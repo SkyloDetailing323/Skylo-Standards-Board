@@ -1,15 +1,38 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 
-const LOGO_SRC = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 50'%3E%3Crect width='200' height='50' fill='%23009cff' rx='4'/%3E%3Ctext x='100' y='34' font-family='monospace' font-size='22' font-weight='900' fill='white' text-anchor='middle'%3ESKYLO%3C/text%3E%3C/svg%3E";
+// ─── SUPABASE CONFIG ──────────────────────────────────────────────────────────
+const SUPABASE_URL = "https://mjmwxxvqcsptrocwucis.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1qbXd4eHZxY3NwdHJvY3d1Y2lzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg4Njk2MjAsImV4cCI6MjA5NDQ0NTYyMH0.YLwGKFvrAn3F8viFgP0oZ6hzqSSq7w8FrNT1y3sy_Sc";
+
+async function sb(path, opts = {}) {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
+    headers: {
+      "apikey": SUPABASE_ANON_KEY,
+      "Authorization": `Bearer ${SUPABASE_ANON_KEY}`,
+      "Content-Type": "application/json",
+      "Prefer": opts.prefer || "return=representation",
+      ...opts.headers,
+    },
+    ...opts,
+  });
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(err);
+  }
+  const text = await res.text();
+  return text ? JSON.parse(text) : null;
+}
 
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
 const blue = "#009cff";
-const bg   = "#ffffff";
+const bg = "#ffffff";
 const card = "#f4f8fd";
 const bord = "#d0e8ff";
 const dark = "#0a1a2e";
 const muted = "#6b8aaa";
 const ADMIN_PIN = "0000";
+
+const LOGO_SRC = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 50'%3E%3Crect width='200' height='50' fill='%23009cff' rx='4'/%3E%3Ctext x='100' y='34' font-family='monospace' font-size='22' font-weight='900' fill='white' text-anchor='middle'%3ESKYLO%3C/text%3E%3C/svg%3E";
 
 const BADGE_DEFS = [
   { id:"day_one",        cat:"Tenure",      name:"Day One",           icon:"🔑", pts:50,   desc:"Completed first day on the job" },
@@ -47,19 +70,16 @@ const PLAN_MAP = Object.fromEntries(SERVICE_PLANS.map(p => [p.id, p]));
 const PLAN_COLORS = { biannual:"#10b981", quarterly:"#3b82f6", bimonthly:"#8b5cf6", monthly:"#009cff", biweekly:"#f59e0b", weekly:"#ef4444" };
 
 const SEED_TECHS = [
-  { id:"t1", name:"Max Hancock",    pin:"1111", avatar:"MH", badges:["day_one"] },
-  { id:"t2", name:"Milos Lewit",    pin:"1112", avatar:"ML", badges:["day_one"] },
-  { id:"t3", name:"Kade Andrew",    pin:"1113", avatar:"KA", badges:["day_one"] },
-  { id:"t4", name:"Riley Lyon",     pin:"1114", avatar:"RL", badges:["day_one"] },
-  { id:"t5", name:"Caleb McDaniel", pin:"1115", avatar:"CM", badges:["day_one"] },
-  { id:"t6", name:"Will Faulkner",  pin:"1116", avatar:"WF", badges:["day_one"] },
+  { name:"Max Hancock",    pin:"1111", avatar:"MH", badges:["day_one"] },
+  { name:"Milos Lewit",    pin:"1112", avatar:"ML", badges:["day_one"] },
+  { name:"Kade Andrew",    pin:"1113", avatar:"KA", badges:["day_one"] },
+  { name:"Riley Lyon",     pin:"1114", avatar:"RL", badges:["day_one"] },
+  { name:"Caleb McDaniel", pin:"1115", avatar:"CM", badges:["day_one"] },
+  { name:"Will Faulkner",  pin:"1116", avatar:"WF", badges:["day_one"] },
 ];
 
 // ─── HELPERS ──────────────────────────────────────────────────────────────────
-const calcPoints = (badges) => badges.reduce((s,id) => s + (BADGE_MAP[id]?.pts || 0), 0);
-const calcUpsellPts = (upsells, techId) => Object.values(upsells).reduce((s,w) => s + (w[techId]||0), 0);
-const calcSwitchPts = (switchovers, techId) => Object.values(switchovers).flatMap(w => w[techId]||[]).reduce((s,e) => s + (PLAN_MAP[e.plan]?.pts||0), 0);
-const calcTotalPts = (tech, upsells, switchovers) => calcPoints(tech.badges) + calcUpsellPts(upsells, tech.id) + calcSwitchPts(switchovers, tech.id);
+const calcPoints = (badges) => (badges || []).reduce((s, id) => s + (BADGE_MAP[id]?.pts || 0), 0);
 const getRank = (pts) => pts >= 2000 ? { label:"Elite", color:"#7c3aed" } : pts >= 1000 ? { label:"Pro", color:blue } : pts >= 500 ? { label:"Rising", color:"#10b981" } : { label:"Rookie", color:muted };
 const medal = (i) => i===0?"🥇":i===1?"🥈":i===2?"🥉":`#${i+1}`;
 
@@ -76,20 +96,11 @@ function formatWeekLabel(key) {
   return `${fmt(d)} – ${fmt(end)}`;
 }
 
-// ─── STORAGE ──────────────────────────────────────────────────────────────────
-async function loadKey(key) {
-  try { const r = localStorage.getItem(key); return r ? JSON.parse(r) : null; } catch { return null; }
-}
-async function saveKey(key, val) {
-  try { localStorage.setItem(key, JSON.stringify(val)); } catch {}
-}
-
-// ─── LOGO ─────────────────────────────────────────────────────────────────────
+// ─── COMPONENTS ───────────────────────────────────────────────────────────────
 function Logo({ height=44 }) {
-  return <img src={LOGO_SRC} alt="Skylo Detailing" style={{ height:`${height}px`, objectFit:"contain" }} />;
+  return <img src={LOGO_SRC} alt="Skylo" style={{ height:`${height}px`, objectFit:"contain" }} />;
 }
 
-// ─── HEADER ───────────────────────────────────────────────────────────────────
 function Header({ right, title }) {
   return (
     <div style={{ background:"#fff", borderBottom:`1px solid ${bord}`, padding:"14px 24px", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
@@ -102,12 +113,10 @@ function Header({ right, title }) {
   );
 }
 
-// ─── LOGOUT BTN ───────────────────────────────────────────────────────────────
 function LogoutBtn({ onLogout }) {
   return <button onClick={onLogout} style={{ background:"none", border:`1px solid ${bord}`, color:muted, padding:"6px 14px", borderRadius:"6px", cursor:"pointer", fontSize:"12px", fontFamily:"monospace" }}>LOG OUT</button>;
 }
 
-// ─── TAB BAR ──────────────────────────────────────────────────────────────────
 function TabBar({ tabs, active, setActive, accentColor }) {
   const ac = accentColor || blue;
   return (
@@ -124,17 +133,16 @@ function TabBar({ tabs, active, setActive, accentColor }) {
   );
 }
 
-// ─── STAT CARD ────────────────────────────────────────────────────────────────
-function StatCard({ label, value, color }) {
+function StatCard({ label, value, color, sub }) {
   return (
     <div style={{ background:card, border:`1px solid ${bord}`, borderRadius:"8px", padding:"18px" }}>
       <div style={{ fontSize:"10px", color:muted, letterSpacing:"2px", textTransform:"uppercase", fontFamily:"monospace", marginBottom:"8px" }}>{label}</div>
       <div style={{ fontSize:"26px", fontWeight:"900", color: color||dark }}>{value}</div>
+      {sub && <div style={{ fontSize:"11px", color:muted, fontFamily:"monospace", marginTop:"4px" }}>{sub}</div>}
     </div>
   );
 }
 
-// ─── PIN PAD ──────────────────────────────────────────────────────────────────
 function PinPad({ onSubmit }) {
   const [pin, setPin] = useState("");
   const [shake, setShake] = useState(false);
@@ -167,86 +175,60 @@ function PinPad({ onSubmit }) {
   );
 }
 
-// ─── BADGE GRID ───────────────────────────────────────────────────────────────
-function BadgeGrid({ earned }) {
-  return (
-    <div>
-      {["Tenure","Performance","Skills","Character"].map(cat => (
-        <div key={cat} style={{ marginBottom:"28px" }}>
-          <div style={{ fontSize:"11px", letterSpacing:"3px", color:blue, fontFamily:"monospace", textTransform:"uppercase", marginBottom:"10px" }}>{cat}</div>
-          <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(190px,1fr))", gap:"10px" }}>
-            {BADGE_DEFS.filter(b => b.cat===cat).map(b => {
-              const has = earned.includes(b.id);
-              return (
-                <div key={b.id} style={{ background: has?"#e6f4ff":card, border:`1px solid ${has?blue+"55":bord}`, borderRadius:"8px", padding:"14px", opacity: has?1:0.45, position:"relative" }}>
-                  {!has && <div style={{ position:"absolute", top:"10px", right:"10px", fontSize:"11px" }}>🔒</div>}
-                  <div style={{ fontSize:"22px", marginBottom:"6px" }}>{b.icon}</div>
-                  <div style={{ fontWeight:"700", fontSize:"13px", color:dark, marginBottom:"3px" }}>{b.name}</div>
-                  <div style={{ fontSize:"11px", color:muted, marginBottom:"6px" }}>{b.desc}</div>
-                  <div style={{ fontSize:"11px", fontFamily:"monospace", color: has?blue:muted }}>+{b.pts} pts</div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-// ─── BADGE LEADERBOARD ────────────────────────────────────────────────────────
-function BadgeLeaderboard({ techs, currentId }) {
-  const sorted = [...techs].sort((a,b) => calcPoints(b.badges)-calcPoints(a.badges));
-  return (
-    <div style={{ display:"flex", flexDirection:"column", gap:"12px" }}>
-      {sorted.map((t,idx) => {
-        const pts = calcPoints(t.badges);
-        const rank = getRank(pts);
-        const isMe = t.id===currentId;
-        const earned = BADGE_DEFS.filter(b => t.badges.includes(b.id));
-        return (
-          <div key={t.id} style={{ background: isMe?"#e6f4ff":card, border:`1px solid ${isMe?blue:bord}`, borderRadius:"10px", padding:"16px 18px" }}>
-            <div style={{ display:"flex", alignItems:"center", gap:"14px", marginBottom: earned.length>0?"12px":"0" }}>
-              <div style={{ width:"30px", textAlign:"center", fontSize: idx<3?"20px":"13px", color:muted, fontFamily:"monospace", fontWeight:"700" }}>{medal(idx)}</div>
-              <div style={{ width:"40px", height:"40px", borderRadius:"50%", background:`${blue}22`, border:`1px solid ${blue}44`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:"12px", fontWeight:"700", color:blue, fontFamily:"monospace", flexShrink:0 }}>{t.avatar}</div>
-              <div style={{ flex:1 }}>
-                <div style={{ fontWeight:"700", fontSize:"15px", color:dark }}>{t.name} {isMe && <span style={{ fontSize:"10px", color:blue, fontFamily:"monospace" }}>YOU</span>}</div>
-                <div style={{ fontSize:"12px", color:muted, fontFamily:"monospace" }}><span style={{ color:rank.color, fontWeight:"700" }}>{rank.label}</span> · {t.badges.length} badges</div>
-              </div>
-              <div style={{ textAlign:"right" }}>
-                <div style={{ fontSize:"22px", fontWeight:"900", color:dark }}>{pts.toLocaleString()}</div>
-                <div style={{ fontSize:"11px", color:muted, fontFamily:"monospace" }}>pts</div>
-              </div>
-            </div>
-            {earned.length>0 && (
-              <div style={{ borderTop:`1px solid ${isMe?blue+"33":bord}`, paddingTop:"10px", display:"flex", flexWrap:"wrap", gap:"6px" }}>
-                {earned.map(b => (
-                  <div key={b.id} style={{ display:"flex", alignItems:"center", gap:"4px", background: isMe?"#cce8ff":"#eef6ff", border:`1px solid ${blue}33`, borderRadius:"4px", padding:"3px 8px", fontSize:"11px", color:dark }}>
-                    <span>{b.icon}</span><span>{b.name}</span><span style={{ color:blue, fontFamily:"monospace" }}>+{b.pts}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
 // ─── UPSELL LEADERBOARD ───────────────────────────────────────────────────────
 function UpsellLeaderboard({ techs, upsells, currentId }) {
   const wk = getWeekKey();
-  const wkData = upsells[wk] || {};
-  const allWeeks = Object.keys(upsells).sort((a,b) => b.localeCompare(a));
+
+  // Group upsells by week_key
+  const byWeek = {};
+  upsells.forEach(u => {
+    if (!byWeek[u.week_key]) byWeek[u.week_key] = {};
+    byWeek[u.week_key][u.tech_id] = (byWeek[u.week_key][u.tech_id] || 0) + u.amount;
+  });
+
+  const allWeeks = Object.keys(byWeek).sort((a,b) => b.localeCompare(a));
+  const wkData = byWeek[wk] || {};
+
+  // Running totals
+  const allTimeTotals = {};
+  upsells.forEach(u => {
+    allTimeTotals[u.tech_id] = (allTimeTotals[u.tech_id] || 0) + u.amount;
+  });
+
   const ranked = [...techs].map(t => ({
     ...t,
-    thisWeek: wkData[t.id]||0,
-    allTime: Object.values(upsells).reduce((s,w) => s+(w[t.id]||0),0),
-  })).sort((a,b) => b.thisWeek-a.thisWeek);
-  const top = ranked[0]?.thisWeek||1;
+    thisWeek: wkData[t.id] || 0,
+    allTime: allTimeTotals[t.id] || 0,
+  })).sort((a,b) => b.thisWeek - a.thisWeek);
+
+  const top = ranked[0]?.thisWeek || 1;
+
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:"20px" }}>
+      {/* Running Totals Banner */}
+      <div style={{ background:"linear-gradient(135deg,#e6f4ff,#f0f9ff)", border:`1px solid ${blue}44`, borderRadius:"10px", padding:"16px 20px" }}>
+        <div style={{ fontSize:"11px", letterSpacing:"3px", color:blue, fontFamily:"monospace", textTransform:"uppercase", marginBottom:"12px" }}>💰 All-Time Upsell Totals</div>
+        <div style={{ display:"flex", flexDirection:"column", gap:"8px" }}>
+          {[...techs].sort((a,b) => (allTimeTotals[b.id]||0) - (allTimeTotals[a.id]||0)).map((t,i) => {
+            const amt = allTimeTotals[t.id] || 0;
+            const topAmt = Math.max(...techs.map(x => allTimeTotals[x.id]||0)) || 1;
+            const pct = Math.round((amt/topAmt)*100);
+            return (
+              <div key={t.id}>
+                <div style={{ display:"flex", justifyContent:"space-between", marginBottom:"3px" }}>
+                  <span style={{ fontSize:"13px", fontWeight: t.id===currentId?"800":"600", color: t.id===currentId?blue:dark }}>{medal(i)} {t.name}{t.id===currentId?" (you)":""}</span>
+                  <span style={{ fontFamily:"monospace", fontWeight:"700", fontSize:"13px", color:dark }}>${amt.toLocaleString()}</span>
+                </div>
+                <div style={{ background:bord, borderRadius:"3px", height:"4px", overflow:"hidden" }}>
+                  <div style={{ width:`${pct}%`, height:"100%", background:`linear-gradient(90deg,${blue},#0066cc)`, borderRadius:"3px" }} />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* This Week */}
       <div>
         <div style={{ fontSize:"11px", letterSpacing:"3px", color:blue, fontFamily:"monospace", textTransform:"uppercase", marginBottom:"12px" }}>This Week · {formatWeekLabel(wk)}</div>
         <div style={{ display:"flex", flexDirection:"column", gap:"10px" }}>
@@ -264,7 +246,7 @@ function UpsellLeaderboard({ techs, upsells, currentId }) {
                   </div>
                   <div style={{ textAlign:"right" }}>
                     <div style={{ fontSize:"22px", fontWeight:"900", color: t.thisWeek>0?dark:bord }}>${t.thisWeek.toLocaleString()}</div>
-                    <div style={{ fontSize:"11px", color:blue, fontFamily:"monospace" }}>+{t.thisWeek.toLocaleString()} pts</div>
+                    <div style={{ fontSize:"11px", color:blue, fontFamily:"monospace" }}>this week</div>
                   </div>
                 </div>
                 <div style={{ background:bord, borderRadius:"4px", height:"5px", overflow:"hidden" }}>
@@ -275,28 +257,31 @@ function UpsellLeaderboard({ techs, upsells, currentId }) {
           })}
         </div>
       </div>
-      {allWeeks.length>1 && (
+
+      {/* Weekly History */}
+      {allWeeks.length > 0 && (
         <div>
           <div style={{ fontSize:"11px", letterSpacing:"3px", color:blue, fontFamily:"monospace", textTransform:"uppercase", marginBottom:"12px" }}>Weekly History</div>
           <div style={{ display:"flex", flexDirection:"column", gap:"10px" }}>
-            {allWeeks.filter(w=>w!==wk).map(w => {
-              const d = upsells[w]||{};
-              const rows = [...techs].map(t=>({...t,amt:d[t.id]||0})).filter(t=>t.amt>0).sort((a,b)=>b.amt-a.amt);
-              const total = rows.reduce((s,t)=>s+t.amt,0);
+            {allWeeks.map(w => {
+              const d = byWeek[w] || {};
+              const rows = [...techs].map(t=>({...t, amt: d[t.id]||0})).filter(t=>t.amt>0).sort((a,b)=>b.amt-a.amt);
+              const total = rows.reduce((s,t)=>s+t.amt, 0);
+              const isCurrent = w === wk;
               return (
-                <div key={w} style={{ background:card, border:`1px solid ${bord}`, borderRadius:"10px", overflow:"hidden" }}>
-                  <div style={{ display:"flex", justifyContent:"space-between", padding:"10px 16px", borderBottom:`1px solid ${bord}`, background:"#eef6ff" }}>
-                    <div style={{ fontWeight:"700", fontSize:"13px", color:dark }}>{formatWeekLabel(w)}</div>
+                <div key={w} style={{ background:card, border:`1px solid ${isCurrent?blue:bord}`, borderRadius:"10px", overflow:"hidden" }}>
+                  <div style={{ display:"flex", justifyContent:"space-between", padding:"10px 16px", borderBottom:`1px solid ${bord}`, background: isCurrent?"#e6f4ff":"#eef6ff" }}>
+                    <div style={{ fontWeight:"700", fontSize:"13px", color:dark }}>{formatWeekLabel(w)} {isCurrent && <span style={{ fontSize:"10px", color:blue, fontFamily:"monospace" }}>CURRENT</span>}</div>
                     <div style={{ fontFamily:"monospace", color:blue, fontWeight:"700", fontSize:"13px" }}>Total: ${total.toLocaleString()}</div>
                   </div>
                   <div style={{ padding:"10px 16px", display:"flex", flexDirection:"column", gap:"5px" }}>
-                    {rows.map((t,i)=>(
+                    {rows.map((t,i) => (
                       <div key={t.id} style={{ display:"flex", justifyContent:"space-between" }}>
                         <div style={{ display:"flex", alignItems:"center", gap:"6px" }}><span>{medal(i)}</span><span style={{ fontSize:"13px", color:dark }}>{t.name}</span></div>
                         <span style={{ fontFamily:"monospace", fontWeight:"700", fontSize:"13px", color:dark }}>${t.amt.toLocaleString()}</span>
                       </div>
                     ))}
-                    {rows.length===0 && <div style={{ fontSize:"12px", color:muted }}>No data</div>}
+                    {rows.length===0 && <div style={{ fontSize:"12px", color:muted }}>No data recorded</div>}
                   </div>
                 </div>
               );
@@ -312,23 +297,55 @@ function UpsellLeaderboard({ techs, upsells, currentId }) {
 function SwitchoverLeaderboard({ techs, switchovers, currentId }) {
   const [rankBy, setRankBy] = useState("count");
   const wk = getWeekKey();
-  const wkData = switchovers[wk] || {};
-  const allWeeks = Object.keys(switchovers).sort((a,b) => b.localeCompare(a));
+
+  const byWeek = {};
+  switchovers.forEach(s => {
+    if (!byWeek[s.week_key]) byWeek[s.week_key] = {};
+    if (!byWeek[s.week_key][s.tech_id]) byWeek[s.week_key][s.tech_id] = [];
+    byWeek[s.week_key][s.tech_id].push({ plan: s.plan_id });
+  });
+
+  const allWeeks = Object.keys(byWeek).sort((a,b) => b.localeCompare(a));
+  const wkData = byWeek[wk] || {};
+
+  // All-time totals
+  const allTimeCount = {};
+  const allTimeValue = {};
+  switchovers.forEach(s => {
+    allTimeCount[s.tech_id] = (allTimeCount[s.tech_id] || 0) + 1;
+    allTimeValue[s.tech_id] = (allTimeValue[s.tech_id] || 0) + (PLAN_MAP[s.plan_id]?.value || 0);
+  });
+
   const ranked = [...techs].map(t => {
-    const entries = wkData[t.id]||[];
-    const allE = Object.values(switchovers).flatMap(w => w[t.id]||[]);
+    const entries = wkData[t.id] || [];
     return {
       ...t,
       count: entries.length,
-      value: entries.reduce((s,e) => s+(PLAN_MAP[e.plan]?.value||0),0),
-      allCount: allE.length,
-      allValue: allE.reduce((s,e) => s+(PLAN_MAP[e.plan]?.value||0),0),
+      value: entries.reduce((s,e) => s+(PLAN_MAP[e.plan]?.value||0), 0),
+      allCount: allTimeCount[t.id] || 0,
+      allValue: allTimeValue[t.id] || 0,
       entries,
     };
   }).sort((a,b) => rankBy==="count" ? b.count-a.count : b.value-a.value);
-  const top = ranked[0]?.[rankBy]||1;
+
+  const top = ranked[0]?.[rankBy] || 1;
+
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:"20px" }}>
+      {/* All-time totals banner */}
+      <div style={{ background:"linear-gradient(135deg,#e6f4ff,#f0f9ff)", border:`1px solid ${blue}44`, borderRadius:"10px", padding:"16px 20px" }}>
+        <div style={{ fontSize:"11px", letterSpacing:"3px", color:blue, fontFamily:"monospace", textTransform:"uppercase", marginBottom:"12px" }}>🔄 All-Time Switchover Totals</div>
+        <div style={{ display:"flex", flexDirection:"column", gap:"6px" }}>
+          {[...techs].sort((a,b) => (allTimeCount[b.id]||0)-(allTimeCount[a.id]||0)).map((t,i) => (
+            <div key={t.id} style={{ display:"flex", justifyContent:"space-between" }}>
+              <span style={{ fontSize:"13px", fontWeight: t.id===currentId?"800":"600", color: t.id===currentId?blue:dark }}>{medal(i)} {t.name}{t.id===currentId?" (you)":""}</span>
+              <span style={{ fontFamily:"monospace", fontSize:"13px", color:dark }}><strong>{allTimeCount[t.id]||0}</strong> converts · <strong>{allTimeValue[t.id]||0}</strong> visits/yr</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* This week */}
       <div>
         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:"12px" }}>
           <div style={{ fontSize:"11px", letterSpacing:"3px", color:blue, fontFamily:"monospace", textTransform:"uppercase" }}>This Week · {formatWeekLabel(wk)}</div>
@@ -363,7 +380,7 @@ function SwitchoverLeaderboard({ techs, switchovers, currentId }) {
                   <div style={{ display:"flex", flexWrap:"wrap", gap:"5px" }}>
                     {t.entries.map((e,i) => {
                       const plan = PLAN_MAP[e.plan];
-                      const pc = PLAN_COLORS[e.plan]||muted;
+                      const pc = PLAN_COLORS[e.plan] || muted;
                       return plan ? (
                         <div key={i} style={{ background:"#fff", border:`1px solid ${pc}44`, borderLeft:`3px solid ${pc}`, borderRadius:"4px", padding:"2px 8px", fontSize:"11px", color:dark, fontFamily:"monospace" }}>
                           {plan.label} · {plan.freq}
@@ -377,6 +394,8 @@ function SwitchoverLeaderboard({ techs, switchovers, currentId }) {
           })}
         </div>
       </div>
+
+      {/* Plan Tiers */}
       <div style={{ background:card, border:`1px solid ${bord}`, borderRadius:"8px", padding:"14px 18px" }}>
         <div style={{ fontSize:"11px", letterSpacing:"2px", color:blue, fontFamily:"monospace", textTransform:"uppercase", marginBottom:"10px" }}>Plan Tiers</div>
         <div style={{ display:"flex", flexWrap:"wrap", gap:"6px" }}>
@@ -389,18 +408,21 @@ function SwitchoverLeaderboard({ techs, switchovers, currentId }) {
           ))}
         </div>
       </div>
-      {allWeeks.length>1 && (
+
+      {/* Weekly History */}
+      {allWeeks.length > 0 && (
         <div>
           <div style={{ fontSize:"11px", letterSpacing:"3px", color:blue, fontFamily:"monospace", textTransform:"uppercase", marginBottom:"12px" }}>Weekly History</div>
           <div style={{ display:"flex", flexDirection:"column", gap:"10px" }}>
-            {allWeeks.filter(w=>w!==wk).map(w => {
-              const d = switchovers[w]||{};
-              const rows = [...techs].map(t=>({ ...t, entries:(d[t.id]||[]) })).filter(t=>t.entries.length>0).sort((a,b)=>b.entries.length-a.entries.length);
-              const total = rows.reduce((s,t)=>s+t.entries.length,0);
+            {allWeeks.map(w => {
+              const d = byWeek[w] || {};
+              const rows = [...techs].map(t=>({ ...t, entries: d[t.id]||[] })).filter(t=>t.entries.length>0).sort((a,b)=>b.entries.length-a.entries.length);
+              const total = rows.reduce((s,t)=>s+t.entries.length, 0);
+              const isCurrent = w === wk;
               return (
-                <div key={w} style={{ background:card, border:`1px solid ${bord}`, borderRadius:"10px", overflow:"hidden" }}>
-                  <div style={{ display:"flex", justifyContent:"space-between", padding:"10px 16px", borderBottom:`1px solid ${bord}`, background:"#eef6ff" }}>
-                    <div style={{ fontWeight:"700", fontSize:"13px", color:dark }}>{formatWeekLabel(w)}</div>
+                <div key={w} style={{ background:card, border:`1px solid ${isCurrent?blue:bord}`, borderRadius:"10px", overflow:"hidden" }}>
+                  <div style={{ display:"flex", justifyContent:"space-between", padding:"10px 16px", borderBottom:`1px solid ${bord}`, background: isCurrent?"#e6f4ff":"#eef6ff" }}>
+                    <div style={{ fontWeight:"700", fontSize:"13px", color:dark }}>{formatWeekLabel(w)} {isCurrent && <span style={{ fontSize:"10px", color:blue, fontFamily:"monospace" }}>CURRENT</span>}</div>
                     <div style={{ fontFamily:"monospace", color:blue, fontWeight:"700", fontSize:"13px" }}>{total} converts</div>
                   </div>
                   <div style={{ padding:"10px 16px", display:"flex", flexDirection:"column", gap:"6px" }}>
@@ -413,7 +435,7 @@ function SwitchoverLeaderboard({ techs, switchovers, currentId }) {
                         <div style={{ display:"flex", flexWrap:"wrap", gap:"3px", paddingLeft:"24px" }}>
                           {t.entries.map((e,j) => {
                             const plan = PLAN_MAP[e.plan];
-                            const pc = PLAN_COLORS[e.plan]||muted;
+                            const pc = PLAN_COLORS[e.plan] || muted;
                             return plan ? <div key={j} style={{ fontSize:"10px", background:"#fff", border:`1px solid ${pc}33`, borderLeft:`2px solid ${pc}`, borderRadius:"3px", padding:"1px 6px", color:muted, fontFamily:"monospace" }}>{plan.label}</div> : null;
                           })}
                         </div>
@@ -431,13 +453,45 @@ function SwitchoverLeaderboard({ techs, switchovers, currentId }) {
   );
 }
 
+// ─── BADGE GRID ───────────────────────────────────────────────────────────────
+function BadgeGrid({ earned }) {
+  return (
+    <div>
+      {["Tenure","Performance","Skills","Character"].map(cat => (
+        <div key={cat} style={{ marginBottom:"28px" }}>
+          <div style={{ fontSize:"11px", letterSpacing:"3px", color:blue, fontFamily:"monospace", textTransform:"uppercase", marginBottom:"10px" }}>{cat}</div>
+          <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(190px,1fr))", gap:"10px" }}>
+            {BADGE_DEFS.filter(b => b.cat===cat).map(b => {
+              const has = earned.includes(b.id);
+              return (
+                <div key={b.id} style={{ background: has?"#e6f4ff":card, border:`1px solid ${has?blue+"55":bord}`, borderRadius:"8px", padding:"14px", opacity: has?1:0.45, position:"relative" }}>
+                  {!has && <div style={{ position:"absolute", top:"10px", right:"10px", fontSize:"11px" }}>🔒</div>}
+                  <div style={{ fontSize:"22px", marginBottom:"6px" }}>{b.icon}</div>
+                  <div style={{ fontWeight:"700", fontSize:"13px", color:dark, marginBottom:"3px" }}>{b.name}</div>
+                  <div style={{ fontSize:"11px", color:muted, marginBottom:"6px" }}>{b.desc}</div>
+                  <div style={{ fontSize:"11px", fontFamily:"monospace", color: has?blue:muted }}>+{b.pts} pts</div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 // ─── TOTAL LEADERBOARD ────────────────────────────────────────────────────────
 function TotalLeaderboard({ techs, upsells, switchovers, currentId }) {
+  const allTimeUpsells = {};
+  upsells.forEach(u => { allTimeUpsells[u.tech_id] = (allTimeUpsells[u.tech_id]||0) + u.amount; });
+
+  const allTimeSwitchPts = {};
+  switchovers.forEach(s => { allTimeSwitchPts[s.tech_id] = (allTimeSwitchPts[s.tech_id]||0) + (PLAN_MAP[s.plan_id]?.pts||0); });
+
   const ranked = [...techs].map(t => {
     const badgePts = calcPoints(t.badges);
-    const upsellPts = calcUpsellPts(upsells, t.id);
-    const switchPts = calcSwitchPts(switchovers, t.id);
+    const upsellPts = Math.round(allTimeUpsells[t.id] || 0);
+    const switchPts = allTimeSwitchPts[t.id] || 0;
     const total = badgePts + upsellPts + switchPts;
     return { ...t, badgePts, upsellPts, switchPts, total };
   }).sort((a,b) => b.total - a.total);
@@ -464,20 +518,18 @@ function TotalLeaderboard({ techs, upsells, switchovers, currentId }) {
                 <div style={{ fontSize:"11px", color:muted, fontFamily:"monospace" }}>total pts</div>
               </div>
             </div>
-            {/* Progress bar */}
             <div style={{ background:bord, borderRadius:"4px", height:"6px", overflow:"hidden", marginBottom:"10px" }}>
               <div style={{ width:`${pct}%`, height:"100%", background:`linear-gradient(90deg,${blue},#0066cc)`, borderRadius:"4px", transition:"width 1s ease" }} />
             </div>
-            {/* Breakdown */}
             <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:"8px" }}>
               {[
                 { label:"🏅 Badges", val:t.badgePts, color:"#7c3aed" },
-                { label:"💰 Upsells", val:t.upsellPts, color:"#10b981" },
+                { label:"💰 Upsells", val:`$${t.upsellPts.toLocaleString()}`, color:"#10b981" },
                 { label:"🔄 Switchovers", val:t.switchPts, color:blue },
               ].map(item => (
                 <div key={item.label} style={{ background:"#fff", border:`1px solid ${bord}`, borderRadius:"6px", padding:"8px 10px", textAlign:"center" }}>
                   <div style={{ fontSize:"11px", color:muted, marginBottom:"2px" }}>{item.label}</div>
-                  <div style={{ fontSize:"15px", fontWeight:"800", color:item.color }}>{item.val.toLocaleString()}</div>
+                  <div style={{ fontSize:"15px", fontWeight:"800", color:item.color }}>{item.val}</div>
                 </div>
               ))}
             </div>
@@ -491,34 +543,48 @@ function TotalLeaderboard({ techs, upsells, switchovers, currentId }) {
 // ─── TECH DASHBOARD ───────────────────────────────────────────────────────────
 function TechDashboard({ tech, techs, upsells, switchovers, onLogout }) {
   const [tab, setTab] = useState("overview");
-  const pts = calcTotalPts(tech, upsells, switchovers);
+
+  const allTimeUpsells = {};
+  upsells.forEach(u => { allTimeUpsells[u.tech_id] = (allTimeUpsells[u.tech_id]||0) + u.amount; });
+  const allTimeSwitchPts = {};
+  switchovers.forEach(s => { allTimeSwitchPts[s.tech_id] = (allTimeSwitchPts[s.tech_id]||0) + (PLAN_MAP[s.plan_id]?.pts||0); });
+
+  const myBadgePts = calcPoints(tech.badges);
+  const myUpsellPts = Math.round(allTimeUpsells[tech.id] || 0);
+  const mySwitchPts = allTimeSwitchPts[tech.id] || 0;
+  const pts = myBadgePts + myUpsellPts + mySwitchPts;
   const rank = getRank(pts);
-  const myPos = [...techs].sort((a,b)=>calcTotalPts(b,upsells,switchovers)-calcTotalPts(a,upsells,switchovers)).findIndex(t=>t.id===tech.id)+1;
-  const maxPts = Math.max(...techs.map(t=>calcTotalPts(t,upsells,switchovers)));
+
+  const allRanked = [...techs].map(t => {
+    const bp = calcPoints(t.badges);
+    const up = Math.round(allTimeUpsells[t.id]||0);
+    const sp = allTimeSwitchPts[t.id]||0;
+    return { ...t, total: bp+up+sp };
+  }).sort((a,b) => b.total - a.total);
+
+  const myPos = allRanked.findIndex(t=>t.id===tech.id)+1;
+  const maxPts = allRanked[0]?.total || 1;
   const pct = maxPts>0 ? Math.round((pts/maxPts)*100) : 0;
+
+  // This week upsells
+  const wk = getWeekKey();
+  const thisWeekUpsell = upsells.filter(u => u.tech_id===tech.id && u.week_key===wk).reduce((s,u)=>s+u.amount,0);
 
   return (
     <div style={{ minHeight:"100vh", background:bg, color:dark }}>
       <Header right={<LogoutBtn onLogout={onLogout} />} />
-      <div style={{ borderBottom:`1px solid ${bord}`, background:"#fff" }}>
-        <div style={{ display:"flex", flexWrap:"wrap", padding:"0 12px" }}>
-          {[["overview","Overview"],["badges","Badges"],["leaderboard","Rankings"],["upsells","Upsells"],["switchovers","Switchovers"],["total","🏆 Total Pts"]].map(([id,label]) => (
-            <button key={id} onClick={() => setTab(id)} style={{
-              background:"none", border:"none", cursor:"pointer", whiteSpace:"nowrap",
-              padding:"11px 12px", fontSize:"11px", letterSpacing:"0.5px", textTransform:"uppercase",
-              fontFamily:"monospace", color: tab===id ? blue : muted, flexShrink:0,
-              borderBottom: tab===id ? `2px solid ${blue}` : "2px solid transparent",
-            }}>{label}</button>
-          ))}
-        </div>
-      </div>
+      <TabBar
+        tabs={[["overview","Overview"],["badges","Badges"],["upsells","Upsells"],["switchovers","Switchovers"],["total","🏆 Total Pts"]]}
+        active={tab} setActive={setTab}
+      />
       <div style={{ padding:"24px", maxWidth:"800px", margin:"0 auto" }}>
 
         {tab==="overview" && (
           <div style={{ display:"flex", flexDirection:"column", gap:"16px" }}>
-            <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:"12px" }}>
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(2,1fr)", gap:"12px" }}>
               <StatCard label="Total Points" value={pts.toLocaleString()} color={blue} />
               <StatCard label="Team Rank" value={`#${myPos} of ${techs.length}`} color="#10b981" />
+              <StatCard label="This Week Upsells" value={`$${thisWeekUpsell.toLocaleString()}`} color="#f59e0b" sub={`All-time: $${myUpsellPts.toLocaleString()}`} />
               <StatCard label="Badges" value={`${tech.badges.length}/${BADGE_DEFS.length}`} color="#7c3aed" />
             </div>
             <div style={{ background:card, border:`1px solid ${bord}`, borderRadius:"8px", padding:"20px" }}>
@@ -535,9 +601,9 @@ function TechDashboard({ tech, techs, upsells, switchovers, onLogout }) {
               <div style={{ fontSize:"10px", color:muted, fontFamily:"monospace", marginTop:"6px" }}>Rookie → Rising (500) → Pro (1000) → Elite (2000)</div>
             </div>
             <div style={{ background:card, border:`1px solid ${bord}`, borderRadius:"8px", padding:"20px" }}>
-              <div style={{ fontSize:"10px", color:muted, letterSpacing:"2px", textTransform:"uppercase", fontFamily:"monospace", marginBottom:"12px" }}>Recent Badges</div>
+              <div style={{ fontSize:"10px", color:muted, letterSpacing:"2px", textTransform:"uppercase", fontFamily:"monospace", marginBottom:"12px" }}>My Badges</div>
               <div style={{ display:"flex", flexWrap:"wrap", gap:"8px" }}>
-                {BADGE_DEFS.filter(b=>tech.badges.includes(b.id)).slice(-5).map(b => (
+                {BADGE_DEFS.filter(b=>tech.badges.includes(b.id)).map(b => (
                   <div key={b.id} style={{ display:"flex", alignItems:"center", gap:"6px", background:"#e6f4ff", border:`1px solid ${blue}33`, borderRadius:"6px", padding:"6px 12px" }}>
                     <span style={{ fontSize:"16px" }}>{b.icon}</span>
                     <div>
@@ -546,118 +612,201 @@ function TechDashboard({ tech, techs, upsells, switchovers, onLogout }) {
                     </div>
                   </div>
                 ))}
+                {tech.badges.length===0 && <div style={{ fontSize:"13px", color:muted }}>No badges yet</div>}
               </div>
             </div>
           </div>
         )}
 
         {tab==="badges" && <BadgeGrid earned={tech.badges} />}
-
-        {tab==="leaderboard" && (
-          <div>
-            <div style={{ fontSize:"13px", color:muted, marginBottom:"20px" }}>Live standings — updated every time a badge is awarded.</div>
-            <BadgeLeaderboard techs={techs} currentId={tech.id} />
-          </div>
-        )}
-
-        {tab==="upsells" && (
-          <div>
-            <div style={{ fontSize:"13px", color:muted, marginBottom:"20px" }}>Weekly upsell revenue — updated by your admin every week.</div>
-            <UpsellLeaderboard techs={techs} upsells={upsells} currentId={tech.id} />
-          </div>
-        )}
-
-        {tab==="switchovers" && (
-          <div>
-            <div style={{ fontSize:"13px", color:muted, marginBottom:"20px" }}>Track who converted one-time clients to recurring service plans.</div>
-            <SwitchoverLeaderboard techs={techs} switchovers={switchovers} currentId={tech.id} />
-          </div>
-        )}
-
-        {tab==="total" && (
-          <div>
-            <div style={{ fontSize:"13px", color:muted, marginBottom:"20px" }}>Combined ranking — badges + upsell dollars + switchover points all in one.</div>
-            <TotalLeaderboard techs={techs} upsells={upsells} switchovers={switchovers} currentId={tech.id} />
-          </div>
-        )}
-
+        {tab==="upsells" && <UpsellLeaderboard techs={techs} upsells={upsells} currentId={tech.id} />}
+        {tab==="switchovers" && <SwitchoverLeaderboard techs={techs} switchovers={switchovers} currentId={tech.id} />}
+        {tab==="total" && <TotalLeaderboard techs={techs} upsells={upsells} switchovers={switchovers} currentId={tech.id} />}
       </div>
     </div>
   );
 }
 
 // ─── ADMIN PANEL ──────────────────────────────────────────────────────────────
-function AdminPanel({ techs, setTechs, upsells, setUpsells, switchovers, setSwitchovers, onLogout }) {
-  const [tab, setTab] = useState("award");
+function AdminPanel({ techs, setTechs, upsells, setUpsells, switchovers, setSwitchovers, onLogout, refreshAll }) {
+  const [tab, setTab] = useState("upsells");
   const [awardForm, setAwardForm] = useState({ techId:"", badgeId:"" });
   const [addForm, setAddForm] = useState({ name:"", pin:"", avatar:"" });
   const [upsellForm, setUpsellForm] = useState({});
   const [swForm, setSwForm] = useState({ techId:"", planId:"" });
   const [toast, setToast] = useState(null);
+  const [saving, setSaving] = useState(false);
 
-  const showToast = (msg, ok=true) => { setToast({msg,ok}); setTimeout(()=>setToast(null),3000); };
+  const showToast = (msg, ok=true) => { setToast({msg,ok}); setTimeout(()=>setToast(null),3500); };
 
-  function awardBadge() {
+  async function awardBadge() {
     if (!awardForm.techId||!awardForm.badgeId) return showToast("Select a tech and badge",false);
     const tech = techs.find(t=>t.id===awardForm.techId);
     if (tech.badges.includes(awardForm.badgeId)) return showToast(`${tech.name} already has this badge`,false);
-    const updated = techs.map(t => t.id===awardForm.techId ? {...t, badges:[...t.badges,awardForm.badgeId]} : t);
-    setTechs(updated); saveKey("techs_v1",updated);
-    showToast(`✅ Badge awarded to ${tech.name}!`);
-    setAwardForm({techId:"",badgeId:""});
+    setSaving(true);
+    try {
+      const newBadges = [...tech.badges, awardForm.badgeId];
+      await sb(`techs?id=eq.${tech.id}`, { method:"PATCH", body: JSON.stringify({ badges: newBadges }), prefer:"return=minimal" });
+      await refreshAll();
+      showToast(`✅ Badge awarded to ${tech.name}!`);
+      setAwardForm({techId:"",badgeId:""});
+    } catch(e) { showToast("Error: "+e.message, false); }
+    setSaving(false);
   }
 
-  function addTech() {
+  async function revokeBadge(techId, badgeId) {
+    const tech = techs.find(t=>t.id===techId);
+    setSaving(true);
+    try {
+      const newBadges = tech.badges.filter(b=>b!==badgeId);
+      await sb(`techs?id=eq.${techId}`, { method:"PATCH", body: JSON.stringify({ badges: newBadges }), prefer:"return=minimal" });
+      await refreshAll();
+      showToast("Badge removed");
+    } catch(e) { showToast("Error: "+e.message, false); }
+    setSaving(false);
+  }
+
+  async function addTech() {
     if (!addForm.name||!addForm.pin||addForm.pin.length!==4) return showToast("Name + 4-digit PIN required",false);
     if (techs.find(t=>t.pin===addForm.pin)) return showToast("PIN already in use",false);
-    const avatar = addForm.avatar||addForm.name.split(" ").map(w=>w[0]).join("").toUpperCase().slice(0,2);
-    const t = { id:`t${Date.now()}`, name:addForm.name, pin:addForm.pin, avatar, badges:["day_one"] };
-    const updated = [...techs,t];
-    setTechs(updated); saveKey("techs_v1",updated);
-    showToast(`✅ ${addForm.name} added!`);
-    setAddForm({name:"",pin:"",avatar:""});
+    setSaving(true);
+    try {
+      const avatar = addForm.avatar||addForm.name.split(" ").map(w=>w[0]).join("").toUpperCase().slice(0,2);
+      await sb("techs", { method:"POST", body: JSON.stringify({ name:addForm.name, pin:addForm.pin, avatar, badges:["day_one"] }) });
+      await refreshAll();
+      showToast(`✅ ${addForm.name} added!`);
+      setAddForm({name:"",pin:"",avatar:""});
+    } catch(e) { showToast("Error: "+e.message, false); }
+    setSaving(false);
   }
 
-  function revokeBadge(techId, badgeId) {
-    const updated = techs.map(t => t.id===techId ? {...t, badges:t.badges.filter(b=>b!==badgeId)} : t);
-    setTechs(updated); saveKey("techs_v1",updated);
-    showToast("Badge removed");
-  }
-
-  function saveUpsells() {
+  async function saveUpsells() {
     const wk = getWeekKey();
-    const updated = {...upsells, [wk]: {...(upsells[wk]||{})}};
-    techs.forEach(t => { const v=parseFloat(upsellForm[t.id]); if(!isNaN(v)) updated[wk][t.id]=v; });
-    setUpsells(updated); saveKey("upsells_v1",updated);
-    showToast("✅ Upsell numbers saved!");
-    setUpsellForm({});
+    setSaving(true);
+    try {
+      for (const t of techs) {
+        const val = parseFloat(upsellForm[t.id]);
+        if (!isNaN(val) && val > 0) {
+          // Check if record exists for this tech+week
+          const existing = await sb(`upsells?tech_id=eq.${t.id}&week_key=eq.${wk}&select=id`);
+          if (existing && existing.length > 0) {
+            await sb(`upsells?id=eq.${existing[0].id}`, { method:"PATCH", body: JSON.stringify({ amount: val }), prefer:"return=minimal" });
+          } else {
+            await sb("upsells", { method:"POST", body: JSON.stringify({ tech_id: t.id, week_key: wk, amount: val }) });
+          }
+        }
+      }
+      await refreshAll();
+      showToast("✅ Upsell numbers saved!");
+      setUpsellForm({});
+    } catch(e) { showToast("Error: "+e.message, false); }
+    setSaving(false);
   }
 
-  function logSwitchover() {
+  async function logSwitchover() {
     if (!swForm.techId||!swForm.planId) return showToast("Select a tech and plan",false);
-    const wk = getWeekKey();
-    const updated = JSON.parse(JSON.stringify(switchovers));
-    if (!updated[wk]) updated[wk]={};
-    if (!updated[wk][swForm.techId]) updated[wk][swForm.techId]=[];
-    updated[wk][swForm.techId].push({ plan:swForm.planId, date:new Date().toISOString() });
-    setSwitchovers(updated); saveKey("switchovers_v1",updated);
-    const tech = techs.find(t=>t.id===swForm.techId);
-    showToast(`✅ Switchover logged for ${tech.name}!`);
-    setSwForm({techId:"",planId:""});
+    setSaving(true);
+    try {
+      const wk = getWeekKey();
+      await sb("switchovers", { method:"POST", body: JSON.stringify({ tech_id: swForm.techId, week_key: wk, plan_id: swForm.planId }) });
+      await refreshAll();
+      const tech = techs.find(t=>t.id===swForm.techId);
+      showToast(`✅ Switchover logged for ${tech.name}!`);
+      setSwForm({techId:"",planId:""});
+    } catch(e) { showToast("Error: "+e.message, false); }
+    setSaving(false);
   }
+
+  // Aggregate upsell totals for display
+  const allTimeUpsells = {};
+  upsells.forEach(u => { allTimeUpsells[u.tech_id] = (allTimeUpsells[u.tech_id]||0) + u.amount; });
+
+  const wkUpsells = {};
+  const wk = getWeekKey();
+  upsells.filter(u=>u.week_key===wk).forEach(u => { wkUpsells[u.tech_id] = u.amount; });
 
   const selStyle = (val) => ({ background:"#fff", border:`1px solid ${bord}`, color:val?dark:muted, padding:"10px 14px", borderRadius:"6px", fontSize:"14px", fontFamily:"monospace", width:"100%", boxSizing:"border-box" });
   const inpStyle = { background:"#fff", border:`1px solid ${bord}`, color:dark, padding:"10px 14px", borderRadius:"6px", fontSize:"14px", fontFamily:"monospace", width:"100%", boxSizing:"border-box" };
-  const btnStyle = (color) => ({ background:color||blue, border:"none", color:"#fff", padding:"12px", borderRadius:"6px", cursor:"pointer", fontSize:"14px", fontWeight:"700", letterSpacing:"1px", fontFamily:"monospace", width:"100%" });
+  const btnStyle = (color) => ({ background: saving?"#ccc":color||blue, border:"none", color:"#fff", padding:"12px", borderRadius:"6px", cursor: saving?"not-allowed":"pointer", fontSize:"14px", fontWeight:"700", letterSpacing:"1px", fontFamily:"monospace", width:"100%" });
 
   return (
     <div style={{ minHeight:"100vh", background:bg, color:dark }}>
       <Header title="Admin Panel" right={<LogoutBtn onLogout={onLogout} />} />
       <TabBar
-        tabs={[["award","Award Badge"],["add","Add Tech"],["manage","Manage"],["upsells","Upsells"],["switchovers","Switchovers"]]}
+        tabs={[["upsells","Upsells"],["switchovers","Switchovers"],["award","Award Badge"],["add","Add Tech"],["manage","Manage"]]}
         active={tab} setActive={setTab} accentColor="#10b981"
       />
       <div style={{ padding:"24px", maxWidth:"700px", margin:"0 auto" }}>
+
+        {tab==="upsells" && (
+          <div style={{ display:"flex", flexDirection:"column", gap:"16px" }}>
+            <div style={{ background:card, border:`1px solid ${bord}`, borderRadius:"8px", padding:"24px", display:"flex", flexDirection:"column", gap:"14px" }}>
+              <div style={{ fontSize:"11px", letterSpacing:"3px", color:"#10b981", fontFamily:"monospace" }}>ENTER THIS WEEK · {formatWeekLabel(wk)}</div>
+              {techs.map(t => (
+                <div key={t.id} style={{ display:"flex", alignItems:"center", gap:"12px" }}>
+                  <div style={{ width:"140px" }}>
+                    <div style={{ fontSize:"14px", fontWeight:"600", color:dark }}>{t.name}</div>
+                    <div style={{ fontSize:"11px", color:muted, fontFamily:"monospace" }}>current: ${(wkUpsells[t.id]||0).toLocaleString()}</div>
+                  </div>
+                  <div style={{ display:"flex", alignItems:"center", gap:"6px", flex:1 }}>
+                    <span style={{ color:muted, fontSize:"16px", fontWeight:"700" }}>$</span>
+                    <input type="number" placeholder={wkUpsells[t.id]||"0"} value={upsellForm[t.id]||""} onChange={e=>setUpsellForm(f=>({...f,[t.id]:e.target.value}))}
+                      style={{ background:"#fff", border:`1px solid ${bord}`, color:dark, padding:"8px 10px", borderRadius:"6px", fontSize:"14px", fontFamily:"monospace", width:"100%" }} />
+                  </div>
+                </div>
+              ))}
+              <button onClick={saveUpsells} disabled={saving} style={btnStyle(blue)}>{saving?"SAVING...":"SAVE THIS WEEK"}</button>
+            </div>
+
+            {/* All-time totals */}
+            <div style={{ background:card, border:`1px solid ${bord}`, borderRadius:"8px", padding:"20px" }}>
+              <div style={{ fontSize:"11px", letterSpacing:"2px", color:blue, fontFamily:"monospace", textTransform:"uppercase", marginBottom:"12px" }}>All-Time Upsell Totals</div>
+              {[...techs].sort((a,b)=>(allTimeUpsells[b.id]||0)-(allTimeUpsells[a.id]||0)).map((t,i) => (
+                <div key={t.id} style={{ display:"flex", justifyContent:"space-between", marginBottom:"8px" }}>
+                  <span style={{ fontSize:"13px", color:dark }}>{medal(i)} {t.name}</span>
+                  <span style={{ fontFamily:"monospace", fontWeight:"700", color:blue }}>${(allTimeUpsells[t.id]||0).toLocaleString()}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {tab==="switchovers" && (
+          <div style={{ display:"flex", flexDirection:"column", gap:"14px" }}>
+            <div style={{ background:card, border:`1px solid ${bord}`, borderRadius:"8px", padding:"24px", display:"flex", flexDirection:"column", gap:"12px" }}>
+              <div style={{ fontSize:"11px", letterSpacing:"3px", color:"#10b981", fontFamily:"monospace" }}>LOG A SWITCHOVER · {formatWeekLabel(wk)}</div>
+              <select value={swForm.techId} onChange={e=>setSwForm(f=>({...f,techId:e.target.value}))} style={selStyle(swForm.techId)}>
+                <option value="">— Select Tech —</option>
+                {techs.map(t=><option key={t.id} value={t.id}>{t.name}</option>)}
+              </select>
+              <select value={swForm.planId} onChange={e=>setSwForm(f=>({...f,planId:e.target.value}))} style={selStyle(swForm.planId)}>
+                <option value="">— Select Plan Converted To —</option>
+                {SERVICE_PLANS.map(p=><option key={p.id} value={p.id}>{p.label} ({p.freq}) +{p.pts}pts</option>)}
+              </select>
+              <button onClick={logSwitchover} disabled={saving} style={btnStyle(blue)}>{saving?"SAVING...":"LOG SWITCHOVER"}</button>
+            </div>
+            <div style={{ background:card, border:`1px solid ${bord}`, borderRadius:"8px", padding:"20px" }}>
+              <div style={{ fontSize:"11px", letterSpacing:"2px", color:blue, fontFamily:"monospace", textTransform:"uppercase", marginBottom:"10px" }}>This Week So Far</div>
+              {(() => {
+                const wkSw = switchovers.filter(s=>s.week_key===wk);
+                if (wkSw.length===0) return <div style={{ fontSize:"12px", color:muted }}>No switchovers logged yet this week</div>;
+                const byTech = {};
+                wkSw.forEach(s => { if (!byTech[s.tech_id]) byTech[s.tech_id]=[]; byTech[s.tech_id].push(s); });
+                return Object.entries(byTech).map(([tid, entries]) => {
+                  const tech = techs.find(t=>t.id===tid);
+                  return tech ? (
+                    <div key={tid} style={{ marginBottom:"10px" }}>
+                      <div style={{ fontSize:"13px", fontWeight:"700", color:dark, marginBottom:"4px" }}>{tech.name} — {entries.length} convert{entries.length!==1?"s":""}</div>
+                      <div style={{ display:"flex", flexWrap:"wrap", gap:"4px" }}>
+                        {entries.map((e,i)=>{ const plan=PLAN_MAP[e.plan_id]; return plan?<div key={i} style={{ fontSize:"11px", background:"#fff", border:`1px solid ${bord}`, borderRadius:"3px", padding:"2px 7px", color:muted, fontFamily:"monospace" }}>{plan.label}</div>:null; })}
+                      </div>
+                    </div>
+                  ) : null;
+                });
+              })()}
+            </div>
+          </div>
+        )}
 
         {tab==="award" && (
           <div style={{ background:card, border:`1px solid ${bord}`, borderRadius:"8px", padding:"24px", display:"flex", flexDirection:"column", gap:"12px" }}>
@@ -670,7 +819,7 @@ function AdminPanel({ techs, setTechs, upsells, setUpsells, switchovers, setSwit
               <option value="">— Select Badge —</option>
               {BADGE_DEFS.map(b=><option key={b.id} value={b.id}>{b.icon} {b.name} (+{b.pts} pts)</option>)}
             </select>
-            <button onClick={awardBadge} style={btnStyle(blue)}>AWARD BADGE</button>
+            <button onClick={awardBadge} disabled={saving} style={btnStyle(blue)}>{saving?"SAVING...":"AWARD BADGE"}</button>
           </div>
         )}
 
@@ -680,7 +829,7 @@ function AdminPanel({ techs, setTechs, upsells, setUpsells, switchovers, setSwit
             <input placeholder="Full Name" value={addForm.name} onChange={e=>setAddForm(f=>({...f,name:e.target.value}))} style={inpStyle} />
             <input placeholder="4-Digit PIN" value={addForm.pin} maxLength={4} onChange={e=>setAddForm(f=>({...f,pin:e.target.value.replace(/\D/g,"")}))} style={inpStyle} />
             <input placeholder="Initials (optional, e.g. JD)" value={addForm.avatar} maxLength={2} onChange={e=>setAddForm(f=>({...f,avatar:e.target.value.toUpperCase()}))} style={inpStyle} />
-            <button onClick={addTech} style={btnStyle("#10b981")}>ADD TECH → Gets Day One Badge</button>
+            <button onClick={addTech} disabled={saving} style={btnStyle("#10b981")}>{saving?"SAVING...":"ADD TECH → Gets Day One Badge"}</button>
           </div>
         )}
 
@@ -690,7 +839,7 @@ function AdminPanel({ techs, setTechs, upsells, setUpsells, switchovers, setSwit
               <div key={t.id} style={{ background:card, border:`1px solid ${bord}`, borderRadius:"8px", padding:"18px" }}>
                 <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:"10px" }}>
                   <div style={{ fontWeight:"700", fontSize:"15px", color:dark }}>{t.name}</div>
-                  <div style={{ fontSize:"12px", color:muted, fontFamily:"monospace" }}>{calcPoints(t.badges).toLocaleString()} pts · PIN: {t.pin}</div>
+                  <div style={{ fontSize:"12px", color:muted, fontFamily:"monospace" }}>{calcPoints(t.badges).toLocaleString()} badge pts · PIN: {t.pin}</div>
                 </div>
                 <div style={{ display:"flex", flexWrap:"wrap", gap:"6px" }}>
                   {t.badges.map(bid => {
@@ -708,62 +857,9 @@ function AdminPanel({ techs, setTechs, upsells, setUpsells, switchovers, setSwit
           </div>
         )}
 
-        {tab==="upsells" && (
-          <div style={{ background:card, border:`1px solid ${bord}`, borderRadius:"8px", padding:"24px", display:"flex", flexDirection:"column", gap:"14px" }}>
-            <div style={{ fontSize:"11px", letterSpacing:"3px", color:"#10b981", fontFamily:"monospace" }}>ENTER THIS WEEK · {formatWeekLabel(getWeekKey())}</div>
-            {techs.map(t => (
-              <div key={t.id} style={{ display:"flex", alignItems:"center", gap:"12px" }}>
-                <div style={{ width:"130px", fontSize:"14px", fontWeight:"600", color:dark }}>{t.name}</div>
-                <div style={{ display:"flex", alignItems:"center", gap:"6px" }}>
-                  <span style={{ color:muted, fontSize:"16px", fontWeight:"700" }}>$</span>
-                  <input type="number" placeholder="0" value={upsellForm[t.id]||""} onChange={e=>setUpsellForm(f=>({...f,[t.id]:e.target.value}))}
-                    style={{ background:"#fff", border:`1px solid ${bord}`, color:dark, padding:"8px 10px", borderRadius:"6px", fontSize:"14px", fontFamily:"monospace", width:"110px" }} />
-                </div>
-              </div>
-            ))}
-            <button onClick={saveUpsells} style={btnStyle(blue)}>SAVE THIS WEEK</button>
-          </div>
-        )}
-
-        {tab==="switchovers" && (
-          <div style={{ display:"flex", flexDirection:"column", gap:"14px" }}>
-            <div style={{ background:card, border:`1px solid ${bord}`, borderRadius:"8px", padding:"24px", display:"flex", flexDirection:"column", gap:"12px" }}>
-              <div style={{ fontSize:"11px", letterSpacing:"3px", color:"#10b981", fontFamily:"monospace" }}>LOG A SWITCHOVER · {formatWeekLabel(getWeekKey())}</div>
-              <select value={swForm.techId} onChange={e=>setSwForm(f=>({...f,techId:e.target.value}))} style={selStyle(swForm.techId)}>
-                <option value="">— Select Tech —</option>
-                {techs.map(t=><option key={t.id} value={t.id}>{t.name}</option>)}
-              </select>
-              <select value={swForm.planId} onChange={e=>setSwForm(f=>({...f,planId:e.target.value}))} style={selStyle(swForm.planId)}>
-                <option value="">— Select Plan Converted To —</option>
-                {SERVICE_PLANS.map(p=><option key={p.id} value={p.id}>{p.label} ({p.freq})</option>)}
-              </select>
-              <button onClick={logSwitchover} style={btnStyle(blue)}>LOG SWITCHOVER</button>
-            </div>
-            <div style={{ background:card, border:`1px solid ${bord}`, borderRadius:"8px", padding:"20px" }}>
-              <div style={{ fontSize:"11px", letterSpacing:"2px", color:blue, fontFamily:"monospace", textTransform:"uppercase", marginBottom:"10px" }}>This Week So Far</div>
-              {(() => {
-                const wkData = switchovers[getWeekKey()]||{};
-                const hasAny = techs.some(t=>(wkData[t.id]||[]).length>0);
-                if (!hasAny) return <div style={{ fontSize:"12px", color:muted }}>No switchovers logged yet this week</div>;
-                return techs.filter(t=>(wkData[t.id]||[]).length>0).map(t => {
-                  const entries = wkData[t.id]||[];
-                  return (
-                    <div key={t.id} style={{ marginBottom:"10px" }}>
-                      <div style={{ fontSize:"13px", fontWeight:"700", color:dark, marginBottom:"4px" }}>{t.name} — {entries.length} convert{entries.length!==1?"s":""}</div>
-                      <div style={{ display:"flex", flexWrap:"wrap", gap:"4px" }}>
-                        {entries.map((e,i)=>{ const plan=PLAN_MAP[e.plan]; return plan?<div key={i} style={{ fontSize:"11px", background:"#fff", border:`1px solid ${bord}`, borderRadius:"3px", padding:"2px 7px", color:muted, fontFamily:"monospace" }}>{plan.label}</div>:null; })}
-                      </div>
-                    </div>
-                  );
-                });
-              })()}
-            </div>
-          </div>
-        )}
-
       </div>
       {toast && (
-        <div style={{ position:"fixed", bottom:"24px", left:"50%", transform:"translateX(-50%)", background: toast.ok?"#10b981":"#ef4444", color:"#fff", padding:"12px 24px", borderRadius:"8px", fontSize:"14px", fontWeight:"600", zIndex:999 }}>
+        <div style={{ position:"fixed", bottom:"24px", left:"50%", transform:"translateX(-50%)", background: toast.ok?"#10b981":"#ef4444", color:"#fff", padding:"12px 24px", borderRadius:"8px", fontSize:"14px", fontWeight:"600", zIndex:999, whiteSpace:"nowrap" }}>
           {toast.msg}
         </div>
       )}
@@ -771,23 +867,49 @@ function AdminPanel({ techs, setTechs, upsells, setUpsells, switchovers, setSwit
   );
 }
 
+// ─── DB SETUP ────────────────────────────────────────────────────────────────
+async function initDB() {
+  // Create tables via Supabase SQL — we'll check if techs exist and seed if needed
+  try {
+    const techs = await sb("techs?select=id&limit=1");
+    return techs !== null;
+  } catch {
+    return false;
+  }
+}
+
 // ─── MAIN APP ─────────────────────────────────────────────────────────────────
 export default function App() {
-  const [techs, setTechs] = useState(null);
-  const [upsells, setUpsells] = useState({});
-  const [switchovers, setSwitchovers] = useState({});
+  const [techs, setTechs] = useState([]);
+  const [upsells, setUpsells] = useState([]);
+  const [switchovers, setSwitchovers] = useState([]);
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [dbError, setDbError] = useState(null);
+
+  const loadAll = useCallback(async () => {
+    try {
+      const [t, u, s] = await Promise.all([
+        sb("techs?select=*&order=name"),
+        sb("upsells?select=*"),
+        sb("switchovers?select=*"),
+      ]);
+      setTechs(t || []);
+      setUpsells(u || []);
+      setSwitchovers(s || []);
+      return true;
+    } catch(e) {
+      setDbError(e.message);
+      return false;
+    }
+  }, []);
 
   useEffect(() => {
-    Promise.all([loadKey("techs_v1"), loadKey("upsells_v1"), loadKey("switchovers_v1")]).then(([t,u,s]) => {
-      const hasOld = t && t.some(x => ["Marcus R.","Devon K.","Jordan T.","Carlos M.","Tyler B."].includes(x.name));
-      setTechs(hasOld||!t ? SEED_TECHS : t);
-      if (hasOld||!t) saveKey("techs_v1", SEED_TECHS);
-      setUpsells(u||{});
-      setSwitchovers(s||{});
+    (async () => {
+      const ok = await loadAll();
+      if (!ok) { setLoading(false); return; }
       setLoading(false);
-    });
+    })();
   }, []);
 
   function handlePin(pin) {
@@ -800,8 +922,28 @@ export default function App() {
   const currentTech = user?.type==="tech" ? techs?.find(t=>t.id===user.techId) : null;
 
   if (loading) return (
-    <div style={{ minHeight:"100vh", background:bg, display:"flex", alignItems:"center", justifyContent:"center" }}>
+    <div style={{ minHeight:"100vh", background:bg, display:"flex", alignItems:"center", justifyContent:"center", flexDirection:"column", gap:"16px" }}>
+      <Logo height={60} />
       <div style={{ color:blue, fontFamily:"monospace", letterSpacing:"3px", fontSize:"12px" }}>LOADING...</div>
+    </div>
+  );
+
+  if (dbError) return (
+    <div style={{ minHeight:"100vh", background:bg, display:"flex", alignItems:"center", justifyContent:"center", flexDirection:"column", gap:"16px", padding:"24px", textAlign:"center" }}>
+      <Logo height={60} />
+      <div style={{ color:"#ef4444", fontFamily:"monospace", fontSize:"13px", maxWidth:"500px" }}>
+        <strong>Database connection error.</strong><br/><br/>
+        The Supabase tables need to be created. Please run the SQL setup in your Supabase dashboard.<br/><br/>
+        <code style={{ background:"#f4f8fd", padding:"8px 12px", borderRadius:"6px", fontSize:"11px", display:"block", textAlign:"left" }}>
+          {`create table techs (id uuid primary key default gen_random_uuid(), name text, pin text, avatar text, badges text[] default '{}');
+
+create table upsells (id uuid primary key default gen_random_uuid(), tech_id uuid references techs(id), week_key text, amount numeric, created_at timestamptz default now());
+
+create table switchovers (id uuid primary key default gen_random_uuid(), tech_id uuid references techs(id), week_key text, plan_id text, created_at timestamptz default now());`}
+        </code>
+        <br/>
+        <button onClick={() => { setDbError(null); setLoading(true); loadAll().then(()=>setLoading(false)); }} style={{ background:blue, border:"none", color:"#fff", padding:"10px 24px", borderRadius:"6px", cursor:"pointer", fontFamily:"monospace", fontSize:"13px" }}>RETRY</button>
+      </div>
     </div>
   );
 
@@ -816,11 +958,26 @@ export default function App() {
         </div>
       </div>
       <PinPad onSubmit={handlePin} />
-      <div style={{ fontSize:"11px", color:bord, fontFamily:"monospace", textAlign:"center" }}>PINS: 1111–1116 · Admin: 0000</div>
     </div>
   );
 
-  if (user.type==="admin") return <AdminPanel techs={techs} setTechs={setTechs} upsells={upsells} setUpsells={setUpsells} switchovers={switchovers} setSwitchovers={setSwitchovers} onLogout={()=>setUser(null)} />;
-  if (user.type==="tech"&&currentTech) return <TechDashboard tech={currentTech} techs={techs} upsells={upsells} switchovers={switchovers} onLogout={()=>setUser(null)} />;
+  if (user.type==="admin") return (
+    <AdminPanel
+      techs={techs} setTechs={setTechs}
+      upsells={upsells} setUpsells={setUpsells}
+      switchovers={switchovers} setSwitchovers={setSwitchovers}
+      onLogout={()=>setUser(null)}
+      refreshAll={loadAll}
+    />
+  );
+
+  if (user.type==="tech" && currentTech) return (
+    <TechDashboard
+      tech={currentTech} techs={techs}
+      upsells={upsells} switchovers={switchovers}
+      onLogout={()=>setUser(null)}
+    />
+  );
+
   return null;
 }
