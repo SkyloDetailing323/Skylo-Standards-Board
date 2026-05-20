@@ -20,17 +20,28 @@ async function sb(path, opts = {}) {
   return text ? JSON.parse(text) : null;
 }
 
-// ─── CONSTANTS ────────────────────────────────────────────────────────────────
-const blue = "#009cff";
-const bg   = "#ffffff";
-const card = "#f4f8fd";
-const bord = "#d0e8ff";
-const dark = "#0a1a2e";
-const muted = "#6b8aaa";
+// ─── DESIGN TOKENS ────────────────────────────────────────────────────────────
+const C = {
+  blue:    "#009cff",
+  blueDk:  "#0077cc",
+  black:   "#080c10",
+  dark:    "#0f1923",
+  card:    "#141e2b",
+  cardLt:  "#1a2535",
+  border:  "#1e2d42",
+  white:   "#ffffff",
+  offWhite:"#e8eef5",
+  muted:   "#5a7a9a",
+  green:   "#00e676",
+  gold:    "#ffd600",
+  orange:  "#ff6b35",
+  purple:  "#9c6dff",
+};
+
 const ADMIN_PIN = "0000";
-const UPSELL_PTS_PER_DOLLAR = 0.5; // $2 = 1 point
-const REVIEW_PTS = 25;             // per 5-star review
-const REVIEW_BONUS_PTS = 75;       // bonus for 10+ reviews in a month
+const UPSELL_PTS_PER_DOLLAR = 0.5;
+const REVIEW_PTS = 25;
+const REVIEW_BONUS_PTS = 75;
 
 const LOGO_SRC = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 50'%3E%3Crect width='200' height='50' fill='%23009cff' rx='4'/%3E%3Ctext x='100' y='34' font-family='monospace' font-size='22' font-weight='900' fill='white' text-anchor='middle'%3ESKYLO%3C/text%3E%3C/svg%3E";
 
@@ -39,12 +50,12 @@ const BADGE_DEFS = [
   { id:"day_one",         cat:"Tenure",      name:"Day One",           icon:"🔑", pts:50,   desc:"Completed first day on the job" },
   { id:"thirty_days",    cat:"Tenure",      name:"30-Day Survivor",   icon:"📅", pts:100,  desc:"First 30 days completed" },
   { id:"ninety_days",    cat:"Tenure",      name:"Quarter Strong",    icon:"📆", pts:200,  desc:"90 days on the team" },
-  { id:"one_year",       cat:"Tenure",      name:"One Year Legend",   icon:"🏅", pts:500,  desc:"First full year — booklet unlocked" },
+  { id:"one_year",       cat:"Tenure",      name:"One Year Legend",   icon:"🏅", pts:500,  desc:"First full year" },
   { id:"two_year",       cat:"Tenure",      name:"Two Year Veteran",  icon:"🎖️", pts:750,  desc:"Two years of excellence" },
   { id:"five_year",      cat:"Tenure",      name:"Five Year Elite",   icon:"👑", pts:1500, desc:"Five years — rare and honored" },
   { id:"zero_callback",  cat:"Performance", name:"Zero Callbacks",    icon:"✅", pts:300,  desc:"Month with zero callbacks" },
   { id:"clean_streak",   cat:"Performance", name:"Clean Streak",      icon:"🔥", pts:600,  desc:"3 months straight, no callbacks" },
-  { id:"five_star",      cat:"Performance", name:"5-Star Tech",       icon:"⭐", pts:150,  desc:"First 5-star customer review" },
+  { id:"five_star",      cat:"Performance", name:"5-Star Tech",       icon:"⭐", pts:150,  desc:"First 5-star review" },
   { id:"review_machine", cat:"Performance", name:"Review Machine",    icon:"🌟", pts:400,  desc:"10 five-star reviews earned" },
   { id:"most_booked",    cat:"Performance", name:"Most Booked",       icon:"📈", pts:350,  desc:"Top revenue tech of the month" },
   { id:"certified",      cat:"Skills",      name:"Certified",         icon:"📜", pts:250,  desc:"First certification earned" },
@@ -59,80 +70,33 @@ const BADGE_DEFS = [
 ];
 const BADGE_MAP = Object.fromEntries(BADGE_DEFS.map(b => [b.id, b]));
 
-// ─── SERVICE PLANS (updated pts based on LTV math) ────────────────────────────
 const SERVICE_PLANS = [
-  { id:"biannual",  label:"Bi-Annual",  freq:"2x/year",        value:2,  pts:25,  ltv_yr:635  },
-  { id:"quarterly", label:"Quarterly",  freq:"4x/year",        value:4,  pts:75,  ltv_yr:1030 },
-  { id:"bimonthly", label:"Bi-Monthly", freq:"Every 2 months", value:6,  pts:120, ltv_yr:1425 },
-  { id:"monthly",   label:"Monthly",    freq:"12x/year",       value:12, pts:200, ltv_yr:2610 },
-  { id:"biweekly",  label:"Bi-Weekly",  freq:"Every 2 weeks",  value:26, pts:280, ltv_yr:3900 },
-  { id:"weekly",    label:"Weekly",     freq:"52x/year",       value:52, pts:350, ltv_yr:5850 },
+  { id:"biannual",  label:"Bi-Annual",  freq:"2x/yr",   pts:25,  ltv:635  },
+  { id:"quarterly", label:"Quarterly",  freq:"4x/yr",   pts:75,  ltv:1030 },
+  { id:"bimonthly", label:"Bi-Monthly", freq:"6x/yr",   pts:120, ltv:1425 },
+  { id:"monthly",   label:"Monthly",    freq:"12x/yr",  pts:200, ltv:2610 },
+  { id:"biweekly",  label:"Bi-Weekly",  freq:"26x/yr",  pts:280, ltv:3900 },
+  { id:"weekly",    label:"Weekly",     freq:"52x/yr",  pts:350, ltv:5850 },
 ];
 const PLAN_MAP = Object.fromEntries(SERVICE_PLANS.map(p => [p.id, p]));
-const PLAN_COLORS = { biannual:"#10b981", quarterly:"#3b82f6", bimonthly:"#8b5cf6", monthly:"#009cff", biweekly:"#f59e0b", weekly:"#ef4444" };
+const PLAN_COLORS = { biannual:C.green, quarterly:C.blue, bimonthly:C.purple, monthly:C.blue, biweekly:C.gold, weekly:C.orange };
 
-// ─── JOURNEY TIERS (calibrated to ~800 pts/month earn rate) ──────────────────
 const JOURNEY_TIERS = [
-  {
-    id:"bronze", name:"Bronze", icon:"🥉", minPts:0, maxPts:1599,
-    color:"#cd7f32", bg:"linear-gradient(135deg,#2a1400,#5a3010)",
-    glow:"#cd7f3255",
-    desc:"Every legend starts here. You're in the door — now prove it.",
-    reward:"Tier 1 Rewards ($150)", rewardPts:1600,
-    perks:["$150 reward eligibility","Weekly upsell tracking","Badge earning unlocked"],
-  },
-  {
-    id:"silver", name:"Silver", icon:"🥈", minPts:1600, maxPts:3199,
-    color:"#a8c0d6", bg:"linear-gradient(135deg,#0e1f2e,#1a3a58)",
-    glow:"#a8c0d655",
-    desc:"You're building something real. The team is noticing.",
-    reward:"Tier 2 Rewards ($300)", rewardPts:3200,
-    perks:["$300 reward eligibility","Switchover bonus tracking","Monthly performance spotlight"],
-  },
-  {
-    id:"gold", name:"Gold", icon:"🥇", minPts:3200, maxPts:5999,
-    color:"#f5c542", bg:"linear-gradient(135deg,#1e1400,#3d2d00)",
-    glow:"#f5c54255",
-    desc:"Elite territory. You're carrying the standard for the whole crew.",
-    reward:"Tier 3 Rewards ($600)", rewardPts:6000,
-    perks:["$600 reward eligibility","Featured on team board","Priority scheduling pick"],
-  },
-  {
-    id:"platinum", name:"Platinum", icon:"💎", minPts:6000, maxPts:11999,
-    color:"#c4b5fd", bg:"linear-gradient(135deg,#0d0520,#1e0a40)",
-    glow:"#c4b5fd55",
-    desc:"You've reached the top tier. This is what Skylo Standard looks like.",
-    reward:"Tier 4 Rewards ($1,200)", rewardPts:12000,
-    perks:["$1,200 reward eligibility","Skylo Legend nomination","Annual recognition award"],
-  },
-  {
-    id:"legend", name:"Legend", icon:"👑", minPts:12000, maxPts:Infinity,
-    color:"#fbbf24", bg:"linear-gradient(135deg,#1a1000,#3d2900)",
-    glow:"#fbbf2455",
-    desc:"One of one. You've set the standard for everyone who comes after you.",
-    reward:"Uncapped — choose your reward", rewardPts:null,
-    perks:["All rewards unlocked","Permanent hall of fame","Custom perk negotiation"],
-  },
+  { id:"bronze",   name:"BRONZE",   icon:"🥉", minPts:0,     maxPts:1599,   color:"#cd7f32", bg:"#1a1000", reward:"Tier 1 — $150",    perks:["$150 reward","Badge tracking","Weekly upsells"] },
+  { id:"silver",   name:"SILVER",   icon:"🥈", minPts:1600,  maxPts:3199,   color:"#a8c0d6", bg:"#0e1520", reward:"Tier 2 — $300",    perks:["$300 reward","Switchover bonuses","Monthly spotlight"] },
+  { id:"gold",     name:"GOLD",     icon:"🥇", minPts:3200,  maxPts:5999,   color:"#ffd600", bg:"#1a1400", reward:"Tier 3 — $600",    perks:["$600 reward","Featured on board","Priority scheduling"] },
+  { id:"platinum", name:"PLATINUM", icon:"💎", minPts:6000,  maxPts:11999,  color:"#c4b5fd", bg:"#0d0520", reward:"Tier 4 — $1,200",  perks:["$1,200 reward","Legend nomination","Annual award"] },
+  { id:"legend",   name:"LEGEND",   icon:"👑", minPts:12000, maxPts:Infinity,color:"#ffd600", bg:"#1a1000", reward:"UNCAPPED",         perks:["All rewards","Hall of fame","Custom perk"] },
 ];
 function getTier(pts) { return [...JOURNEY_TIERS].reverse().find(t => pts >= t.minPts) || JOURNEY_TIERS[0]; }
 
-const SEED_TECHS = [
-  { name:"Max Hancock",    pin:"1111", avatar:"MH", badges:["day_one"], start_date: null },
-  { name:"Milos Lewit",    pin:"1112", avatar:"ML", badges:["day_one"], start_date: null },
-  { name:"Kade Andrew",    pin:"1113", avatar:"KA", badges:["day_one"], start_date: null },
-  { name:"Riley Lyon",     pin:"1114", avatar:"RL", badges:["day_one"], start_date: null },
-  { name:"Caleb McDaniel", pin:"1115", avatar:"CM", badges:["day_one"], start_date: null },
-  { name:"Will Faulkner",  pin:"1116", avatar:"WF", badges:["day_one"], start_date: null },
-];
-
 // ─── HELPERS ──────────────────────────────────────────────────────────────────
-const calcPoints = (badges) => (badges || []).reduce((s, id) => s + (BADGE_MAP[id]?.pts || 0), 0);
+const calcBadgePts = (badges) => (badges||[]).reduce((s,id) => s+(BADGE_MAP[id]?.pts||0), 0);
 const medal = (i) => i===0?"🥇":i===1?"🥈":i===2?"🥉":`#${i+1}`;
 
 function getWeekKey() {
-  const now = new Date();
-  const start = new Date(now);
-  start.setDate(now.getDate() - now.getDay());
+  const now = new Date(), start = new Date(now);
+  start.setDate(now.getDate()-now.getDay());
   return `${start.getFullYear()}-${String(start.getMonth()+1).padStart(2,"0")}-${String(start.getDate()).padStart(2,"0")}`;
 }
 function getMonthKey() {
@@ -140,84 +104,130 @@ function getMonthKey() {
   return `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`;
 }
 function formatWeekLabel(key) {
-  const d = new Date(key + "T00:00:00");
-  const end = new Date(d); end.setDate(d.getDate()+6);
-  const fmt = (dt) => dt.toLocaleDateString("en-US",{month:"short",day:"numeric"});
+  const d = new Date(key+"T00:00:00"), end = new Date(d);
+  end.setDate(d.getDate()+6);
+  const fmt = dt => dt.toLocaleDateString("en-US",{month:"short",day:"numeric"});
   return `${fmt(d)} – ${fmt(end)}`;
 }
 function formatMonthLabel(key) {
-  const [y, m] = key.split("-");
-  return new Date(y, m-1).toLocaleDateString("en-US",{month:"long",year:"numeric"});
+  const [y,m] = key.split("-");
+  return new Date(y,m-1).toLocaleDateString("en-US",{month:"long",year:"numeric"});
 }
 function formatTenure(startDate) {
-  if (!startDate) return "—";
-  const start = new Date(startDate);
-  const now = new Date();
-  const days = Math.floor((now - start) / (1000 * 60 * 60 * 24));
+  if (!startDate) return null;
+  const days = Math.floor((new Date()-new Date(startDate))/(1000*60*60*24));
   if (days < 30) return `${days}d`;
-  if (days < 365) return `${Math.floor(days/30)}mo ${days%30}d`;
-  const yrs = Math.floor(days/365);
-  const mos = Math.floor((days % 365) / 30);
+  if (days < 365) return `${Math.floor(days/30)}mo`;
+  const yrs = Math.floor(days/365), mos = Math.floor((days%365)/30);
   return mos > 0 ? `${yrs}yr ${mos}mo` : `${yrs}yr`;
 }
-
-function calcTechTotals(tech, upsells, switchovers, reviews) {
-  const badgePts = calcPoints(tech.badges);
-  const upsellAmt = upsells.filter(u => u.tech_id === tech.id).reduce((s,u) => s+u.amount, 0);
-  const upsellPts = Math.round(upsellAmt * UPSELL_PTS_PER_DOLLAR);
-  const switchPts = switchovers.filter(s => s.tech_id === tech.id).reduce((s,sw) => s+(PLAN_MAP[sw.plan_id]?.pts||0), 0);
-  // review pts: 25 per review + 75 bonus per month with 10+
-  const reviewsByMonth = {};
-  reviews.filter(r => r.tech_id === tech.id).forEach(r => {
-    reviewsByMonth[r.month_key] = (reviewsByMonth[r.month_key]||0) + r.count;
-  });
-  const reviewPts = Object.values(reviewsByMonth).reduce((s,cnt) => {
-    return s + (cnt * REVIEW_PTS) + (cnt >= 10 ? REVIEW_BONUS_PTS : 0);
-  }, 0);
-  const total = badgePts + upsellPts + switchPts + reviewPts;
+function calcTotals(tech, upsells, switchovers, reviews) {
+  const badgePts = calcBadgePts(tech.badges);
+  const upsellAmt = upsells.filter(u=>u.tech_id===tech.id).reduce((s,u)=>s+u.amount,0);
+  const upsellPts = Math.round(upsellAmt*UPSELL_PTS_PER_DOLLAR);
+  const switchPts = switchovers.filter(s=>s.tech_id===tech.id).reduce((s,sw)=>s+(PLAN_MAP[sw.plan_id]?.pts||0),0);
+  const byMonth = {};
+  reviews.filter(r=>r.tech_id===tech.id).forEach(r=>{ byMonth[r.month_key]=(byMonth[r.month_key]||0)+r.count; });
+  const reviewPts = Object.values(byMonth).reduce((s,cnt)=>s+(cnt*REVIEW_PTS)+(cnt>=10?REVIEW_BONUS_PTS:0),0);
+  const total = badgePts+upsellPts+switchPts+reviewPts;
   return { badgePts, upsellAmt, upsellPts, switchPts, reviewPts, total };
 }
 
-// ─── COMPONENTS ───────────────────────────────────────────────────────────────
-function Logo({ height=44 }) {
-  return <img src={LOGO_SRC} alt="Skylo" style={{ height:`${height}px`, objectFit:"contain" }} />;
+// ─── GLOBAL STYLES ────────────────────────────────────────────────────────────
+const GS = `
+  @import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;800;900&family=Barlow:wght@400;500;600;700&display=swap');
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:${C.dark}; color:${C.white}; font-family:'Barlow',sans-serif; -webkit-font-smoothing:antialiased; }
+  ::-webkit-scrollbar { width:4px; } ::-webkit-scrollbar-track { background:${C.dark}; } ::-webkit-scrollbar-thumb { background:${C.border}; border-radius:2px; }
+  input,select,button { font-family:'Barlow',sans-serif; }
+  input[type=number]::-webkit-inner-spin-button { -webkit-appearance:none; }
+`;
+
+// ─── BASE COMPONENTS ──────────────────────────────────────────────────────────
+function Logo({ h=40 }) {
+  return <img src={LOGO_SRC} alt="Skylo" style={{ height:`${h}px`, objectFit:"contain" }}/>;
 }
-function Header({ right, title }) {
+
+function Header({ right, title, subtitle }) {
   return (
-    <div style={{ background:"#fff", borderBottom:`1px solid ${bord}`, padding:"14px 24px", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
-      <div style={{ display:"flex", alignItems:"center", gap:"12px" }}>
-        <Logo height={36} />
-        {title && <span style={{ fontWeight:"800", fontSize:"15px", color:dark }}>{title}</span>}
+    <div style={{ background:C.black, borderBottom:`2px solid ${C.blue}`, padding:"0 20px", display:"flex", alignItems:"center", justifyContent:"space-between", height:"60px" }}>
+      <div style={{ display:"flex", alignItems:"center", gap:"14px" }}>
+        <Logo h={32}/>
+        {title && (
+          <div>
+            <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"16px", letterSpacing:"2px", textTransform:"uppercase", color:C.white, lineHeight:1 }}>{title}</div>
+            {subtitle && <div style={{ fontSize:"10px", color:C.muted, letterSpacing:"2px", textTransform:"uppercase", marginTop:"2px" }}>{subtitle}</div>}
+          </div>
+        )}
       </div>
       {right}
     </div>
   );
 }
+
 function LogoutBtn({ onLogout }) {
-  return <button onClick={onLogout} style={{ background:"none", border:`1px solid ${bord}`, color:muted, padding:"6px 14px", borderRadius:"6px", cursor:"pointer", fontSize:"12px", fontFamily:"monospace" }}>LOG OUT</button>;
-}
-function TabBar({ tabs, active, setActive, accentColor }) {
-  const ac = accentColor || blue;
   return (
-    <div style={{ display:"flex", borderBottom:`1px solid ${bord}`, background:"#fff", padding:"0 12px", overflowX:"auto", WebkitOverflowScrolling:"touch", scrollbarWidth:"none" }}>
+    <button onClick={onLogout} style={{ background:"none", border:`1px solid ${C.border}`, color:C.muted, padding:"6px 14px", borderRadius:"4px", cursor:"pointer", fontSize:"11px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", letterSpacing:"2px", textTransform:"uppercase" }}>
+      EXIT
+    </button>
+  );
+}
+
+function TabBar({ tabs, active, setActive, accent }) {
+  const ac = accent || C.blue;
+  return (
+    <div style={{ display:"flex", background:C.black, borderBottom:`1px solid ${C.border}`, overflowX:"auto", WebkitOverflowScrolling:"touch", scrollbarWidth:"none" }}>
       {tabs.map(([id,label]) => (
-        <button key={id} onClick={() => setActive(id)} style={{
+        <button key={id} onClick={()=>setActive(id)} style={{
           background:"none", border:"none", cursor:"pointer", whiteSpace:"nowrap",
-          padding:"12px 14px", fontSize:"11px", letterSpacing:"0.5px", textTransform:"uppercase",
-          fontFamily:"monospace", color: active===id ? ac : muted, flexShrink:0,
-          borderBottom: active===id ? `2px solid ${ac}` : "2px solid transparent",
+          padding:"14px 18px", fontSize:"11px", letterSpacing:"2px", textTransform:"uppercase",
+          fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700",
+          color:active===id?ac:C.muted, flexShrink:0,
+          borderBottom:active===id?`3px solid ${ac}`:"3px solid transparent",
         }}>{label}</button>
       ))}
     </div>
   );
 }
-function StatCard({ label, value, color, sub }) {
+
+function Num({ val, size=32, color=C.white, unit="" }) {
   return (
-    <div style={{ background:card, border:`1px solid ${bord}`, borderRadius:"8px", padding:"18px" }}>
-      <div style={{ fontSize:"10px", color:muted, letterSpacing:"2px", textTransform:"uppercase", fontFamily:"monospace", marginBottom:"8px" }}>{label}</div>
-      <div style={{ fontSize:"26px", fontWeight:"900", color: color||dark }}>{value}</div>
-      {sub && <div style={{ fontSize:"11px", color:muted, fontFamily:"monospace", marginTop:"4px" }}>{sub}</div>}
+    <div style={{ display:"flex", alignItems:"baseline", gap:"3px" }}>
+      <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:`${size}px`, color, lineHeight:1 }}>{val}</span>
+      {unit && <span style={{ fontSize:`${size*0.45}px`, color:C.muted, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>{unit}</span>}
     </div>
+  );
+}
+
+function StatBlock({ label, value, color, sub, accent }) {
+  return (
+    <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${accent||color||C.blue}`, borderRadius:"6px", padding:"16px" }}>
+      <div style={{ fontSize:"10px", color:C.muted, letterSpacing:"2px", textTransform:"uppercase", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", marginBottom:"8px" }}>{label}</div>
+      <Num val={value} color={color||C.white} size={28}/>
+      {sub && <div style={{ fontSize:"11px", color:C.muted, marginTop:"5px" }}>{sub}</div>}
+    </div>
+  );
+}
+
+function Bar({ pct, color=C.blue, h=5 }) {
+  return (
+    <div style={{ background:C.border, borderRadius:"2px", height:`${h}px`, overflow:"hidden" }}>
+      <div style={{ width:`${Math.min(pct,100)}%`, height:"100%", background:color, borderRadius:"2px" }}/>
+    </div>
+  );
+}
+
+function Label({ children, color=C.blue }) {
+  return (
+    <div style={{ fontSize:"10px", color, letterSpacing:"2px", textTransform:"uppercase", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", marginBottom:"10px" }}>{children}</div>
+  );
+}
+
+function Pill({ children, color=C.blue }) {
+  return (
+    <span style={{ display:"inline-block", background:`${color}22`, border:`1px solid ${color}55`, color, borderRadius:"3px", padding:"2px 8px", fontSize:"10px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", letterSpacing:"1px", textTransform:"uppercase" }}>
+      {children}
+    </span>
   );
 }
 
@@ -226,29 +236,29 @@ function PinPad({ onSubmit }) {
   const [pin, setPin] = useState("");
   const [shake, setShake] = useState(false);
   useEffect(() => {
-    if (pin.length === 4) {
+    if (pin.length===4) {
       const ok = onSubmit(pin);
-      if (!ok) { setShake(true); setTimeout(() => { setShake(false); setPin(""); }, 600); }
+      if (!ok) { setShake(true); setTimeout(()=>{ setShake(false); setPin(""); },500); }
     }
   }, [pin]);
-  const press = (d) => { if (pin.length < 4) setPin(p => p+d); };
+  const press = d => { if (pin.length<4) setPin(p=>p+d); };
   return (
-    <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:"28px" }}>
-      <div style={{ fontSize:"12px", letterSpacing:"3px", color:muted, textTransform:"uppercase", fontFamily:"monospace" }}>Enter PIN</div>
-      <div style={{ display:"flex", gap:"16px", animation: shake?"shake 0.4s ease":"none" }}>
-        {[0,1,2,3].map(i => (
-          <div key={i} style={{ width:"16px", height:"16px", borderRadius:"50%", background: i<pin.length?blue:"transparent", border:`2px solid ${i<pin.length?blue:bord}`, transition:"all 0.15s" }} />
+    <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:"32px" }}>
+      <div style={{ display:"flex", gap:"14px", animation:shake?"shake .4s ease":"none" }}>
+        {[0,1,2,3].map(i=>(
+          <div key={i} style={{ width:"14px", height:"14px", borderRadius:"50%", background:i<pin.length?C.blue:"transparent", border:`2px solid ${i<pin.length?C.blue:C.border}` }}/>
         ))}
       </div>
-      <div style={{ display:"grid", gridTemplateColumns:"repeat(3, 70px)", gap:"10px" }}>
-        {[1,2,3,4,5,6,7,8,9,"",0,"⌫"].map((d,i) => (
-          <button key={i} onClick={() => d==="⌫"?setPin(p=>p.slice(0,-1)):d!==""?press(String(d)):null}
-            disabled={d===""} style={{ width:"70px", height:"70px", borderRadius:"8px", background:d===""?"transparent":card, border:d===""?"none":`1px solid ${bord}`, color:d==="⌫"?muted:dark, fontSize:d==="⌫"?"18px":"20px", fontWeight:"600", cursor:d===""?"default":"pointer", fontFamily:"monospace" }}>
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(3,72px)", gap:"10px" }}>
+        {[1,2,3,4,5,6,7,8,9,"",0,"⌫"].map((d,i)=>(
+          <button key={i} onClick={()=>d==="⌫"?setPin(p=>p.slice(0,-1)):d!==""?press(String(d)):null}
+            disabled={d===""}
+            style={{ width:"72px", height:"72px", borderRadius:"6px", background:d===""?"transparent":C.card, border:d===""?"none":`1px solid ${C.border}`, color:d==="⌫"?C.muted:C.white, fontSize:d==="⌫"?"20px":"24px", fontWeight:"700", cursor:d===""?"default":"pointer", fontFamily:"'Barlow Condensed',sans-serif" }}>
             {d}
           </button>
         ))}
       </div>
-      <style>{`@keyframes shake{0%,100%{transform:translateX(0)}20%,60%{transform:translateX(-8px)}40%,80%{transform:translateX(8px)}}`}</style>
+      <style>{`@keyframes shake{0%,100%{transform:translateX(0)}20%,60%{transform:translateX(-6px)}40%,80%{transform:translateX(6px)}}${GS}`}</style>
     </div>
   );
 }
@@ -256,20 +266,19 @@ function PinPad({ onSubmit }) {
 // ─── BADGE GRID ───────────────────────────────────────────────────────────────
 function BadgeGrid({ earned }) {
   return (
-    <div>
-      {["Tenure","Performance","Skills","Character"].map(cat => (
-        <div key={cat} style={{ marginBottom:"28px" }}>
-          <div style={{ fontSize:"11px", letterSpacing:"3px", color:blue, fontFamily:"monospace", textTransform:"uppercase", marginBottom:"10px" }}>{cat}</div>
-          <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(190px,1fr))", gap:"10px" }}>
-            {BADGE_DEFS.filter(b => b.cat===cat).map(b => {
+    <div style={{ display:"flex", flexDirection:"column", gap:"24px" }}>
+      {["Tenure","Performance","Skills","Character"].map(cat=>(
+        <div key={cat}>
+          <Label color={C.blue}>{cat}</Label>
+          <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(180px,1fr))", gap:"8px" }}>
+            {BADGE_DEFS.filter(b=>b.cat===cat).map(b=>{
               const has = earned.includes(b.id);
               return (
-                <div key={b.id} style={{ background:has?"#e6f4ff":card, border:`1px solid ${has?blue+"55":bord}`, borderRadius:"8px", padding:"14px", opacity:has?1:0.45, position:"relative" }}>
-                  {!has && <div style={{ position:"absolute", top:"10px", right:"10px", fontSize:"11px" }}>🔒</div>}
+                <div key={b.id} style={{ background:has?`${C.blue}18`:C.card, border:`1px solid ${has?C.blue:C.border}`, borderRadius:"6px", padding:"14px", opacity:has?1:0.4 }}>
                   <div style={{ fontSize:"22px", marginBottom:"6px" }}>{b.icon}</div>
-                  <div style={{ fontWeight:"700", fontSize:"13px", color:dark, marginBottom:"3px" }}>{b.name}</div>
-                  <div style={{ fontSize:"11px", color:muted, marginBottom:"6px" }}>{b.desc}</div>
-                  <div style={{ fontSize:"11px", fontFamily:"monospace", color:has?blue:muted }}>+{b.pts} pts</div>
+                  <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", fontSize:"14px", color:C.white, marginBottom:"2px" }}>{b.name}</div>
+                  <div style={{ fontSize:"11px", color:C.muted, marginBottom:"6px", lineHeight:"1.3" }}>{b.desc}</div>
+                  <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontSize:"13px", fontWeight:"800", color:has?C.blue:C.muted }}>+{b.pts} PTS</div>
                 </div>
               );
             })}
@@ -284,57 +293,54 @@ function BadgeGrid({ earned }) {
 function UpsellLeaderboard({ techs, upsells, currentId }) {
   const wk = getWeekKey();
   const byWeek = {};
-  upsells.forEach(u => {
-    if (!byWeek[u.week_key]) byWeek[u.week_key] = {};
-    byWeek[u.week_key][u.tech_id] = (byWeek[u.week_key][u.tech_id]||0) + u.amount;
-  });
-  const allWeeks = Object.keys(byWeek).sort((a,b) => b.localeCompare(a));
+  upsells.forEach(u=>{ if(!byWeek[u.week_key])byWeek[u.week_key]={}; byWeek[u.week_key][u.tech_id]=(byWeek[u.week_key][u.tech_id]||0)+u.amount; });
+  const allWeeks = Object.keys(byWeek).sort((a,b)=>b.localeCompare(a));
   const wkData = byWeek[wk]||{};
-  const allTimeTotals = {};
-  upsells.forEach(u => { allTimeTotals[u.tech_id]=(allTimeTotals[u.tech_id]||0)+u.amount; });
-  const ranked = [...techs].map(t => ({...t, thisWeek:wkData[t.id]||0, allTime:allTimeTotals[t.id]||0})).sort((a,b)=>b.thisWeek-a.thisWeek);
-  const top = ranked[0]?.thisWeek||1;
+  const allTime = {};
+  upsells.forEach(u=>{ allTime[u.tech_id]=(allTime[u.tech_id]||0)+u.amount; });
+  const ranked = [...techs].map(t=>({...t,week:wkData[t.id]||0,all:allTime[t.id]||0})).sort((a,b)=>b.week-a.week);
+  const top = ranked[0]?.week||1;
   return (
-    <div style={{ display:"flex", flexDirection:"column", gap:"20px" }}>
-      <div style={{ background:"linear-gradient(135deg,#e6f4ff,#f0f9ff)", border:`1px solid ${blue}44`, borderRadius:"10px", padding:"16px 20px" }}>
-        <div style={{ fontSize:"11px", letterSpacing:"3px", color:blue, fontFamily:"monospace", textTransform:"uppercase", marginBottom:"12px" }}>💰 All-Time Upsell Totals</div>
-        {[...techs].sort((a,b)=>(allTimeTotals[b.id]||0)-(allTimeTotals[a.id]||0)).map((t,i)=>{
-          const amt=allTimeTotals[t.id]||0; const topAmt=Math.max(...techs.map(x=>allTimeTotals[x.id]||0))||1; const pct=Math.round((amt/topAmt)*100);
-          return (
-            <div key={t.id} style={{ marginBottom:"8px" }}>
-              <div style={{ display:"flex", justifyContent:"space-between", marginBottom:"3px" }}>
-                <span style={{ fontSize:"13px", fontWeight:t.id===currentId?"800":"600", color:t.id===currentId?blue:dark }}>{medal(i)} {t.name}{t.id===currentId?" (you)":""}</span>
-                <span style={{ fontFamily:"monospace", fontWeight:"700", fontSize:"13px", color:dark }}>${amt.toLocaleString()}</span>
+    <div style={{ display:"flex", flexDirection:"column", gap:"24px" }}>
+      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"6px", overflow:"hidden" }}>
+        <div style={{ padding:"14px 18px", borderBottom:`1px solid ${C.border}`, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+          <Label color={C.green}>💰 All-Time Totals</Label>
+        </div>
+        <div style={{ padding:"14px 18px", display:"flex", flexDirection:"column", gap:"10px" }}>
+          {[...techs].sort((a,b)=>(allTime[b.id]||0)-(allTime[a.id]||0)).map((t,i)=>{
+            const amt=allTime[t.id]||0; const pct=Math.round((amt/(Math.max(...techs.map(x=>allTime[x.id]||0))||1))*100);
+            return (
+              <div key={t.id}>
+                <div style={{ display:"flex", justifyContent:"space-between", marginBottom:"5px" }}>
+                  <span style={{ fontSize:"13px", fontWeight:"600", color:t.id===currentId?C.blue:C.offWhite }}>{medal(i)} {t.name}{t.id===currentId?" — YOU":""}</span>
+                  <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"14px", color:C.white }}>${amt.toLocaleString()}</span>
+                </div>
+                <Bar pct={pct} color={C.green}/>
               </div>
-              <div style={{ background:bord, borderRadius:"3px", height:"4px", overflow:"hidden" }}>
-                <div style={{ width:`${pct}%`, height:"100%", background:`linear-gradient(90deg,${blue},#0066cc)`, borderRadius:"3px" }} />
-              </div>
-            </div>
-          );
-        })}
+            );
+          })}
+        </div>
       </div>
       <div>
-        <div style={{ fontSize:"11px", letterSpacing:"3px", color:blue, fontFamily:"monospace", textTransform:"uppercase", marginBottom:"12px" }}>This Week · {formatWeekLabel(wk)}</div>
-        <div style={{ display:"flex", flexDirection:"column", gap:"10px" }}>
+        <Label>This Week · {formatWeekLabel(wk)}</Label>
+        <div style={{ display:"flex", flexDirection:"column", gap:"8px" }}>
           {ranked.map((t,idx)=>{
-            const isMe=t.id===currentId; const pct=top>0?Math.round((t.thisWeek/top)*100):0;
+            const isMe=t.id===currentId; const pct=top>0?Math.round((t.week/top)*100):0;
             return (
-              <div key={t.id} style={{ background:isMe?"#e6f4ff":card, border:`1px solid ${isMe?blue:bord}`, borderRadius:"10px", padding:"16px 18px" }}>
-                <div style={{ display:"flex", alignItems:"center", gap:"14px", marginBottom:"10px" }}>
-                  <div style={{ width:"30px", textAlign:"center", fontSize:idx<3?"20px":"13px", color:muted, fontFamily:"monospace", fontWeight:"700" }}>{medal(idx)}</div>
-                  <div style={{ width:"40px", height:"40px", borderRadius:"50%", background:`${blue}22`, border:`1px solid ${blue}44`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:"12px", fontWeight:"700", color:blue, fontFamily:"monospace", flexShrink:0 }}>{t.avatar}</div>
+              <div key={t.id} style={{ background:isMe?`${C.blue}18`:C.card, border:`1px solid ${isMe?C.blue:C.border}`, borderRadius:"6px", padding:"14px 18px" }}>
+                <div style={{ display:"flex", alignItems:"center", gap:"12px", marginBottom:"10px" }}>
+                  <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:idx<3?"22px":"14px", color:C.muted, width:"28px", textAlign:"center" }}>{medal(idx)}</div>
+                  <div style={{ width:"38px", height:"38px", borderRadius:"50%", background:`${C.blue}22`, border:`1px solid ${C.blue}44`, display:"flex", alignItems:"center", justifyContent:"center", fontFamily:"'Barlow Condensed',sans-serif", fontSize:"12px", fontWeight:"800", color:C.blue, flexShrink:0 }}>{t.avatar}</div>
                   <div style={{ flex:1 }}>
-                    <div style={{ fontWeight:"700", fontSize:"15px", color:dark }}>{t.name}{isMe&&<span style={{ fontSize:"10px", color:blue, fontFamily:"monospace" }}> YOU</span>}</div>
-                    <div style={{ fontSize:"12px", color:muted, fontFamily:"monospace" }}>All-time: ${t.allTime.toLocaleString()} · {Math.round(t.allTime*UPSELL_PTS_PER_DOLLAR).toLocaleString()} pts</div>
+                    <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"16px", color:C.white }}>{t.name}{isMe&&<span style={{ color:C.blue, fontSize:"11px", letterSpacing:"1px", marginLeft:"6px" }}>YOU</span>}</div>
+                    <div style={{ fontSize:"11px", color:C.muted }}>All-time ${t.all.toLocaleString()} · {Math.round(t.all*UPSELL_PTS_PER_DOLLAR).toLocaleString()} pts</div>
                   </div>
                   <div style={{ textAlign:"right" }}>
-                    <div style={{ fontSize:"22px", fontWeight:"900", color:t.thisWeek>0?dark:bord }}>${t.thisWeek.toLocaleString()}</div>
-                    <div style={{ fontSize:"11px", color:blue, fontFamily:"monospace" }}>+{Math.round(t.thisWeek*UPSELL_PTS_PER_DOLLAR)} pts</div>
+                    <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"24px", color:t.week>0?C.white:C.border }}>${t.week.toLocaleString()}</div>
+                    <div style={{ fontSize:"11px", color:C.green }}>+{Math.round(t.week*UPSELL_PTS_PER_DOLLAR)} pts</div>
                   </div>
                 </div>
-                <div style={{ background:bord, borderRadius:"4px", height:"5px", overflow:"hidden" }}>
-                  <div style={{ width:`${pct}%`, height:"100%", background:`linear-gradient(90deg,${blue},#0066cc)`, borderRadius:"4px" }} />
-                </div>
+                <Bar pct={pct} color={C.green}/>
               </div>
             );
           })}
@@ -342,24 +348,24 @@ function UpsellLeaderboard({ techs, upsells, currentId }) {
       </div>
       {allWeeks.length>0&&(
         <div>
-          <div style={{ fontSize:"11px", letterSpacing:"3px", color:blue, fontFamily:"monospace", textTransform:"uppercase", marginBottom:"12px" }}>Weekly History</div>
-          <div style={{ display:"flex", flexDirection:"column", gap:"10px" }}>
+          <Label>Weekly History</Label>
+          <div style={{ display:"flex", flexDirection:"column", gap:"8px" }}>
             {allWeeks.map(w=>{
               const d=byWeek[w]||{}; const rows=[...techs].map(t=>({...t,amt:d[t.id]||0})).filter(t=>t.amt>0).sort((a,b)=>b.amt-a.amt); const total=rows.reduce((s,t)=>s+t.amt,0);
               return (
-                <div key={w} style={{ background:card, border:`1px solid ${w===wk?blue:bord}`, borderRadius:"10px", overflow:"hidden" }}>
-                  <div style={{ display:"flex", justifyContent:"space-between", padding:"10px 16px", borderBottom:`1px solid ${bord}`, background:w===wk?"#e6f4ff":"#eef6ff" }}>
-                    <div style={{ fontWeight:"700", fontSize:"13px", color:dark }}>{formatWeekLabel(w)}{w===wk&&<span style={{ fontSize:"10px", color:blue, fontFamily:"monospace" }}> CURRENT</span>}</div>
-                    <div style={{ fontFamily:"monospace", color:blue, fontWeight:"700", fontSize:"13px" }}>Total: ${total.toLocaleString()}</div>
+                <div key={w} style={{ background:C.card, border:`1px solid ${w===wk?C.blue:C.border}`, borderRadius:"6px", overflow:"hidden" }}>
+                  <div style={{ display:"flex", justifyContent:"space-between", padding:"10px 16px", borderBottom:`1px solid ${C.border}`, background:C.cardLt }}>
+                    <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", fontSize:"13px", color:C.white }}>{formatWeekLabel(w)}{w===wk&&<Pill color={C.blue}> CURRENT</Pill>}</span>
+                    <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"13px", color:C.green }}>${total.toLocaleString()}</span>
                   </div>
-                  <div style={{ padding:"10px 16px", display:"flex", flexDirection:"column", gap:"5px" }}>
+                  <div style={{ padding:"10px 16px", display:"flex", flexDirection:"column", gap:"4px" }}>
                     {rows.map((t,i)=>(
                       <div key={t.id} style={{ display:"flex", justifyContent:"space-between" }}>
-                        <div style={{ display:"flex", alignItems:"center", gap:"6px" }}><span>{medal(i)}</span><span style={{ fontSize:"13px", color:dark }}>{t.name}</span></div>
-                        <span style={{ fontFamily:"monospace", fontWeight:"700", fontSize:"13px", color:dark }}>${t.amt.toLocaleString()}</span>
+                        <span style={{ fontSize:"13px", color:C.offWhite }}>{medal(i)} {t.name}</span>
+                        <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"13px", color:C.white }}>${t.amt.toLocaleString()}</span>
                       </div>
                     ))}
-                    {rows.length===0&&<div style={{ fontSize:"12px", color:muted }}>No data</div>}
+                    {rows.length===0&&<span style={{ fontSize:"12px", color:C.muted }}>No data</span>}
                   </div>
                 </div>
               );
@@ -376,63 +382,56 @@ function SwitchoverLeaderboard({ techs, switchovers, currentId }) {
   const [rankBy, setRankBy] = useState("count");
   const wk = getWeekKey();
   const byWeek = {};
-  switchovers.forEach(s => {
-    if (!byWeek[s.week_key]) byWeek[s.week_key]={};
-    if (!byWeek[s.week_key][s.tech_id]) byWeek[s.week_key][s.tech_id]=[];
-    byWeek[s.week_key][s.tech_id].push({plan:s.plan_id});
-  });
+  switchovers.forEach(s=>{ if(!byWeek[s.week_key])byWeek[s.week_key]={}; if(!byWeek[s.week_key][s.tech_id])byWeek[s.week_key][s.tech_id]=[]; byWeek[s.week_key][s.tech_id].push({plan:s.plan_id}); });
   const allWeeks = Object.keys(byWeek).sort((a,b)=>b.localeCompare(a));
   const wkData = byWeek[wk]||{};
-  const allTimeCount={}, allTimePts={};
-  switchovers.forEach(s=>{allTimeCount[s.tech_id]=(allTimeCount[s.tech_id]||0)+1; allTimePts[s.tech_id]=(allTimePts[s.tech_id]||0)+(PLAN_MAP[s.plan_id]?.pts||0);});
-  const ranked = [...techs].map(t=>{
-    const entries=wkData[t.id]||[];
-    return {...t, count:entries.length, pts:entries.reduce((s,e)=>s+(PLAN_MAP[e.plan]?.pts||0),0), allCount:allTimeCount[t.id]||0, allPts:allTimePts[t.id]||0, entries};
-  }).sort((a,b)=>rankBy==="count"?b.count-a.count:b.pts-a.pts);
+  const allCount={}, allPts={};
+  switchovers.forEach(s=>{ allCount[s.tech_id]=(allCount[s.tech_id]||0)+1; allPts[s.tech_id]=(allPts[s.tech_id]||0)+(PLAN_MAP[s.plan_id]?.pts||0); });
+  const ranked = [...techs].map(t=>{ const e=wkData[t.id]||[]; return {...t,count:e.length,pts:e.reduce((s,x)=>s+(PLAN_MAP[x.plan]?.pts||0),0),allCount:allCount[t.id]||0,allPts:allPts[t.id]||0,entries:e}; }).sort((a,b)=>rankBy==="count"?b.count-a.count:b.pts-a.pts);
   const top=ranked[0]?.[rankBy==="count"?"count":"pts"]||1;
   return (
-    <div style={{ display:"flex", flexDirection:"column", gap:"20px" }}>
-      <div style={{ background:"linear-gradient(135deg,#e6f4ff,#f0f9ff)", border:`1px solid ${blue}44`, borderRadius:"10px", padding:"16px 20px" }}>
-        <div style={{ fontSize:"11px", letterSpacing:"3px", color:blue, fontFamily:"monospace", textTransform:"uppercase", marginBottom:"12px" }}>🔄 All-Time Switchover Totals</div>
-        {[...techs].sort((a,b)=>(allTimePts[b.id]||0)-(allTimePts[a.id]||0)).map((t,i)=>(
-          <div key={t.id} style={{ display:"flex", justifyContent:"space-between", marginBottom:"6px" }}>
-            <span style={{ fontSize:"13px", fontWeight:t.id===currentId?"800":"600", color:t.id===currentId?blue:dark }}>{medal(i)} {t.name}{t.id===currentId?" (you)":""}</span>
-            <span style={{ fontFamily:"monospace", fontSize:"13px", color:dark }}><strong>{allTimeCount[t.id]||0}</strong> converts · <strong>{(allTimePts[t.id]||0).toLocaleString()}</strong> pts</span>
-          </div>
-        ))}
+    <div style={{ display:"flex", flexDirection:"column", gap:"24px" }}>
+      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"6px", overflow:"hidden" }}>
+        <div style={{ padding:"14px 18px", borderBottom:`1px solid ${C.border}` }}><Label color={C.purple}>🔄 All-Time Switchovers</Label></div>
+        <div style={{ padding:"14px 18px", display:"flex", flexDirection:"column", gap:"8px" }}>
+          {[...techs].sort((a,b)=>(allPts[b.id]||0)-(allPts[a.id]||0)).map((t,i)=>(
+            <div key={t.id} style={{ display:"flex", justifyContent:"space-between" }}>
+              <span style={{ fontSize:"13px", color:t.id===currentId?C.blue:C.offWhite }}>{medal(i)} {t.name}{t.id===currentId?" — YOU":""}</span>
+              <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"13px", color:C.white }}>{allCount[t.id]||0} converts · {(allPts[t.id]||0).toLocaleString()} pts</span>
+            </div>
+          ))}
+        </div>
       </div>
       <div>
         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:"12px" }}>
-          <div style={{ fontSize:"11px", letterSpacing:"3px", color:blue, fontFamily:"monospace", textTransform:"uppercase" }}>This Week · {formatWeekLabel(wk)}</div>
+          <Label>This Week · {formatWeekLabel(wk)}</Label>
           <div style={{ display:"flex", gap:"6px" }}>
-            {[["count","# Converts"],["pts","Points"]].map(([id,label])=>(
-              <button key={id} onClick={()=>setRankBy(id)} style={{ background:rankBy===id?blue:card, border:`1px solid ${rankBy===id?blue:bord}`, color:rankBy===id?"#fff":muted, padding:"4px 10px", borderRadius:"4px", cursor:"pointer", fontSize:"11px", fontFamily:"monospace" }}>{label}</button>
+            {[["count","COUNT"],["pts","POINTS"]].map(([id,label])=>(
+              <button key={id} onClick={()=>setRankBy(id)} style={{ background:rankBy===id?C.blue:"none", border:`1px solid ${rankBy===id?C.blue:C.border}`, color:rankBy===id?C.white:C.muted, padding:"4px 10px", borderRadius:"4px", cursor:"pointer", fontSize:"10px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", letterSpacing:"1px" }}>{label}</button>
             ))}
           </div>
         </div>
-        <div style={{ display:"flex", flexDirection:"column", gap:"10px" }}>
+        <div style={{ display:"flex", flexDirection:"column", gap:"8px" }}>
           {ranked.map((t,idx)=>{
             const isMe=t.id===currentId; const val=rankBy==="count"?t.count:t.pts; const pct=top>0?Math.round((val/top)*100):0;
             return (
-              <div key={t.id} style={{ background:isMe?"#e6f4ff":card, border:`1px solid ${isMe?blue:bord}`, borderRadius:"10px", padding:"16px 18px" }}>
-                <div style={{ display:"flex", alignItems:"center", gap:"14px", marginBottom:"10px" }}>
-                  <div style={{ width:"30px", textAlign:"center", fontSize:idx<3?"20px":"13px", color:muted, fontFamily:"monospace", fontWeight:"700" }}>{medal(idx)}</div>
-                  <div style={{ width:"40px", height:"40px", borderRadius:"50%", background:`${blue}22`, border:`1px solid ${blue}44`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:"12px", fontWeight:"700", color:blue, fontFamily:"monospace", flexShrink:0 }}>{t.avatar}</div>
+              <div key={t.id} style={{ background:isMe?`${C.blue}18`:C.card, border:`1px solid ${isMe?C.blue:C.border}`, borderRadius:"6px", padding:"14px 18px" }}>
+                <div style={{ display:"flex", alignItems:"center", gap:"12px", marginBottom:"10px" }}>
+                  <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:idx<3?"22px":"14px", color:C.muted, width:"28px", textAlign:"center" }}>{medal(idx)}</div>
+                  <div style={{ width:"38px", height:"38px", borderRadius:"50%", background:`${C.blue}22`, border:`1px solid ${C.blue}44`, display:"flex", alignItems:"center", justifyContent:"center", fontFamily:"'Barlow Condensed',sans-serif", fontSize:"12px", fontWeight:"800", color:C.blue, flexShrink:0 }}>{t.avatar}</div>
                   <div style={{ flex:1 }}>
-                    <div style={{ fontWeight:"700", fontSize:"15px", color:dark }}>{t.name}{isMe&&<span style={{ fontSize:"10px", color:blue, fontFamily:"monospace" }}> YOU</span>}</div>
-                    <div style={{ fontSize:"12px", color:muted, fontFamily:"monospace" }}>All-time: {t.allCount} converts · {t.allPts.toLocaleString()} pts</div>
+                    <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"16px", color:C.white }}>{t.name}{isMe&&<span style={{ color:C.blue, fontSize:"11px", marginLeft:"6px" }}>YOU</span>}</div>
+                    <div style={{ fontSize:"11px", color:C.muted }}>All-time: {t.allCount} converts · {t.allPts.toLocaleString()} pts</div>
                   </div>
                   <div style={{ textAlign:"right" }}>
-                    <div style={{ fontSize:"22px", fontWeight:"900", color:t.count>0?dark:bord }}>{t.count}</div>
-                    <div style={{ fontSize:"11px", color:blue, fontFamily:"monospace" }}>+{t.pts} pts</div>
+                    <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"24px", color:t.count>0?C.white:C.border }}>{t.count}</div>
+                    <div style={{ fontSize:"11px", color:C.purple }}>+{t.pts} pts</div>
                   </div>
                 </div>
-                <div style={{ background:bord, borderRadius:"4px", height:"5px", overflow:"hidden", marginBottom:t.entries.length>0?"10px":"0" }}>
-                  <div style={{ width:`${pct}%`, height:"100%", background:`linear-gradient(90deg,${blue},#0066cc)`, borderRadius:"4px" }} />
-                </div>
+                <Bar pct={pct} color={C.purple}/>
                 {t.entries.length>0&&(
-                  <div style={{ display:"flex", flexWrap:"wrap", gap:"5px" }}>
-                    {t.entries.map((e,i)=>{const plan=PLAN_MAP[e.plan]; const pc=PLAN_COLORS[e.plan]||muted; return plan?(<div key={i} style={{ background:"#fff", border:`1px solid ${pc}44`, borderLeft:`3px solid ${pc}`, borderRadius:"4px", padding:"2px 8px", fontSize:"11px", color:dark, fontFamily:"monospace" }}>{plan.label} · +{plan.pts}pts</div>):null;})}
+                  <div style={{ display:"flex", flexWrap:"wrap", gap:"5px", marginTop:"10px" }}>
+                    {t.entries.map((e,i)=>{ const plan=PLAN_MAP[e.plan]; const pc=PLAN_COLORS[e.plan]||C.muted; return plan?(<span key={i} style={{ background:`${pc}22`, border:`1px solid ${pc}55`, borderLeft:`3px solid ${pc}`, borderRadius:"3px", padding:"2px 8px", fontSize:"11px", color:C.white, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>{plan.label} +{plan.pts}pts</span>):null; })}
                   </div>
                 )}
               </div>
@@ -440,17 +439,17 @@ function SwitchoverLeaderboard({ techs, switchovers, currentId }) {
           })}
         </div>
       </div>
-      <div style={{ background:card, border:`1px solid ${bord}`, borderRadius:"8px", padding:"14px 18px" }}>
-        <div style={{ fontSize:"11px", letterSpacing:"2px", color:blue, fontFamily:"monospace", textTransform:"uppercase", marginBottom:"10px" }}>Plan Tiers & Points</div>
+      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"6px", padding:"14px 18px" }}>
+        <Label color={C.purple}>Plan Values</Label>
         <div style={{ display:"flex", flexWrap:"wrap", gap:"6px" }}>
-          {SERVICE_PLANS.map(p=>(
-            <div key={p.id} style={{ background:"#fff", border:`1px solid ${PLAN_COLORS[p.id]}44`, borderLeft:`3px solid ${PLAN_COLORS[p.id]}`, borderRadius:"4px", padding:"3px 10px", fontSize:"12px", display:"flex", gap:"8px", alignItems:"center" }}>
-              <span style={{ fontWeight:"700", color:dark }}>{p.label}</span>
-              <span style={{ color:muted }}>{p.freq}</span>
-              <span style={{ color:blue, fontFamily:"monospace", fontWeight:"700" }}>+{p.pts}pts</span>
-              <span style={{ color:"#10b981", fontFamily:"monospace" }}>${p.ltv_yr.toLocaleString()}/yr LTV</span>
+          {SERVICE_PLANS.map(p=>{ const pc=PLAN_COLORS[p.id]; return (
+            <div key={p.id} style={{ background:`${pc}15`, border:`1px solid ${pc}44`, borderLeft:`3px solid ${pc}`, borderRadius:"4px", padding:"4px 10px", fontSize:"12px" }}>
+              <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", color:C.white }}>{p.label} </span>
+              <span style={{ color:C.muted }}>{p.freq} </span>
+              <span style={{ color:pc, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>+{p.pts}pts </span>
+              <span style={{ color:C.green, fontFamily:"'Barlow Condensed',sans-serif" }}>${p.ltv.toLocaleString()}/yr LTV</span>
             </div>
-          ))}
+          ); })}
         </div>
       </div>
     </div>
@@ -461,135 +460,99 @@ function SwitchoverLeaderboard({ techs, switchovers, currentId }) {
 function ReviewLeaderboard({ techs, reviews, currentId }) {
   const mk = getMonthKey();
   const byMonth = {};
-  reviews.forEach(r => {
-    if (!byMonth[r.month_key]) byMonth[r.month_key]={};
-    byMonth[r.month_key][r.tech_id] = (byMonth[r.month_key][r.tech_id]||0)+r.count;
-  });
+  reviews.forEach(r=>{ if(!byMonth[r.month_key])byMonth[r.month_key]={}; byMonth[r.month_key][r.tech_id]=(byMonth[r.month_key][r.tech_id]||0)+r.count; });
   const allMonths = Object.keys(byMonth).sort((a,b)=>b.localeCompare(a));
   const mData = byMonth[mk]||{};
-  const allTimeCount={};
-  reviews.forEach(r=>{ allTimeCount[r.tech_id]=(allTimeCount[r.tech_id]||0)+r.count; });
-  const ranked = [...techs].map(t=>({...t, thisMonth:mData[t.id]||0, allTime:allTimeCount[t.id]||0})).sort((a,b)=>b.thisMonth-a.thisMonth);
-  const top=ranked[0]?.thisMonth||1;
+  const allTime = {};
+  reviews.forEach(r=>{ allTime[r.tech_id]=(allTime[r.tech_id]||0)+r.count; });
+  const ranked = [...techs].map(t=>({...t,month:mData[t.id]||0,all:allTime[t.id]||0})).sort((a,b)=>b.month-a.month);
+  const top = ranked[0]?.month||1;
   return (
-    <div style={{ display:"flex", flexDirection:"column", gap:"20px" }}>
-      <div style={{ background:"linear-gradient(135deg,#fff8e1,#fffbf0)", border:`1px solid #f5c54244`, borderRadius:"10px", padding:"16px 20px" }}>
-        <div style={{ fontSize:"11px", letterSpacing:"3px", color:"#b7860b", fontFamily:"monospace", textTransform:"uppercase", marginBottom:"8px" }}>⭐ Point System</div>
-        <div style={{ display:"flex", gap:"16px", flexWrap:"wrap" }}>
-          <div style={{ fontSize:"13px", color:dark }}><strong style={{ color:"#b7860b" }}>+{REVIEW_PTS} pts</strong> per 5-star review</div>
-          <div style={{ fontSize:"13px", color:dark }}><strong style={{ color:"#b7860b" }}>+{REVIEW_BONUS_PTS} bonus pts</strong> for 10+ reviews in a month</div>
-        </div>
+    <div style={{ display:"flex", flexDirection:"column", gap:"24px" }}>
+      <div style={{ background:`${C.gold}18`, border:`1px solid ${C.gold}44`, borderRadius:"6px", padding:"14px 18px", display:"flex", gap:"24px", flexWrap:"wrap" }}>
+        <div><span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"22px", color:C.gold }}>+{REVIEW_PTS}</span><span style={{ fontSize:"12px", color:C.muted, marginLeft:"6px" }}>pts per review</span></div>
+        <div><span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"22px", color:C.gold }}>+{REVIEW_BONUS_PTS}</span><span style={{ fontSize:"12px", color:C.muted, marginLeft:"6px" }}>bonus at 10+ in a month</span></div>
       </div>
-      <div style={{ background:"linear-gradient(135deg,#e6f4ff,#f0f9ff)", border:`1px solid ${blue}44`, borderRadius:"10px", padding:"16px 20px" }}>
-        <div style={{ fontSize:"11px", letterSpacing:"3px", color:blue, fontFamily:"monospace", textTransform:"uppercase", marginBottom:"12px" }}>⭐ All-Time Review Totals</div>
-        {[...techs].sort((a,b)=>(allTimeCount[b.id]||0)-(allTimeCount[a.id]||0)).map((t,i)=>{
-          const cnt=allTimeCount[t.id]||0; const topCnt=Math.max(...techs.map(x=>allTimeCount[x.id]||0))||1; const pct=Math.round((cnt/topCnt)*100);
-          return (
-            <div key={t.id} style={{ marginBottom:"8px" }}>
-              <div style={{ display:"flex", justifyContent:"space-between", marginBottom:"3px" }}>
-                <span style={{ fontSize:"13px", fontWeight:t.id===currentId?"800":"600", color:t.id===currentId?blue:dark }}>{medal(i)} {t.name}{t.id===currentId?" (you)":""}</span>
-                <span style={{ fontFamily:"monospace", fontWeight:"700", fontSize:"13px", color:dark }}>{cnt} reviews</span>
-              </div>
-              <div style={{ background:bord, borderRadius:"3px", height:"4px", overflow:"hidden" }}>
-                <div style={{ width:`${pct}%`, height:"100%", background:"linear-gradient(90deg,#f5c542,#f59e0b)", borderRadius:"3px" }} />
-              </div>
-            </div>
-          );
-        })}
-      </div>
-      <div>
-        <div style={{ fontSize:"11px", letterSpacing:"3px", color:blue, fontFamily:"monospace", textTransform:"uppercase", marginBottom:"12px" }}>This Month · {formatMonthLabel(mk)}</div>
-        <div style={{ display:"flex", flexDirection:"column", gap:"10px" }}>
-          {ranked.map((t,idx)=>{
-            const isMe=t.id===currentId; const pct=top>0?Math.round((t.thisMonth/top)*100):0; const bonus=t.thisMonth>=10?REVIEW_BONUS_PTS:0;
+      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"6px", overflow:"hidden" }}>
+        <div style={{ padding:"14px 18px", borderBottom:`1px solid ${C.border}` }}><Label color={C.gold}>⭐ All-Time Reviews</Label></div>
+        <div style={{ padding:"14px 18px", display:"flex", flexDirection:"column", gap:"10px" }}>
+          {[...techs].sort((a,b)=>(allTime[b.id]||0)-(allTime[a.id]||0)).map((t,i)=>{
+            const cnt=allTime[t.id]||0; const pct=Math.round((cnt/(Math.max(...techs.map(x=>allTime[x.id]||0))||1))*100);
             return (
-              <div key={t.id} style={{ background:isMe?"#e6f4ff":card, border:`1px solid ${isMe?blue:bord}`, borderRadius:"10px", padding:"16px 18px" }}>
-                <div style={{ display:"flex", alignItems:"center", gap:"14px", marginBottom:"10px" }}>
-                  <div style={{ width:"30px", textAlign:"center", fontSize:idx<3?"20px":"13px", color:muted, fontFamily:"monospace", fontWeight:"700" }}>{medal(idx)}</div>
-                  <div style={{ width:"40px", height:"40px", borderRadius:"50%", background:`${blue}22`, border:`1px solid ${blue}44`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:"12px", fontWeight:"700", color:blue, fontFamily:"monospace", flexShrink:0 }}>{t.avatar}</div>
-                  <div style={{ flex:1 }}>
-                    <div style={{ fontWeight:"700", fontSize:"15px", color:dark }}>{t.name}{isMe&&<span style={{ fontSize:"10px", color:blue, fontFamily:"monospace" }}> YOU</span>}</div>
-                    <div style={{ fontSize:"12px", color:muted, fontFamily:"monospace" }}>All-time: {t.allTime} reviews</div>
-                  </div>
-                  <div style={{ textAlign:"right" }}>
-                    <div style={{ fontSize:"22px", fontWeight:"900", color:t.thisMonth>0?dark:bord }}>{t.thisMonth}</div>
-                    <div style={{ fontSize:"11px", color:"#f5c542", fontFamily:"monospace" }}>+{(t.thisMonth*REVIEW_PTS)+bonus} pts{bonus>0?" 🔥":""}</div>
-                  </div>
+              <div key={t.id}>
+                <div style={{ display:"flex", justifyContent:"space-between", marginBottom:"5px" }}>
+                  <span style={{ fontSize:"13px", color:t.id===currentId?C.blue:C.offWhite }}>{medal(i)} {t.name}{t.id===currentId?" — YOU":""}</span>
+                  <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"14px", color:C.white }}>{cnt} ⭐</span>
                 </div>
-                <div style={{ background:bord, borderRadius:"4px", height:"5px", overflow:"hidden" }}>
-                  <div style={{ width:`${pct}%`, height:"100%", background:"linear-gradient(90deg,#f5c542,#f59e0b)", borderRadius:"4px" }} />
-                </div>
-                {t.thisMonth>=10&&<div style={{ marginTop:"8px", fontSize:"11px", color:"#b7860b", fontFamily:"monospace", background:"#fff8e1", padding:"4px 10px", borderRadius:"4px", display:"inline-block" }}>🔥 10+ review bonus unlocked!</div>}
+                <Bar pct={pct} color={C.gold}/>
               </div>
             );
           })}
         </div>
       </div>
-      {allMonths.length>0&&(
-        <div>
-          <div style={{ fontSize:"11px", letterSpacing:"3px", color:blue, fontFamily:"monospace", textTransform:"uppercase", marginBottom:"12px" }}>Monthly History</div>
-          <div style={{ display:"flex", flexDirection:"column", gap:"10px" }}>
-            {allMonths.map(m=>{
-              const d=byMonth[m]||{}; const rows=[...techs].map(t=>({...t,cnt:d[t.id]||0})).filter(t=>t.cnt>0).sort((a,b)=>b.cnt-a.cnt); const total=rows.reduce((s,t)=>s+t.cnt,0);
-              return (
-                <div key={m} style={{ background:card, border:`1px solid ${m===mk?blue:bord}`, borderRadius:"10px", overflow:"hidden" }}>
-                  <div style={{ display:"flex", justifyContent:"space-between", padding:"10px 16px", borderBottom:`1px solid ${bord}`, background:m===mk?"#e6f4ff":"#eef6ff" }}>
-                    <div style={{ fontWeight:"700", fontSize:"13px", color:dark }}>{formatMonthLabel(m)}{m===mk&&<span style={{ fontSize:"10px", color:blue, fontFamily:"monospace" }}> CURRENT</span>}</div>
-                    <div style={{ fontFamily:"monospace", color:"#b7860b", fontWeight:"700", fontSize:"13px" }}>{total} reviews</div>
+      <div>
+        <Label>This Month · {formatMonthLabel(mk)}</Label>
+        <div style={{ display:"flex", flexDirection:"column", gap:"8px" }}>
+          {ranked.map((t,idx)=>{
+            const isMe=t.id===currentId; const pct=top>0?Math.round((t.month/top)*100):0; const bonus=t.month>=10;
+            return (
+              <div key={t.id} style={{ background:isMe?`${C.blue}18`:C.card, border:`1px solid ${isMe?C.blue:C.border}`, borderRadius:"6px", padding:"14px 18px" }}>
+                <div style={{ display:"flex", alignItems:"center", gap:"12px", marginBottom:"10px" }}>
+                  <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:idx<3?"22px":"14px", color:C.muted, width:"28px", textAlign:"center" }}>{medal(idx)}</div>
+                  <div style={{ width:"38px", height:"38px", borderRadius:"50%", background:`${C.blue}22`, border:`1px solid ${C.blue}44`, display:"flex", alignItems:"center", justifyContent:"center", fontFamily:"'Barlow Condensed',sans-serif", fontSize:"12px", fontWeight:"800", color:C.blue, flexShrink:0 }}>{t.avatar}</div>
+                  <div style={{ flex:1 }}>
+                    <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"16px", color:C.white }}>{t.name}{isMe&&<span style={{ color:C.blue, fontSize:"11px", marginLeft:"6px" }}>YOU</span>}</div>
+                    <div style={{ fontSize:"11px", color:C.muted }}>All-time: {t.all} reviews</div>
                   </div>
-                  <div style={{ padding:"10px 16px", display:"flex", flexDirection:"column", gap:"5px" }}>
-                    {rows.map((t,i)=>(<div key={t.id} style={{ display:"flex", justifyContent:"space-between" }}><div style={{ display:"flex", alignItems:"center", gap:"6px" }}><span>{medal(i)}</span><span style={{ fontSize:"13px", color:dark }}>{t.name}</span></div><span style={{ fontFamily:"monospace", fontWeight:"700", fontSize:"13px", color:dark }}>{t.cnt} ⭐</span></div>))}
-                    {rows.length===0&&<div style={{ fontSize:"12px", color:muted }}>No reviews logged</div>}
+                  <div style={{ textAlign:"right" }}>
+                    <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"24px", color:t.month>0?C.white:C.border }}>{t.month}</div>
+                    <div style={{ fontSize:"11px", color:C.gold }}>+{(t.month*REVIEW_PTS)+(bonus?REVIEW_BONUS_PTS:0)} pts{bonus?" 🔥":""}</div>
                   </div>
                 </div>
-              );
-            })}
-          </div>
+                <Bar pct={pct} color={C.gold}/>
+                {bonus&&<div style={{ marginTop:"8px" }}><Pill color={C.gold}>🔥 10+ bonus unlocked</Pill></div>}
+              </div>
+            );
+          })}
         </div>
-      )}
+      </div>
     </div>
   );
 }
 
 // ─── TOTAL LEADERBOARD ────────────────────────────────────────────────────────
 function TotalLeaderboard({ techs, upsells, switchovers, reviews }) {
-  const ranked = [...techs].map(t => {
-    const totals = calcTechTotals(t, upsells, switchovers, reviews);
-    const tier = getTier(totals.total);
-    return {...t, ...totals, tier};
-  }).sort((a,b)=>b.total-a.total);
+  const ranked = [...techs].map(t=>{ const tt=calcTotals(t,upsells,switchovers,reviews); return {...t,...tt,tier:getTier(tt.total)}; }).sort((a,b)=>b.total-a.total);
   const top = ranked[0]?.total||1;
   return (
-    <div style={{ display:"flex", flexDirection:"column", gap:"12px" }}>
+    <div style={{ display:"flex", flexDirection:"column", gap:"8px" }}>
       {ranked.map((t,idx)=>{
         const pct=Math.round((t.total/top)*100);
         return (
-          <div key={t.id} style={{ background:card, border:`1px solid ${bord}`, borderRadius:"10px", padding:"16px 18px" }}>
-            <div style={{ display:"flex", alignItems:"center", gap:"14px", marginBottom:"12px" }}>
-              <div style={{ width:"30px", textAlign:"center", fontSize:idx<3?"20px":"13px", color:muted, fontFamily:"monospace", fontWeight:"700" }}>{medal(idx)}</div>
-              <div style={{ width:"40px", height:"40px", borderRadius:"50%", background:`${blue}22`, border:`1px solid ${blue}44`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:"12px", fontWeight:"700", color:blue, fontFamily:"monospace", flexShrink:0 }}>{t.avatar}</div>
+          <div key={t.id} style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"6px", padding:"16px 18px" }}>
+            <div style={{ display:"flex", alignItems:"center", gap:"12px", marginBottom:"12px" }}>
+              <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:idx<3?"26px":"16px", color:C.muted, width:"32px", textAlign:"center" }}>{medal(idx)}</div>
+              <div style={{ width:"42px", height:"42px", borderRadius:"50%", background:`${C.blue}22`, border:`1px solid ${C.blue}44`, display:"flex", alignItems:"center", justifyContent:"center", fontFamily:"'Barlow Condensed',sans-serif", fontSize:"13px", fontWeight:"800", color:C.blue, flexShrink:0 }}>{t.avatar}</div>
               <div style={{ flex:1 }}>
-                <div style={{ fontWeight:"700", fontSize:"15px", color:dark }}>{t.name}</div>
-                <div style={{ fontSize:"11px", color:t.tier.color, fontFamily:"monospace", fontWeight:"700" }}>{t.tier.icon} {t.tier.name}</div>
+                <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"18px", color:C.white }}>{t.name}</div>
+                <Pill color={t.tier.color}>{t.tier.icon} {t.tier.name}</Pill>
               </div>
               <div style={{ textAlign:"right" }}>
-                <div style={{ fontSize:"24px", fontWeight:"900", color:dark }}>{t.total.toLocaleString()}</div>
-                <div style={{ fontSize:"11px", color:muted, fontFamily:"monospace" }}>total pts</div>
+                <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"28px", color:C.white }}>{t.total.toLocaleString()}</div>
+                <div style={{ fontSize:"10px", color:C.muted, letterSpacing:"1px" }}>TOTAL PTS</div>
               </div>
             </div>
-            <div style={{ background:bord, borderRadius:"4px", height:"6px", overflow:"hidden", marginBottom:"10px" }}>
-              <div style={{ width:`${pct}%`, height:"100%", background:`linear-gradient(90deg,${blue},#0066cc)`, borderRadius:"4px", transition:"width 1s ease" }} />
-            </div>
-            <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:"8px" }}>
+            <Bar pct={pct} color={C.blue} h={4}/>
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:"6px", marginTop:"10px" }}>
               {[
-                {label:"🏅 Badges", val:t.badgePts, color:"#7c3aed"},
-                {label:"💰 Upsells", val:`$${Math.round(t.upsellAmt).toLocaleString()}`, color:"#10b981"},
-                {label:"🔄 Converts", val:t.switchPts, color:blue},
-                {label:"⭐ Reviews", val:t.reviewPts, color:"#f5c542"},
+                {l:"Badges",    v:t.badgePts,               c:C.purple},
+                {l:"Upsells",   v:`$${Math.round(t.upsellAmt).toLocaleString()}`, c:C.green},
+                {l:"Converts",  v:t.switchPts,              c:C.blue},
+                {l:"Reviews",   v:t.reviewPts,              c:C.gold},
               ].map(item=>(
-                <div key={item.label} style={{ background:"#fff", border:`1px solid ${bord}`, borderRadius:"6px", padding:"8px 10px", textAlign:"center" }}>
-                  <div style={{ fontSize:"11px", color:muted, marginBottom:"2px" }}>{item.label}</div>
-                  <div style={{ fontSize:"14px", fontWeight:"800", color:item.color }}>{typeof item.val==="number"?item.val.toLocaleString():item.val}</div>
+                <div key={item.l} style={{ background:C.cardLt, borderRadius:"4px", padding:"8px", textAlign:"center" }}>
+                  <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"15px", color:item.c }}>{item.v}</div>
+                  <div style={{ fontSize:"9px", color:C.muted, letterSpacing:"1px", textTransform:"uppercase" }}>{item.l}</div>
                 </div>
               ))}
             </div>
@@ -603,37 +566,35 @@ function TotalLeaderboard({ techs, upsells, switchovers, reviews }) {
 // ─── JOURNEY BOARD ────────────────────────────────────────────────────────────
 function JourneyBoard({ techs, upsells, switchovers, reviews }) {
   const [selected, setSelected] = useState(null);
-  const ranked = [...techs].map(t => {
-    const totals = calcTechTotals(t, upsells, switchovers, reviews);
-    const tier = getTier(totals.total);
-    const nextTier = JOURNEY_TIERS.find(t2 => t2.minPts > totals.total);
-    const ptsToNext = nextTier ? nextTier.minPts - totals.total : 0;
-    const tierPct = nextTier ? Math.round(((totals.total - tier.minPts) / (nextTier.minPts - tier.minPts)) * 100) : 100;
-    const totalReviews = reviews.filter(r=>r.tech_id===t.id).reduce((s,r)=>s+r.count,0);
-    const totalSwitches = switchovers.filter(s=>s.tech_id===t.id).length;
-    return {...t, ...totals, tier, nextTier, ptsToNext, tierPct, totalReviews, totalSwitches};
+  const ranked = [...techs].map(t=>{
+    const tt=calcTotals(t,upsells,switchovers,reviews);
+    const tier=getTier(tt.total);
+    const nextTier=JOURNEY_TIERS.find(t2=>t2.minPts>tt.total);
+    const ptsToNext=nextTier?nextTier.minPts-tt.total:0;
+    const tierPct=nextTier?Math.round(((tt.total-tier.minPts)/(nextTier.minPts-tier.minPts))*100):100;
+    const totalReviews=reviews.filter(r=>r.tech_id===t.id).reduce((s,r)=>s+r.count,0);
+    const totalSwitches=switchovers.filter(s=>s.tech_id===t.id).length;
+    return {...t,...tt,tier,nextTier,ptsToNext,tierPct,totalReviews,totalSwitches};
   }).sort((a,b)=>b.total-a.total);
 
   return (
-    <div style={{ display:"flex", flexDirection:"column", gap:"24px" }}>
-      <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(300px,1fr))", gap:"16px" }}>
-        {ranked.map((t,idx) => (
+    <div style={{ display:"flex", flexDirection:"column", gap:"20px" }}>
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(300px,1fr))", gap:"12px" }}>
+        {ranked.map((t,idx)=>(
           <JourneyCard key={t.id} tech={t} rank={idx+1} total={ranked.length}
-            onClick={() => setSelected(selected===t.id?null:t.id)} expanded={selected===t.id} />
+            onClick={()=>setSelected(selected===t.id?null:t.id)} expanded={selected===t.id}/>
         ))}
       </div>
-      <div style={{ background:card, border:`1px solid ${bord}`, borderRadius:"12px", padding:"20px" }}>
-        <div style={{ fontSize:"11px", letterSpacing:"3px", color:blue, fontFamily:"monospace", textTransform:"uppercase", marginBottom:"14px" }}>Arena Tiers</div>
-        <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(200px,1fr))", gap:"10px" }}>
+      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"6px", padding:"16px 18px" }}>
+        <Label>Arena Tiers</Label>
+        <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(180px,1fr))", gap:"8px" }}>
           {JOURNEY_TIERS.map(tier=>(
-            <div key={tier.id} style={{ background:tier.bg, borderRadius:"8px", padding:"14px", border:`1px solid ${tier.glow}` }}>
-              <div style={{ fontSize:"22px", marginBottom:"4px" }}>{tier.icon}</div>
-              <div style={{ fontWeight:"800", fontSize:"16px", color:tier.color, fontFamily:"monospace", letterSpacing:"1px" }}>{tier.name}</div>
-              <div style={{ fontSize:"11px", color:"rgba(255,255,255,0.5)", fontFamily:"monospace", marginBottom:"4px" }}>
+            <div key={tier.id} style={{ background:tier.bg, border:`1px solid ${tier.color}33`, borderLeft:`3px solid ${tier.color}`, borderRadius:"6px", padding:"12px" }}>
+              <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"20px", color:tier.color, letterSpacing:"2px" }}>{tier.icon} {tier.name}</div>
+              <div style={{ fontSize:"10px", color:C.muted, fontFamily:"'Barlow Condensed',sans-serif", marginBottom:"4px" }}>
                 {tier.maxPts===Infinity?`${tier.minPts.toLocaleString()}+ pts`:`${tier.minPts.toLocaleString()} – ${tier.maxPts.toLocaleString()} pts`}
               </div>
-              <div style={{ fontSize:"11px", color:"rgba(255,255,255,0.7)", marginBottom:"6px" }}>{tier.desc}</div>
-              <div style={{ fontSize:"11px", color:tier.color, fontFamily:"monospace", fontWeight:"700" }}>🎁 {tier.reward}</div>
+              <div style={{ fontSize:"11px", color:tier.color, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>🎁 {tier.reward}</div>
             </div>
           ))}
         </div>
@@ -644,101 +605,95 @@ function JourneyBoard({ techs, upsells, switchovers, reviews }) {
 
 function JourneyCard({ tech, rank, total, onClick, expanded }) {
   const tier = tech.tier;
-  const earnedBadges = BADGE_DEFS.filter(b => tech.badges.includes(b.id));
   const tenure = formatTenure(tech.start_date);
+  const earnedBadges = BADGE_DEFS.filter(b=>tech.badges.includes(b.id));
   return (
-    <div onClick={onClick} style={{ background:tier.bg, borderRadius:"14px", overflow:"hidden", border:`1px solid ${tier.glow}`, boxShadow:expanded?`0 0 32px ${tier.glow}`:`0 4px 16px rgba(0,0,0,0.3)`, cursor:"pointer", transition:"all 0.3s ease", transform:expanded?"scale(1.01)":"scale(1)" }}>
-      <div style={{ height:"4px", background:`linear-gradient(90deg,${tier.color},${tier.glow})` }} />
-      <div style={{ padding:"18px" }}>
-        <div style={{ display:"flex", alignItems:"center", gap:"12px", marginBottom:"14px" }}>
-          <div style={{ fontSize:"28px" }}>{tier.icon}</div>
-          <div style={{ flex:1 }}>
-            <div style={{ fontWeight:"800", fontSize:"17px", color:"#fff" }}>{tech.name}</div>
-            <div style={{ fontSize:"11px", color:tier.color, fontFamily:"monospace", fontWeight:"700", letterSpacing:"1px", textTransform:"uppercase" }}>{tier.name} Arena</div>
-            {tech.start_date && <div style={{ fontSize:"10px", color:"rgba(255,255,255,0.4)", fontFamily:"monospace", marginTop:"2px" }}>⏱ {tenure} with Skylo</div>}
+    <div onClick={onClick} style={{ background:tier.bg, border:`1px solid ${tier.color}44`, borderTop:`3px solid ${tier.color}`, borderRadius:"6px", cursor:"pointer", overflow:"hidden" }}>
+      <div style={{ padding:"16px 18px" }}>
+        <div style={{ display:"flex", alignItems:"flex-start", justifyContent:"space-between", marginBottom:"14px" }}>
+          <div>
+            <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"22px", color:C.white, lineHeight:1 }}>{tech.name}</div>
+            <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"13px", color:tier.color, letterSpacing:"2px", marginTop:"3px" }}>{tier.icon} {tier.name} ARENA</div>
+            {tenure&&<div style={{ fontSize:"10px", color:C.muted, marginTop:"3px" }}>⏱ {tenure} with Skylo</div>}
           </div>
           <div style={{ textAlign:"right" }}>
-            <div style={{ fontSize:"24px", fontWeight:"900", color:"#fff" }}>{tech.total.toLocaleString()}</div>
-            <div style={{ fontSize:"10px", color:"rgba(255,255,255,0.5)", fontFamily:"monospace" }}>pts</div>
+            <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"30px", color:C.white, lineHeight:1 }}>{tech.total.toLocaleString()}</div>
+            <div style={{ fontSize:"10px", color:C.muted, letterSpacing:"1px" }}>PTS</div>
+            <div style={{ fontSize:"10px", color:tier.color, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", marginTop:"2px" }}>#{rank} of {total}</div>
           </div>
         </div>
         {tech.nextTier?(
           <div style={{ marginBottom:"14px" }}>
             <div style={{ display:"flex", justifyContent:"space-between", marginBottom:"5px" }}>
-              <div style={{ fontSize:"10px", color:"rgba(255,255,255,0.5)", fontFamily:"monospace" }}>Progress to {tech.nextTier.name}</div>
-              <div style={{ fontSize:"10px", color:tier.color, fontFamily:"monospace" }}>{tech.ptsToNext.toLocaleString()} pts away</div>
+              <span style={{ fontSize:"10px", color:C.muted, letterSpacing:"1px", textTransform:"uppercase" }}>Next: {tech.nextTier.name}</span>
+              <span style={{ fontSize:"10px", color:tier.color, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>{tech.ptsToNext.toLocaleString()} pts away</span>
             </div>
-            <div style={{ background:"rgba(255,255,255,0.1)", borderRadius:"4px", height:"6px", overflow:"hidden" }}>
-              <div style={{ width:`${tech.tierPct}%`, height:"100%", background:`linear-gradient(90deg,${tier.color},#fff)`, borderRadius:"4px", transition:"width 1s ease" }} />
-            </div>
-            <div style={{ fontSize:"10px", color:"rgba(255,255,255,0.35)", fontFamily:"monospace", marginTop:"3px" }}>{tech.tierPct}% complete · 🎁 {tech.nextTier.reward} unlocks at {tech.nextTier.minPts.toLocaleString()} pts</div>
+            <Bar pct={tech.tierPct} color={tier.color} h={6}/>
+            <div style={{ fontSize:"10px", color:C.muted, marginTop:"4px" }}>{tech.tierPct}% · 🎁 {tech.nextTier.reward}</div>
           </div>
         ):(
-          <div style={{ marginBottom:"14px", background:"rgba(255,255,255,0.08)", borderRadius:"6px", padding:"8px 12px", textAlign:"center" }}>
-            <div style={{ fontSize:"12px", color:tier.color, fontWeight:"700", fontFamily:"monospace" }}>👑 LEGEND STATUS ACHIEVED</div>
+          <div style={{ marginBottom:"14px", background:`${tier.color}18`, border:`1px solid ${tier.color}44`, borderRadius:"4px", padding:"8px 12px", textAlign:"center" }}>
+            <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"13px", color:tier.color, letterSpacing:"2px" }}>👑 LEGEND STATUS ACHIEVED</span>
           </div>
         )}
-        <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:"6px", marginBottom:expanded?"14px":"0" }}>
+        <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:"6px" }}>
           {[
-            {label:"Badges", val:tech.badges.length, icon:"🏅"},
-            {label:"Upsells", val:`$${Math.round(tech.upsellAmt).toLocaleString()}`, icon:"💰"},
-            {label:"Converts", val:tech.totalSwitches, icon:"🔄"},
-            {label:"Reviews", val:tech.totalReviews, icon:"⭐"},
+            {l:"Badges",   v:tech.badges.length,        c:C.purple},
+            {l:"Upsells",  v:`$${Math.round(tech.upsellAmt).toLocaleString()}`, c:C.green},
+            {l:"Converts", v:tech.totalSwitches,        c:C.blue},
+            {l:"Reviews",  v:tech.totalReviews,         c:C.gold},
           ].map(s=>(
-            <div key={s.label} style={{ background:"rgba(255,255,255,0.07)", borderRadius:"6px", padding:"8px 4px", textAlign:"center" }}>
-              <div style={{ fontSize:"14px" }}>{s.icon}</div>
-              <div style={{ fontSize:"13px", fontWeight:"800", color:"#fff" }}>{s.val}</div>
-              <div style={{ fontSize:"9px", color:"rgba(255,255,255,0.4)", fontFamily:"monospace" }}>{s.label}</div>
+            <div key={s.l} style={{ background:"rgba(0,0,0,0.3)", borderRadius:"4px", padding:"8px 4px", textAlign:"center" }}>
+              <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"16px", color:s.c }}>{s.v}</div>
+              <div style={{ fontSize:"9px", color:C.muted, letterSpacing:"1px", textTransform:"uppercase" }}>{s.l}</div>
             </div>
           ))}
         </div>
         {expanded&&(
-          <div style={{ borderTop:"1px solid rgba(255,255,255,0.1)", paddingTop:"14px", display:"flex", flexDirection:"column", gap:"12px" }}>
+          <div style={{ borderTop:`1px solid ${tier.color}33`, paddingTop:"14px", marginTop:"14px", display:"flex", flexDirection:"column", gap:"12px" }}>
             <div>
-              <div style={{ fontSize:"10px", color:"rgba(255,255,255,0.4)", fontFamily:"monospace", letterSpacing:"2px", textTransform:"uppercase", marginBottom:"8px" }}>Points Breakdown</div>
+              <Label color={tier.color}>Points Breakdown</Label>
               {[
-                {label:"🏅 Badge Points", val:tech.badgePts, color:"#a78bfa"},
-                {label:"💰 Upsell Points", val:tech.upsellPts, color:"#34d399"},
-                {label:"🔄 Switchover Points", val:tech.switchPts, color:blue},
-                {label:"⭐ Review Points", val:tech.reviewPts, color:"#f5c542"},
+                {l:"Badge Points",      v:tech.badgePts,   c:C.purple},
+                {l:"Upsell Points",     v:tech.upsellPts,  c:C.green},
+                {l:"Switchover Points", v:tech.switchPts,  c:C.blue},
+                {l:"Review Points",     v:tech.reviewPts,  c:C.gold},
               ].map(item=>(
-                <div key={item.label} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:"5px" }}>
-                  <div style={{ fontSize:"12px", color:"rgba(255,255,255,0.6)" }}>{item.label}</div>
-                  <div style={{ fontSize:"13px", fontWeight:"700", color:item.color, fontFamily:"monospace" }}>{item.val.toLocaleString()}</div>
+                <div key={item.l} style={{ display:"flex", justifyContent:"space-between", marginBottom:"6px" }}>
+                  <span style={{ fontSize:"12px", color:C.muted }}>{item.l}</span>
+                  <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"14px", color:item.c }}>{item.v.toLocaleString()}</span>
                 </div>
               ))}
             </div>
             {tech.start_date&&(
-              <div style={{ background:"rgba(255,255,255,0.06)", borderRadius:"6px", padding:"10px 12px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-                <div style={{ fontSize:"12px", color:"rgba(255,255,255,0.5)" }}>Start Date</div>
-                <div style={{ fontSize:"13px", fontWeight:"700", color:"rgba(255,255,255,0.8)", fontFamily:"monospace" }}>{new Date(tech.start_date+"T00:00:00").toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"})} · {tenure}</div>
+              <div style={{ background:"rgba(0,0,0,0.3)", borderRadius:"4px", padding:"10px 12px", display:"flex", justifyContent:"space-between" }}>
+                <span style={{ fontSize:"12px", color:C.muted }}>Started</span>
+                <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", fontSize:"13px", color:C.white }}>{new Date(tech.start_date+"T00:00:00").toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"})} · {tenure}</span>
               </div>
             )}
             {earnedBadges.length>0&&(
               <div>
-                <div style={{ fontSize:"10px", color:"rgba(255,255,255,0.4)", fontFamily:"monospace", letterSpacing:"2px", textTransform:"uppercase", marginBottom:"8px" }}>Badges Earned</div>
+                <Label color={tier.color}>Badges</Label>
                 <div style={{ display:"flex", flexWrap:"wrap", gap:"5px" }}>
                   {earnedBadges.map(b=>(
-                    <div key={b.id} style={{ background:"rgba(255,255,255,0.1)", border:`1px solid ${tier.glow}`, borderRadius:"4px", padding:"3px 8px", fontSize:"11px", color:"#fff", fontFamily:"monospace" }}>{b.icon} {b.name}</div>
+                    <span key={b.id} style={{ background:`${tier.color}18`, border:`1px solid ${tier.color}44`, borderRadius:"3px", padding:"2px 8px", fontSize:"11px", color:C.white, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>{b.icon} {b.name}</span>
                   ))}
                 </div>
               </div>
             )}
             <div>
-              <div style={{ fontSize:"10px", color:"rgba(255,255,255,0.4)", fontFamily:"monospace", letterSpacing:"2px", textTransform:"uppercase", marginBottom:"8px" }}>Current Perks</div>
+              <Label color={tier.color}>Current Perks</Label>
               {tier.perks.map((p,i)=>(
-                <div key={i} style={{ fontSize:"12px", color:"rgba(255,255,255,0.7)", display:"flex", alignItems:"center", gap:"6px", marginBottom:"4px" }}>
-                  <span style={{ color:tier.color }}>✓</span> {p}
+                <div key={i} style={{ fontSize:"12px", color:C.offWhite, display:"flex", alignItems:"center", gap:"6px", marginBottom:"4px" }}>
+                  <span style={{ color:tier.color, fontWeight:"800" }}>✓</span>{p}
                 </div>
               ))}
             </div>
-            <div style={{ background:"rgba(255,255,255,0.06)", borderRadius:"6px", padding:"10px 12px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-              <div style={{ fontSize:"12px", color:"rgba(255,255,255,0.5)" }}>Team Rank</div>
-              <div style={{ fontSize:"16px", fontWeight:"900", color:tier.color, fontFamily:"monospace" }}>#{rank} of {total}</div>
-            </div>
           </div>
         )}
-        <div style={{ textAlign:"center", marginTop:"10px", fontSize:"10px", color:"rgba(255,255,255,0.2)", fontFamily:"monospace" }}>{expanded?"TAP TO COLLAPSE":"TAP TO EXPAND"}</div>
+        <div style={{ textAlign:"center", marginTop:"12px", fontSize:"10px", color:C.muted, letterSpacing:"1px" }}>
+          {expanded?"▲ COLLAPSE":"▼ EXPAND"}
+        </div>
       </div>
     </div>
   );
@@ -747,60 +702,86 @@ function JourneyCard({ tech, rank, total, onClick, expanded }) {
 // ─── TECH DASHBOARD ───────────────────────────────────────────────────────────
 function TechDashboard({ tech, techs, upsells, switchovers, reviews, onLogout }) {
   const [tab, setTab] = useState("overview");
-  const totals = calcTechTotals(tech, upsells, switchovers, reviews);
-  const tier = getTier(totals.total);
-  const nextTier = JOURNEY_TIERS.find(t => t.minPts > totals.total);
-  const allRanked = [...techs].map(t=>({...t,...calcTechTotals(t,upsells,switchovers,reviews)})).sort((a,b)=>b.total-a.total);
+  const tt = calcTotals(tech, upsells, switchovers, reviews);
+  const tier = getTier(tt.total);
+  const nextTier = JOURNEY_TIERS.find(t=>t.minPts>tt.total);
+  const allRanked = [...techs].map(t=>({...t,...calcTotals(t,upsells,switchovers,reviews)})).sort((a,b)=>b.total-a.total);
   const myPos = allRanked.findIndex(t=>t.id===tech.id)+1;
-  const maxPts = allRanked[0]?.total||1;
-  const pct = Math.round((totals.total/maxPts)*100);
-  const wk = getWeekKey(); const mk = getMonthKey();
-  const thisWeekUpsell = upsells.filter(u=>u.tech_id===tech.id&&u.week_key===wk).reduce((s,u)=>s+u.amount,0);
-  const thisMonthReviews = reviews.filter(r=>r.tech_id===tech.id&&r.month_key===mk).reduce((s,r)=>s+r.count,0);
+  const wk=getWeekKey(), mk=getMonthKey();
+  const weekUpsell = upsells.filter(u=>u.tech_id===tech.id&&u.week_key===wk).reduce((s,u)=>s+u.amount,0);
+  const monthReviews = reviews.filter(r=>r.tech_id===tech.id&&r.month_key===mk).reduce((s,r)=>s+r.count,0);
   const tenure = formatTenure(tech.start_date);
   return (
-    <div style={{ minHeight:"100vh", background:bg, color:dark }}>
+    <div style={{ minHeight:"100vh", background:C.dark }}>
+      <style>{GS}</style>
       <Header right={<LogoutBtn onLogout={onLogout}/>}/>
-      <TabBar tabs={[["overview","Overview"],["badges","Badges"],["upsells","Upsells"],["switchovers","Switchovers"],["reviews","⭐ Reviews"],["total","🏆 Total"],["journey","🗺️ Journey"]]} active={tab} setActive={setTab}/>
-      <div style={{ padding:"24px", maxWidth:"800px", margin:"0 auto" }}>
+      <div style={{ background:C.black, borderBottom:`1px solid ${C.border}`, padding:"16px 20px 0" }}>
+        <div style={{ display:"flex", alignItems:"center", gap:"14px", marginBottom:"16px" }}>
+          <div style={{ width:"52px", height:"52px", borderRadius:"50%", background:`${C.blue}22`, border:`2px solid ${C.blue}`, display:"flex", alignItems:"center", justifyContent:"center", fontFamily:"'Barlow Condensed',sans-serif", fontSize:"16px", fontWeight:"900", color:C.blue, flexShrink:0 }}>{tech.avatar}</div>
+          <div style={{ flex:1 }}>
+            <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"26px", color:C.white, lineHeight:1 }}>{tech.name}</div>
+            <div style={{ display:"flex", gap:"8px", alignItems:"center", marginTop:"4px", flexWrap:"wrap" }}>
+              <Pill color={tier.color}>{tier.icon} {tier.name}</Pill>
+              {tenure&&<span style={{ fontSize:"11px", color:C.muted }}>⏱ {tenure}</span>}
+            </div>
+          </div>
+          <div style={{ textAlign:"right" }}>
+            <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"36px", color:C.white, lineHeight:1 }}>{tt.total.toLocaleString()}</div>
+            <div style={{ fontSize:"10px", color:C.muted, letterSpacing:"2px" }}>TOTAL PTS</div>
+          </div>
+        </div>
+        {nextTier&&(
+          <div style={{ marginBottom:"14px" }}>
+            <div style={{ display:"flex", justifyContent:"space-between", marginBottom:"5px" }}>
+              <span style={{ fontSize:"10px", color:C.muted, letterSpacing:"1px" }}>NEXT: {nextTier.name} · {nextTier.reward}</span>
+              <span style={{ fontSize:"10px", color:tier.color, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>{(nextTier.minPts-tt.total).toLocaleString()} PTS AWAY</span>
+            </div>
+            <Bar pct={Math.round(((tt.total-tier.minPts)/(nextTier.minPts-tier.minPts))*100)} color={tier.color} h={4}/>
+          </div>
+        )}
+      </div>
+      <TabBar tabs={[["overview","Overview"],["badges","Badges"],["upsells","Upsells"],["switchovers","Converts"],["reviews","⭐ Reviews"],["total","🏆 Total"],["journey","🗺️ Journey"]]} active={tab} setActive={setTab}/>
+      <div style={{ padding:"20px", maxWidth:"800px", margin:"0 auto" }}>
         {tab==="overview"&&(
           <div style={{ display:"flex", flexDirection:"column", gap:"16px" }}>
-            <div style={{ display:"grid", gridTemplateColumns:"repeat(2,1fr)", gap:"12px" }}>
-              <StatCard label="Total Points" value={totals.total.toLocaleString()} color={blue}/>
-              <StatCard label="Team Rank" value={`#${myPos} of ${techs.length}`} color="#10b981"/>
-              <StatCard label="This Week Upsells" value={`$${thisWeekUpsell.toLocaleString()}`} color="#f59e0b" sub={`All-time: $${Math.round(totals.upsellAmt).toLocaleString()}`}/>
-              <StatCard label="Reviews This Month" value={thisMonthReviews} color="#f5c542" sub={`All-time: ${reviews.filter(r=>r.tech_id===tech.id).reduce((s,r)=>s+r.count,0)}`}/>
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(2,1fr)", gap:"10px" }}>
+              <StatBlock label="Total Points" value={tt.total.toLocaleString()} color={C.blue} accent={C.blue}/>
+              <StatBlock label="Team Rank" value={`#${myPos} / ${techs.length}`} color={C.green} accent={C.green}/>
+              <StatBlock label="Week Upsells" value={`$${weekUpsell.toLocaleString()}`} color={C.white} sub={`All-time $${Math.round(tt.upsellAmt).toLocaleString()}`} accent={C.green}/>
+              <StatBlock label="Month Reviews" value={monthReviews} color={C.gold} sub={`All-time ${reviews.filter(r=>r.tech_id===tech.id).reduce((s,r)=>s+r.count,0)}`} accent={C.gold}/>
             </div>
-            <div style={{ background:tier.bg, border:`1px solid ${tier.glow}`, borderRadius:"10px", padding:"20px" }}>
-              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:"12px" }}>
-                <div>
-                  <div style={{ fontSize:"10px", color:"rgba(255,255,255,0.5)", letterSpacing:"2px", textTransform:"uppercase", fontFamily:"monospace", marginBottom:"4px" }}>Current Arena</div>
-                  <div style={{ fontSize:"26px", fontWeight:"900", color:tier.color }}>{tier.icon} {tier.name}</div>
-                  {tech.start_date&&<div style={{ fontSize:"11px", color:"rgba(255,255,255,0.5)", fontFamily:"monospace", marginTop:"2px" }}>⏱ {tenure} with Skylo</div>}
-                </div>
-                <div style={{ fontSize:"12px", color:"rgba(255,255,255,0.5)", fontFamily:"monospace" }}>{pct}% of leader</div>
-              </div>
-              {nextTier&&(
-                <>
-                  <div style={{ background:"rgba(255,255,255,0.1)", borderRadius:"4px", height:"8px", overflow:"hidden", marginBottom:"6px" }}>
-                    <div style={{ width:`${Math.round(((totals.total-tier.minPts)/(nextTier.minPts-tier.minPts))*100)}%`, height:"100%", background:`linear-gradient(90deg,${tier.color},#fff)`, borderRadius:"4px", transition:"width 1s ease" }}/>
-                  </div>
-                  <div style={{ fontSize:"11px", color:"rgba(255,255,255,0.4)", fontFamily:"monospace" }}>{(nextTier.minPts-totals.total).toLocaleString()} pts to {nextTier.name} · 🎁 {nextTier.reward}</div>
-                </>
-              )}
-            </div>
-            <div style={{ background:card, border:`1px solid ${bord}`, borderRadius:"8px", padding:"20px" }}>
-              <div style={{ fontSize:"10px", color:muted, letterSpacing:"2px", textTransform:"uppercase", fontFamily:"monospace", marginBottom:"12px" }}>My Badges</div>
-              <div style={{ display:"flex", flexWrap:"wrap", gap:"8px" }}>
-                {BADGE_DEFS.filter(b=>tech.badges.includes(b.id)).map(b=>(
-                  <div key={b.id} style={{ display:"flex", alignItems:"center", gap:"6px", background:"#e6f4ff", border:`1px solid ${blue}33`, borderRadius:"6px", padding:"6px 12px" }}>
-                    <span style={{ fontSize:"16px" }}>{b.icon}</span>
-                    <div><div style={{ fontSize:"12px", fontWeight:"700", color:dark }}>{b.name}</div><div style={{ fontSize:"11px", color:blue, fontFamily:"monospace" }}>+{b.pts} pts</div></div>
+            <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${tier.color}`, borderRadius:"6px", padding:"16px 18px" }}>
+              <Label color={tier.color}>Points Breakdown</Label>
+              <div style={{ display:"grid", gridTemplateColumns:"repeat(2,1fr)", gap:"8px" }}>
+                {[
+                  {l:"🏅 Badges",    v:tt.badgePts,   c:C.purple},
+                  {l:"💰 Upsells",   v:tt.upsellPts,  c:C.green},
+                  {l:"🔄 Converts",  v:tt.switchPts,  c:C.blue},
+                  {l:"⭐ Reviews",   v:tt.reviewPts,  c:C.gold},
+                ].map(item=>(
+                  <div key={item.l} style={{ background:C.cardLt, borderRadius:"4px", padding:"10px 12px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                    <span style={{ fontSize:"12px", color:C.muted }}>{item.l}</span>
+                    <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"18px", color:item.c }}>{item.v.toLocaleString()}</span>
                   </div>
                 ))}
-                {tech.badges.length===0&&<div style={{ fontSize:"13px", color:muted }}>No badges yet</div>}
               </div>
             </div>
+            {tech.badges.length>0&&(
+              <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"6px", padding:"16px 18px" }}>
+                <Label>My Badges</Label>
+                <div style={{ display:"flex", flexWrap:"wrap", gap:"6px" }}>
+                  {BADGE_DEFS.filter(b=>tech.badges.includes(b.id)).map(b=>(
+                    <div key={b.id} style={{ background:`${C.blue}18`, border:`1px solid ${C.blue}44`, borderRadius:"4px", padding:"6px 10px", display:"flex", alignItems:"center", gap:"6px" }}>
+                      <span style={{ fontSize:"16px" }}>{b.icon}</span>
+                      <div>
+                        <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", fontSize:"12px", color:C.white }}>{b.name}</div>
+                        <div style={{ fontSize:"10px", color:C.blue, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>+{b.pts} PTS</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
         {tab==="badges"&&<BadgeGrid earned={tech.badges}/>}
@@ -810,7 +791,7 @@ function TechDashboard({ tech, techs, upsells, switchovers, reviews, onLogout })
         {tab==="total"&&<TotalLeaderboard techs={techs} upsells={upsells} switchovers={switchovers} reviews={reviews}/>}
         {tab==="journey"&&(
           <div>
-            <div style={{ fontSize:"13px", color:muted, marginBottom:"20px" }}>Every tech's personal journey. Tiers unlock at 1,600 · 3,200 · 6,000 · 12,000 pts. Tap any card to expand.</div>
+            <div style={{ fontSize:"13px", color:C.muted, marginBottom:"16px" }}>Tap any card to expand. Tiers unlock at 1,600 · 3,200 · 6,000 · 12,000 pts.</div>
             <JourneyBoard techs={techs} upsells={upsells} switchovers={switchovers} reviews={reviews}/>
           </div>
         )}
@@ -820,7 +801,7 @@ function TechDashboard({ tech, techs, upsells, switchovers, reviews, onLogout })
 }
 
 // ─── ADMIN PANEL ──────────────────────────────────────────────────────────────
-function AdminPanel({ techs, setTechs, upsells, setUpsells, switchovers, setSwitchovers, reviews, setReviews, onLogout, refreshAll }) {
+function AdminPanel({ techs, upsells, switchovers, reviews, onLogout, refreshAll }) {
   const [tab, setTab] = useState("upsells");
   const [awardForm, setAwardForm] = useState({techId:"",badgeId:""});
   const [addForm, setAddForm] = useState({name:"",pin:"",avatar:"",start_date:""});
@@ -830,122 +811,100 @@ function AdminPanel({ techs, setTechs, upsells, setUpsells, switchovers, setSwit
   const [toast, setToast] = useState(null);
   const [saving, setSaving] = useState(false);
 
-  const showToast = (msg, ok=true) => { setToast({msg,ok}); setTimeout(()=>setToast(null),3500); };
+  const showToast=(msg,ok=true)=>{ setToast({msg,ok}); setTimeout(()=>setToast(null),3000); };
 
   async function awardBadge() {
     if (!awardForm.techId||!awardForm.badgeId) return showToast("Select a tech and badge",false);
     const tech=techs.find(t=>t.id===awardForm.techId);
     if (tech.badges.includes(awardForm.badgeId)) return showToast(`${tech.name} already has this badge`,false);
     setSaving(true);
-    try {
-      await sb(`techs?id=eq.${tech.id}`,{method:"PATCH",body:JSON.stringify({badges:[...tech.badges,awardForm.badgeId]}),prefer:"return=minimal"});
-      await refreshAll(); showToast(`✅ Badge awarded to ${tech.name}!`); setAwardForm({techId:"",badgeId:""});
-    } catch(e){showToast("Error: "+e.message,false);}
+    try { await sb(`techs?id=eq.${tech.id}`,{method:"PATCH",body:JSON.stringify({badges:[...tech.badges,awardForm.badgeId]}),prefer:"return=minimal"}); await refreshAll(); showToast(`✅ Badge awarded to ${tech.name}!`); setAwardForm({techId:"",badgeId:""}); }
+    catch(e){ showToast("Error: "+e.message,false); }
     setSaving(false);
   }
   async function revokeBadge(techId,badgeId) {
     const tech=techs.find(t=>t.id===techId); setSaving(true);
-    try {
-      await sb(`techs?id=eq.${techId}`,{method:"PATCH",body:JSON.stringify({badges:tech.badges.filter(b=>b!==badgeId)}),prefer:"return=minimal"});
-      await refreshAll(); showToast("Badge removed");
-    } catch(e){showToast("Error: "+e.message,false);}
+    try { await sb(`techs?id=eq.${techId}`,{method:"PATCH",body:JSON.stringify({badges:tech.badges.filter(b=>b!==badgeId)}),prefer:"return=minimal"}); await refreshAll(); showToast("Badge removed"); }
+    catch(e){ showToast("Error: "+e.message,false); }
     setSaving(false);
   }
   async function addTech() {
     if (!addForm.name||!addForm.pin||addForm.pin.length!==4) return showToast("Name + 4-digit PIN required",false);
     if (techs.find(t=>t.pin===addForm.pin)) return showToast("PIN already in use",false);
     setSaving(true);
-    try {
-      const avatar=addForm.avatar||addForm.name.split(" ").map(w=>w[0]).join("").toUpperCase().slice(0,2);
-      await sb("techs",{method:"POST",body:JSON.stringify({name:addForm.name,pin:addForm.pin,avatar,badges:["day_one"],start_date:addForm.start_date||null})});
-      await refreshAll(); showToast(`✅ ${addForm.name} added!`); setAddForm({name:"",pin:"",avatar:"",start_date:""});
-    } catch(e){showToast("Error: "+e.message,false);}
+    try { const avatar=addForm.avatar||addForm.name.split(" ").map(w=>w[0]).join("").toUpperCase().slice(0,2); await sb("techs",{method:"POST",body:JSON.stringify({name:addForm.name,pin:addForm.pin,avatar,badges:["day_one"],start_date:addForm.start_date||null})}); await refreshAll(); showToast(`✅ ${addForm.name} added!`); setAddForm({name:"",pin:"",avatar:"",start_date:""}); }
+    catch(e){ showToast("Error: "+e.message,false); }
     setSaving(false);
   }
-  async function updateStartDate(techId, date) {
-    try {
-      await sb(`techs?id=eq.${techId}`,{method:"PATCH",body:JSON.stringify({start_date:date||null}),prefer:"return=minimal"});
-      await refreshAll(); showToast("✅ Start date saved!");
-    } catch(e){showToast("Error: "+e.message,false);}
+  async function updateStartDate(techId,date) {
+    try { await sb(`techs?id=eq.${techId}`,{method:"PATCH",body:JSON.stringify({start_date:date||null}),prefer:"return=minimal"}); await refreshAll(); showToast("✅ Start date saved!"); }
+    catch(e){ showToast("Error: "+e.message,false); }
   }
   async function saveUpsells() {
     const wk=getWeekKey(); setSaving(true);
     try {
-      for (const t of techs) {
-        const val=parseFloat(upsellForm[t.id]); if (isNaN(val)||val<=0) continue;
-        const existing=await sb(`upsells?tech_id=eq.${t.id}&week_key=eq.${wk}&select=id`);
-        if (existing&&existing.length>0) await sb(`upsells?id=eq.${existing[0].id}`,{method:"PATCH",body:JSON.stringify({amount:val}),prefer:"return=minimal"});
-        else await sb("upsells",{method:"POST",body:JSON.stringify({tech_id:t.id,week_key:wk,amount:val})});
-      }
+      for (const t of techs) { const val=parseFloat(upsellForm[t.id]); if(isNaN(val)||val<=0)continue; const existing=await sb(`upsells?tech_id=eq.${t.id}&week_key=eq.${wk}&select=id`); if(existing&&existing.length>0)await sb(`upsells?id=eq.${existing[0].id}`,{method:"PATCH",body:JSON.stringify({amount:val}),prefer:"return=minimal"}); else await sb("upsells",{method:"POST",body:JSON.stringify({tech_id:t.id,week_key:wk,amount:val})}); }
       await refreshAll(); showToast("✅ Upsells saved!"); setUpsellForm({});
-    } catch(e){showToast("Error: "+e.message,false);}
+    } catch(e){ showToast("Error: "+e.message,false); }
     setSaving(false);
   }
   async function logSwitchover() {
     if (!swForm.techId||!swForm.planId) return showToast("Select a tech and plan",false);
     setSaving(true);
-    try {
-      const wk=getWeekKey();
-      await sb("switchovers",{method:"POST",body:JSON.stringify({tech_id:swForm.techId,week_key:wk,plan_id:swForm.planId})});
-      await refreshAll(); const tech=techs.find(t=>t.id===swForm.techId); showToast(`✅ Switchover logged for ${tech.name}!`); setSwForm({techId:"",planId:""});
-    } catch(e){showToast("Error: "+e.message,false);}
+    try { await sb("switchovers",{method:"POST",body:JSON.stringify({tech_id:swForm.techId,week_key:getWeekKey(),plan_id:swForm.planId})}); await refreshAll(); showToast(`✅ Switchover logged!`); setSwForm({techId:"",planId:""}); }
+    catch(e){ showToast("Error: "+e.message,false); }
     setSaving(false);
   }
   async function saveReviews() {
     const mk=getMonthKey(); setSaving(true);
     try {
-      for (const t of techs) {
-        const val=parseInt(reviewForm[t.id]); if (isNaN(val)||val<=0) continue;
-        const existing=await sb(`reviews?tech_id=eq.${t.id}&month_key=eq.${mk}&select=id`);
-        if (existing&&existing.length>0) await sb(`reviews?id=eq.${existing[0].id}`,{method:"PATCH",body:JSON.stringify({count:val}),prefer:"return=minimal"});
-        else await sb("reviews",{method:"POST",body:JSON.stringify({tech_id:t.id,month_key:mk,count:val})});
-      }
+      for (const t of techs) { const val=parseInt(reviewForm[t.id]); if(isNaN(val)||val<=0)continue; const existing=await sb(`reviews?tech_id=eq.${t.id}&month_key=eq.${mk}&select=id`); if(existing&&existing.length>0)await sb(`reviews?id=eq.${existing[0].id}`,{method:"PATCH",body:JSON.stringify({count:val}),prefer:"return=minimal"}); else await sb("reviews",{method:"POST",body:JSON.stringify({tech_id:t.id,month_key:mk,count:val})}); }
       await refreshAll(); showToast("✅ Reviews saved!"); setReviewForm({});
-    } catch(e){showToast("Error: "+e.message,false);}
+    } catch(e){ showToast("Error: "+e.message,false); }
     setSaving(false);
   }
 
-  const wk=getWeekKey(); const mk=getMonthKey();
-  const wkUpsells={}; upsells.filter(u=>u.week_key===wk).forEach(u=>{wkUpsells[u.tech_id]=u.amount;});
-  const mkReviews={}; reviews.filter(r=>r.month_key===mk).forEach(r=>{mkReviews[r.tech_id]=r.count;});
-  const allTimeUpsells={}; upsells.forEach(u=>{allTimeUpsells[u.tech_id]=(allTimeUpsells[u.tech_id]||0)+u.amount;});
+  const wk=getWeekKey(), mk=getMonthKey();
+  const wkUp={}; upsells.filter(u=>u.week_key===wk).forEach(u=>{wkUp[u.tech_id]=u.amount;});
+  const mkRev={}; reviews.filter(r=>r.month_key===mk).forEach(r=>{mkRev[r.tech_id]=r.count;});
+  const allTimeUp={}; upsells.forEach(u=>{allTimeUp[u.tech_id]=(allTimeUp[u.tech_id]||0)+u.amount;});
 
-  const selStyle=(val)=>({background:"#fff",border:`1px solid ${bord}`,color:val?dark:muted,padding:"10px 14px",borderRadius:"6px",fontSize:"14px",fontFamily:"monospace",width:"100%",boxSizing:"border-box"});
-  const inpStyle={background:"#fff",border:`1px solid ${bord}`,color:dark,padding:"10px 14px",borderRadius:"6px",fontSize:"14px",fontFamily:"monospace",width:"100%",boxSizing:"border-box"};
-  const btnStyle=(color)=>({background:saving?"#ccc":color||blue,border:"none",color:"#fff",padding:"12px",borderRadius:"6px",cursor:saving?"not-allowed":"pointer",fontSize:"14px",fontWeight:"700",letterSpacing:"1px",fontFamily:"monospace",width:"100%"});
+  const inp={ background:C.card, border:`1px solid ${C.border}`, color:C.white, padding:"10px 14px", borderRadius:"6px", fontSize:"14px", fontFamily:"'Barlow',sans-serif", width:"100%", boxSizing:"border-box" };
+  const sel=(val)=>({...inp, color:val?C.white:C.muted});
+  const btn=(color)=>({ background:saving?"#333":color||C.blue, border:"none", color:C.white, padding:"13px", borderRadius:"6px", cursor:saving?"not-allowed":"pointer", fontSize:"13px", fontWeight:"700", letterSpacing:"2px", fontFamily:"'Barlow Condensed',sans-serif", width:"100%", textTransform:"uppercase" });
 
   return (
-    <div style={{ minHeight:"100vh", background:bg, color:dark }}>
-      <Header title="Admin Panel" right={<LogoutBtn onLogout={onLogout}/>}/>
-      <TabBar tabs={[["upsells","Upsells"],["reviews","⭐ Reviews"],["switchovers","Switchovers"],["award","Award Badge"],["add","Add Tech"],["manage","Manage"],["journey","🗺️ Journey"]]} active={tab} setActive={setTab} accentColor="#10b981"/>
-      <div style={{ padding:"24px", maxWidth:"700px", margin:"0 auto" }}>
+    <div style={{ minHeight:"100vh", background:C.dark }}>
+      <style>{GS}</style>
+      <Header title="Admin Panel" subtitle="Skylo Standard Board" right={<LogoutBtn onLogout={onLogout}/>}/>
+      <TabBar tabs={[["upsells","Upsells"],["reviews","⭐ Reviews"],["switchovers","Converts"],["award","Award Badge"],["add","Add Tech"],["manage","Manage"],["journey","🗺️ Journey"]]} active={tab} setActive={setTab} accent={C.green}/>
+      <div style={{ padding:"20px", maxWidth:"700px", margin:"0 auto" }}>
 
         {tab==="upsells"&&(
           <div style={{ display:"flex", flexDirection:"column", gap:"16px" }}>
-            <div style={{ background:card, border:`1px solid ${bord}`, borderRadius:"8px", padding:"24px", display:"flex", flexDirection:"column", gap:"14px" }}>
-              <div style={{ fontSize:"11px", letterSpacing:"3px", color:"#10b981", fontFamily:"monospace" }}>ENTER THIS WEEK · {formatWeekLabel(wk)}</div>
-              <div style={{ fontSize:"12px", color:muted }}>$2 = 1 point · each dollar logged earns half a point toward tiers</div>
+            <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"6px", padding:"20px", display:"flex", flexDirection:"column", gap:"14px" }}>
+              <Label color={C.green}>Enter This Week · {formatWeekLabel(wk)}</Label>
+              <div style={{ fontSize:"12px", color:C.muted }}>$2 = 1 point</div>
               {techs.map(t=>(
                 <div key={t.id} style={{ display:"flex", alignItems:"center", gap:"12px" }}>
-                  <div style={{ width:"140px" }}>
-                    <div style={{ fontSize:"14px", fontWeight:"600", color:dark }}>{t.name}</div>
-                    <div style={{ fontSize:"11px", color:muted, fontFamily:"monospace" }}>current: ${(wkUpsells[t.id]||0).toLocaleString()}</div>
+                  <div style={{ width:"150px" }}>
+                    <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", fontSize:"15px", color:C.white }}>{t.name}</div>
+                    <div style={{ fontSize:"11px", color:C.muted }}>current: ${(wkUp[t.id]||0).toLocaleString()}</div>
                   </div>
                   <div style={{ display:"flex", alignItems:"center", gap:"6px", flex:1 }}>
-                    <span style={{ color:muted, fontSize:"16px", fontWeight:"700" }}>$</span>
-                    <input type="number" placeholder={wkUpsells[t.id]||"0"} value={upsellForm[t.id]||""} onChange={e=>setUpsellForm(f=>({...f,[t.id]:e.target.value}))}
-                      style={{ background:"#fff", border:`1px solid ${bord}`, color:dark, padding:"8px 10px", borderRadius:"6px", fontSize:"14px", fontFamily:"monospace", width:"100%" }}/>
+                    <span style={{ color:C.green, fontSize:"16px", fontWeight:"800" }}>$</span>
+                    <input type="number" placeholder={wkUp[t.id]||"0"} value={upsellForm[t.id]||""} onChange={e=>setUpsellForm(f=>({...f,[t.id]:e.target.value}))} style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.white, padding:"8px 10px", borderRadius:"6px", fontSize:"14px", fontFamily:"'Barlow Condensed',sans-serif", width:"100%", fontWeight:"700" }}/>
                   </div>
                 </div>
               ))}
-              <button onClick={saveUpsells} disabled={saving} style={btnStyle(blue)}>{saving?"SAVING...":"SAVE THIS WEEK"}</button>
+              <button onClick={saveUpsells} disabled={saving} style={btn(C.green)}>{saving?"Saving...":"Save This Week"}</button>
             </div>
-            <div style={{ background:card, border:`1px solid ${bord}`, borderRadius:"8px", padding:"20px" }}>
-              <div style={{ fontSize:"11px", letterSpacing:"2px", color:blue, fontFamily:"monospace", textTransform:"uppercase", marginBottom:"12px" }}>All-Time Upsell Totals</div>
-              {[...techs].sort((a,b)=>(allTimeUpsells[b.id]||0)-(allTimeUpsells[a.id]||0)).map((t,i)=>(
+            <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"6px", padding:"16px 18px" }}>
+              <Label color={C.green}>All-Time Upsell Totals</Label>
+              {[...techs].sort((a,b)=>(allTimeUp[b.id]||0)-(allTimeUp[a.id]||0)).map((t,i)=>(
                 <div key={t.id} style={{ display:"flex", justifyContent:"space-between", marginBottom:"8px" }}>
-                  <span style={{ fontSize:"13px", color:dark }}>{medal(i)} {t.name}</span>
-                  <span style={{ fontFamily:"monospace", fontWeight:"700", color:blue }}>${(allTimeUpsells[t.id]||0).toLocaleString()} · {Math.round((allTimeUpsells[t.id]||0)*UPSELL_PTS_PER_DOLLAR)} pts</span>
+                  <span style={{ fontSize:"13px", color:C.offWhite }}>{medal(i)} {t.name}</span>
+                  <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", color:C.green }}>${(allTimeUp[t.id]||0).toLocaleString()} · {Math.round((allTimeUp[t.id]||0)*UPSELL_PTS_PER_DOLLAR)} pts</span>
                 </div>
               ))}
             </div>
@@ -953,95 +912,89 @@ function AdminPanel({ techs, setTechs, upsells, setUpsells, switchovers, setSwit
         )}
 
         {tab==="reviews"&&(
-          <div style={{ display:"flex", flexDirection:"column", gap:"16px" }}>
-            <div style={{ background:card, border:`1px solid ${bord}`, borderRadius:"8px", padding:"24px", display:"flex", flexDirection:"column", gap:"14px" }}>
-              <div style={{ fontSize:"11px", letterSpacing:"3px", color:"#10b981", fontFamily:"monospace" }}>LOG 5-STAR REVIEWS · {formatMonthLabel(mk)}</div>
-              <div style={{ fontSize:"12px", color:muted }}>+{REVIEW_PTS} pts per review · +{REVIEW_BONUS_PTS} bonus at 10+ reviews in a month</div>
-              {techs.map(t=>(
-                <div key={t.id} style={{ display:"flex", alignItems:"center", gap:"12px" }}>
-                  <div style={{ width:"140px" }}>
-                    <div style={{ fontSize:"14px", fontWeight:"600", color:dark }}>{t.name}</div>
-                    <div style={{ fontSize:"11px", color:muted, fontFamily:"monospace" }}>this month: {mkReviews[t.id]||0} ⭐</div>
-                  </div>
-                  <div style={{ display:"flex", alignItems:"center", gap:"6px", flex:1 }}>
-                    <span style={{ color:"#f5c542", fontSize:"16px" }}>⭐</span>
-                    <input type="number" placeholder={mkReviews[t.id]||"0"} value={reviewForm[t.id]||""} onChange={e=>setReviewForm(f=>({...f,[t.id]:e.target.value}))}
-                      style={{ background:"#fff", border:`1px solid ${bord}`, color:dark, padding:"8px 10px", borderRadius:"6px", fontSize:"14px", fontFamily:"monospace", width:"100%" }}/>
-                  </div>
+          <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"6px", padding:"20px", display:"flex", flexDirection:"column", gap:"14px" }}>
+            <Label color={C.gold}>Log 5-Star Reviews · {formatMonthLabel(mk)}</Label>
+            <div style={{ fontSize:"12px", color:C.muted }}>+{REVIEW_PTS} pts each · +{REVIEW_BONUS_PTS} bonus at 10+ per month</div>
+            {techs.map(t=>(
+              <div key={t.id} style={{ display:"flex", alignItems:"center", gap:"12px" }}>
+                <div style={{ width:"150px" }}>
+                  <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", fontSize:"15px", color:C.white }}>{t.name}</div>
+                  <div style={{ fontSize:"11px", color:C.muted }}>this month: {mkRev[t.id]||0} ⭐</div>
                 </div>
-              ))}
-              <button onClick={saveReviews} disabled={saving} style={btnStyle("#f5c542")}>{saving?"SAVING...":"SAVE THIS MONTH'S REVIEWS"}</button>
-            </div>
+                <div style={{ display:"flex", alignItems:"center", gap:"6px", flex:1 }}>
+                  <span style={{ color:C.gold, fontSize:"16px" }}>⭐</span>
+                  <input type="number" placeholder={mkRev[t.id]||"0"} value={reviewForm[t.id]||""} onChange={e=>setReviewForm(f=>({...f,[t.id]:e.target.value}))} style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.white, padding:"8px 10px", borderRadius:"6px", fontSize:"14px", fontFamily:"'Barlow Condensed',sans-serif", width:"100%", fontWeight:"700" }}/>
+                </div>
+              </div>
+            ))}
+            <button onClick={saveReviews} disabled={saving} style={btn(C.gold)}>{saving?"Saving...":"Save This Month's Reviews"}</button>
           </div>
         )}
 
         {tab==="switchovers"&&(
-          <div style={{ display:"flex", flexDirection:"column", gap:"14px" }}>
-            <div style={{ background:card, border:`1px solid ${bord}`, borderRadius:"8px", padding:"24px", display:"flex", flexDirection:"column", gap:"12px" }}>
-              <div style={{ fontSize:"11px", letterSpacing:"3px", color:"#10b981", fontFamily:"monospace" }}>LOG A SWITCHOVER · {formatWeekLabel(wk)}</div>
-              <select value={swForm.techId} onChange={e=>setSwForm(f=>({...f,techId:e.target.value}))} style={selStyle(swForm.techId)}>
-                <option value="">— Select Tech —</option>
-                {techs.map(t=><option key={t.id} value={t.id}>{t.name}</option>)}
-              </select>
-              <select value={swForm.planId} onChange={e=>setSwForm(f=>({...f,planId:e.target.value}))} style={selStyle(swForm.planId)}>
-                <option value="">— Select Plan —</option>
-                {SERVICE_PLANS.map(p=><option key={p.id} value={p.id}>{p.label} ({p.freq}) · +{p.pts}pts · ${p.ltv_yr.toLocaleString()}/yr LTV</option>)}
-              </select>
-              <button onClick={logSwitchover} disabled={saving} style={btnStyle(blue)}>{saving?"SAVING...":"LOG SWITCHOVER"}</button>
-            </div>
+          <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"6px", padding:"20px", display:"flex", flexDirection:"column", gap:"12px" }}>
+            <Label color={C.purple}>Log a Switchover · {formatWeekLabel(wk)}</Label>
+            <select value={swForm.techId} onChange={e=>setSwForm(f=>({...f,techId:e.target.value}))} style={sel(swForm.techId)}>
+              <option value="">— Select Tech —</option>
+              {techs.map(t=><option key={t.id} value={t.id}>{t.name}</option>)}
+            </select>
+            <select value={swForm.planId} onChange={e=>setSwForm(f=>({...f,planId:e.target.value}))} style={sel(swForm.planId)}>
+              <option value="">— Select Plan —</option>
+              {SERVICE_PLANS.map(p=><option key={p.id} value={p.id}>{p.label} ({p.freq}) · +{p.pts}pts · ${p.ltv.toLocaleString()}/yr LTV</option>)}
+            </select>
+            <button onClick={logSwitchover} disabled={saving} style={btn(C.purple)}>{saving?"Saving...":"Log Switchover"}</button>
           </div>
         )}
 
         {tab==="award"&&(
-          <div style={{ background:card, border:`1px solid ${bord}`, borderRadius:"8px", padding:"24px", display:"flex", flexDirection:"column", gap:"12px" }}>
-            <div style={{ fontSize:"11px", letterSpacing:"3px", color:"#10b981", fontFamily:"monospace" }}>AWARD A BADGE</div>
-            <select value={awardForm.techId} onChange={e=>setAwardForm(f=>({...f,techId:e.target.value}))} style={selStyle(awardForm.techId)}>
+          <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"6px", padding:"20px", display:"flex", flexDirection:"column", gap:"12px" }}>
+            <Label color={C.blue}>Award a Badge</Label>
+            <select value={awardForm.techId} onChange={e=>setAwardForm(f=>({...f,techId:e.target.value}))} style={sel(awardForm.techId)}>
               <option value="">— Select Tech —</option>
               {techs.map(t=><option key={t.id} value={t.id}>{t.name}</option>)}
             </select>
-            <select value={awardForm.badgeId} onChange={e=>setAwardForm(f=>({...f,badgeId:e.target.value}))} style={selStyle(awardForm.badgeId)}>
+            <select value={awardForm.badgeId} onChange={e=>setAwardForm(f=>({...f,badgeId:e.target.value}))} style={sel(awardForm.badgeId)}>
               <option value="">— Select Badge —</option>
               {BADGE_DEFS.map(b=><option key={b.id} value={b.id}>{b.icon} {b.name} (+{b.pts} pts)</option>)}
             </select>
-            <button onClick={awardBadge} disabled={saving} style={btnStyle(blue)}>{saving?"SAVING...":"AWARD BADGE"}</button>
+            <button onClick={awardBadge} disabled={saving} style={btn(C.blue)}>{saving?"Saving...":"Award Badge"}</button>
           </div>
         )}
 
         {tab==="add"&&(
-          <div style={{ background:card, border:`1px solid ${bord}`, borderRadius:"8px", padding:"24px", display:"flex", flexDirection:"column", gap:"12px" }}>
-            <div style={{ fontSize:"11px", letterSpacing:"3px", color:"#10b981", fontFamily:"monospace" }}>ADD NEW TECH</div>
-            <input placeholder="Full Name" value={addForm.name} onChange={e=>setAddForm(f=>({...f,name:e.target.value}))} style={inpStyle}/>
-            <input placeholder="4-Digit PIN" value={addForm.pin} maxLength={4} onChange={e=>setAddForm(f=>({...f,pin:e.target.value.replace(/\D/g,"")}))} style={inpStyle}/>
-            <input placeholder="Initials (optional)" value={addForm.avatar} maxLength={2} onChange={e=>setAddForm(f=>({...f,avatar:e.target.value.toUpperCase()}))} style={inpStyle}/>
+          <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"6px", padding:"20px", display:"flex", flexDirection:"column", gap:"12px" }}>
+            <Label color={C.green}>Add New Tech</Label>
+            <input placeholder="Full Name" value={addForm.name} onChange={e=>setAddForm(f=>({...f,name:e.target.value}))} style={inp}/>
+            <input placeholder="4-Digit PIN" value={addForm.pin} maxLength={4} onChange={e=>setAddForm(f=>({...f,pin:e.target.value.replace(/\D/g,"")}))} style={inp}/>
+            <input placeholder="Initials (optional)" value={addForm.avatar} maxLength={2} onChange={e=>setAddForm(f=>({...f,avatar:e.target.value.toUpperCase()}))} style={inp}/>
             <div>
-              <div style={{ fontSize:"12px", color:muted, marginBottom:"6px" }}>Start Date (for tenure tracking)</div>
-              <input type="date" value={addForm.start_date} onChange={e=>setAddForm(f=>({...f,start_date:e.target.value}))} style={inpStyle}/>
+              <div style={{ fontSize:"12px", color:C.muted, marginBottom:"6px" }}>Start Date</div>
+              <input type="date" value={addForm.start_date} onChange={e=>setAddForm(f=>({...f,start_date:e.target.value}))} style={inp}/>
             </div>
-            <button onClick={addTech} disabled={saving} style={btnStyle("#10b981")}>{saving?"SAVING...":"ADD TECH"}</button>
+            <button onClick={addTech} disabled={saving} style={btn(C.green)}>{saving?"Saving...":"Add Tech"}</button>
           </div>
         )}
 
         {tab==="manage"&&(
-          <div style={{ display:"flex", flexDirection:"column", gap:"14px" }}>
+          <div style={{ display:"flex", flexDirection:"column", gap:"10px" }}>
             {techs.map(t=>(
-              <div key={t.id} style={{ background:card, border:`1px solid ${bord}`, borderRadius:"8px", padding:"18px" }}>
+              <div key={t.id} style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"6px", padding:"16px 18px" }}>
                 <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:"10px" }}>
-                  <div style={{ fontWeight:"700", fontSize:"15px", color:dark }}>{t.name}</div>
-                  <div style={{ fontSize:"12px", color:muted, fontFamily:"monospace" }}>PIN: {t.pin}</div>
+                  <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"17px", color:C.white }}>{t.name}</div>
+                  <span style={{ fontSize:"12px", color:C.muted, fontFamily:"'Barlow Condensed',sans-serif" }}>PIN: {t.pin}</span>
                 </div>
-                <div style={{ marginBottom:"10px", display:"flex", alignItems:"center", gap:"10px" }}>
-                  <div style={{ fontSize:"12px", color:muted }}>Start date:</div>
-                  <input type="date" defaultValue={t.start_date||""} onBlur={e=>updateStartDate(t.id,e.target.value)}
-                    style={{ background:"#fff", border:`1px solid ${bord}`, color:dark, padding:"4px 8px", borderRadius:"4px", fontSize:"12px", fontFamily:"monospace" }}/>
-                  {t.start_date&&<span style={{ fontSize:"12px", color:blue, fontFamily:"monospace" }}>{formatTenure(t.start_date)}</span>}
+                <div style={{ display:"flex", alignItems:"center", gap:"10px", marginBottom:"10px" }}>
+                  <span style={{ fontSize:"12px", color:C.muted }}>Start date:</span>
+                  <input type="date" defaultValue={t.start_date||""} onBlur={e=>updateStartDate(t.id,e.target.value)} style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.white, padding:"4px 8px", borderRadius:"4px", fontSize:"12px", fontFamily:"'Barlow Condensed',sans-serif" }}/>
+                  {t.start_date&&<span style={{ fontSize:"12px", color:C.blue, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>{formatTenure(t.start_date)}</span>}
                 </div>
-                <div style={{ display:"flex", flexWrap:"wrap", gap:"6px" }}>
-                  {t.badges.map(bid=>{const b=BADGE_MAP[bid]; return b?(
-                    <div key={bid} style={{ display:"flex", alignItems:"center", gap:"5px", background:"#e6f4ff", border:`1px solid ${blue}33`, borderRadius:"4px", padding:"3px 8px", fontSize:"12px" }}>
-                      <span>{b.icon}</span><span style={{ color:dark }}>{b.name}</span>
-                      <button onClick={()=>revokeBadge(t.id,bid)} style={{ background:"none", border:"none", color:"#ef4444", cursor:"pointer", fontSize:"13px", padding:"0 0 0 2px", lineHeight:1 }}>×</button>
-                    </div>
-                  ):null;})}
+                <div style={{ display:"flex", flexWrap:"wrap", gap:"5px" }}>
+                  {t.badges.map(bid=>{ const b=BADGE_MAP[bid]; return b?(
+                    <span key={bid} style={{ background:`${C.blue}18`, border:`1px solid ${C.blue}44`, borderRadius:"3px", padding:"3px 8px", fontSize:"12px", display:"inline-flex", alignItems:"center", gap:"4px" }}>
+                      <span>{b.icon}</span><span style={{ color:C.white, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>{b.name}</span>
+                      <button onClick={()=>revokeBadge(t.id,bid)} style={{ background:"none", border:"none", color:"#ff4444", cursor:"pointer", fontSize:"13px", lineHeight:1, padding:"0 0 0 2px" }}>×</button>
+                    </span>
+                  ):null; })}
                 </div>
               </div>
             ))}
@@ -1050,14 +1003,14 @@ function AdminPanel({ techs, setTechs, upsells, setUpsells, switchovers, setSwit
 
         {tab==="journey"&&(
           <div>
-            <div style={{ fontSize:"13px", color:muted, marginBottom:"20px" }}>All tech journeys — tap any card to see full breakdown.</div>
+            <div style={{ fontSize:"13px", color:C.muted, marginBottom:"16px" }}>Tap any card to expand full breakdown.</div>
             <JourneyBoard techs={techs} upsells={upsells} switchovers={switchovers} reviews={reviews}/>
           </div>
         )}
 
       </div>
       {toast&&(
-        <div style={{ position:"fixed", bottom:"24px", left:"50%", transform:"translateX(-50%)", background:toast.ok?"#10b981":"#ef4444", color:"#fff", padding:"12px 24px", borderRadius:"8px", fontSize:"14px", fontWeight:"600", zIndex:999, whiteSpace:"nowrap" }}>
+        <div style={{ position:"fixed", bottom:"24px", left:"50%", transform:"translateX(-50%)", background:toast.ok?C.green:"#ff4444", color:toast.ok?C.black:C.white, padding:"12px 24px", borderRadius:"6px", fontSize:"14px", fontWeight:"700", zIndex:999, whiteSpace:"nowrap", fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:"1px" }}>
           {toast.msg}
         </div>
       )}
@@ -1077,20 +1030,13 @@ export default function App() {
 
   const loadAll = useCallback(async () => {
     try {
-      const [t,u,s,r] = await Promise.all([
-        sb("techs?select=*&order=name"),
-        sb("upsells?select=*"),
-        sb("switchovers?select=*"),
-        sb("reviews?select=*"),
-      ]);
+      const [t,u,s,r] = await Promise.all([sb("techs?select=*&order=name"),sb("upsells?select=*"),sb("switchovers?select=*"),sb("reviews?select=*")]);
       setTechs(t||[]); setUpsells(u||[]); setSwitchovers(s||[]); setReviews(r||[]);
       return true;
     } catch(e) { setDbError(e.message); return false; }
   }, []);
 
-  useEffect(() => {
-    (async () => { const ok=await loadAll(); if(!ok){setLoading(false);return;} setLoading(false); })();
-  }, []);
+  useEffect(() => { (async()=>{ const ok=await loadAll(); setLoading(false); if(!ok)return; })(); }, []);
 
   function handlePin(pin) {
     if (pin===ADMIN_PIN) { setUser({type:"admin"}); return true; }
@@ -1098,49 +1044,48 @@ export default function App() {
     if (tech) { setUser({type:"tech",techId:tech.id}); return true; }
     return false;
   }
-
   const currentTech = user?.type==="tech" ? techs?.find(t=>t.id===user.techId) : null;
 
   if (loading) return (
-    <div style={{ minHeight:"100vh", background:bg, display:"flex", alignItems:"center", justifyContent:"center", flexDirection:"column", gap:"16px" }}>
-      <Logo height={60}/><div style={{ color:blue, fontFamily:"monospace", letterSpacing:"3px", fontSize:"12px" }}>LOADING...</div>
+    <div style={{ minHeight:"100vh", background:C.dark, display:"flex", alignItems:"center", justifyContent:"center", flexDirection:"column", gap:"16px" }}>
+      <style>{GS}</style>
+      <Logo h={60}/>
+      <div style={{ fontFamily:"'Barlow Condensed',sans-serif", color:C.blue, letterSpacing:"4px", fontSize:"12px", fontWeight:"700" }}>LOADING...</div>
     </div>
   );
 
   if (dbError) return (
-    <div style={{ minHeight:"100vh", background:bg, display:"flex", alignItems:"center", justifyContent:"center", flexDirection:"column", gap:"16px", padding:"24px", textAlign:"center" }}>
-      <Logo height={60}/>
-      <div style={{ color:"#ef4444", fontFamily:"monospace", fontSize:"13px", maxWidth:"600px" }}>
+    <div style={{ minHeight:"100vh", background:C.dark, display:"flex", alignItems:"center", justifyContent:"center", flexDirection:"column", gap:"16px", padding:"24px", textAlign:"center" }}>
+      <style>{GS}</style>
+      <Logo h={60}/>
+      <div style={{ color:"#ff4444", fontSize:"13px", maxWidth:"560px" }}>
         <strong>Database setup needed.</strong> Run this SQL in Supabase → SQL Editor:<br/><br/>
-        <code style={{ background:"#f4f8fd", padding:"12px", borderRadius:"6px", fontSize:"11px", display:"block", textAlign:"left", whiteSpace:"pre" }}>
+        <code style={{ background:C.card, padding:"12px", borderRadius:"6px", fontSize:"11px", display:"block", textAlign:"left", whiteSpace:"pre", color:C.offWhite }}>
 {`alter table techs add column if not exists start_date date;
 
 create table if not exists reviews (
   id uuid primary key default gen_random_uuid(),
   tech_id uuid references techs(id),
-  month_key text,
-  count integer default 0,
+  month_key text, count integer default 0,
   created_at timestamptz default now()
 );
-
 alter table reviews enable row level security;
 drop policy if exists "public access" on reviews;
 create policy "public access" on reviews for all using (true) with check (true);`}
         </code><br/>
-        <button onClick={()=>{setDbError(null);setLoading(true);loadAll().then(()=>setLoading(false));}} style={{ background:blue, border:"none", color:"#fff", padding:"10px 24px", borderRadius:"6px", cursor:"pointer", fontFamily:"monospace", fontSize:"13px" }}>RETRY</button>
+        <button onClick={()=>{setDbError(null);setLoading(true);loadAll().then(()=>setLoading(false));}} style={{ background:C.blue, border:"none", color:C.white, padding:"10px 24px", borderRadius:"6px", cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontSize:"14px", fontWeight:"700", letterSpacing:"2px" }}>RETRY</button>
       </div>
     </div>
   );
 
   if (!user) return (
-    <div style={{ minHeight:"100vh", background:bg, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:"40px" }}>
-      <div style={{ textAlign:"center", display:"flex", flexDirection:"column", alignItems:"center", gap:"16px" }}>
-        <Logo height={80}/>
-        <div>
-          <div style={{ fontSize:"11px", letterSpacing:"4px", color:blue, textTransform:"uppercase", fontFamily:"monospace", marginBottom:"6px" }}>Field Operations</div>
-          <h1 style={{ fontSize:"28px", fontWeight:"900", margin:0, letterSpacing:"-0.5px", color:dark }}>The Standard Board</h1>
-          <p style={{ color:muted, marginTop:"6px", fontSize:"14px" }}>Enter your PIN to continue</p>
-        </div>
+    <div style={{ minHeight:"100vh", background:C.dark, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:"48px" }}>
+      <style>{GS}</style>
+      <div style={{ textAlign:"center" }}>
+        <Logo h={80}/>
+        <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"42px", color:C.white, letterSpacing:"6px", marginTop:"20px", lineHeight:1 }}>THE STANDARD</div>
+        <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"42px", color:C.blue, letterSpacing:"6px", lineHeight:1 }}>BOARD</div>
+        <div style={{ fontSize:"13px", color:C.muted, letterSpacing:"3px", marginTop:"12px", textTransform:"uppercase" }}>Enter your PIN</div>
       </div>
       <PinPad onSubmit={handlePin}/>
     </div>
