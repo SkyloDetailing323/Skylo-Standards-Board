@@ -710,11 +710,11 @@ const INCENTIVE_TIERS = [
     name: "IGNITION",
     tagline: "You started. Now prove it.",
     items: [
-      { emoji:"🎮", name:"Gaming Controller",  desc:"PS5 DualSense or Xbox Elite" },
-      { emoji:"🥩", name:"Steakhouse Dinner",  desc:"$150 gift card" },
-      { emoji:"👟", name:"Fresh Kicks",        desc:"$150 Nike or Adidas card" },
-      { emoji:"🎟️", name:"Concert Tickets",    desc:"2 tickets to a show of your choice" },
-      { emoji:"🍕", name:"Food Haul",          desc:"$150 DoorDash or Uber Eats credit" },
+      { name:"PS5 DualSense Controller", desc:"Brand new PS5 wireless controller", img:"https://images.unsplash.com/photo-1608096299210-db7e38487075?w=400&h=240&fit=crop&auto=format" },
+      { name:"Steakhouse Dinner",        desc:"$150 gift card to your local steakhouse", img:"https://images.unsplash.com/photo-1544025162-d76694265947?w=400&h=240&fit=crop&auto=format" },
+      { name:"Nike Air Max",             desc:"$150 Nike gift card — your pick", img:"https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=400&h=240&fit=crop&auto=format" },
+      { name:"Concert Tickets",          desc:"2 tickets to a local show of your choice", img:"https://images.unsplash.com/photo-1501281668745-f7f57925c3b4?w=400&h=240&fit=crop&auto=format" },
+      { name:"Food Delivery Credit",     desc:"$150 DoorDash or Uber Eats credit", img:"https://images.unsplash.com/photo-1565299585323-38d6b0865b47?w=400&h=240&fit=crop&auto=format" },
     ],
   },
   {
@@ -725,11 +725,11 @@ const INCENTIVE_TIERS = [
     name: "VOLTAGE",
     tagline: "The team is noticing.",
     items: [
-      { emoji:"🎮", name:"Xbox / PS5 Bundle",  desc:"Console + 3 games of your choice" },
-      { emoji:"🔧", name:"Car Parts Credit",   desc:"$300 AutoZone or Summit Racing card" },
-      { emoji:"🏨", name:"Weekend Getaway",    desc:"2-night hotel stay in-state" },
-      { emoji:"🎯", name:"Range Day + Ammo",   desc:"$300 to your local gun range" },
-      { emoji:"🎧", name:"Sony WH-1000XM5",   desc:"Top-tier noise cancelling headphones" },
+      { name:"Xbox Series X",           desc:"Brand new console + 3 games", img:"https://images.unsplash.com/photo-1605979257913-1704eb7b6246?w=400&h=240&fit=crop&auto=format" },
+      { name:"AutoZone / Summit Racing",desc:"$300 car parts gift card", img:"https://images.unsplash.com/photo-1492144534655-ae79c964c9d7?w=400&h=240&fit=crop&auto=format" },
+      { name:"Hotel Weekend",           desc:"2-night hotel stay anywhere in-state", img:"https://images.unsplash.com/photo-1551882547-ff40c63fe5fa?w=400&h=240&fit=crop&auto=format" },
+      { name:"Range Day + Ammo",        desc:"$300 to your local gun range + ammo", img:"https://images.unsplash.com/photo-1584308666744-24d5c474f2ae?w=400&h=240&fit=crop&auto=format" },
+      { name:"Sony WH-1000XM5",        desc:"Top-tier noise cancelling headphones", img:"https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=400&h=240&fit=crop&auto=format" },
     ],
   },
   {
@@ -740,11 +740,11 @@ const INCENTIVE_TIERS = [
     name: "OVERDRIVE",
     tagline: "Elite territory.",
     items: [
-      { emoji:"🎮", name:"Full Gaming Setup",      desc:"Xbox Series X or PS5, brand new" },
-      { emoji:"🏁", name:"Track Day Experience",   desc:"Drive a supercar at a racing circuit" },
-      { emoji:"✈️", name:"Flight + Hotel Weekend", desc:"Flights + 2 nights, city of your choice" },
-      { emoji:"🔩", name:"Custom Wheels / Tires",  desc:"$600 toward rims, tires, or suspension" },
-      { emoji:"⌚", name:"Luxury Watch",           desc:"Seiko Presage or Citizen Eco-Drive" },
+      { name:"PlayStation 5",           desc:"Brand new PS5 console", img:"https://images.unsplash.com/photo-1607853202273-797f1c22a38e?w=400&h=240&fit=crop&auto=format" },
+      { name:"Supercar Track Day",      desc:"Drive a supercar at a real racing circuit", img:"https://images.unsplash.com/photo-1503376780353-7e6692767b70?w=400&h=240&fit=crop&auto=format" },
+      { name:"Flight + Hotel Weekend",  desc:"Flights + 2 nights in a city of your choice", img:"https://images.unsplash.com/photo-1436491865332-7a61a109cc05?w=400&h=240&fit=crop&auto=format" },
+      { name:"Custom Wheels",           desc:"$600 toward rims, tires, or suspension", img:"https://images.unsplash.com/photo-1558618666-fcd25c85cd64?w=400&h=240&fit=crop&auto=format" },
+      { name:"Nixon 500 Watch",         desc:"Gold Nixon 500 — clean, bold, built for you", img:"https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=400&h=240&fit=crop&auto=format" },
     ],
   },
   {
@@ -755,11 +755,11 @@ const INCENTIVE_TIERS = [
     name: "LEGEND",
     tagline: "One of one.",
     items: [
-      { emoji:"🚢", name:"3-Day Cruise",           desc:"Carnival or Royal Caribbean, you + guest" },
-      { emoji:"🏝️", name:"All-Inclusive Resort",   desc:"3 nights Cancun or Dominican Republic" },
-      { emoji:"🏎️", name:"Performance Build Fund", desc:"$1,200 toward your car build" },
-      { emoji:"🎵", name:"VIP Concert Package",    desc:"Floor seats + backstage + hotel night" },
-      { emoji:"🎰", name:"Vegas Trip",             desc:"Flights + 3 nights on the Strip + cash" },
+      { name:"3-Day Cruise",            desc:"Carnival or Royal Caribbean, you + a guest", img:"https://images.unsplash.com/photo-1548574505-5e239809ee19?w=400&h=240&fit=crop&auto=format" },
+      { name:"All-Inclusive Resort",    desc:"3 nights Cancun or Dominican Republic", img:"https://images.unsplash.com/photo-1571896349842-33c89424de2d?w=400&h=240&fit=crop&auto=format" },
+      { name:"Performance Build Fund",  desc:"$1,200 toward your car build, no questions asked", img:"https://images.unsplash.com/photo-1544636331-e26879cd4d9b?w=400&h=240&fit=crop&auto=format" },
+      { name:"VIP Concert Package",    desc:"Floor seats + backstage passes + hotel night", img:"https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=400&h=240&fit=crop&auto=format" },
+      { name:"Vegas Trip",             desc:"Flights + 3 nights on the Strip + spending cash", img:"https://images.unsplash.com/photo-1605833556294-ea5c2a5339fd?w=400&h=240&fit=crop&auto=format" },
     ],
   },
 ];
@@ -831,14 +831,14 @@ function IncentiveBoard({ techs, upsells, switchovers, reviews, currentId }) {
             )}
 
             <div style={{ padding:"14px 18px" }}>
-              <div style={{ fontSize:"10px", color:C.muted, letterSpacing:"2px", textTransform:"uppercase", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", marginBottom:"10px" }}>Choose Your Reward</div>
-              <div style={{ display:"flex", flexDirection:"column", gap:"8px" }}>
+              <div style={{ fontSize:"10px", color:C.muted, letterSpacing:"2px", textTransform:"uppercase", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", marginBottom:"12px" }}>Choose Your Reward</div>
+              <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(150px,1fr))", gap:"10px" }}>
                 {tier.items.map(item=>(
-                  <div key={item.name} style={{ display:"flex", alignItems:"center", gap:"12px", background:C.cardLt, borderRadius:"4px", padding:"10px 14px" }}>
-                    <div style={{ fontSize:"24px", flexShrink:0 }}>{item.emoji}</div>
-                    <div>
-                      <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", fontSize:"15px", color:C.white }}>{item.name}</div>
-                      <div style={{ fontSize:"11px", color:C.muted }}>{item.desc}</div>
+                  <div key={item.name} style={{ background:C.cardLt, borderRadius:"6px", overflow:"hidden", border:`1px solid ${C.border}` }}>
+                    <img src={item.img} alt={item.name} style={{ width:"100%", height:"110px", objectFit:"cover", display:"block" }} loading="lazy"/>
+                    <div style={{ padding:"10px" }}>
+                      <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"13px", color:C.white, lineHeight:"1.2", marginBottom:"3px" }}>{item.name}</div>
+                      <div style={{ fontSize:"10px", color:C.muted, lineHeight:"1.3" }}>{item.desc}</div>
                     </div>
                   </div>
                 ))}
