@@ -699,6 +699,158 @@ function JourneyCard({ tech, rank, total, onClick, expanded }) {
   );
 }
 
+
+// ─── INCENTIVE BOARD ─────────────────────────────────────────────────────────
+const INCENTIVE_TIERS = [
+  {
+    pts: 1600,
+    prize: "$150",
+    color: "#cd7f32",
+    icon: "🔥",
+    name: "IGNITION",
+    tagline: "You started. Now prove it.",
+    items: [
+      { emoji:"🎮", name:"Gaming Controller",  desc:"PS5 DualSense or Xbox Elite" },
+      { emoji:"🥩", name:"Steakhouse Dinner",  desc:"$150 gift card" },
+      { emoji:"👟", name:"Fresh Kicks",        desc:"$150 Nike or Adidas card" },
+      { emoji:"🎟️", name:"Concert Tickets",    desc:"2 tickets to a show of your choice" },
+      { emoji:"🍕", name:"Food Haul",          desc:"$150 DoorDash or Uber Eats credit" },
+    ],
+  },
+  {
+    pts: 3200,
+    prize: "$300",
+    color: "#a8c0d6",
+    icon: "⚡",
+    name: "VOLTAGE",
+    tagline: "The team is noticing.",
+    items: [
+      { emoji:"🎮", name:"Xbox / PS5 Bundle",  desc:"Console + 3 games of your choice" },
+      { emoji:"🔧", name:"Car Parts Credit",   desc:"$300 AutoZone or Summit Racing card" },
+      { emoji:"🏨", name:"Weekend Getaway",    desc:"2-night hotel stay in-state" },
+      { emoji:"🎯", name:"Range Day + Ammo",   desc:"$300 to your local gun range" },
+      { emoji:"🎧", name:"Sony WH-1000XM5",   desc:"Top-tier noise cancelling headphones" },
+    ],
+  },
+  {
+    pts: 6000,
+    prize: "$600",
+    color: "#ffd600",
+    icon: "🏆",
+    name: "OVERDRIVE",
+    tagline: "Elite territory.",
+    items: [
+      { emoji:"🎮", name:"Full Gaming Setup",      desc:"Xbox Series X or PS5, brand new" },
+      { emoji:"🏁", name:"Track Day Experience",   desc:"Drive a supercar at a racing circuit" },
+      { emoji:"✈️", name:"Flight + Hotel Weekend", desc:"Flights + 2 nights, city of your choice" },
+      { emoji:"🔩", name:"Custom Wheels / Tires",  desc:"$600 toward rims, tires, or suspension" },
+      { emoji:"⌚", name:"Luxury Watch",           desc:"Seiko Presage or Citizen Eco-Drive" },
+    ],
+  },
+  {
+    pts: 12000,
+    prize: "$1,200",
+    color: "#c4b5fd",
+    icon: "👑",
+    name: "LEGEND",
+    tagline: "One of one.",
+    items: [
+      { emoji:"🚢", name:"3-Day Cruise",           desc:"Carnival or Royal Caribbean, you + guest" },
+      { emoji:"🏝️", name:"All-Inclusive Resort",   desc:"3 nights Cancun or Dominican Republic" },
+      { emoji:"🏎️", name:"Performance Build Fund", desc:"$1,200 toward your car build" },
+      { emoji:"🎵", name:"VIP Concert Package",    desc:"Floor seats + backstage + hotel night" },
+      { emoji:"🎰", name:"Vegas Trip",             desc:"Flights + 3 nights on the Strip + cash" },
+    ],
+  },
+];
+
+function IncentiveBoard({ techs, upsells, switchovers, reviews, currentId }) {
+  return (
+    <div style={{ display:"flex", flexDirection:"column", gap:"16px" }}>
+      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.blue}`, borderRadius:"6px", padding:"16px 18px" }}>
+        <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"28px", color:C.white, letterSpacing:"3px", marginBottom:"4px" }}>SKYLO REWARDS PROGRAM</div>
+        <div style={{ fontSize:"13px", color:C.muted }}>Stack your points from upsells, switchovers, reviews, and badges. Hit a tier, claim your prize.</div>
+        <div style={{ display:"grid", gridTemplateColumns:"repeat(2,1fr)", gap:"8px", marginTop:"14px" }}>
+          {[
+            {l:"Upsells",    v:"$2 = 1 pt",       c:C.green},
+            {l:"Reviews",    v:"25 pts each",      c:C.gold},
+            {l:"Switchovers",v:"25–350 pts",       c:C.purple},
+            {l:"Badges",     v:"50–1,500 pts",     c:C.blue},
+          ].map(item=>(
+            <div key={item.l} style={{ background:C.cardLt, borderRadius:"4px", padding:"8px 12px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+              <span style={{ fontSize:"12px", color:C.muted }}>{item.l}</span>
+              <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"14px", color:item.c }}>{item.v}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {INCENTIVE_TIERS.map((tier, ti) => {
+        const myTotal = currentId ? (() => {
+          const tech = techs?.find(t=>t.id===currentId);
+          if (!tech) return 0;
+          return calcTotals(tech, upsells, switchovers, reviews).total;
+        })() : null;
+        const unlocked = myTotal !== null && myTotal >= tier.pts;
+        const progress = myTotal !== null ? Math.min(Math.round((myTotal / tier.pts) * 100), 100) : null;
+        const prevPts = ti === 0 ? 0 : INCENTIVE_TIERS[ti-1].pts;
+        const tierProgress = myTotal !== null ? Math.min(Math.round(((myTotal - prevPts) / (tier.pts - prevPts)) * 100), 100) : null;
+
+        return (
+          <div key={tier.name} style={{ background:C.card, border:`1px solid ${unlocked ? tier.color+"66" : C.border}`, borderTop:`4px solid ${tier.color}`, borderRadius:"6px", overflow:"hidden", opacity: unlocked || myTotal === null ? 1 : 0.85 }}>
+            <div style={{ padding:"16px 18px", borderBottom:`1px solid ${C.border}`, display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+              <div>
+                <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"28px", color:tier.color, letterSpacing:"3px", lineHeight:1 }}>{tier.icon} {tier.name}</div>
+                <div style={{ fontSize:"12px", color:C.muted, marginTop:"3px" }}>{tier.tagline}</div>
+              </div>
+              <div style={{ textAlign:"right" }}>
+                <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"38px", color:C.white, lineHeight:1 }}>{tier.prize}</div>
+                <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontSize:"12px", color:tier.color, fontWeight:"700", letterSpacing:"1px" }}>{tier.pts.toLocaleString()} PTS REQUIRED</div>
+              </div>
+            </div>
+
+            {myTotal !== null && (
+              <div style={{ padding:"12px 18px", borderBottom:`1px solid ${C.border}`, background:C.cardLt }}>
+                {unlocked ? (
+                  <div style={{ display:"flex", alignItems:"center", gap:"10px" }}>
+                    <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"14px", color:tier.color, letterSpacing:"2px" }}>✅ UNLOCKED — SEE ADMIN TO CLAIM</div>
+                  </div>
+                ) : (
+                  <div>
+                    <div style={{ display:"flex", justifyContent:"space-between", marginBottom:"6px" }}>
+                      <span style={{ fontSize:"11px", color:C.muted, letterSpacing:"1px", textTransform:"uppercase" }}>Progress</span>
+                      <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"12px", color:tier.color }}>{(tier.pts - myTotal).toLocaleString()} pts away</span>
+                    </div>
+                    <div style={{ background:C.border, borderRadius:"2px", height:"6px", overflow:"hidden" }}>
+                      <div style={{ width:`${Math.max(tierProgress||0,0)}%`, height:"100%", background:tier.color, borderRadius:"2px" }}/>
+                    </div>
+                    <div style={{ fontSize:"10px", color:C.muted, marginTop:"4px" }}>{Math.max(tierProgress||0,0)}% of the way there</div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            <div style={{ padding:"14px 18px" }}>
+              <div style={{ fontSize:"10px", color:C.muted, letterSpacing:"2px", textTransform:"uppercase", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", marginBottom:"10px" }}>Choose Your Reward</div>
+              <div style={{ display:"flex", flexDirection:"column", gap:"8px" }}>
+                {tier.items.map(item=>(
+                  <div key={item.name} style={{ display:"flex", alignItems:"center", gap:"12px", background:C.cardLt, borderRadius:"4px", padding:"10px 14px" }}>
+                    <div style={{ fontSize:"24px", flexShrink:0 }}>{item.emoji}</div>
+                    <div>
+                      <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", fontSize:"15px", color:C.white }}>{item.name}</div>
+                      <div style={{ fontSize:"11px", color:C.muted }}>{item.desc}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 // ─── TECH DASHBOARD ───────────────────────────────────────────────────────────
 function TechDashboard({ tech, techs, upsells, switchovers, reviews, onLogout }) {
   const [tab, setTab] = useState("overview");
@@ -740,7 +892,7 @@ function TechDashboard({ tech, techs, upsells, switchovers, reviews, onLogout })
           </div>
         )}
       </div>
-      <TabBar tabs={[["overview","Overview"],["badges","Badges"],["upsells","Upsells"],["switchovers","Converts"],["reviews","⭐ Reviews"],["total","🏆 Total"],["journey","🗺️ Journey"]]} active={tab} setActive={setTab}/>
+      <TabBar tabs={[["overview","Overview"],["badges","Badges"],["upsells","Upsells"],["switchovers","Converts"],["reviews","⭐ Reviews"],["total","🏆 Total"],["journey","🗺️ Journey"],["incentive","🎁 Rewards"]]} active={tab} setActive={setTab}/>
       <div style={{ padding:"20px", maxWidth:"800px", margin:"0 auto" }}>
         {tab==="overview"&&(
           <div style={{ display:"flex", flexDirection:"column", gap:"16px" }}>
@@ -793,6 +945,12 @@ function TechDashboard({ tech, techs, upsells, switchovers, reviews, onLogout })
           <div>
             <div style={{ fontSize:"13px", color:C.muted, marginBottom:"16px" }}>Tap any card to expand. Tiers unlock at 1,600 · 3,200 · 6,000 · 12,000 pts.</div>
             <JourneyBoard techs={techs} upsells={upsells} switchovers={switchovers} reviews={reviews}/>
+          </div>
+        )}
+        {tab==="incentive"&&(
+          <div>
+            <div style={{ fontSize:"13px", color:C.muted, marginBottom:"16px" }}>Your personal progress toward each reward tier.</div>
+            <IncentiveBoard techs={techs} upsells={upsells} switchovers={switchovers} reviews={reviews} currentId={tech.id}/>
           </div>
         )}
       </div>
@@ -877,7 +1035,7 @@ function AdminPanel({ techs, upsells, switchovers, reviews, onLogout, refreshAll
     <div style={{ minHeight:"100vh", background:C.dark }}>
       <style>{GS}</style>
       <Header title="Admin Panel" subtitle="Skylo Standard Board" right={<LogoutBtn onLogout={onLogout}/>}/>
-      <TabBar tabs={[["upsells","Upsells"],["reviews","⭐ Reviews"],["switchovers","Converts"],["award","Award Badge"],["add","Add Tech"],["manage","Manage"],["journey","🗺️ Journey"]]} active={tab} setActive={setTab} accent={C.green}/>
+      <TabBar tabs={[["upsells","Upsells"],["reviews","⭐ Reviews"],["switchovers","Converts"],["award","Award Badge"],["add","Add Tech"],["manage","Manage"],["journey","🗺️ Journey"],["incentive","🎁 Rewards"]]} active={tab} setActive={setTab} accent={C.green}/>
       <div style={{ padding:"20px", maxWidth:"700px", margin:"0 auto" }}>
 
         {tab==="upsells"&&(
@@ -1005,6 +1163,12 @@ function AdminPanel({ techs, upsells, switchovers, reviews, onLogout, refreshAll
           <div>
             <div style={{ fontSize:"13px", color:C.muted, marginBottom:"16px" }}>Tap any card to expand full breakdown.</div>
             <JourneyBoard techs={techs} upsells={upsells} switchovers={switchovers} reviews={reviews}/>
+          </div>
+        )}
+        {tab==="incentive"&&(
+          <div>
+            <div style={{ fontSize:"13px", color:C.muted, marginBottom:"16px" }}>Team rewards overview — all tiers and prizes.</div>
+            <IncentiveBoard techs={techs} upsells={upsells} switchovers={switchovers} reviews={reviews} currentId={null}/>
           </div>
         )}
 
