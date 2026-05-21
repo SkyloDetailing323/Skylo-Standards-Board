@@ -1003,6 +1003,294 @@ function TechDashboard({ tech, techs, upsells, switchovers, reviews, onLogout })
 }
 
 
+
+
+// ─── DELETE TAB ───────────────────────────────────────────────────────────────
+function DeleteTab({ techs, upsells, switchovers, reviews, saving, setSaving, refreshAll, showToast }) {
+  const [section, setSection] = useState("upsells");
+  const [filterTech, setFilterTech] = useState("");
+
+  const selStyle = { background:C.cardLt, border:`1px solid ${C.border}`, color:C.white, padding:"8px 12px", borderRadius:"6px", fontSize:"13px", fontFamily:"'Barlow',sans-serif", width:"100%", cursor:"pointer" };
+
+  async function deleteUpsell(id) {
+    if (!window.confirm("Delete this upsell entry?")) return;
+    setSaving(true);
+    try { await sb(`upsells?id=eq.${id}`,{method:"DELETE",prefer:"return=minimal"}); await refreshAll(); showToast("Upsell deleted"); }
+    catch(e){ showToast("Error: "+e.message,false); }
+    setSaving(false);
+  }
+  async function deleteSwitchover(id) {
+    if (!window.confirm("Delete this switchover?")) return;
+    setSaving(true);
+    try { await sb(`switchovers?id=eq.${id}`,{method:"DELETE",prefer:"return=minimal"}); await refreshAll(); showToast("Switchover deleted"); }
+    catch(e){ showToast("Error: "+e.message,false); }
+    setSaving(false);
+  }
+  async function deleteReview(id) {
+    if (!window.confirm("Delete this review entry?")) return;
+    setSaving(true);
+    try { await sb(`reviews?id=eq.${id}`,{method:"DELETE",prefer:"return=minimal"}); await refreshAll(); showToast("Review entry deleted"); }
+    catch(e){ showToast("Error: "+e.message,false); }
+    setSaving(false);
+  }
+
+  const filteredUpsells = upsells.filter(u=>!filterTech||u.tech_id===filterTech).sort((a,b)=>b.week_key?.localeCompare(a.week_key||"")||0);
+  const filteredSwitchovers = switchovers.filter(s=>!filterTech||s.tech_id===filterTech).sort((a,b)=>(b.created_at||"").localeCompare(a.created_at||""));
+  const filteredReviews = reviews.filter(r=>!filterTech||r.tech_id===filterTech).sort((a,b)=>b.month_key?.localeCompare(a.month_key||"")||0);
+
+  return (
+    <div style={{ display:"flex", flexDirection:"column", gap:"14px" }}>
+      <div style={{ background:`#ff444418`, border:`1px solid #ff444444`, borderRadius:"6px", padding:"12px 16px", fontSize:"12px", color:C.muted }}>
+        <span style={{ color:C.red, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800" }}>⚠️ DELETE ZONE</span> — Deletions are permanent. Use this to remove test data or mistakes.
+      </div>
+
+      {/* Section picker */}
+      <div style={{ display:"flex", gap:"8px" }}>
+        {[["upsells","💰 Upsells"],["switchovers","🔄 Converts"],["reviews","⭐ Reviews"]].map(([id,label])=>(
+          <button key={id} onClick={()=>setSection(id)} style={{ background:section===id?C.red:C.card, border:`1px solid ${section===id?C.red:C.border}`, color:section===id?C.white:C.muted, padding:"8px 14px", borderRadius:"4px", cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", fontSize:"11px", letterSpacing:"1px" }}>{label}</button>
+        ))}
+      </div>
+
+      {/* Filter by tech */}
+      <select value={filterTech} onChange={e=>setFilterTech(e.target.value)} style={selStyle}>
+        <option value="">All Techs</option>
+        {techs.map(t=><option key={t.id} value={t.id}>{t.name}</option>)}
+      </select>
+
+      {/* UPSELLS */}
+      {section==="upsells"&&(
+        <div style={{ display:"flex", flexDirection:"column", gap:"6px" }}>
+          {filteredUpsells.length===0&&<div style={{ fontSize:"13px", color:C.muted, padding:"12px" }}>No upsell entries found.</div>}
+          {filteredUpsells.map(u=>{
+            const tech=techs.find(t=>t.id===u.tech_id);
+            return (
+              <div key={u.id} style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"6px", padding:"12px 16px", display:"flex", alignItems:"center", justifyContent:"space-between", gap:"12px" }}>
+                <div>
+                  <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"15px", color:C.white }}>{tech?.name}</div>
+                  <div style={{ fontSize:"12px", color:C.muted }}>{formatWeekLabel(u.week_key)} · <span style={{ color:C.green, fontWeight:"700" }}>${u.amount?.toLocaleString()}</span></div>
+                </div>
+                <button onClick={()=>deleteUpsell(u.id)} disabled={saving} style={{ background:"none", border:`1px solid ${C.red}`, color:C.red, padding:"6px 12px", borderRadius:"4px", cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", fontSize:"12px", letterSpacing:"1px", flexShrink:0 }}>DELETE</button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* SWITCHOVERS */}
+      {section==="switchovers"&&(
+        <div style={{ display:"flex", flexDirection:"column", gap:"6px" }}>
+          {filteredSwitchovers.length===0&&<div style={{ fontSize:"13px", color:C.muted, padding:"12px" }}>No switchover entries found.</div>}
+          {filteredSwitchovers.map(s=>{
+            const tech=techs.find(t=>t.id===s.tech_id);
+            const plan=PLAN_MAP[s.plan_id];
+            const pc=PLAN_COLORS[s.plan_id]||C.muted;
+            return (
+              <div key={s.id} style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"6px", padding:"12px 16px", display:"flex", alignItems:"center", justifyContent:"space-between", gap:"12px" }}>
+                <div>
+                  <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"15px", color:C.white }}>{tech?.name}</div>
+                  <div style={{ fontSize:"12px", color:C.muted }}>{formatWeekLabel(s.week_key)} · <span style={{ color:pc, fontWeight:"700" }}>{plan?.label||s.plan_id} · +{plan?.pts||0}pts</span></div>
+                </div>
+                <button onClick={()=>deleteSwitchover(s.id)} disabled={saving} style={{ background:"none", border:`1px solid ${C.red}`, color:C.red, padding:"6px 12px", borderRadius:"4px", cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", fontSize:"12px", letterSpacing:"1px", flexShrink:0 }}>DELETE</button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* REVIEWS */}
+      {section==="reviews"&&(
+        <div style={{ display:"flex", flexDirection:"column", gap:"6px" }}>
+          {filteredReviews.length===0&&<div style={{ fontSize:"13px", color:C.muted, padding:"12px" }}>No review entries found.</div>}
+          {filteredReviews.map(r=>{
+            const tech=techs.find(t=>t.id===r.tech_id);
+            return (
+              <div key={r.id} style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"6px", padding:"12px 16px", display:"flex", alignItems:"center", justifyContent:"space-between", gap:"12px" }}>
+                <div>
+                  <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"15px", color:C.white }}>{tech?.name}</div>
+                  <div style={{ fontSize:"12px", color:C.muted }}>{formatMonthLabel(r.month_key)} · <span style={{ color:C.gold, fontWeight:"700" }}>{r.count} ⭐</span></div>
+                </div>
+                <button onClick={()=>deleteReview(r.id)} disabled={saving} style={{ background:"none", border:`1px solid ${C.red}`, color:C.red, padding:"6px 12px", borderRadius:"4px", cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", fontSize:"12px", letterSpacing:"1px", flexShrink:0 }}>DELETE</button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── ADMIN UPSELL ENTRY (with date picker) ────────────────────────────────────
+function AdminUpsellEntry({ techs, upsells, saving, setSaving, refreshAll, showToast, allTimeUp }) {
+  const wk = getWeekKey();
+  const [targetWeek, setTargetWeek] = useState(wk);
+  const [form, setForm] = useState({});
+  const [useCustomDate, setUseCustomDate] = useState(false);
+  const [customDate, setCustomDate] = useState("");
+
+  // Get week key from any date
+  function weekKeyFromDate(dateStr) {
+    const d = new Date(dateStr + "T00:00:00");
+    const start = new Date(d);
+    start.setDate(d.getDate() - d.getDay());
+    return `${start.getFullYear()}-${String(start.getMonth()+1).padStart(2,"0")}-${String(start.getDate()).padStart(2,"0")}`;
+  }
+
+  const activeWeek = useCustomDate && customDate ? weekKeyFromDate(customDate) : targetWeek;
+  const weekData = {};
+  upsells.filter(u=>u.week_key===activeWeek).forEach(u=>{weekData[u.tech_id]=u.amount;});
+
+  // All weeks that have data
+  const byWeek = {};
+  upsells.forEach(u=>{ byWeek[u.week_key]=(byWeek[u.week_key]||0)+1; });
+  const existingWeeks = Object.keys(byWeek).sort((a,b)=>b.localeCompare(a));
+
+  async function handleSave() {
+    setSaving(true);
+    try {
+      for (const t of techs) {
+        const val = parseFloat(form[t.id]);
+        if (isNaN(val)||val<=0) continue;
+        const existing = await sb(`upsells?tech_id=eq.${t.id}&week_key=eq.${activeWeek}&select=id`);
+        if (existing&&existing.length>0) await sb(`upsells?id=eq.${existing[0].id}`,{method:"PATCH",body:JSON.stringify({amount:val}),prefer:"return=minimal"});
+        else await sb("upsells",{method:"POST",body:JSON.stringify({tech_id:t.id,week_key:activeWeek,amount:val})});
+      }
+      await refreshAll();
+      showToast("✅ Upsells saved for " + formatWeekLabel(activeWeek) + "!");
+      setForm({});
+    } catch(e){ showToast("Error: "+e.message,false); }
+    setSaving(false);
+  }
+
+  return (
+    <div style={{ display:"flex", flexDirection:"column", gap:"16px" }}>
+      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.green}`, borderRadius:"6px", padding:"20px", display:"flex", flexDirection:"column", gap:"14px" }}>
+        <Label color={C.green}>Log Upsells</Label>
+        <div style={{ fontSize:"12px", color:C.muted }}>$2 = 1 point · You can log current or any past week</div>
+
+        {/* Week selector */}
+        <div style={{ display:"flex", flexDirection:"column", gap:"8px" }}>
+          <div style={{ display:"flex", gap:"8px" }}>
+            <button onClick={()=>{ setUseCustomDate(false); setTargetWeek(wk); }} style={{ background:!useCustomDate&&targetWeek===wk?C.green:C.cardLt, border:`1px solid ${!useCustomDate&&targetWeek===wk?C.green:C.border}`, color:!useCustomDate&&targetWeek===wk?C.black:C.muted, padding:"8px 14px", borderRadius:"4px", cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", fontSize:"12px", letterSpacing:"1px" }}>THIS WEEK</button>
+            <button onClick={()=>setUseCustomDate(true)} style={{ background:useCustomDate?C.blue:C.cardLt, border:`1px solid ${useCustomDate?C.blue:C.border}`, color:useCustomDate?C.white:C.muted, padding:"8px 14px", borderRadius:"4px", cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", fontSize:"12px", letterSpacing:"1px" }}>PICK A DATE</button>
+            {existingWeeks.length>0&&<button onClick={()=>{ setUseCustomDate(false); }} style={{ background:!useCustomDate&&targetWeek!==wk?C.purple:C.cardLt, border:`1px solid ${!useCustomDate&&targetWeek!==wk?C.purple:C.border}`, color:!useCustomDate&&targetWeek!==wk?C.white:C.muted, padding:"8px 14px", borderRadius:"4px", cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", fontSize:"12px", letterSpacing:"1px" }}>PAST WEEK</button>}
+          </div>
+          {useCustomDate&&(
+            <div>
+              <div style={{ fontSize:"11px", color:C.muted, marginBottom:"5px" }}>Pick any date — we'll find the week it belongs to</div>
+              <input type="date" value={customDate} onChange={e=>setCustomDate(e.target.value)} style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.white, padding:"8px 12px", borderRadius:"6px", fontSize:"14px", fontFamily:"'Barlow',sans-serif", width:"100%", boxSizing:"border-box" }}/>
+              {customDate&&<div style={{ fontSize:"11px", color:C.blue, marginTop:"4px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>Week: {formatWeekLabel(activeWeek)}</div>}
+            </div>
+          )}
+          {!useCustomDate&&existingWeeks.length>0&&(
+            <select value={targetWeek} onChange={e=>setTargetWeek(e.target.value)} style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.white, padding:"8px 12px", borderRadius:"6px", fontSize:"14px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", width:"100%", cursor:"pointer" }}>
+              <option value={wk}>{formatWeekLabel(wk)} — Current</option>
+              {existingWeeks.filter(w=>w!==wk).map(w=><option key={w} value={w}>{formatWeekLabel(w)}</option>)}
+              <option value="new">+ Enter a different past week</option>
+            </select>
+          )}
+        </div>
+
+        <div style={{ background:C.cardLt, borderRadius:"4px", padding:"8px 12px", fontSize:"12px", color:C.blue, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>
+          Logging for: {formatWeekLabel(activeWeek)}{activeWeek===wk?" (Current Week)":""}
+        </div>
+
+        {techs.map(t=>(
+          <div key={t.id} style={{ display:"flex", alignItems:"center", gap:"12px" }}>
+            <div style={{ width:"150px" }}>
+              <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", fontSize:"15px", color:C.white }}>{t.name}</div>
+              <div style={{ fontSize:"11px", color:C.muted }}>logged: ${(weekData[t.id]||0).toLocaleString()}</div>
+            </div>
+            <div style={{ display:"flex", alignItems:"center", gap:"6px", flex:1 }}>
+              <span style={{ color:C.green, fontSize:"16px", fontWeight:"800" }}>$</span>
+              <input type="number" placeholder={weekData[t.id]||"0"} value={form[t.id]||""} onChange={e=>setForm(f=>({...f,[t.id]:e.target.value}))} style={{ background:C.card, border:`1px solid ${C.border}`, color:C.white, padding:"8px 10px", borderRadius:"6px", fontSize:"14px", fontFamily:"'Barlow Condensed',sans-serif", width:"100%", fontWeight:"700" }}/>
+            </div>
+          </div>
+        ))}
+        <button onClick={handleSave} disabled={saving} style={{ background:saving?"#333":C.green, border:"none", color:saving?"#666":C.black, padding:"13px", borderRadius:"6px", cursor:saving?"not-allowed":"pointer", fontSize:"13px", fontWeight:"700", letterSpacing:"2px", fontFamily:"'Barlow Condensed',sans-serif", width:"100%", textTransform:"uppercase" }}>{saving?"Saving...":"Save Upsells"}</button>
+      </div>
+      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"6px", padding:"16px 18px" }}>
+        <Label color={C.green}>All-Time Totals</Label>
+        {[...techs].sort((a,b)=>(allTimeUp[b.id]||0)-(allTimeUp[a.id]||0)).map((t,i)=>(
+          <div key={t.id} style={{ display:"flex", justifyContent:"space-between", marginBottom:"8px" }}>
+            <span style={{ fontSize:"13px", color:C.offWhite }}>{medal(i)} {t.name}</span>
+            <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", color:C.green }}>${(allTimeUp[t.id]||0).toLocaleString()} · {Math.round((allTimeUp[t.id]||0)*UPSELL_PTS_PER_DOLLAR)} pts</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ─── ADMIN REVIEW ENTRY (with month picker) ───────────────────────────────────
+function AdminReviewEntry({ techs, reviews, saving, setSaving, refreshAll, showToast }) {
+  const mk = getMonthKey();
+  const [targetMonth, setTargetMonth] = useState(mk);
+  const [form, setForm] = useState({});
+
+  const byMonth = {};
+  reviews.forEach(r=>{ byMonth[r.month_key]=(byMonth[r.month_key]||0)+1; });
+  const existingMonths = Object.keys(byMonth).sort((a,b)=>b.localeCompare(a));
+
+  const monthData = {};
+  reviews.filter(r=>r.month_key===targetMonth).forEach(r=>{ monthData[r.tech_id]=r.count; });
+
+  async function handleSave() {
+    setSaving(true);
+    try {
+      for (const t of techs) {
+        const val = parseInt(form[t.id]);
+        if (isNaN(val)||val<=0) continue;
+        const existing = await sb(`reviews?tech_id=eq.${t.id}&month_key=eq.${targetMonth}&select=id`);
+        if (existing&&existing.length>0) await sb(`reviews?id=eq.${existing[0].id}`,{method:"PATCH",body:JSON.stringify({count:val}),prefer:"return=minimal"});
+        else await sb("reviews",{method:"POST",body:JSON.stringify({tech_id:t.id,month_key:targetMonth,count:val})});
+      }
+      await refreshAll();
+      showToast("✅ Reviews saved for " + formatMonthLabel(targetMonth) + "!");
+      setForm({});
+    } catch(e){ showToast("Error: "+e.message,false); }
+    setSaving(false);
+  }
+
+  return (
+    <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.gold}`, borderRadius:"6px", padding:"20px", display:"flex", flexDirection:"column", gap:"14px" }}>
+      <Label color={C.gold}>Log 5-Star Reviews</Label>
+      <div style={{ fontSize:"12px", color:C.muted }}>+{REVIEW_PTS} pts each · +{REVIEW_BONUS_PTS} bonus at 10+ · Log current or any past month</div>
+
+      <div>
+        <div style={{ fontSize:"11px", color:C.muted, marginBottom:"6px" }}>Select month</div>
+        <select value={targetMonth} onChange={e=>{ setTargetMonth(e.target.value); setForm({}); }} style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.white, padding:"8px 12px", borderRadius:"6px", fontSize:"14px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", width:"100%", cursor:"pointer" }}>
+          <option value={mk}>{formatMonthLabel(mk)} — Current</option>
+          {existingMonths.filter(m=>m!==mk).map(m=><option key={m} value={m}>{formatMonthLabel(m)}</option>)}
+          {/* generate last 12 months as options */}
+          {Array.from({length:11},(_,i)=>{
+            const d = new Date(); d.setMonth(d.getMonth()-(i+1));
+            const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
+            return !byMonth[key] ? <option key={key} value={key}>{formatMonthLabel(key)}</option> : null;
+          })}
+        </select>
+      </div>
+
+      <div style={{ background:C.cardLt, borderRadius:"4px", padding:"8px 12px", fontSize:"12px", color:C.gold, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>
+        Logging for: {formatMonthLabel(targetMonth)}{targetMonth===mk?" (Current Month)":""}
+      </div>
+
+      {techs.map(t=>(
+        <div key={t.id} style={{ display:"flex", alignItems:"center", gap:"12px" }}>
+          <div style={{ width:"150px" }}>
+            <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", fontSize:"15px", color:C.white }}>{t.name}</div>
+            <div style={{ fontSize:"11px", color:C.muted }}>logged: {monthData[t.id]||0} ⭐</div>
+          </div>
+          <div style={{ display:"flex", alignItems:"center", gap:"6px", flex:1 }}>
+            <span style={{ color:C.gold, fontSize:"16px" }}>⭐</span>
+            <input type="number" placeholder={monthData[t.id]||"0"} value={form[t.id]||""} onChange={e=>setForm(f=>({...f,[t.id]:e.target.value}))} style={{ background:C.card, border:`1px solid ${C.border}`, color:C.white, padding:"8px 10px", borderRadius:"6px", fontSize:"14px", fontFamily:"'Barlow Condensed',sans-serif", width:"100%", fontWeight:"700" }}/>
+          </div>
+        </div>
+      ))}
+      <button onClick={handleSave} disabled={saving} style={{ background:saving?"#333":C.gold, border:"none", color:saving?"#666":C.black, padding:"13px", borderRadius:"6px", cursor:saving?"not-allowed":"pointer", fontSize:"13px", fontWeight:"700", letterSpacing:"2px", fontFamily:"'Barlow Condensed',sans-serif", width:"100%", textTransform:"uppercase" }}>{saving?"Saving...":"Save Reviews"}</button>
+    </div>
+  );
+}
+
 // ─── RIDE-ALONG SYSTEM ────────────────────────────────────────────────────────
 const CHECKLIST_SECTIONS = [
   {
@@ -1383,60 +1671,16 @@ function AdminPanel({ techs, upsells, switchovers, reviews, rideAlongs, schedule
     <div style={{ minHeight:"100vh", background:C.dark }}>
       <style>{GS}</style>
       <Header title="Admin Panel" subtitle="Skylo Standard Board" right={<LogoutBtn onLogout={onLogout}/>}/>
-      <TabBar tabs={[["upsells","Upsells"],["reviews","⭐ Reviews"],["switchovers","Converts"],["award","Award Badge"],["add","Add Tech"],["manage","Manage"],["journey","🗺️ Journey"],["incentive","🎁 Rewards"],["ridealong","🚗 Ride-Alongs"]]} active={tab} setActive={setTab} accent={C.green}/>
+      <TabBar tabs={[["upsells","Upsells"],["reviews","⭐ Reviews"],["switchovers","Converts"],["award","Award Badge"],["add","Add Tech"],["manage","Manage"],["delete","🗑️ Delete"],["journey","🗺️ Journey"],["incentive","🎁 Rewards"],["ridealong","🚗 Ride-Alongs"]]} active={tab} setActive={setTab} accent={C.green}/>
       <div style={{ padding:"20px", maxWidth:"700px", margin:"0 auto" }}>
 
         {tab==="upsells"&&(
-          <div style={{ display:"flex", flexDirection:"column", gap:"16px" }}>
-            <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"6px", padding:"20px", display:"flex", flexDirection:"column", gap:"14px" }}>
-              <Label color={C.green}>Enter This Week · {formatWeekLabel(wk)}</Label>
-              <div style={{ fontSize:"12px", color:C.muted }}>$2 = 1 point</div>
-              {techs.map(t=>(
-                <div key={t.id} style={{ display:"flex", alignItems:"center", gap:"12px" }}>
-                  <div style={{ width:"150px" }}>
-                    <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", fontSize:"15px", color:C.white }}>{t.name}</div>
-                    <div style={{ fontSize:"11px", color:C.muted }}>current: ${(wkUp[t.id]||0).toLocaleString()}</div>
-                  </div>
-                  <div style={{ display:"flex", alignItems:"center", gap:"6px", flex:1 }}>
-                    <span style={{ color:C.green, fontSize:"16px", fontWeight:"800" }}>$</span>
-                    <input type="number" placeholder={wkUp[t.id]||"0"} value={upsellForm[t.id]||""} onChange={e=>setUpsellForm(f=>({...f,[t.id]:e.target.value}))} style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.white, padding:"8px 10px", borderRadius:"6px", fontSize:"14px", fontFamily:"'Barlow Condensed',sans-serif", width:"100%", fontWeight:"700" }}/>
-                  </div>
-                </div>
-              ))}
-              <button onClick={saveUpsells} disabled={saving} style={btn(C.green)}>{saving?"Saving...":"Save This Week"}</button>
-            </div>
-            <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"6px", padding:"16px 18px" }}>
-              <Label color={C.green}>All-Time Upsell Totals</Label>
-              {[...techs].sort((a,b)=>(allTimeUp[b.id]||0)-(allTimeUp[a.id]||0)).map((t,i)=>(
-                <div key={t.id} style={{ display:"flex", justifyContent:"space-between", marginBottom:"8px" }}>
-                  <span style={{ fontSize:"13px", color:C.offWhite }}>{medal(i)} {t.name}</span>
-                  <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", color:C.green }}>${(allTimeUp[t.id]||0).toLocaleString()} · {Math.round((allTimeUp[t.id]||0)*UPSELL_PTS_PER_DOLLAR)} pts</span>
-                </div>
-              ))}
-            </div>
-          </div>
+          <AdminUpsellEntry techs={techs} upsells={upsells} saving={saving} setSaving={setSaving} refreshAll={refreshAll} showToast={showToast} allTimeUp={allTimeUp}/>
         )}
 
         {tab==="reviews"&&(
-          <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"6px", padding:"20px", display:"flex", flexDirection:"column", gap:"14px" }}>
-            <Label color={C.gold}>Log 5-Star Reviews · {formatMonthLabel(mk)}</Label>
-            <div style={{ fontSize:"12px", color:C.muted }}>+{REVIEW_PTS} pts each · +{REVIEW_BONUS_PTS} bonus at 10+ per month</div>
-            {techs.map(t=>(
-              <div key={t.id} style={{ display:"flex", alignItems:"center", gap:"12px" }}>
-                <div style={{ width:"150px" }}>
-                  <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", fontSize:"15px", color:C.white }}>{t.name}</div>
-                  <div style={{ fontSize:"11px", color:C.muted }}>this month: {mkRev[t.id]||0} ⭐</div>
-                </div>
-                <div style={{ display:"flex", alignItems:"center", gap:"6px", flex:1 }}>
-                  <span style={{ color:C.gold, fontSize:"16px" }}>⭐</span>
-                  <input type="number" placeholder={mkRev[t.id]||"0"} value={reviewForm[t.id]||""} onChange={e=>setReviewForm(f=>({...f,[t.id]:e.target.value}))} style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.white, padding:"8px 10px", borderRadius:"6px", fontSize:"14px", fontFamily:"'Barlow Condensed',sans-serif", width:"100%", fontWeight:"700" }}/>
-                </div>
-              </div>
-            ))}
-            <button onClick={saveReviews} disabled={saving} style={btn(C.gold)}>{saving?"Saving...":"Save This Month's Reviews"}</button>
-          </div>
+          <AdminReviewEntry techs={techs} reviews={reviews} saving={saving} setSaving={setSaving} refreshAll={refreshAll} showToast={showToast}/>
         )}
-
         {tab==="switchovers"&&(
           <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"6px", padding:"20px", display:"flex", flexDirection:"column", gap:"12px" }}>
             <Label color={C.purple}>Log a Switchover · {formatWeekLabel(wk)}</Label>
@@ -1507,6 +1751,10 @@ function AdminPanel({ techs, upsells, switchovers, reviews, rideAlongs, schedule
           </div>
         )}
 
+
+        {tab==="delete"&&(
+          <DeleteTab techs={techs} upsells={upsells} switchovers={switchovers} reviews={reviews} saving={saving} setSaving={setSaving} refreshAll={refreshAll} showToast={showToast}/>
+        )}
         {tab==="journey"&&(
           <div>
             <div style={{ fontSize:"13px", color:C.muted, marginBottom:"16px" }}>Tap any card to expand full breakdown.</div>
