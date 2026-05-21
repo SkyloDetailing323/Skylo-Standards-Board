@@ -295,49 +295,85 @@ function UpsellLeaderboard({ techs, upsells, currentId }) {
   const byWeek = {};
   upsells.forEach(u=>{ if(!byWeek[u.week_key])byWeek[u.week_key]={}; byWeek[u.week_key][u.tech_id]=(byWeek[u.week_key][u.tech_id]||0)+u.amount; });
   const allWeeks = Object.keys(byWeek).sort((a,b)=>b.localeCompare(a));
-  const wkData = byWeek[wk]||{};
+  const [selectedWeek, setSelectedWeek] = useState(wk);
   const allTime = {};
   upsells.forEach(u=>{ allTime[u.tech_id]=(allTime[u.tech_id]||0)+u.amount; });
-  const ranked = [...techs].map(t=>({...t,week:wkData[t.id]||0,all:allTime[t.id]||0})).sort((a,b)=>b.week-a.week);
-  const top = ranked[0]?.week||1;
+
+  // Selected week data
+  const wkData = byWeek[selectedWeek]||{};
+  const ranked = [...techs].map(t=>({...t,amt:wkData[t.id]||0,all:allTime[t.id]||0})).sort((a,b)=>b.amt-a.amt);
+  const top = ranked[0]?.amt||1;
+  const weekTotal = ranked.reduce((s,t)=>s+t.amt,0);
+
   return (
-    <div style={{ display:"flex", flexDirection:"column", gap:"24px" }}>
-      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"6px", overflow:"hidden" }}>
-        <div style={{ padding:"14px 18px", borderBottom:`1px solid ${C.border}`, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-          <Label color={C.green}>💰 All-Time Totals</Label>
+    <div style={{ display:"flex", flexDirection:"column", gap:"20px" }}>
+
+      {/* Week selector */}
+      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"6px", padding:"14px 18px" }}>
+        <Label color={C.green}>📅 Select Week</Label>
+        <select
+          value={selectedWeek}
+          onChange={e=>setSelectedWeek(e.target.value)}
+          style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.white, padding:"10px 14px", borderRadius:"6px", fontSize:"14px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", width:"100%", cursor:"pointer" }}
+        >
+          {allWeeks.length === 0 && <option value={wk}>{formatWeekLabel(wk)} — Current Week</option>}
+          {allWeeks.map(w=>(
+            <option key={w} value={w}>{formatWeekLabel(w)}{w===wk?" — Current":""}</option>
+          ))}
+        </select>
+      </div>
+
+      {/* Selected week breakdown */}
+      <div style={{ background:C.card, border:`1px solid ${selectedWeek===wk?C.blue:C.border}`, borderTop:`3px solid ${C.green}`, borderRadius:"6px", overflow:"hidden" }}>
+        <div style={{ padding:"14px 18px", borderBottom:`1px solid ${C.border}`, background:C.cardLt, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+          <div>
+            <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"16px", color:C.white }}>{formatWeekLabel(selectedWeek)}</div>
+            {selectedWeek===wk&&<div style={{ fontSize:"10px", color:C.blue, letterSpacing:"1px", textTransform:"uppercase", marginTop:"2px" }}>Current Week</div>}
+          </div>
+          <div style={{ textAlign:"right" }}>
+            <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"24px", color:C.green }}>${weekTotal.toLocaleString()}</div>
+            <div style={{ fontSize:"10px", color:C.muted, letterSpacing:"1px" }}>TEAM TOTAL</div>
+          </div>
+        </div>
+        <div style={{ padding:"14px 18px", display:"flex", flexDirection:"column", gap:"10px" }}>
+          {ranked.map((t,idx)=>{
+            const isMe=t.id===currentId; const pct=top>0?Math.round((t.amt/top)*100):0;
+            return (
+              <div key={t.id} style={{ background:isMe?`${C.blue}18`:"transparent", border:isMe?`1px solid ${C.blue}44`:"1px solid transparent", borderRadius:"6px", padding:"10px 12px" }}>
+                <div style={{ display:"flex", alignItems:"center", gap:"12px", marginBottom:"8px" }}>
+                  <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:idx<3?"20px":"13px", color:C.muted, width:"26px", textAlign:"center" }}>{medal(idx)}</div>
+                  <div style={{ width:"36px", height:"36px", borderRadius:"50%", background:`${C.blue}22`, border:`1px solid ${C.blue}44`, display:"flex", alignItems:"center", justifyContent:"center", fontFamily:"'Barlow Condensed',sans-serif", fontSize:"12px", fontWeight:"800", color:C.blue, flexShrink:0 }}>{t.avatar}</div>
+                  <div style={{ flex:1 }}>
+                    <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"15px", color:C.white }}>{t.name}{isMe&&<span style={{ color:C.blue, fontSize:"11px", marginLeft:"6px" }}>YOU</span>}</div>
+                    <div style={{ fontSize:"11px", color:C.muted }}>+{Math.round(t.amt*UPSELL_PTS_PER_DOLLAR)} pts this week</div>
+                  </div>
+                  <div style={{ textAlign:"right" }}>
+                    <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"22px", color:t.amt>0?C.white:C.border }}>${t.amt.toLocaleString()}</div>
+                  </div>
+                </div>
+                <Bar pct={pct} color={C.green} h={4}/>
+              </div>
+            );
+          })}
+          {weekTotal===0&&<div style={{ fontSize:"13px", color:C.muted, textAlign:"center", padding:"12px" }}>No upsells logged for this week</div>}
+        </div>
+      </div>
+
+      {/* Running totals pinned at bottom */}
+      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.green}`, borderRadius:"6px", overflow:"hidden" }}>
+        <div style={{ padding:"14px 18px", borderBottom:`1px solid ${C.border}`, background:C.cardLt }}>
+          <Label color={C.green}>💰 Running Totals — All Time</Label>
         </div>
         <div style={{ padding:"14px 18px", display:"flex", flexDirection:"column", gap:"10px" }}>
           {[...techs].sort((a,b)=>(allTime[b.id]||0)-(allTime[a.id]||0)).map((t,i)=>{
-            const amt=allTime[t.id]||0; const pct=Math.round((amt/(Math.max(...techs.map(x=>allTime[x.id]||0))||1))*100);
+            const amt=allTime[t.id]||0; const topAmt=Math.max(...techs.map(x=>allTime[x.id]||0))||1; const pct=Math.round((amt/topAmt)*100);
             return (
               <div key={t.id}>
                 <div style={{ display:"flex", justifyContent:"space-between", marginBottom:"5px" }}>
                   <span style={{ fontSize:"13px", fontWeight:"600", color:t.id===currentId?C.blue:C.offWhite }}>{medal(i)} {t.name}{t.id===currentId?" — YOU":""}</span>
-                  <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"14px", color:C.white }}>${amt.toLocaleString()}</span>
-                </div>
-                <Bar pct={pct} color={C.green}/>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-      <div>
-        <Label>This Week · {formatWeekLabel(wk)}</Label>
-        <div style={{ display:"flex", flexDirection:"column", gap:"8px" }}>
-          {ranked.map((t,idx)=>{
-            const isMe=t.id===currentId; const pct=top>0?Math.round((t.week/top)*100):0;
-            return (
-              <div key={t.id} style={{ background:isMe?`${C.blue}18`:C.card, border:`1px solid ${isMe?C.blue:C.border}`, borderRadius:"6px", padding:"14px 18px" }}>
-                <div style={{ display:"flex", alignItems:"center", gap:"12px", marginBottom:"10px" }}>
-                  <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:idx<3?"22px":"14px", color:C.muted, width:"28px", textAlign:"center" }}>{medal(idx)}</div>
-                  <div style={{ width:"38px", height:"38px", borderRadius:"50%", background:`${C.blue}22`, border:`1px solid ${C.blue}44`, display:"flex", alignItems:"center", justifyContent:"center", fontFamily:"'Barlow Condensed',sans-serif", fontSize:"12px", fontWeight:"800", color:C.blue, flexShrink:0 }}>{t.avatar}</div>
-                  <div style={{ flex:1 }}>
-                    <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"16px", color:C.white }}>{t.name}{isMe&&<span style={{ color:C.blue, fontSize:"11px", letterSpacing:"1px", marginLeft:"6px" }}>YOU</span>}</div>
-                    <div style={{ fontSize:"11px", color:C.muted }}>All-time ${t.all.toLocaleString()} · {Math.round(t.all*UPSELL_PTS_PER_DOLLAR).toLocaleString()} pts</div>
-                  </div>
                   <div style={{ textAlign:"right" }}>
-                    <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"24px", color:t.week>0?C.white:C.border }}>${t.week.toLocaleString()}</div>
-                    <div style={{ fontSize:"11px", color:C.green }}>+{Math.round(t.week*UPSELL_PTS_PER_DOLLAR)} pts</div>
+                    <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"14px", color:C.white }}>${amt.toLocaleString()}</span>
+                    <span style={{ fontSize:"11px", color:C.green, marginLeft:"8px" }}>{Math.round(amt*UPSELL_PTS_PER_DOLLAR).toLocaleString()} pts</span>
                   </div>
                 </div>
                 <Bar pct={pct} color={C.green}/>
@@ -346,33 +382,6 @@ function UpsellLeaderboard({ techs, upsells, currentId }) {
           })}
         </div>
       </div>
-      {allWeeks.length>0&&(
-        <div>
-          <Label>Weekly History</Label>
-          <div style={{ display:"flex", flexDirection:"column", gap:"8px" }}>
-            {allWeeks.map(w=>{
-              const d=byWeek[w]||{}; const rows=[...techs].map(t=>({...t,amt:d[t.id]||0})).filter(t=>t.amt>0).sort((a,b)=>b.amt-a.amt); const total=rows.reduce((s,t)=>s+t.amt,0);
-              return (
-                <div key={w} style={{ background:C.card, border:`1px solid ${w===wk?C.blue:C.border}`, borderRadius:"6px", overflow:"hidden" }}>
-                  <div style={{ display:"flex", justifyContent:"space-between", padding:"10px 16px", borderBottom:`1px solid ${C.border}`, background:C.cardLt }}>
-                    <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", fontSize:"13px", color:C.white }}>{formatWeekLabel(w)}{w===wk&&<Pill color={C.blue}> CURRENT</Pill>}</span>
-                    <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"13px", color:C.green }}>${total.toLocaleString()}</span>
-                  </div>
-                  <div style={{ padding:"10px 16px", display:"flex", flexDirection:"column", gap:"4px" }}>
-                    {rows.map((t,i)=>(
-                      <div key={t.id} style={{ display:"flex", justifyContent:"space-between" }}>
-                        <span style={{ fontSize:"13px", color:C.offWhite }}>{medal(i)} {t.name}</span>
-                        <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"13px", color:C.white }}>${t.amt.toLocaleString()}</span>
-                      </div>
-                    ))}
-                    {rows.length===0&&<span style={{ fontSize:"12px", color:C.muted }}>No data</span>}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
     </div>
   );
 }
@@ -462,22 +471,83 @@ function ReviewLeaderboard({ techs, reviews, currentId }) {
   const byMonth = {};
   reviews.forEach(r=>{ if(!byMonth[r.month_key])byMonth[r.month_key]={}; byMonth[r.month_key][r.tech_id]=(byMonth[r.month_key][r.tech_id]||0)+r.count; });
   const allMonths = Object.keys(byMonth).sort((a,b)=>b.localeCompare(a));
-  const mData = byMonth[mk]||{};
+  const [selectedMonth, setSelectedMonth] = useState(mk);
   const allTime = {};
   reviews.forEach(r=>{ allTime[r.tech_id]=(allTime[r.tech_id]||0)+r.count; });
-  const ranked = [...techs].map(t=>({...t,month:mData[t.id]||0,all:allTime[t.id]||0})).sort((a,b)=>b.month-a.month);
-  const top = ranked[0]?.month||1;
+
+  const mData = byMonth[selectedMonth]||{};
+  const ranked = [...techs].map(t=>({...t,cnt:mData[t.id]||0})).sort((a,b)=>b.cnt-a.cnt);
+  const top = ranked[0]?.cnt||1;
+  const monthTotal = ranked.reduce((s,t)=>s+t.cnt,0);
+
   return (
-    <div style={{ display:"flex", flexDirection:"column", gap:"24px" }}>
-      <div style={{ background:`${C.gold}18`, border:`1px solid ${C.gold}44`, borderRadius:"6px", padding:"14px 18px", display:"flex", gap:"24px", flexWrap:"wrap" }}>
-        <div><span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"22px", color:C.gold }}>+{REVIEW_PTS}</span><span style={{ fontSize:"12px", color:C.muted, marginLeft:"6px" }}>pts per review</span></div>
-        <div><span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"22px", color:C.gold }}>+{REVIEW_BONUS_PTS}</span><span style={{ fontSize:"12px", color:C.muted, marginLeft:"6px" }}>bonus at 10+ in a month</span></div>
+    <div style={{ display:"flex", flexDirection:"column", gap:"20px" }}>
+      {/* Points info */}
+      <div style={{ background:`${C.gold}18`, border:`1px solid ${C.gold}44`, borderRadius:"6px", padding:"12px 18px", display:"flex", gap:"24px", flexWrap:"wrap" }}>
+        <div><span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"20px", color:C.gold }}>+{REVIEW_PTS}</span><span style={{ fontSize:"12px", color:C.muted, marginLeft:"6px" }}>pts per review</span></div>
+        <div><span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"20px", color:C.gold }}>+{REVIEW_BONUS_PTS}</span><span style={{ fontSize:"12px", color:C.muted, marginLeft:"6px" }}>bonus at 10+ in a month</span></div>
       </div>
-      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"6px", overflow:"hidden" }}>
-        <div style={{ padding:"14px 18px", borderBottom:`1px solid ${C.border}` }}><Label color={C.gold}>⭐ All-Time Reviews</Label></div>
+
+      {/* Month selector */}
+      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"6px", padding:"14px 18px" }}>
+        <Label color={C.gold}>📅 Select Month</Label>
+        <select
+          value={selectedMonth}
+          onChange={e=>setSelectedMonth(e.target.value)}
+          style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.white, padding:"10px 14px", borderRadius:"6px", fontSize:"14px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", width:"100%", cursor:"pointer" }}
+        >
+          {allMonths.length === 0 && <option value={mk}>{formatMonthLabel(mk)} — Current Month</option>}
+          {allMonths.map(m=>(
+            <option key={m} value={m}>{formatMonthLabel(m)}{m===mk?" — Current":""}</option>
+          ))}
+        </select>
+      </div>
+
+      {/* Selected month breakdown */}
+      <div style={{ background:C.card, border:`1px solid ${selectedMonth===mk?C.gold:C.border}`, borderTop:`3px solid ${C.gold}`, borderRadius:"6px", overflow:"hidden" }}>
+        <div style={{ padding:"14px 18px", borderBottom:`1px solid ${C.border}`, background:C.cardLt, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+          <div>
+            <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"16px", color:C.white }}>{formatMonthLabel(selectedMonth)}</div>
+            {selectedMonth===mk&&<div style={{ fontSize:"10px", color:C.gold, letterSpacing:"1px", textTransform:"uppercase", marginTop:"2px" }}>Current Month</div>}
+          </div>
+          <div style={{ textAlign:"right" }}>
+            <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"24px", color:C.gold }}>{monthTotal} ⭐</div>
+            <div style={{ fontSize:"10px", color:C.muted, letterSpacing:"1px" }}>TEAM TOTAL</div>
+          </div>
+        </div>
+        <div style={{ padding:"14px 18px", display:"flex", flexDirection:"column", gap:"10px" }}>
+          {ranked.map((t,idx)=>{
+            const isMe=t.id===currentId; const pct=top>0?Math.round((t.cnt/top)*100):0; const bonus=t.cnt>=10;
+            return (
+              <div key={t.id} style={{ background:isMe?`${C.blue}18`:"transparent", border:isMe?`1px solid ${C.blue}44`:"1px solid transparent", borderRadius:"6px", padding:"10px 12px" }}>
+                <div style={{ display:"flex", alignItems:"center", gap:"12px", marginBottom:"8px" }}>
+                  <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:idx<3?"20px":"13px", color:C.muted, width:"26px", textAlign:"center" }}>{medal(idx)}</div>
+                  <div style={{ width:"36px", height:"36px", borderRadius:"50%", background:`${C.blue}22`, border:`1px solid ${C.blue}44`, display:"flex", alignItems:"center", justifyContent:"center", fontFamily:"'Barlow Condensed',sans-serif", fontSize:"12px", fontWeight:"800", color:C.blue, flexShrink:0 }}>{t.avatar}</div>
+                  <div style={{ flex:1 }}>
+                    <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"15px", color:C.white }}>{t.name}{isMe&&<span style={{ color:C.blue, fontSize:"11px", marginLeft:"6px" }}>YOU</span>}</div>
+                    <div style={{ fontSize:"11px", color:C.muted }}>+{(t.cnt*REVIEW_PTS)+(bonus?REVIEW_BONUS_PTS:0)} pts{bonus?" 🔥":""}</div>
+                  </div>
+                  <div style={{ textAlign:"right" }}>
+                    <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"22px", color:t.cnt>0?C.gold:C.border }}>{t.cnt} ⭐</div>
+                  </div>
+                </div>
+                <Bar pct={pct} color={C.gold} h={4}/>
+                {bonus&&<div style={{ marginTop:"6px" }}><Pill color={C.gold}>🔥 Bonus unlocked</Pill></div>}
+              </div>
+            );
+          })}
+          {monthTotal===0&&<div style={{ fontSize:"13px", color:C.muted, textAlign:"center", padding:"12px" }}>No reviews logged for this month</div>}
+        </div>
+      </div>
+
+      {/* Running totals pinned at bottom */}
+      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.gold}`, borderRadius:"6px", overflow:"hidden" }}>
+        <div style={{ padding:"14px 18px", borderBottom:`1px solid ${C.border}`, background:C.cardLt }}>
+          <Label color={C.gold}>⭐ Running Totals — All Time</Label>
+        </div>
         <div style={{ padding:"14px 18px", display:"flex", flexDirection:"column", gap:"10px" }}>
           {[...techs].sort((a,b)=>(allTime[b.id]||0)-(allTime[a.id]||0)).map((t,i)=>{
-            const cnt=allTime[t.id]||0; const pct=Math.round((cnt/(Math.max(...techs.map(x=>allTime[x.id]||0))||1))*100);
+            const cnt=allTime[t.id]||0; const topCnt=Math.max(...techs.map(x=>allTime[x.id]||0))||1; const pct=Math.round((cnt/topCnt)*100);
             return (
               <div key={t.id}>
                 <div style={{ display:"flex", justifyContent:"space-between", marginBottom:"5px" }}>
@@ -485,32 +555,6 @@ function ReviewLeaderboard({ techs, reviews, currentId }) {
                   <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"14px", color:C.white }}>{cnt} ⭐</span>
                 </div>
                 <Bar pct={pct} color={C.gold}/>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-      <div>
-        <Label>This Month · {formatMonthLabel(mk)}</Label>
-        <div style={{ display:"flex", flexDirection:"column", gap:"8px" }}>
-          {ranked.map((t,idx)=>{
-            const isMe=t.id===currentId; const pct=top>0?Math.round((t.month/top)*100):0; const bonus=t.month>=10;
-            return (
-              <div key={t.id} style={{ background:isMe?`${C.blue}18`:C.card, border:`1px solid ${isMe?C.blue:C.border}`, borderRadius:"6px", padding:"14px 18px" }}>
-                <div style={{ display:"flex", alignItems:"center", gap:"12px", marginBottom:"10px" }}>
-                  <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:idx<3?"22px":"14px", color:C.muted, width:"28px", textAlign:"center" }}>{medal(idx)}</div>
-                  <div style={{ width:"38px", height:"38px", borderRadius:"50%", background:`${C.blue}22`, border:`1px solid ${C.blue}44`, display:"flex", alignItems:"center", justifyContent:"center", fontFamily:"'Barlow Condensed',sans-serif", fontSize:"12px", fontWeight:"800", color:C.blue, flexShrink:0 }}>{t.avatar}</div>
-                  <div style={{ flex:1 }}>
-                    <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"16px", color:C.white }}>{t.name}{isMe&&<span style={{ color:C.blue, fontSize:"11px", marginLeft:"6px" }}>YOU</span>}</div>
-                    <div style={{ fontSize:"11px", color:C.muted }}>All-time: {t.all} reviews</div>
-                  </div>
-                  <div style={{ textAlign:"right" }}>
-                    <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"24px", color:t.month>0?C.white:C.border }}>{t.month}</div>
-                    <div style={{ fontSize:"11px", color:C.gold }}>+{(t.month*REVIEW_PTS)+(bonus?REVIEW_BONUS_PTS:0)} pts{bonus?" 🔥":""}</div>
-                  </div>
-                </div>
-                <Bar pct={pct} color={C.gold}/>
-                {bonus&&<div style={{ marginTop:"8px" }}><Pill color={C.gold}>🔥 10+ bonus unlocked</Pill></div>}
               </div>
             );
           })}
@@ -958,8 +1002,312 @@ function TechDashboard({ tech, techs, upsells, switchovers, reviews, onLogout })
   );
 }
 
+
+// ─── RIDE-ALONG SYSTEM ────────────────────────────────────────────────────────
+const CHECKLIST_SECTIONS = [
+  {
+    id: "arrival",
+    title: "Arrival",
+    icon: "🚗",
+    items: [
+      { id:"uniform",  label:"Uniform clean and worn correctly?" },
+      { id:"ontime",   label:"Arrived on time or let client know they were late?" },
+      { id:"parked",   label:"Are they parked correctly and strategically?" },
+    ],
+  },
+  {
+    id: "cleaning",
+    title: "Cleaning",
+    icon: "🧹",
+    items: [
+      { id:"tote",     label:"Tote organized and no missing items?" },
+      { id:"swift",    label:"Are they working swiftly?" },
+      { id:"tools",    label:"Are they using the right tools and chemicals for the corresponding cleaning process?" },
+      { id:"pics",     label:"Did they take after pics and do all checklists?" },
+    ],
+    notes: [
+      { id:"faults",   label:"How is their cleaning technique? Name any faults:" },
+      { id:"wins",     label:"What are they succeeding with?" },
+    ],
+  },
+  {
+    id: "customer",
+    title: "Customer Interaction",
+    icon: "🤝",
+    items: [
+      { id:"knock",    label:"Did they knock on the door to try for an in-person walk through first?" },
+      { id:"video",    label:"If not, did they send a walk-through video of the interior and exterior?" },
+      { id:"payment",  label:"Did they have them pay on the phone right there or send the invoice before they left?" },
+      { id:"flyers",   label:"Did they hand out 3 flyers and a customer satisfaction card and attach pics to HCP?" },
+    ],
+  },
+];
+
+// Get all upcoming Thursdays
+function getThursdays(count = 12) {
+  const thursdays = [];
+  const now = new Date();
+  const day = now.getDay();
+  const daysUntilThursday = (4 - day + 7) % 7 || 7;
+  let next = new Date(now);
+  next.setDate(now.getDate() + daysUntilThursday);
+  for (let i = 0; i < count; i++) {
+    const d = new Date(next);
+    d.setDate(next.getDate() + i * 7);
+    thursdays.push(d.toISOString().split("T")[0]);
+  }
+  return thursdays;
+}
+
+function formatDate(dateStr) {
+  if (!dateStr) return "";
+  const d = new Date(dateStr + "T00:00:00");
+  return d.toLocaleDateString("en-US", { weekday:"long", month:"long", day:"numeric" });
+}
+
+function RideAlongTab({ techs, rideAlongs, schedules, onSave, onSaveSchedule, saving }) {
+  const [view, setView] = useState("schedule"); // "schedule" | "new" | "history" | "detail"
+  const [selectedTech, setSelectedTech] = useState("");
+  const [selectedDate, setSelectedDate] = useState("");
+  const [checklist, setChecklist] = useState({});
+  const [notes, setNotes] = useState({});
+  const [generalNotes, setGeneralNotes] = useState("");
+  const [viewDetail, setViewDetail] = useState(null);
+  const [scheduleMap, setScheduleMap] = useState({});
+  const thursdays = getThursdays(12);
+
+  // Load existing schedule into map
+  useEffect(() => {
+    const map = {};
+    schedules.forEach(s => { map[s.date] = s.tech_id; });
+    setScheduleMap(map);
+  }, [schedules]);
+
+  function resetForm() {
+    setChecklist({});
+    setNotes({});
+    setGeneralNotes("");
+    setSelectedTech("");
+    setSelectedDate("");
+  }
+
+  async function handleSaveRideAlong() {
+    if (!selectedTech || !selectedDate) return;
+    await onSave({
+      tech_id: selectedTech,
+      date: selectedDate,
+      checklist: JSON.stringify(checklist),
+      notes: JSON.stringify(notes),
+      general_notes: generalNotes,
+    });
+    resetForm();
+    setView("history");
+  }
+
+  async function handleScheduleChange(date, techId) {
+    const newMap = { ...scheduleMap, [date]: techId };
+    setScheduleMap(newMap);
+    await onSaveSchedule(date, techId);
+  }
+
+  const inp = { background:C.cardLt, border:`1px solid ${C.border}`, color:C.white, padding:"10px 14px", borderRadius:"6px", fontSize:"14px", fontFamily:"'Barlow',sans-serif", width:"100%", boxSizing:"border-box", resize:"vertical", minHeight:"80px" };
+  const selStyle = (val) => ({ background:C.cardLt, border:`1px solid ${C.border}`, color:val?C.white:C.muted, padding:"10px 14px", borderRadius:"6px", fontSize:"14px", fontFamily:"'Barlow',sans-serif", width:"100%", boxSizing:"border-box", cursor:"pointer" });
+
+  return (
+    <div style={{ display:"flex", flexDirection:"column", gap:"16px" }}>
+      {/* View switcher */}
+      <div style={{ display:"flex", gap:"8px", flexWrap:"wrap" }}>
+        {[["schedule","📅 Schedule"],["new","✏️ New Ride-Along"],["history","📋 History"]].map(([id,label])=>(
+          <button key={id} onClick={()=>{ setView(id); setViewDetail(null); }} style={{ background:view===id?C.blue:C.card, border:`1px solid ${view===id?C.blue:C.border}`, color:view===id?C.white:C.muted, padding:"8px 16px", borderRadius:"4px", cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", fontSize:"12px", letterSpacing:"1px", textTransform:"uppercase" }}>{label}</button>
+        ))}
+      </div>
+
+      {/* SCHEDULE VIEW */}
+      {view==="schedule"&&(
+        <div style={{ display:"flex", flexDirection:"column", gap:"10px" }}>
+          <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.blue}`, borderRadius:"6px", padding:"16px 18px" }}>
+            <Label color={C.blue}>📅 Thursday Ride-Along Schedule</Label>
+            <div style={{ fontSize:"12px", color:C.muted, marginBottom:"14px" }}>Assign a tech to each Thursday. This is your weekly coaching schedule.</div>
+            <div style={{ display:"flex", flexDirection:"column", gap:"8px" }}>
+              {thursdays.map(date=>{
+                const assignedId = scheduleMap[date];
+                const assignedTech = techs.find(t=>t.id===assignedId);
+                const isPast = new Date(date) < new Date(new Date().toISOString().split("T")[0]);
+                return (
+                  <div key={date} style={{ background:C.cardLt, border:`1px solid ${assignedId?C.blue:C.border}`, borderRadius:"6px", padding:"12px 16px", display:"flex", alignItems:"center", gap:"12px", opacity:isPast?0.6:1 }}>
+                    <div style={{ flex:1 }}>
+                      <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"15px", color:C.white }}>{formatDate(date)}</div>
+                      {isPast&&<div style={{ fontSize:"10px", color:C.muted, letterSpacing:"1px", textTransform:"uppercase" }}>Past</div>}
+                    </div>
+                    <select
+                      value={scheduleMap[date]||""}
+                      onChange={e=>handleScheduleChange(date,e.target.value)}
+                      style={{ background:C.card, border:`1px solid ${assignedId?C.blue:C.border}`, color:assignedId?C.blue:C.muted, padding:"6px 10px", borderRadius:"4px", fontSize:"13px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", cursor:"pointer", minWidth:"140px" }}
+                    >
+                      <option value="">— Assign Tech —</option>
+                      {techs.map(t=><option key={t.id} value={t.id}>{t.name}</option>)}
+                    </select>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Next up */}
+          {(() => {
+            const today = new Date().toISOString().split("T")[0];
+            const next = thursdays.find(d=>d>=today&&scheduleMap[d]);
+            if (!next) return null;
+            const tech = techs.find(t=>t.id===scheduleMap[next]);
+            return (
+              <div style={{ background:`${C.blue}18`, border:`1px solid ${C.blue}44`, borderRadius:"6px", padding:"16px 18px", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+                <div>
+                  <div style={{ fontSize:"10px", color:C.blue, letterSpacing:"2px", textTransform:"uppercase", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", marginBottom:"4px" }}>Next Ride-Along</div>
+                  <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"22px", color:C.white }}>{tech?.name}</div>
+                  <div style={{ fontSize:"13px", color:C.muted }}>{formatDate(next)}</div>
+                </div>
+                <button onClick={()=>{ setSelectedTech(scheduleMap[next]); setSelectedDate(next); setView("new"); }} style={{ background:C.blue, border:"none", color:C.white, padding:"10px 18px", borderRadius:"4px", cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"13px", letterSpacing:"1px" }}>START SESSION →</button>
+              </div>
+            );
+          })()}
+        </div>
+      )}
+
+      {/* NEW RIDE-ALONG FORM */}
+      {view==="new"&&(
+        <div style={{ display:"flex", flexDirection:"column", gap:"14px" }}>
+          <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.green}`, borderRadius:"6px", padding:"16px 18px", display:"flex", flexDirection:"column", gap:"12px" }}>
+            <Label color={C.green}>✏️ New Ride-Along Session</Label>
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"10px" }}>
+              <select value={selectedTech} onChange={e=>setSelectedTech(e.target.value)} style={selStyle(selectedTech)}>
+                <option value="">— Select Tech —</option>
+                {techs.map(t=><option key={t.id} value={t.id}>{t.name}</option>)}
+              </select>
+              <input type="date" value={selectedDate} onChange={e=>setSelectedDate(e.target.value)} style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:selectedDate?C.white:C.muted, padding:"10px 14px", borderRadius:"6px", fontSize:"14px", fontFamily:"'Barlow',sans-serif", width:"100%", boxSizing:"border-box" }}/>
+            </div>
+          </div>
+
+          {CHECKLIST_SECTIONS.map(section=>(
+            <div key={section.id} style={{ background:C.card, border:`1px solid ${C.border}`, borderLeft:`3px solid ${C.blue}`, borderRadius:"6px", padding:"16px 18px" }}>
+              <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"18px", color:C.white, letterSpacing:"2px", marginBottom:"14px" }}>{section.icon} {section.title.toUpperCase()}</div>
+              <div style={{ display:"flex", flexDirection:"column", gap:"10px" }}>
+                {section.items.map(item=>(
+                  <div key={item.id} style={{ display:"flex", alignItems:"flex-start", gap:"12px" }}>
+                    <div style={{ display:"flex", gap:"6px", flexShrink:0, marginTop:"2px" }}>
+                      {["✅","❌","N/A"].map(val=>(
+                        <button key={val} onClick={()=>setChecklist(c=>({...c,[section.id+"_"+item.id]:val}))}
+                          style={{ background:checklist[section.id+"_"+item.id]===val?( val==="✅"?`${C.green}33`:val==="❌"?"#ff444433":"#ffffff22"):C.cardLt, border:`1px solid ${checklist[section.id+"_"+item.id]===val?(val==="✅"?C.green:val==="❌"?C.red:C.muted):C.border}`, color:checklist[section.id+"_"+item.id]===val?(val==="✅"?C.green:val==="❌"?C.red:C.white):C.muted, padding:"3px 8px", borderRadius:"4px", cursor:"pointer", fontSize:"11px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", whiteSpace:"nowrap" }}>
+                          {val}
+                        </button>
+                      ))}
+                    </div>
+                    <div style={{ fontSize:"13px", color:C.offWhite, lineHeight:"1.4", paddingTop:"2px" }}>{item.label}</div>
+                  </div>
+                ))}
+                {section.notes?.map(note=>(
+                  <div key={note.id} style={{ marginTop:"4px" }}>
+                    <div style={{ fontSize:"12px", color:C.muted, marginBottom:"6px" }}>{note.label}</div>
+                    <textarea value={notes[section.id+"_"+note.id]||""} onChange={e=>setNotes(n=>({...n,[section.id+"_"+note.id]:e.target.value}))} placeholder="Type notes here..." style={{...inp, minHeight:"64px"}}/>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+
+          {/* General notes */}
+          <div style={{ background:C.card, border:`1px solid ${C.border}`, borderLeft:`3px solid ${C.gold}`, borderRadius:"6px", padding:"16px 18px" }}>
+            <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"18px", color:C.white, letterSpacing:"2px", marginBottom:"10px" }}>📝 GENERAL NOTES & COACHING POINTS</div>
+            <textarea value={generalNotes} onChange={e=>setGeneralNotes(e.target.value)} placeholder="Overall session notes, things to work on, wins, action items for next ride-along..." style={{...inp, minHeight:"100px"}}/>
+          </div>
+
+          <button onClick={handleSaveRideAlong} disabled={saving||!selectedTech||!selectedDate} style={{ background:saving||!selectedTech||!selectedDate?"#333":C.green, border:"none", color:saving||!selectedTech||!selectedDate?"#666":C.black, padding:"14px", borderRadius:"6px", cursor:saving||!selectedTech||!selectedDate?"not-allowed":"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"14px", letterSpacing:"2px", textTransform:"uppercase" }}>
+            {saving?"SAVING...":"SAVE RIDE-ALONG SESSION"}
+          </button>
+        </div>
+      )}
+
+      {/* HISTORY VIEW */}
+      {view==="history"&&!viewDetail&&(
+        <div style={{ display:"flex", flexDirection:"column", gap:"10px" }}>
+          <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.purple}`, borderRadius:"6px", padding:"16px 18px" }}>
+            <Label color={C.purple}>📋 Ride-Along History</Label>
+            {rideAlongs.length===0&&<div style={{ fontSize:"13px", color:C.muted }}>No ride-alongs logged yet.</div>}
+            {[...rideAlongs].sort((a,b)=>b.date.localeCompare(a.date)).map(ra=>{
+              const tech = techs.find(t=>t.id===ra.tech_id);
+              const cl = ra.checklist ? JSON.parse(ra.checklist) : {};
+              const passed = Object.values(cl).filter(v=>v==="✅").length;
+              const failed = Object.values(cl).filter(v=>v==="❌").length;
+              const total = Object.values(cl).length;
+              return (
+                <div key={ra.id} onClick={()=>setViewDetail(ra)} style={{ background:C.cardLt, border:`1px solid ${C.border}`, borderRadius:"6px", padding:"14px 16px", marginBottom:"8px", cursor:"pointer", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                  <div>
+                    <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"16px", color:C.white }}>{tech?.name}</div>
+                    <div style={{ fontSize:"12px", color:C.muted }}>{formatDate(ra.date)}</div>
+                    {total>0&&<div style={{ fontSize:"11px", color:C.muted, marginTop:"3px" }}><span style={{ color:C.green }}>✅ {passed}</span> passed · <span style={{ color:C.red }}>❌ {failed}</span> failed</div>}
+                  </div>
+                  <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", fontSize:"12px", color:C.blue, letterSpacing:"1px" }}>VIEW →</div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* DETAIL VIEW */}
+      {view==="history"&&viewDetail&&(
+        <div style={{ display:"flex", flexDirection:"column", gap:"14px" }}>
+          <button onClick={()=>setViewDetail(null)} style={{ background:"none", border:`1px solid ${C.border}`, color:C.muted, padding:"8px 16px", borderRadius:"4px", cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", fontSize:"12px", letterSpacing:"1px", alignSelf:"flex-start" }}>← BACK TO HISTORY</button>
+          {(() => {
+            const tech = techs.find(t=>t.id===viewDetail.tech_id);
+            const cl = viewDetail.checklist ? JSON.parse(viewDetail.checklist) : {};
+            const notes = viewDetail.notes ? JSON.parse(viewDetail.notes) : {};
+            return (
+              <>
+                <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.purple}`, borderRadius:"6px", padding:"16px 18px" }}>
+                  <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"22px", color:C.white }}>{tech?.name}</div>
+                  <div style={{ fontSize:"13px", color:C.muted }}>{formatDate(viewDetail.date)}</div>
+                </div>
+                {CHECKLIST_SECTIONS.map(section=>(
+                  <div key={section.id} style={{ background:C.card, border:`1px solid ${C.border}`, borderLeft:`3px solid ${C.blue}`, borderRadius:"6px", padding:"16px 18px" }}>
+                    <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"16px", color:C.white, letterSpacing:"2px", marginBottom:"12px" }}>{section.icon} {section.title.toUpperCase()}</div>
+                    {section.items.map(item=>{
+                      const val = cl[section.id+"_"+item.id];
+                      return (
+                        <div key={item.id} style={{ display:"flex", alignItems:"center", gap:"10px", marginBottom:"8px" }}>
+                          <span style={{ fontSize:"14px", flexShrink:0 }}>{val||"—"}</span>
+                          <span style={{ fontSize:"13px", color:C.offWhite }}>{item.label}</span>
+                        </div>
+                      );
+                    })}
+                    {section.notes?.map(note=>{
+                      const val = notes[section.id+"_"+note.id];
+                      if (!val) return null;
+                      return (
+                        <div key={note.id} style={{ marginTop:"8px", background:C.cardLt, borderRadius:"4px", padding:"10px 12px" }}>
+                          <div style={{ fontSize:"11px", color:C.muted, marginBottom:"4px" }}>{note.label}</div>
+                          <div style={{ fontSize:"13px", color:C.offWhite, lineHeight:"1.5", whiteSpace:"pre-wrap" }}>{val}</div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ))}
+                {viewDetail.general_notes&&(
+                  <div style={{ background:C.card, border:`1px solid ${C.border}`, borderLeft:`3px solid ${C.gold}`, borderRadius:"6px", padding:"16px 18px" }}>
+                    <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"16px", color:C.white, letterSpacing:"2px", marginBottom:"10px" }}>📝 GENERAL NOTES</div>
+                    <div style={{ fontSize:"13px", color:C.offWhite, lineHeight:"1.6", whiteSpace:"pre-wrap" }}>{viewDetail.general_notes}</div>
+                  </div>
+                )}
+              </>
+            );
+          })()}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── ADMIN PANEL ──────────────────────────────────────────────────────────────
-function AdminPanel({ techs, upsells, switchovers, reviews, onLogout, refreshAll }) {
+function AdminPanel({ techs, upsells, switchovers, reviews, rideAlongs, schedules, onLogout, refreshAll }) {
   const [tab, setTab] = useState("upsells");
   const [awardForm, setAwardForm] = useState({techId:"",badgeId:""});
   const [addForm, setAddForm] = useState({name:"",pin:"",avatar:"",start_date:""});
@@ -1035,7 +1383,7 @@ function AdminPanel({ techs, upsells, switchovers, reviews, onLogout, refreshAll
     <div style={{ minHeight:"100vh", background:C.dark }}>
       <style>{GS}</style>
       <Header title="Admin Panel" subtitle="Skylo Standard Board" right={<LogoutBtn onLogout={onLogout}/>}/>
-      <TabBar tabs={[["upsells","Upsells"],["reviews","⭐ Reviews"],["switchovers","Converts"],["award","Award Badge"],["add","Add Tech"],["manage","Manage"],["journey","🗺️ Journey"],["incentive","🎁 Rewards"]]} active={tab} setActive={setTab} accent={C.green}/>
+      <TabBar tabs={[["upsells","Upsells"],["reviews","⭐ Reviews"],["switchovers","Converts"],["award","Award Badge"],["add","Add Tech"],["manage","Manage"],["journey","🗺️ Journey"],["incentive","🎁 Rewards"],["ridealong","🚗 Ride-Alongs"]]} active={tab} setActive={setTab} accent={C.green}/>
       <div style={{ padding:"20px", maxWidth:"700px", margin:"0 auto" }}>
 
         {tab==="upsells"&&(
@@ -1172,6 +1520,29 @@ function AdminPanel({ techs, upsells, switchovers, reviews, onLogout, refreshAll
           </div>
         )}
 
+        {tab==="ridealong"&&(
+          <RideAlongTab
+            techs={techs}
+            rideAlongs={rideAlongs||[]}
+            schedules={schedules||[]}
+            saving={saving}
+            onSave={async(data)=>{
+              setSaving(true);
+              try { await sb("ride_alongs",{method:"POST",body:JSON.stringify(data)}); await refreshAll(); showToast("✅ Ride-along saved!"); }
+              catch(e){ showToast("Error: "+e.message,false); }
+              setSaving(false);
+            }}
+            onSaveSchedule={async(date,techId)=>{
+              try {
+                const existing = await sb(`ride_along_schedule?date=eq.${date}&select=id`);
+                if(existing&&existing.length>0) await sb(`ride_along_schedule?id=eq.${existing[0].id}`,{method:"PATCH",body:JSON.stringify({tech_id:techId||null}),prefer:"return=minimal"});
+                else if(techId) await sb("ride_along_schedule",{method:"POST",body:JSON.stringify({date,tech_id:techId})});
+                await refreshAll();
+              } catch(e){ showToast("Error saving schedule: "+e.message,false); }
+            }}
+          />
+        )}
+
       </div>
       {toast&&(
         <div style={{ position:"fixed", bottom:"24px", left:"50%", transform:"translateX(-50%)", background:toast.ok?C.green:"#ff4444", color:toast.ok?C.black:C.white, padding:"12px 24px", borderRadius:"6px", fontSize:"14px", fontWeight:"700", zIndex:999, whiteSpace:"nowrap", fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:"1px" }}>
@@ -1188,14 +1559,24 @@ export default function App() {
   const [upsells, setUpsells] = useState([]);
   const [switchovers, setSwitchovers] = useState([]);
   const [reviews, setReviews] = useState([]);
+  const [rideAlongs, setRideAlongs] = useState([]);
+  const [schedules, setSchedules] = useState([]);
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [dbError, setDbError] = useState(null);
 
   const loadAll = useCallback(async () => {
     try {
-      const [t,u,s,r] = await Promise.all([sb("techs?select=*&order=name"),sb("upsells?select=*"),sb("switchovers?select=*"),sb("reviews?select=*")]);
+      const [t,u,s,r,ra,sch] = await Promise.all([
+        sb("techs?select=*&order=name"),
+        sb("upsells?select=*"),
+        sb("switchovers?select=*"),
+        sb("reviews?select=*"),
+        sb("ride_alongs?select=*&order=date.desc").catch(()=>[]),
+        sb("ride_along_schedule?select=*").catch(()=>[]),
+      ]);
       setTechs(t||[]); setUpsells(u||[]); setSwitchovers(s||[]); setReviews(r||[]);
+      setRideAlongs(ra||[]); setSchedules(sch||[]);
       return true;
     } catch(e) { setDbError(e.message); return false; }
   }, []);
@@ -1258,6 +1639,7 @@ create policy "public access" on reviews for all using (true) with check (true);
   if (user.type==="admin") return (
     <AdminPanel techs={techs} setTechs={setTechs} upsells={upsells} setUpsells={setUpsells}
       switchovers={switchovers} setSwitchovers={setSwitchovers} reviews={reviews} setReviews={setReviews}
+      rideAlongs={rideAlongs} schedules={schedules}
       onLogout={()=>setUser(null)} refreshAll={loadAll}/>
   );
   if (user.type==="tech"&&currentTech) return (
