@@ -2056,6 +2056,25 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
     try { await sb(`techs?id=eq.${techId}`,{method:"PATCH",body:JSON.stringify({start_date:date||null}),prefer:"return=minimal"}); await refreshAll(); showToast("✅ Start date saved!"); }
     catch(e){ showToast("Error: "+e.message,false); }
   }
+  async function deleteTech(tech) {
+    const confirmed = window.confirm(`⚠️ Delete ${tech.name}?\n\nThis will permanently remove them AND all their upsells, reviews, switchovers, and callbacks. This cannot be undone.`);
+    if (!confirmed) return;
+    setSaving(true);
+    try {
+      // Delete all associated data first
+      await Promise.all([
+        sb(`upsells?tech_id=eq.${tech.id}`,{method:"DELETE",prefer:"return=minimal"}),
+        sb(`reviews?tech_id=eq.${tech.id}`,{method:"DELETE",prefer:"return=minimal"}),
+        sb(`switchovers?tech_id=eq.${tech.id}`,{method:"DELETE",prefer:"return=minimal"}),
+        sb(`callbacks?tech_id=eq.${tech.id}`,{method:"DELETE",prefer:"return=minimal"}).catch(()=>{}),
+      ]);
+      // Then delete the tech
+      await sb(`techs?id=eq.${tech.id}`,{method:"DELETE",prefer:"return=minimal"});
+      await refreshAll();
+      showToast(`🗑️ ${tech.name} removed`);
+    } catch(e){ showToast("Error: "+e.message,false); }
+    setSaving(false);
+  }
   async function saveUpsells() {
     const wk=getWeekKey(); setSaving(true);
     try {
@@ -2247,6 +2266,11 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
                       <button onClick={()=>revokeBadge(t.id,bid)} style={{ background:"none", border:"none", color:"#ff4444", cursor:"pointer", fontSize:"13px", lineHeight:1, padding:"0 0 0 2px" }}>×</button>
                     </span>
                   ):null; })}
+                </div>
+                <div style={{ marginTop:"12px", paddingTop:"12px", borderTop:`1px solid ${C.border}` }}>
+                  <button onClick={()=>deleteTech(t)} disabled={saving} style={{ background:"none", border:"1px solid #ef4444", color:"#ef4444", padding:"7px 16px", borderRadius:"8px", cursor:saving?"not-allowed":"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"12px", letterSpacing:"1px", textTransform:"uppercase" }}>
+                    🗑️ Remove {t.name} from Skylo
+                  </button>
                 </div>
               </div>
             ))}
