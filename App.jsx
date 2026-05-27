@@ -1391,17 +1391,17 @@ function TechDashboard({ tech, techs, upsells, switchovers, reviews, callbacks, 
         {tab==="upsells"&&<UpsellLeaderboard techs={techs} upsells={upsells} currentId={tech.id}/>}
         {tab==="switchovers"&&<SwitchoverLeaderboard techs={techs} switchovers={switchovers} currentId={tech.id}/>}
         {tab==="reviews"&&<ReviewLeaderboard techs={techs} reviews={reviews} currentId={tech.id}/>}
-        {tab==="total"&&<TotalLeaderboard techs={techs} upsells={upsells} switchovers={switchovers} reviews={reviews} callbacks={callbacks||[]}/}
+        {tab==="total"&&<TotalLeaderboard techs={techs} upsells={upsells} switchovers={switchovers} reviews={reviews} callbacks={callbacks||[]}/>}
         {tab==="journey"&&(
           <div>
             <div style={{ fontSize:"13px", color:C.muted, marginBottom:"16px" }}>Tap any card to expand full breakdown.</div>
-            <JourneyBoard techs={techs} upsells={upsells} switchovers={switchovers} reviews={reviews} quota={q} callbacks={callbacks||[]}/
+            <JourneyBoard techs={techs} upsells={upsells} switchovers={switchovers} reviews={reviews} quota={q} callbacks={callbacks||[]}/>
           </div>
         )}
         {tab==="incentive"&&(
           <div>
             <div style={{ fontSize:"13px", color:C.muted, marginBottom:"16px" }}>Your personal progress toward each reward tier.</div>
-            <IncentiveBoard techs={techs} upsells={upsells} switchovers={switchovers} reviews={reviews} callbacks={callbacks||[]} currentId={tech.id}/
+            <IncentiveBoard techs={techs} upsells={upsells} switchovers={switchovers} reviews={reviews} callbacks={callbacks||[]} currentId={tech.id}/>
           </div>
         )}
       </div>
@@ -2260,7 +2260,7 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
         {tab==="journey"&&(
           <div>
             <div style={{ fontSize:"13px", color:C.muted, marginBottom:"16px" }}>Tap any card to expand full breakdown.</div>
-            <JourneyBoard techs={techs} upsells={upsells} switchovers={switchovers} reviews={reviews} quota={quota} callbacks={callbacks||[]}/
+            <JourneyBoard techs={techs} upsells={upsells} switchovers={switchovers} reviews={reviews} quota={quota} callbacks={callbacks||[]}/>
           </div>
         )}
         {tab==="kyle"&&(
@@ -2272,7 +2272,7 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
         {tab==="incentive"&&(
           <div>
             <div style={{ fontSize:"13px", color:C.muted, marginBottom:"16px" }}>Team rewards overview — all tiers and prizes.</div>
-            <IncentiveBoard techs={techs} upsells={upsells} switchovers={switchovers} reviews={reviews} callbacks={callbacks||[]} currentId={null}/
+            <IncentiveBoard techs={techs} upsells={upsells} switchovers={switchovers} reviews={reviews} callbacks={callbacks||[]} currentId={null}/>
           </div>
         )}
 
