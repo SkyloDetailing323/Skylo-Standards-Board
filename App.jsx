@@ -131,16 +131,18 @@ const calcBadgePts = (badges) => (badges||[]).reduce((s,id) => s+(BADGE_MAP[id]?
 const medal = (i) => i===0?"🥇":i===1?"🥈":i===2?"🥉":`#${i+1}`;
 
 function getWeekKey() {
-  // Week runs Monday–Sunday, rolls at midnight MT (UTC-6 MDT / UTC-7 MST)
-  // Use UTC-6 (MDT summer) for Utah
+  // Week runs Mon–Sun, resets at Monday 12:00am MT (UTC-6 MDT)
   const mtOffset = 6 * 60 * 60 * 1000;
   const mt = new Date(Date.now() - mtOffset);
-  // Get Monday of current MT week
-  const day = mt.getDay(); // 0=Sun, 1=Mon...
-  const daysToMonday = day === 0 ? 6 : day - 1; // Sunday rolls back 6 to last Monday
+  const day = mt.getDay(); // 0=Sun,1=Mon,2=Tue...6=Sat
+  // Days since last Monday (Sunday counts as 6 days after Monday)
+  const daysBack = day === 0 ? 6 : day - 1;
   const monday = new Date(mt);
-  monday.setDate(mt.getDate() - daysToMonday);
-  return `${monday.getFullYear()}-${String(monday.getMonth()+1).padStart(2,"0")}-${String(monday.getDate()).padStart(2,"0")}`;
+  monday.setDate(mt.getDate() - daysBack);
+  const y = monday.getFullYear();
+  const m = String(monday.getMonth()+1).padStart(2,"0");
+  const d = String(monday.getDate()).padStart(2,"0");
+  return `${y}-${m}-${d}`;
 }
 function getMonthKey() {
   const now = new Date();
