@@ -45,6 +45,7 @@ const ADMIN_PIN = "0000";
 const UPSELL_PTS_PER_DOLLAR = 1.0;
 const REVIEW_PTS = 12;
 const REVIEW_BONUS_PTS = 40;
+const CALLBACK_PTS = -300; // deducted per callback — nearly a full week of work
 
 // ─── QUOTA CONFIG (Kyle sets these in admin) ──────────────────────────────────
 const DEFAULT_QUOTA = {
@@ -130,9 +131,16 @@ const calcBadgePts = (badges) => (badges||[]).reduce((s,id) => s+(BADGE_MAP[id]?
 const medal = (i) => i===0?"🥇":i===1?"🥈":i===2?"🥉":`#${i+1}`;
 
 function getWeekKey() {
-  const now = new Date(), start = new Date(now);
-  start.setDate(now.getDate()-now.getDay());
-  return `${start.getFullYear()}-${String(start.getMonth()+1).padStart(2,"0")}-${String(start.getDate()).padStart(2,"0")}`;
+  // Week runs Monday–Sunday, rolls at midnight MT (UTC-6 MDT / UTC-7 MST)
+  // Use UTC-6 (MDT summer) for Utah
+  const mtOffset = 6 * 60 * 60 * 1000;
+  const mt = new Date(Date.now() - mtOffset);
+  // Get Monday of current MT week
+  const day = mt.getDay(); // 0=Sun, 1=Mon...
+  const daysToMonday = day === 0 ? 6 : day - 1; // Sunday rolls back 6 to last Monday
+  const monday = new Date(mt);
+  monday.setDate(mt.getDate() - daysToMonday);
+  return `${monday.getFullYear()}-${String(monday.getMonth()+1).padStart(2,"0")}-${String(monday.getDate()).padStart(2,"0")}`;
 }
 function getMonthKey() {
   const now = new Date();
@@ -156,7 +164,7 @@ function formatTenure(startDate) {
   const yrs = Math.floor(days/365), mos = Math.floor((days%365)/30);
   return mos > 0 ? `${yrs}yr ${mos}mo` : `${yrs}yr`;
 }
-function calcTotals(tech, upsells, switchovers, reviews) {
+function calcTotals(tech, upsells, switchovers, reviews, callbacks=[]) {
   const badgePts = calcBadgePts(tech.badges);
   const upsellAmt = upsells.filter(u=>u.tech_id===tech.id).reduce((s,u)=>s+u.amount,0);
   const upsellPts = Math.round(upsellAmt*UPSELL_PTS_PER_DOLLAR);
@@ -164,8 +172,10 @@ function calcTotals(tech, upsells, switchovers, reviews) {
   const byMonth = {};
   reviews.filter(r=>r.tech_id===tech.id).forEach(r=>{ byMonth[r.month_key]=(byMonth[r.month_key]||0)+r.count; });
   const reviewPts = Object.values(byMonth).reduce((s,cnt)=>s+(cnt*REVIEW_PTS)+(cnt>=10?REVIEW_BONUS_PTS:0),0);
-  const total = badgePts+upsellPts+switchPts+reviewPts;
-  return { badgePts, upsellAmt, upsellPts, switchPts, reviewPts, total };
+  const callbackCount = callbacks.filter(c=>c.tech_id===tech.id).length;
+  const callbackPts = callbackCount * CALLBACK_PTS;
+  const total = Math.max(0, badgePts+upsellPts+switchPts+reviewPts+callbackPts);
+  return { badgePts, upsellAmt, upsellPts, switchPts, reviewPts, callbackPts, callbackCount, total };
 }
 
 // ─── WEEKLY PAY CALCULATOR ────────────────────────────────────────────────────
@@ -178,34 +188,21 @@ const PAY_TIERS = [
 ];
 
 function calcWeeklyPay(weeklyUpsellAmt) {
-  let remaining = weeklyUpsellAmt;
-  let totalPay = 0;
-  const breakdown = [];
-  const brackets = [
-    { floor: 0,   ceil: 150,  rate: 0.15 },
-    { floor: 150, ceil: 300,  rate: 0.20 },
-    { floor: 300, ceil: 450,  rate: 0.25 },
-    { floor: 450, ceil: 700,  rate: 0.30 },
-    { floor: 700, ceil: Infinity, rate: 0.30 },
-  ];
-  for (const b of brackets) {
-    if (remaining <= 0) break;
-    const inBracket = Math.min(remaining, b.ceil === Infinity ? remaining : b.ceil - b.floor);
-    const pay = inBracket * b.rate;
-    if (inBracket > 0) {
-      totalPay += pay;
-      breakdown.push({ label: b.ceil === Infinity ? `$${b.floor}+` : `$${b.floor}–$${b.ceil}`, rate: b.rate, revenue: inBracket, pay });
-    }
-    remaining -= inBracket;
-  }
-  return { totalPay, breakdown };
+  // Unlock rate — once you hit a tier, that rate applies to your ENTIRE week (backfilled)
+  let rate;
+  if      (weeklyUpsellAmt >= 450) rate = 0.30;
+  else if (weeklyUpsellAmt >= 300) rate = 0.25;
+  else if (weeklyUpsellAmt >= 150) rate = 0.20;
+  else                              rate = 0.15;
+  const totalPay = weeklyUpsellAmt * rate;
+  return { totalPay, rate };
 }
 
 function getNextPayTier(weeklyAmt) {
-  if (weeklyAmt < 150) return { threshold: 150, rate: 0.20, label: "20% bracket", amt: 150 - weeklyAmt };
-  if (weeklyAmt < 300) return { threshold: 300, rate: 0.25, label: "25% bracket", amt: 300 - weeklyAmt };
-  if (weeklyAmt < 450) return { threshold: 450, rate: 0.30, label: "30% bracket", amt: 450 - weeklyAmt };
-  return null;
+  if (weeklyAmt < 150) return { amt: 150 - weeklyAmt, rate: 0.20, label: "20% on your whole week" };
+  if (weeklyAmt < 300) return { amt: 300 - weeklyAmt, rate: 0.25, label: "25% on your whole week" };
+  if (weeklyAmt < 450) return { amt: 450 - weeklyAmt, rate: 0.30, label: "30% on your whole week" };
+  return { amt: null, rate: 0.30, label: "MAX RATE — 30% on your whole week 🔥" };
 }
 
 
@@ -663,7 +660,7 @@ function ReviewLeaderboard({ techs, reviews, currentId }) {
 
 // ─── TOTAL LEADERBOARD ────────────────────────────────────────────────────────
 function TotalLeaderboard({ techs, upsells, switchovers, reviews }) {
-  const ranked = [...techs].map(t=>{ const tt=calcTotals(t,upsells,switchovers,reviews); return {...t,...tt,tier:getTier(tt.total)}; }).sort((a,b)=>b.total-a.total);
+  const ranked = [...techs].map(t=>{ const tt=calcTotals(t,upsells,switchovers,reviews,callbacks||[]); return {...t,...tt,tier:getTier(tt.total)}; }).sort((a,b)=>b.total-a.total);
   const top = ranked[0]?.total||1;
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:"8px" }}>
@@ -709,7 +706,7 @@ function JourneyBoard({ techs, upsells, switchovers, reviews, quota }) {
   const [selected, setSelected] = useState(null);
   const mk = getMonthKey();
   const ranked = [...techs].map(t=>{
-    const tt=calcTotals(t,upsells,switchovers,reviews);
+    const tt=calcTotals(t,upsells,switchovers,reviews,callbacks||[]);
     const tier=getTier(tt.total);
     const nextTier=JOURNEY_TIERS.find(t2=>t2.minPts>tt.total);
     const ptsToNext=nextTier?nextTier.minPts-tt.total:0;
@@ -858,30 +855,47 @@ function JourneyCard({ tech, rank, total, onClick, expanded, upsells, quota }) {
                 <span style={{ fontSize:"12px", color:C.muted }}>Week upsells</span>
                 <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"20px", color:C.black }}>${weekUpsellAmt.toLocaleString()}</span>
               </div>
+              {/* Pay scale — backfill display */}
               <div style={{ display:"flex", flexDirection:"column", gap:"4px", marginBottom:"8px" }}>
-                {[
-                  { floor:0,   ceil:150,  rate:"15%", label:"$0–$150" },
-                  { floor:150, ceil:300,  rate:"20%", label:"$150–$300" },
-                  { floor:300, ceil:450,  rate:"25%", label:"$300–$450" },
-                  { floor:450, ceil:700,  rate:"30%", label:"$450–$700" },
-                ].map(b=>{
-                  const active = weekUpsellAmt > b.floor;
-                  const current = weekUpsellAmt >= b.floor && weekUpsellAmt < b.ceil;
-                  return (
-                    <div key={b.label} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", background:current?`${C.green}22`:active?`${C.green}10`:"transparent", border:current?`1px solid ${C.green}55`:"1px solid transparent", borderRadius:"4px", padding:"4px 8px" }}>
-                      <span style={{ fontSize:"11px", color:current?C.green:active?C.black:C.muted, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:current?"800":"600" }}>{b.label}</span>
-                      <span style={{ fontSize:"11px", color:current?C.green:active?C.black:C.muted, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800" }}>{b.rate}{current?" ← YOU":""}</span>
-                    </div>
-                  );
-                })}
+                {(()=>{
+                  const { rate } = calcWeeklyPay(weekUpsellAmt);
+                  const currentPct = Math.round(rate*100);
+                  return [
+                    { floor:0,   ceil:150,      baseRate:15, label:"$0–$149"   },
+                    { floor:150, ceil:300,       baseRate:20, label:"$150–$299" },
+                    { floor:300, ceil:450,       baseRate:25, label:"$300–$449" },
+                    { floor:450, ceil:Infinity,  baseRate:30, label:"$450+"     },
+                  ].map(b=>{
+                    const isCurrent    = weekUpsellAmt >= b.floor && (b.ceil===Infinity ? true : weekUpsellAmt < b.ceil);
+                    const isPast       = b.ceil !== Infinity && weekUpsellAmt >= b.ceil;
+                    const isLocked     = weekUpsellAmt < b.floor;
+                    const backfilled   = isPast && currentPct > b.baseRate;
+                    const displayRate  = isLocked ? b.baseRate : currentPct;
+                    return (
+                      <div key={b.label} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", background:isCurrent?`${C.green}22`:isPast?`${C.green}08`:"transparent", border:isCurrent?`1px solid ${C.green}55`:"1px solid transparent", borderRadius:"6px", padding:"6px 10px" }}>
+                        <div style={{ display:"flex", alignItems:"center", gap:"6px" }}>
+                          <span style={{ fontSize:"11px", color:isCurrent?C.green:isPast?C.black:C.muted, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:isCurrent?"900":"600" }}>{b.label}</span>
+                          {isCurrent && <span style={{ fontSize:"9px", background:C.green, color:C.white, borderRadius:"8px", padding:"1px 7px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900" }}>YOUR TIER</span>}
+                          {backfilled && <span style={{ fontSize:"9px", background:`${C.green}22`, color:C.green, borderRadius:"8px", padding:"1px 7px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800" }}>↑ BACKFILLED</span>}
+                        </div>
+                        <div style={{ display:"flex", alignItems:"center", gap:"5px" }}>
+                          {backfilled && <span style={{ fontSize:"10px", color:C.muted, textDecoration:"line-through", fontFamily:"'Barlow Condensed',sans-serif" }}>{b.baseRate}%</span>}
+                          <span style={{ fontSize:"13px", color:isLocked?C.muted:C.green, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900" }}>{displayRate}%</span>
+                        </div>
+                      </div>
+                    );
+                  });
+                })()}
               </div>
               <div style={{ borderTop:`1px solid ${C.green}33`, paddingTop:"8px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-                <span style={{ fontSize:"12px", color:C.muted }}>Est. upsell bonus</span>
+                <span style={{ fontSize:"12px", color:C.muted }}>Est. upsell bonus <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", color:C.black }}>({Math.round(calcWeeklyPay(weekUpsellAmt).rate*100)}% × ${weekUpsellAmt})</span></span>
                 <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"22px", color:C.green }}>${totalPay.toFixed(2)}</span>
               </div>
               {nextPayTier&&(
-                <div style={{ marginTop:"8px", background:`${C.gold}18`, border:`1px solid ${C.gold}44`, borderRadius:"8px", padding:"6px 10px", fontSize:"11px", color:C.gold, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>
-                  💡 Upsell ${nextPayTier.amt.toFixed(0)} more this week to hit {nextPayTier.label}
+                <div style={{ marginTop:"8px", background:nextPayTier.amt===null?`${C.green}18`:`${C.gold}18`, border:`1px solid ${nextPayTier.amt===null?C.green:C.gold}44`, borderRadius:"8px", padding:"6px 10px", fontSize:"11px", color:nextPayTier.amt===null?C.green:C.gold, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>
+                  {nextPayTier.amt===null
+                    ? `🔥 ${nextPayTier.label}`
+                    : `💡 Upsell $${nextPayTier.amt.toFixed(0)} more to unlock ${nextPayTier.label}`}
                 </div>
               )}
             </div>
@@ -1168,7 +1182,7 @@ function IncentiveBoard({ techs, upsells, switchovers, reviews, currentId }) {
         const myTotal = currentId ? (() => {
           const tech = techs?.find(t=>t.id===currentId);
           if (!tech) return 0;
-          return calcTotals(tech, upsells, switchovers, reviews).total;
+          return calcTotals(tech, upsells, switchovers, reviews, callbacks).total;
         })() : null;
         const unlocked = myTotal !== null && myTotal >= tier.pts;
         const progress = myTotal !== null ? Math.min(Math.round((myTotal / tier.pts) * 100), 100) : null;
@@ -1231,13 +1245,13 @@ function IncentiveBoard({ techs, upsells, switchovers, reviews, currentId }) {
 }
 
 // ─── TECH DASHBOARD ───────────────────────────────────────────────────────────
-function TechDashboard({ tech, techs, upsells, switchovers, reviews, quota, onLogout }) {
+function TechDashboard({ tech, techs, upsells, switchovers, reviews, callbacks, quota, onLogout }) {
   const q = quota || DEFAULT_QUOTA;
   const [tab, setTab] = useState("overview");
-  const tt = calcTotals(tech, upsells, switchovers, reviews);
+  const tt = calcTotals(tech, upsells, switchovers, reviews, callbacks);
   const tier = getTier(tt.total);
   const nextTier = JOURNEY_TIERS.find(t=>t.minPts>tt.total);
-  const allRanked = [...techs].map(t=>({...t,...calcTotals(t,upsells,switchovers,reviews)})).sort((a,b)=>b.total-a.total);
+  const allRanked = [...techs].map(t=>({...t,...calcTotals(t,upsells,switchovers,reviews,callbacks||[])})).sort((a,b)=>b.total-a.total);
   const myPos = allRanked.findIndex(t=>t.id===tech.id)+1;
   const wk=getWeekKey(), mk=getMonthKey();
   const weekUpsell = upsells.filter(u=>u.tech_id===tech.id&&u.week_key===wk).reduce((s,u)=>s+u.amount,0);
@@ -1346,6 +1360,7 @@ function TechDashboard({ tech, techs, upsells, switchovers, reviews, quota, onLo
                   {l:"💰 Upsells",   v:tt.upsellPts,  c:C.green},
                   {l:"🔄 Converts",  v:tt.switchPts,  c:C.blue},
                   {l:"⭐ Reviews",   v:tt.reviewPts,  c:C.gold},
+                  ...(tt.callbackCount>0?[{l:`📞 Callbacks (${tt.callbackCount})`, v:tt.callbackPts, c:"#ef4444"}]:[]),
                 ].map(item=>(
                   <div key={item.l} style={{ background:C.cardLt, borderRadius:"4px", padding:"10px 12px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
                     <span style={{ fontSize:"12px", color:C.muted }}>{item.l}</span>
@@ -1987,13 +2002,14 @@ function RideAlongTab({ techs, rideAlongs, schedules, onSave, onSaveSchedule, sa
 }
 
 // ─── ADMIN PANEL ──────────────────────────────────────────────────────────────
-function AdminPanel({ techs, upsells, switchovers, reviews, rideAlongs, schedules, quota, setQuota, onLogout, refreshAll }) {
+function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlongs, schedules, quota, setQuota, onLogout, refreshAll }) {
   const [tab, setTab] = useState("upsells");
   const [awardForm, setAwardForm] = useState({techId:"",badgeId:""});
   const [addForm, setAddForm] = useState({name:"",pin:"",avatar:"",start_date:""});
   const [upsellForm, setUpsellForm] = useState({});
   const [swForm, setSwForm] = useState({techId:"",planId:""});
   const [reviewForm, setReviewForm] = useState({});
+  const [cbForm, setCbForm] = useState({techId:"",reason:""});
   const [toast, setToast] = useState(null);
   const [saving, setSaving] = useState(false);
 
@@ -2055,6 +2071,24 @@ function AdminPanel({ techs, upsells, switchovers, reviews, rideAlongs, schedule
     catch(e){ showToast("Error: "+e.message,false); }
     setSaving(false);
   }
+  async function logCallback() {
+    if (!cbForm.techId) return showToast("Select a tech",false);
+    const tech = techs.find(t=>t.id===cbForm.techId);
+    setSaving(true);
+    try {
+      await sb("callbacks",{method:"POST",body:JSON.stringify({tech_id:cbForm.techId,reason:cbForm.reason||""})});
+      await refreshAll();
+      showToast(`📞 Callback logged for ${tech?.name} — ${Math.abs(CALLBACK_PTS)} pts deducted`);
+      setCbForm({techId:"",reason:""});
+    } catch(e){ showToast("Error: "+e.message,false); }
+    setSaving(false);
+  }
+  async function deleteCallback(id) {
+    setSaving(true);
+    try { await sb(`callbacks?id=eq.${id}`,{method:"DELETE",prefer:"return=minimal"}); await refreshAll(); showToast("Callback removed"); }
+    catch(e){ showToast("Error: "+e.message,false); }
+    setSaving(false);
+  }
   async function saveReviews() {
     const mk=getMonthKey(); setSaving(true);
     try {
@@ -2077,7 +2111,7 @@ function AdminPanel({ techs, upsells, switchovers, reviews, rideAlongs, schedule
     <div style={{ minHeight:"100vh", background:"#f0f8ff" }}>
       <style>{GS}</style>
       <Header title="Admin Panel" subtitle="Skylo Standard Board" right={<LogoutBtn onLogout={onLogout}/>}/>
-      <TabBar tabs={[["upsells","Upsells"],["reviews","⭐ Reviews"],["switchovers","Converts"],["award","Award Badge"],["add","Add Tech"],["manage","Manage"],["delete","🗑️ Delete"],["journey","🗺️ Journey"],["kyle","👑 Kyle Bonus"],["quota","📋 Quota"],["incentive","🎁 Rewards"],["ridealong","🚗 Ride-Alongs"]]} active={tab} setActive={setTab} accent={C.green}/>
+      <TabBar tabs={[["upsells","Upsells"],["reviews","⭐ Reviews"],["switchovers","Converts"],["callbacks","📞 Callbacks"],["award","Award Badge"],["add","Add Tech"],["manage","Manage"],["delete","🗑️ Delete"],["journey","🗺️ Journey"],["kyle","👑 Kyle Bonus"],["quota","📋 Quota"],["incentive","🎁 Rewards"],["ridealong","🚗 Ride-Alongs"]]} active={tab} setActive={setTab} accent={C.green}/>
       <div style={{ padding:"20px", maxWidth:"700px", margin:"0 auto" }}>
 
         {tab==="upsells"&&(
@@ -2099,6 +2133,68 @@ function AdminPanel({ techs, upsells, switchovers, reviews, rideAlongs, schedule
               {SERVICE_PLANS.map(p=><option key={p.id} value={p.id}>{p.label} ({p.freq}) · +{p.pts}pts · ${p.ltv.toLocaleString()}/yr LTV</option>)}
             </select>
             <button onClick={logSwitchover} disabled={saving} style={btn(C.purple)}>{saving?"Saving...":"Log Switchover"}</button>
+          </div>
+        )}
+
+        {tab==="callbacks"&&(
+          <div style={{ display:"flex", flexDirection:"column", gap:"16px" }}>
+            {/* Log a callback */}
+            <div style={{ background:C.white, border:`2px solid #ef444444`, borderTop:`3px solid #ef4444`, borderRadius:"12px", padding:"20px", display:"flex", flexDirection:"column", gap:"12px", boxShadow:"0 2px 8px rgba(239,68,68,0.08)" }}>
+              <div>
+                <Label color="#ef4444">📞 Log a Callback</Label>
+                <div style={{ fontSize:"12px", color:C.muted, marginBottom:"4px" }}>Each callback deducts <strong style={{ color:"#ef4444" }}>{Math.abs(CALLBACK_PTS)} points</strong> — nearly a full week of work. Quality matters.</div>
+              </div>
+              <select value={cbForm.techId||""} onChange={e=>setCbForm(f=>({...f,techId:e.target.value}))} style={sel(cbForm?.techId)}>
+                <option value="">— Select Tech —</option>
+                {techs.map(t=><option key={t.id} value={t.id}>{t.name}</option>)}
+              </select>
+              <input placeholder="Reason / job description (optional)" value={cbForm.reason||""} onChange={e=>setCbForm(f=>({...f,reason:e.target.value}))} style={inp}/>
+              <button onClick={logCallback} disabled={saving} style={{ ...btn("#ef4444"), color:C.white }}>{saving?"Saving...":"Log Callback — Deduct Points"}</button>
+            </div>
+
+            {/* Callback history */}
+            <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:"12px", overflow:"hidden", boxShadow:"0 2px 8px rgba(43,156,240,0.08)" }}>
+              <div style={{ padding:"14px 18px", borderBottom:`1px solid ${C.border}`, background:C.cardLt }}>
+                <Label color="#ef4444">📋 Callback History</Label>
+              </div>
+              <div style={{ padding:"14px 18px", display:"flex", flexDirection:"column", gap:"8px" }}>
+                {callbacks.length===0&&<div style={{ fontSize:"13px", color:C.muted }}>No callbacks logged yet. Keep it that way! 💪</div>}
+                {callbacks.map(cb=>{
+                  const tech = techs.find(t=>t.id===cb.tech_id);
+                  return (
+                    <div key={cb.id} style={{ background:`#ef444410`, border:`1px solid #ef444433`, borderLeft:`3px solid #ef4444`, borderRadius:"8px", padding:"12px 14px", display:"flex", justifyContent:"space-between", alignItems:"center", gap:"12px" }}>
+                      <div>
+                        <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"15px", color:C.black }}>{tech?.name||"Unknown"}</div>
+                        <div style={{ fontSize:"11px", color:C.muted, marginTop:"2px" }}>{cb.reason||"No reason provided"} · {new Date(cb.created_at).toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"})}</div>
+                      </div>
+                      <div style={{ display:"flex", alignItems:"center", gap:"10px", flexShrink:0 }}>
+                        <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"16px", color:"#ef4444" }}>{CALLBACK_PTS} pts</span>
+                        <button onClick={()=>deleteCallback(cb.id)} disabled={saving} style={{ background:"none", border:`1px solid #ef4444`, color:"#ef4444", padding:"4px 10px", borderRadius:"6px", cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", fontSize:"11px" }}>DELETE</button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Per-tech callback summary */}
+            {callbacks.length>0&&(
+              <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"16px 18px", boxShadow:"0 2px 8px rgba(43,156,240,0.08)" }}>
+                <Label color="#ef4444">📊 All-Time Callback Count</Label>
+                <div style={{ display:"flex", flexDirection:"column", gap:"6px" }}>
+                  {techs.map(t=>{
+                    const count = callbacks.filter(c=>c.tech_id===t.id).length;
+                    if (!count) return null;
+                    return (
+                      <div key={t.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                        <span style={{ fontSize:"13px", color:C.black, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>{t.name}</span>
+                        <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"14px", color:"#ef4444" }}>{count} callback{count>1?"s":""} · {count*Math.abs(CALLBACK_PTS)} pts lost</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -2219,6 +2315,7 @@ export default function App() {
   const [upsells, setUpsells] = useState([]);
   const [switchovers, setSwitchovers] = useState([]);
   const [reviews, setReviews] = useState([]);
+  const [callbacks, setCallbacks] = useState([]);
   const [rideAlongs, setRideAlongs] = useState([]);
   const [schedules, setSchedules] = useState([]);
   const [user, setUser] = useState(null);
@@ -2229,7 +2326,7 @@ export default function App() {
 
   const loadAll = useCallback(async () => {
     try {
-      const [t,u,s,r,ra,sch,settings] = await Promise.all([
+      const [t,u,s,r,ra,sch,settings,cb] = await Promise.all([
         sb("techs?select=*&order=name"),
         sb("upsells?select=*"),
         sb("switchovers?select=*"),
@@ -2237,9 +2334,10 @@ export default function App() {
         sb("ride_alongs?select=*&order=date.desc").catch(()=>[]),
         sb("ride_along_schedule?select=*").catch(()=>[]),
         sb("settings?key=eq.quota&select=*").catch(()=>[]),
+        sb("callbacks?select=*&order=created_at.desc").catch(()=>[]),
       ]);
       setTechs(t||[]); setUpsells(u||[]); setSwitchovers(s||[]); setReviews(r||[]);
-      setRideAlongs(ra||[]); setSchedules(sch||[]);
+      setRideAlongs(ra||[]); setSchedules(sch||[]); setCallbacks(cb||[]);
       if (settings&&settings.length>0) {
         try { setQuota(JSON.parse(settings[0].value)); } catch {}
       }
@@ -2292,7 +2390,17 @@ create table if not exists settings (
 );
 alter table settings enable row level security;
 drop policy if exists "public access" on settings;
-create policy "public access" on settings for all using (true) with check (true);`}
+create policy "public access" on settings for all using (true) with check (true);
+
+create table if not exists callbacks (
+  id uuid primary key default gen_random_uuid(),
+  tech_id uuid references techs(id),
+  reason text default '',
+  created_at timestamptz default now()
+);
+alter table callbacks enable row level security;
+drop policy if exists "public access" on callbacks;
+create policy "public access" on callbacks for all using (true) with check (true);`}
         </code><br/>
         <button onClick={()=>{setDbError(null);setLoading(true);loadAll().then(()=>setLoading(false));}} style={{ background:C.blue, border:"none", color:C.black, padding:"12px 28px", borderRadius:"24px", cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontSize:"14px", fontWeight:"900", fontStyle:"italic", letterSpacing:"2px" }}>RETRY</button>
       </div>
@@ -2315,12 +2423,12 @@ create policy "public access" on settings for all using (true) with check (true)
   if (user.type==="admin") return (
     <AdminPanel techs={techs} setTechs={setTechs} upsells={upsells} setUpsells={setUpsells}
       switchovers={switchovers} setSwitchovers={setSwitchovers} reviews={reviews} setReviews={setReviews}
-      rideAlongs={rideAlongs} schedules={schedules} quota={quota} setQuota={setQuota}
+      callbacks={callbacks} rideAlongs={rideAlongs} schedules={schedules} quota={quota} setQuota={setQuota}
       onLogout={()=>setUser(null)} refreshAll={loadAll}/>
   );
   if (user.type==="tech"&&currentTech) return (
     <TechDashboard tech={currentTech} techs={techs} upsells={upsells} switchovers={switchovers}
-      reviews={reviews} quota={quota} onLogout={()=>setUser(null)}/>
+      reviews={reviews} callbacks={callbacks} quota={quota} onLogout={()=>setUser(null)}/>
   );
   return null;
 }
