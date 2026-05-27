@@ -1231,7 +1231,8 @@ function IncentiveBoard({ techs, upsells, switchovers, reviews, currentId }) {
 }
 
 // ─── TECH DASHBOARD ───────────────────────────────────────────────────────────
-function TechDashboard({ tech, techs, upsells, switchovers, reviews, onLogout }) {
+function TechDashboard({ tech, techs, upsells, switchovers, reviews, quota, onLogout }) {
+  const q = quota || DEFAULT_QUOTA;
   const [tab, setTab] = useState("overview");
   const tt = calcTotals(tech, upsells, switchovers, reviews);
   const tier = getTier(tt.total);
@@ -1242,6 +1243,16 @@ function TechDashboard({ tech, techs, upsells, switchovers, reviews, onLogout })
   const weekUpsell = upsells.filter(u=>u.tech_id===tech.id&&u.week_key===wk).reduce((s,u)=>s+u.amount,0);
   const monthReviews = reviews.filter(r=>r.tech_id===tech.id&&r.month_key===mk).reduce((s,r)=>s+r.count,0);
   const tenure = formatTenure(tech.start_date);
+
+  // Month quota actuals
+  const now = new Date(); const y = now.getFullYear(); const mo = String(now.getMonth()+1).padStart(2,"0");
+  const monthUpsellAmt   = upsells.filter(u=>u.tech_id===tech.id && u.week_key?.startsWith(`${y}-${mo}`)).reduce((s,u)=>s+u.amount,0);
+  const monthSwitchCount = switchovers.filter(s=>s.tech_id===tech.id && s.week_key?.startsWith(`${y}-${mo}`)).length;
+  const upHit  = monthUpsellAmt   >= q.upsells;
+  const revHit = monthReviews     >= q.reviews;
+  const swHit  = monthSwitchCount >= q.switchovers;
+  const allQuotaHit = upHit && revHit && swHit;
+  const quotaHitCount = [upHit,revHit,swHit].filter(Boolean).length;
   return (
     <div style={{ minHeight:"100vh", background:"#f0f8ff" }}>
       <style>{GS}</style>
@@ -1275,6 +1286,52 @@ function TechDashboard({ tech, techs, upsells, switchovers, reviews, onLogout })
       <div style={{ padding:"20px", maxWidth:"800px", margin:"0 auto" }}>
         {tab==="overview"&&(
           <div style={{ display:"flex", flexDirection:"column", gap:"16px" }}>
+
+            {/* ── MONTHLY QUOTA CARD ── */}
+            <div style={{ background:allQuotaHit?`${C.green}12`:C.white, border:`2px solid ${allQuotaHit?C.green:C.border}`, borderTop:`4px solid ${allQuotaHit?C.green:C.blue}`, borderRadius:"16px", padding:"18px 20px", boxShadow:"0 4px 16px rgba(43,156,240,0.10)" }}>
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:"14px" }}>
+                <div>
+                  <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontStyle:"italic", fontSize:"18px", color:allQuotaHit?C.green:C.black, letterSpacing:"1px" }}>
+                    {allQuotaHit ? "✅ QUOTA CRUSHED" : `📊 MONTHLY QUOTA`}
+                  </div>
+                  <div style={{ fontSize:"11px", color:C.muted, marginTop:"2px" }}>{formatMonthLabel(mk)} · {quotaHitCount}/3 targets hit</div>
+                </div>
+                <div style={{ background:allQuotaHit?C.green:quotaHitCount>=2?C.gold:quotaHitCount===1?C.orange:"#ef4444", borderRadius:"20px", padding:"4px 12px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"13px", color:C.white }}>
+                  {allQuotaHit?"ON FIRE 🔥":quotaHitCount>=2?"CLOSE":"NEEDS WORK"}
+                </div>
+              </div>
+              <div style={{ display:"flex", flexDirection:"column", gap:"10px" }}>
+                {[
+                  { label:"💰 Upsells",     actual:`$${monthUpsellAmt}`,   target:`$${q.upsells}`,    pct:Math.min(Math.round((monthUpsellAmt/q.upsells)*100),100),    hit:upHit,  color:C.green },
+                  { label:"⭐ Reviews",      actual:monthReviews,            target:q.reviews,           pct:Math.min(Math.round((monthReviews/q.reviews)*100),100),       hit:revHit, color:C.gold  },
+                  { label:"🔄 Switchovers", actual:monthSwitchCount,        target:q.switchovers,       pct:Math.min(Math.round((monthSwitchCount/q.switchovers)*100),100),hit:swHit,  color:C.blue  },
+                ].map(row=>(
+                  <div key={row.label}>
+                    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:"5px" }}>
+                      <span style={{ fontSize:"12px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", color:C.black }}>{row.label}</span>
+                      <div style={{ display:"flex", alignItems:"center", gap:"8px" }}>
+                        <span style={{ fontSize:"12px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", color:row.hit?row.color:C.black }}>
+                          {row.actual} <span style={{ color:C.muted, fontWeight:"600" }}>/ {row.target}</span>
+                        </span>
+                        {row.hit
+                          ? <span style={{ background:row.color, color:C.white, borderRadius:"10px", padding:"1px 8px", fontSize:"10px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900" }}>✓ HIT</span>
+                          : <span style={{ background:C.cardLt, color:C.muted, borderRadius:"10px", padding:"1px 8px", fontSize:"10px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>{row.pct}%</span>
+                        }
+                      </div>
+                    </div>
+                    <div style={{ background:C.border, borderRadius:"6px", height:"7px", overflow:"hidden" }}>
+                      <div style={{ width:`${row.pct}%`, height:"100%", background:row.hit?row.color:row.color+"99", borderRadius:"6px", transition:"width 0.4s ease" }}/>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              {!allQuotaHit&&(
+                <div style={{ marginTop:"12px", fontSize:"11px", color:C.muted, fontStyle:"italic" }}>
+                  Keep pushing — hit all 3 and Kyle earns his bonus too 💪
+                </div>
+              )}
+            </div>
+
             <div style={{ display:"grid", gridTemplateColumns:"repeat(2,1fr)", gap:"10px" }}>
               <StatBlock label="Total Points" value={tt.total.toLocaleString()} color={C.blue} accent={C.blue}/>
               <StatBlock label="Team Rank" value={`#${myPos} / ${techs.length}`} color={C.green} accent={C.green}/>
@@ -1323,7 +1380,7 @@ function TechDashboard({ tech, techs, upsells, switchovers, reviews, onLogout })
         {tab==="journey"&&(
           <div>
             <div style={{ fontSize:"13px", color:C.muted, marginBottom:"16px" }}>Tap any card to expand full breakdown.</div>
-            <JourneyBoard techs={techs} upsells={upsells} switchovers={switchovers} reviews={reviews} quota={DEFAULT_QUOTA}/>
+            <JourneyBoard techs={techs} upsells={upsells} switchovers={switchovers} reviews={reviews} quota={q}/>
           </div>
         )}
         {tab==="incentive"&&(
@@ -1930,7 +1987,7 @@ function RideAlongTab({ techs, rideAlongs, schedules, onSave, onSaveSchedule, sa
 }
 
 // ─── ADMIN PANEL ──────────────────────────────────────────────────────────────
-function AdminPanel({ techs, upsells, switchovers, reviews, rideAlongs, schedules, onLogout, refreshAll }) {
+function AdminPanel({ techs, upsells, switchovers, reviews, rideAlongs, schedules, quota, setQuota, onLogout, refreshAll }) {
   const [tab, setTab] = useState("upsells");
   const [awardForm, setAwardForm] = useState({techId:"",badgeId:""});
   const [addForm, setAddForm] = useState({name:"",pin:"",avatar:"",start_date:""});
@@ -1939,15 +1996,21 @@ function AdminPanel({ techs, upsells, switchovers, reviews, rideAlongs, schedule
   const [reviewForm, setReviewForm] = useState({});
   const [toast, setToast] = useState(null);
   const [saving, setSaving] = useState(false);
-  const [quota, setQuota] = useState(() => {
-    try { const s = localStorage.getItem("skylo_quota"); return s ? JSON.parse(s) : DEFAULT_QUOTA; } catch { return DEFAULT_QUOTA; }
-  });
 
   const showToast=(msg,ok=true)=>{ setToast({msg,ok}); setTimeout(()=>setToast(null),3000); };
-  function saveQuota(newQuota) {
-    setQuota(newQuota);
-    try { localStorage.setItem("skylo_quota", JSON.stringify(newQuota)); } catch {}
-    showToast("✅ Quota targets saved!");
+  async function saveQuota(newQuota) {
+    setSaving(true);
+    try {
+      const existing = await sb("settings?key=eq.quota&select=id").catch(()=>[]);
+      if (existing&&existing.length>0) {
+        await sb(`settings?id=eq.${existing[0].id}`,{method:"PATCH",body:JSON.stringify({value:JSON.stringify(newQuota)}),prefer:"return=minimal"});
+      } else {
+        await sb("settings",{method:"POST",body:JSON.stringify({key:"quota",value:JSON.stringify(newQuota)})});
+      }
+      setQuota(newQuota);
+      showToast("✅ Quota saved — all devices updated!");
+    } catch(e) { showToast("Error saving quota: "+e.message,false); }
+    setSaving(false);
   }
 
   async function awardBadge() {
@@ -2162,18 +2225,24 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [dbError, setDbError] = useState(null);
 
+  const [quota, setQuota] = useState(DEFAULT_QUOTA);
+
   const loadAll = useCallback(async () => {
     try {
-      const [t,u,s,r,ra,sch] = await Promise.all([
+      const [t,u,s,r,ra,sch,settings] = await Promise.all([
         sb("techs?select=*&order=name"),
         sb("upsells?select=*"),
         sb("switchovers?select=*"),
         sb("reviews?select=*"),
         sb("ride_alongs?select=*&order=date.desc").catch(()=>[]),
         sb("ride_along_schedule?select=*").catch(()=>[]),
+        sb("settings?key=eq.quota&select=*").catch(()=>[]),
       ]);
       setTechs(t||[]); setUpsells(u||[]); setSwitchovers(s||[]); setReviews(r||[]);
       setRideAlongs(ra||[]); setSchedules(sch||[]);
+      if (settings&&settings.length>0) {
+        try { setQuota(JSON.parse(settings[0].value)); } catch {}
+      }
       return true;
     } catch(e) { setDbError(e.message); return false; }
   }, []);
@@ -2213,7 +2282,17 @@ create table if not exists reviews (
 );
 alter table reviews enable row level security;
 drop policy if exists "public access" on reviews;
-create policy "public access" on reviews for all using (true) with check (true);`}
+create policy "public access" on reviews for all using (true) with check (true);
+
+create table if not exists settings (
+  id uuid primary key default gen_random_uuid(),
+  key text unique not null,
+  value text not null,
+  created_at timestamptz default now()
+);
+alter table settings enable row level security;
+drop policy if exists "public access" on settings;
+create policy "public access" on settings for all using (true) with check (true);`}
         </code><br/>
         <button onClick={()=>{setDbError(null);setLoading(true);loadAll().then(()=>setLoading(false));}} style={{ background:C.blue, border:"none", color:C.black, padding:"12px 28px", borderRadius:"24px", cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontSize:"14px", fontWeight:"900", fontStyle:"italic", letterSpacing:"2px" }}>RETRY</button>
       </div>
@@ -2236,12 +2315,12 @@ create policy "public access" on reviews for all using (true) with check (true);
   if (user.type==="admin") return (
     <AdminPanel techs={techs} setTechs={setTechs} upsells={upsells} setUpsells={setUpsells}
       switchovers={switchovers} setSwitchovers={setSwitchovers} reviews={reviews} setReviews={setReviews}
-      rideAlongs={rideAlongs} schedules={schedules}
+      rideAlongs={rideAlongs} schedules={schedules} quota={quota} setQuota={setQuota}
       onLogout={()=>setUser(null)} refreshAll={loadAll}/>
   );
   if (user.type==="tech"&&currentTech) return (
     <TechDashboard tech={currentTech} techs={techs} upsells={upsells} switchovers={switchovers}
-      reviews={reviews} onLogout={()=>setUser(null)}/>
+      reviews={reviews} quota={quota} onLogout={()=>setUser(null)}/>
   );
   return null;
 }
