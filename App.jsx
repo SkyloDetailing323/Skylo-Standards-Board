@@ -188,10 +188,10 @@ const PAY_TIERS = [
 ];
 
 function calcWeeklyPay(weeklyUpsellAmt) {
-  // Unlock rate — once you hit a tier, that rate applies to your ENTIRE week (backfilled)
+  // Flat rate unlocks and backfills ALL upsells for the week
   let rate;
-  if      (weeklyUpsellAmt >= 450) rate = 0.30;
-  else if (weeklyUpsellAmt >= 300) rate = 0.25;
+  if      (weeklyUpsellAmt >= 700) rate = 0.30;
+  else if (weeklyUpsellAmt >= 400) rate = 0.25;
   else if (weeklyUpsellAmt >= 150) rate = 0.20;
   else                              rate = 0.15;
   const totalPay = weeklyUpsellAmt * rate;
@@ -200,8 +200,8 @@ function calcWeeklyPay(weeklyUpsellAmt) {
 
 function getNextPayTier(weeklyAmt) {
   if (weeklyAmt < 150) return { amt: 150 - weeklyAmt, rate: 0.20, label: "20% on your whole week" };
-  if (weeklyAmt < 300) return { amt: 300 - weeklyAmt, rate: 0.25, label: "25% on your whole week" };
-  if (weeklyAmt < 450) return { amt: 450 - weeklyAmt, rate: 0.30, label: "30% on your whole week" };
+  if (weeklyAmt < 400) return { amt: 400 - weeklyAmt, rate: 0.25, label: "25% on your whole week" };
+  if (weeklyAmt < 700) return { amt: 700 - weeklyAmt, rate: 0.30, label: "30% on your whole week" };
   return { amt: null, rate: 0.30, label: "MAX RATE — 30% on your whole week 🔥" };
 }
 
@@ -861,10 +861,10 @@ function JourneyCard({ tech, rank, total, onClick, expanded, upsells, quota }) {
                   const { rate } = calcWeeklyPay(weekUpsellAmt);
                   const currentPct = Math.round(rate*100);
                   return [
-                    { floor:0,   ceil:150,      baseRate:15, label:"$0–$149"   },
-                    { floor:150, ceil:300,       baseRate:20, label:"$150–$299" },
-                    { floor:300, ceil:450,       baseRate:25, label:"$300–$449" },
-                    { floor:450, ceil:Infinity,  baseRate:30, label:"$450+"     },
+                    { floor:0,   ceil:150,      baseRate:15, label:"$1–$149"    },
+                    { floor:150, ceil:400,       baseRate:20, label:"$150–$399" },
+                    { floor:400, ceil:700,       baseRate:25, label:"$400–$699" },
+                    { floor:700, ceil:Infinity,  baseRate:30, label:"$700+"      },
                   ].map(b=>{
                     const isCurrent    = weekUpsellAmt >= b.floor && (b.ceil===Infinity ? true : weekUpsellAmt < b.ceil);
                     const isPast       = b.ceil !== Infinity && weekUpsellAmt >= b.ceil;
