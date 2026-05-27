@@ -46,29 +46,51 @@ const REVIEW_BONUS_PTS = 75;
 const LOGO_SRC = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 50'%3E%3Crect width='200' height='50' fill='%23009cff' rx='4'/%3E%3Ctext x='100' y='34' font-family='monospace' font-size='22' font-weight='900' fill='white' text-anchor='middle'%3ESKYLO%3C/text%3E%3C/svg%3E";
 
 // ─── BADGE DEFS ───────────────────────────────────────────────────────────────
-const BADGE_DEFS = [
-  { id:"day_one",         cat:"Tenure",      name:"Day One",           icon:"🔑", pts:50,   desc:"Completed first day on the job" },
-  { id:"thirty_days",    cat:"Tenure",      name:"30-Day Survivor",   icon:"📅", pts:100,  desc:"First 30 days completed" },
-  { id:"ninety_days",    cat:"Tenure",      name:"Quarter Strong",    icon:"📆", pts:200,  desc:"90 days on the team" },
-  { id:"one_year",       cat:"Tenure",      name:"One Year Legend",   icon:"🏅", pts:500,  desc:"First full year" },
-  { id:"two_year",       cat:"Tenure",      name:"Two Year Veteran",  icon:"🎖️", pts:750,  desc:"Two years of excellence" },
-  { id:"five_year",      cat:"Tenure",      name:"Five Year Elite",   icon:"👑", pts:1500, desc:"Five years — rare and honored" },
-  { id:"zero_callback",  cat:"Performance", name:"Zero Callbacks",    icon:"✅", pts:300,  desc:"Month with zero callbacks" },
-  { id:"clean_streak",   cat:"Performance", name:"Clean Streak",      icon:"🔥", pts:600,  desc:"3 months straight, no callbacks" },
-  { id:"five_star",      cat:"Performance", name:"5-Star Tech",       icon:"⭐", pts:150,  desc:"First 5-star review" },
-  { id:"review_machine", cat:"Performance", name:"Review Machine",    icon:"🌟", pts:400,  desc:"10 five-star reviews earned" },
-  { id:"most_booked",    cat:"Performance", name:"Most Booked",       icon:"📈", pts:350,  desc:"Top revenue tech of the month" },
-  { id:"certified",      cat:"Skills",      name:"Certified",         icon:"📜", pts:250,  desc:"First certification earned" },
-  { id:"double_cert",    cat:"Skills",      name:"Double Certified",  icon:"🎓", pts:400,  desc:"Two certifications completed" },
-  { id:"multi_trade",    cat:"Skills",      name:"Multi-Trade",       icon:"🛠️", pts:500,  desc:"Trained in more than one trade" },
-  { id:"mentor",         cat:"Skills",      name:"Mentor",            icon:"🤝", pts:450,  desc:"Trained or onboarded a new tech" },
-  { id:"never_late",     cat:"Character",   name:"Never Late",        icon:"⏰", pts:200,  desc:"Perfect punctuality all quarter" },
-  { id:"safety_first",   cat:"Character",   name:"Safety First",      icon:"🦺", pts:100,  desc:"Proactive safety report" },
-  { id:"problem_solver", cat:"Character",   name:"Problem Solver",    icon:"💡", pts:300,  desc:"Idea adopted by the team" },
-  { id:"team_player",    cat:"Character",   name:"Team Player",       icon:"🫂", pts:150,  desc:"Covered for a teammate" },
-  { id:"culture_carrier",cat:"Character",   name:"Culture Carrier",   icon:"🏆", pts:500,  desc:"Peer-nominated quarterly" },
+// Rotating trophies: passed to current leader each month, no points
+const ROTATING_TROPHIES = [
+  { id:"audit_legend",    name:"Audit Legend",     icon:"📋", desc:"100% on audits for the month — passed to the current holder" },
+  { id:"upsell_king",     name:"Upsell King",      icon:"👑", desc:"Highest upsells for the month — passed to the current holder" },
+  { id:"review_champ",   name:"Review Champion",  icon:"⭐", desc:"Most reviews in the month — passed to the current holder" },
 ];
-const BADGE_MAP = Object.fromEntries(BADGE_DEFS.map(b => [b.id, b]));
+
+// Permanent point badges
+const BADGE_DEFS = [
+  // Tenure (show up, stay loyal — valued but not high-point)
+  { id:"three_month",    cat:"Tenure",      name:"3-Month Mark",       icon:"📅", pts:75,   desc:"3 months on the team" },
+  { id:"six_month",      cat:"Tenure",      name:"Half Year Hustle",   icon:"📆", pts:150,  desc:"6 months of consistency" },
+  { id:"one_year",       cat:"Tenure",      name:"One Year Strong",    icon:"🏅", pts:300,  desc:"First full year with Skylo" },
+  { id:"two_year",       cat:"Tenure",      name:"Two Year Vet",       icon:"🎖️", pts:450,  desc:"Two years of excellence" },
+  { id:"three_year",     cat:"Tenure",      name:"Three Year Elite",   icon:"💎", pts:650,  desc:"Three years — rare commitment" },
+  { id:"five_year",      cat:"Tenure",      name:"Five Year Legend",   icon:"👑", pts:1000, desc:"Five years — one of the best" },
+
+  // Revenue (directly tied to company revenue — high value)
+  { id:"rev_10k",        cat:"Revenue",     name:"$10K Serviced",      icon:"💵", pts:400,  desc:"First $10,000 in serviced revenue" },
+  { id:"rev_25k",        cat:"Revenue",     name:"$25K Serviced",      icon:"💰", pts:800,  desc:"$25,000 in lifetime serviced revenue" },
+  { id:"rev_50k",        cat:"Revenue",     name:"$50K Milestone",     icon:"🤑", pts:1500, desc:"$50,000 serviced — elite territory" },
+  { id:"rev_100k",       cat:"Revenue",     name:"$100K Club",         icon:"🏦", pts:3000, desc:"$100,000 serviced — hall of fame" },
+
+  // Clean Streaks (quality = retention = revenue)
+  { id:"streak_1mo",     cat:"Clean Streak","name":"1-Month Clean",    icon:"✅", pts:300,  desc:"One full month with zero callbacks" },
+  { id:"streak_2mo",     cat:"Clean Streak","name":"2-Month Clean",    icon:"🔵", pts:500,  desc:"Two months straight, no callbacks" },
+  { id:"streak_3mo",     cat:"Clean Streak","name":"3-Month Clean",    icon:"🔥", pts:750,  desc:"Three months with zero callbacks" },
+  { id:"streak_6mo",     cat:"Clean Streak","name":"6-Month Streak",   icon:"⚡", pts:1200, desc:"Six months clean — top tier quality" },
+  { id:"streak_1yr",     cat:"Clean Streak","name":"Year of Zero",     icon:"🌟", pts:2000, desc:"A full year with zero callbacks" },
+
+  // Shift Coverage (team first mentality)
+  { id:"shift_cover",    cat:"Character",   name:"Shift Hero",         icon:"🫂", pts:400,  desc:"Covered 4+ extra shifts in a month outside normal schedule" },
+
+  // The Prestige Badge
+  { id:"perfect_detail", cat:"Prestige",    name:"The Perfect Detail", icon:"💎", pts:2500, desc:"On time every appt, 100% audit, zero callbacks, 1 review/day for a full week, all HCP pics + flyers + satisfaction cards attached" },
+
+  // Bonus ideas
+  { id:"switchover_5",   cat:"Performance", name:"Converter",          icon:"🔄", pts:350,  desc:"Converted 5 customers to service plans" },
+  { id:"switchover_20",  cat:"Performance", name:"Subscription King",  icon:"📈", pts:900,  desc:"Converted 20 customers to service plans" },
+  { id:"early_bird",     cat:"Character",   name:"Early Bird",         icon:"⏰", pts:200,  desc:"On time or early to every job for a full month" },
+  { id:"customer_whisperer", cat:"Performance", name:"Customer Whisperer", icon:"🤝", pts:500, desc:"3 months straight of 5-star reviews with no gaps" },
+];
+const ALL_BADGE_DEFS = [...BADGE_DEFS, ...ROTATING_TROPHIES.map(t=>({...t,cat:"Trophy",pts:0}))];
+const BADGE_MAP = Object.fromEntries(ALL_BADGE_DEFS.map(b => [b.id, b]));
+
 
 const SERVICE_PLANS = [
   { id:"biannual",  label:"Bi-Annual",  freq:"2x/yr",   pts:25,  ltv:635  },
@@ -133,7 +155,47 @@ function calcTotals(tech, upsells, switchovers, reviews) {
   return { badgePts, upsellAmt, upsellPts, switchPts, reviewPts, total };
 }
 
-// ─── GLOBAL STYLES ────────────────────────────────────────────────────────────
+// ─── WEEKLY PAY CALCULATOR ────────────────────────────────────────────────────
+// Tiers reset each week. First $150 = 15%, then $300 = 20%, then $450 = 25%, then $700 = 30%
+const PAY_TIERS = [
+  { upTo: 150,  rate: 0.15, label: "0–$150",    color: C.green  },
+  { upTo: 300,  rate: 0.20, label: "$150–$300",  color: C.blue   },
+  { upTo: 450,  rate: 0.25, label: "$300–$450",  color: C.gold   },
+  { upTo: 700,  rate: 0.30, label: "$450–$700",  color: C.orange },
+];
+
+function calcWeeklyPay(weeklyUpsellAmt) {
+  let remaining = weeklyUpsellAmt;
+  let totalPay = 0;
+  const breakdown = [];
+  const brackets = [
+    { floor: 0,   ceil: 150,  rate: 0.15 },
+    { floor: 150, ceil: 300,  rate: 0.20 },
+    { floor: 300, ceil: 450,  rate: 0.25 },
+    { floor: 450, ceil: 700,  rate: 0.30 },
+    { floor: 700, ceil: Infinity, rate: 0.30 },
+  ];
+  for (const b of brackets) {
+    if (remaining <= 0) break;
+    const inBracket = Math.min(remaining, b.ceil === Infinity ? remaining : b.ceil - b.floor);
+    const pay = inBracket * b.rate;
+    if (inBracket > 0) {
+      totalPay += pay;
+      breakdown.push({ label: b.ceil === Infinity ? `$${b.floor}+` : `$${b.floor}–$${b.ceil}`, rate: b.rate, revenue: inBracket, pay });
+    }
+    remaining -= inBracket;
+  }
+  return { totalPay, breakdown };
+}
+
+function getNextPayTier(weeklyAmt) {
+  if (weeklyAmt < 150) return { threshold: 150, rate: 0.20, label: "20% bracket", amt: 150 - weeklyAmt };
+  if (weeklyAmt < 300) return { threshold: 300, rate: 0.25, label: "25% bracket", amt: 300 - weeklyAmt };
+  if (weeklyAmt < 450) return { threshold: 450, rate: 0.30, label: "30% bracket", amt: 450 - weeklyAmt };
+  return null;
+}
+
+
 const GS = `
   @import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;800;900&family=Barlow:wght@400;500;600;700&display=swap');
   * { margin:0; padding:0; box-sizing:border-box; }
@@ -265,29 +327,50 @@ function PinPad({ onSubmit }) {
 
 // ─── BADGE GRID ───────────────────────────────────────────────────────────────
 function BadgeGrid({ earned }) {
+  const cats = ["Prestige","Revenue","Clean Streak","Performance","Character","Tenure","Trophy"];
+  const catColors = { Prestige:C.gold, Revenue:C.green, "Clean Streak":C.blue, Performance:C.purple, Character:C.orange, Tenure:C.muted, Trophy:"#ff6ef7" };
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:"24px" }}>
-      {["Tenure","Performance","Skills","Character"].map(cat=>(
-        <div key={cat}>
-          <Label color={C.blue}>{cat}</Label>
-          <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(180px,1fr))", gap:"8px" }}>
-            {BADGE_DEFS.filter(b=>b.cat===cat).map(b=>{
-              const has = earned.includes(b.id);
-              return (
-                <div key={b.id} style={{ background:has?`${C.blue}18`:C.card, border:`1px solid ${has?C.blue:C.border}`, borderRadius:"6px", padding:"14px", opacity:has?1:0.4 }}>
-                  <div style={{ fontSize:"22px", marginBottom:"6px" }}>{b.icon}</div>
-                  <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", fontSize:"14px", color:C.white, marginBottom:"2px" }}>{b.name}</div>
-                  <div style={{ fontSize:"11px", color:C.muted, marginBottom:"6px", lineHeight:"1.3" }}>{b.desc}</div>
-                  <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontSize:"13px", fontWeight:"800", color:has?C.blue:C.muted }}>+{b.pts} PTS</div>
-                </div>
-              );
-            })}
-          </div>
+      {/* Rotating Trophies info */}
+      <div style={{ background:"#ff6ef718", border:"1px solid #ff6ef744", borderRadius:"6px", padding:"12px 16px" }}>
+        <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"13px", color:"#ff6ef7", letterSpacing:"2px", marginBottom:"6px" }}>🏆 ROTATING MONTHLY TROPHIES</div>
+        <div style={{ fontSize:"12px", color:C.muted }}>These badges are passed to whoever is in the lead each month — no points, pure bragging rights.</div>
+        <div style={{ display:"flex", gap:"8px", flexWrap:"wrap", marginTop:"10px" }}>
+          {ROTATING_TROPHIES.map(t=>(
+            <div key={t.id} style={{ background:earned?.includes(t.id)?"#ff6ef722":"rgba(0,0,0,0.2)", border:`1px solid ${earned?.includes(t.id)?"#ff6ef7":"#333"}`, borderRadius:"4px", padding:"6px 12px", opacity:earned?.includes(t.id)?1:0.5 }}>
+              <span style={{ fontSize:"16px" }}>{t.icon}</span>
+              <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", fontSize:"12px", color:earned?.includes(t.id)?"#ff6ef7":C.muted, marginLeft:"6px" }}>{t.name}</span>
+            </div>
+          ))}
         </div>
-      ))}
+      </div>
+      {cats.filter(c=>c!=="Trophy").map(cat=>{
+        const badges = ALL_BADGE_DEFS.filter(b=>b.cat===cat);
+        if (!badges.length) return null;
+        const col = catColors[cat] || C.blue;
+        return (
+          <div key={cat}>
+            <div style={{ fontSize:"10px", color:col, letterSpacing:"2px", textTransform:"uppercase", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", marginBottom:"10px" }}>{cat}</div>
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(160px,1fr))", gap:"8px" }}>
+              {badges.map(b=>{
+                const have = earned?.includes(b.id);
+                return (
+                  <div key={b.id} style={{ background:have?`${col}18`:"rgba(0,0,0,0.2)", border:`1px solid ${have?col+"55":C.border}`, borderRadius:"6px", padding:"10px 12px", opacity:have?1:0.45 }}>
+                    <div style={{ fontSize:"22px", marginBottom:"5px" }}>{b.icon}</div>
+                    <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"13px", color:have?C.white:C.muted }}>{b.name}</div>
+                    <div style={{ fontSize:"10px", color:col, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", marginTop:"2px" }}>{b.pts>0?`+${b.pts} pts`:"Trophy"}</div>
+                    <div style={{ fontSize:"10px", color:C.muted, marginTop:"4px", lineHeight:"1.3" }}>{b.desc}</div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }
+
 
 // ─── UPSELL LEADERBOARD ───────────────────────────────────────────────────────
 function UpsellLeaderboard({ techs, upsells, currentId }) {
@@ -625,7 +708,7 @@ function JourneyBoard({ techs, upsells, switchovers, reviews }) {
     <div style={{ display:"flex", flexDirection:"column", gap:"20px" }}>
       <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(300px,1fr))", gap:"12px" }}>
         {ranked.map((t,idx)=>(
-          <JourneyCard key={t.id} tech={t} rank={idx+1} total={ranked.length}
+          <JourneyCard key={t.id} tech={t} rank={idx+1} total={ranked.length} upsells={upsells}
             onClick={()=>setSelected(selected===t.id?null:t.id)} expanded={selected===t.id}/>
         ))}
       </div>
@@ -647,10 +730,17 @@ function JourneyBoard({ techs, upsells, switchovers, reviews }) {
   );
 }
 
-function JourneyCard({ tech, rank, total, onClick, expanded }) {
+function JourneyCard({ tech, rank, total, onClick, expanded, upsells }) {
   const tier = tech.tier;
   const tenure = formatTenure(tech.start_date);
-  const earnedBadges = BADGE_DEFS.filter(b=>tech.badges.includes(b.id));
+  const earnedBadges = ALL_BADGE_DEFS.filter(b=>tech.badges?.includes(b.id));
+  
+  // Current week pay breakdown
+  const wk = getWeekKey();
+  const weekUpsellAmt = (upsells||[]).filter(u=>u.tech_id===tech.id&&u.week_key===wk).reduce((s,u)=>s+u.amount,0);
+  const { totalPay, breakdown } = calcWeeklyPay(weekUpsellAmt);
+  const nextTier = getNextPayTier(weekUpsellAmt);
+
   return (
     <div onClick={onClick} style={{ background:tier.bg, border:`1px solid ${tier.color}44`, borderTop:`3px solid ${tier.color}`, borderRadius:"6px", cursor:"pointer", overflow:"hidden" }}>
       <div style={{ padding:"16px 18px" }}>
@@ -682,7 +772,7 @@ function JourneyCard({ tech, rank, total, onClick, expanded }) {
         )}
         <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:"6px" }}>
           {[
-            {l:"Badges",   v:tech.badges.length,        c:C.purple},
+            {l:"Badges",   v:tech.badges?.length||0,        c:C.purple},
             {l:"Upsells",  v:`$${Math.round(tech.upsellAmt).toLocaleString()}`, c:C.green},
             {l:"Converts", v:tech.totalSwitches,        c:C.blue},
             {l:"Reviews",  v:tech.totalReviews,         c:C.gold},
@@ -695,6 +785,43 @@ function JourneyCard({ tech, rank, total, onClick, expanded }) {
         </div>
         {expanded&&(
           <div style={{ borderTop:`1px solid ${tier.color}33`, paddingTop:"14px", marginTop:"14px", display:"flex", flexDirection:"column", gap:"12px" }}>
+            
+            {/* 💵 Weekly Pay Scale */}
+            <div style={{ background:"rgba(0,0,0,0.35)", borderRadius:"6px", padding:"12px 14px", border:`1px solid ${C.green}33` }}>
+              <div style={{ fontSize:"10px", color:C.green, letterSpacing:"2px", textTransform:"uppercase", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", marginBottom:"10px" }}>💵 This Week's Pay Scale</div>
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", marginBottom:"10px" }}>
+                <span style={{ fontSize:"12px", color:C.muted }}>Week upsells</span>
+                <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"20px", color:C.white }}>${weekUpsellAmt.toLocaleString()}</span>
+              </div>
+              {/* Pay brackets */}
+              <div style={{ display:"flex", flexDirection:"column", gap:"4px", marginBottom:"8px" }}>
+                {[
+                  { floor:0,   ceil:150,  rate:"15%", label:"$0–$150" },
+                  { floor:150, ceil:300,  rate:"20%", label:"$150–$300" },
+                  { floor:300, ceil:450,  rate:"25%", label:"$300–$450" },
+                  { floor:450, ceil:700,  rate:"30%", label:"$450–$700" },
+                ].map(b=>{
+                  const active = weekUpsellAmt > b.floor;
+                  const current = weekUpsellAmt >= b.floor && weekUpsellAmt < b.ceil;
+                  return (
+                    <div key={b.label} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", background:current?`${C.green}22`:active?`${C.green}10`:"transparent", border:current?`1px solid ${C.green}55`:"1px solid transparent", borderRadius:"4px", padding:"4px 8px" }}>
+                      <span style={{ fontSize:"11px", color:current?C.green:active?C.offWhite:C.muted, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:current?"800":"600" }}>{b.label}</span>
+                      <span style={{ fontSize:"11px", color:current?C.green:active?C.offWhite:C.muted, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800" }}>{b.rate}{current?" ← YOU":""}</span>
+                    </div>
+                  );
+                })}
+              </div>
+              <div style={{ borderTop:`1px solid ${C.green}33`, paddingTop:"8px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                <span style={{ fontSize:"12px", color:C.muted }}>Est. upsell bonus</span>
+                <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"22px", color:C.green }}>${totalPay.toFixed(2)}</span>
+              </div>
+              {nextTier&&(
+                <div style={{ marginTop:"8px", background:`${C.gold}18`, border:`1px solid ${C.gold}44`, borderRadius:"4px", padding:"6px 10px", fontSize:"11px", color:C.gold, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>
+                  💡 Upsell ${nextTier.amt.toFixed(0)} more this week to hit {nextTier.label}
+                </div>
+              )}
+            </div>
+
             <div>
               <Label color={tier.color}>Points Breakdown</Label>
               {[
@@ -754,11 +881,11 @@ const INCENTIVE_TIERS = [
     name: "IGNITION",
     tagline: "You started. Now prove it.",
     items: [
-      { name:"PS5 DualSense Controller", desc:"Brand new PS5 wireless controller", img:"https://images.unsplash.com/photo-1608096299210-db7e38487075?w=400&h=240&fit=crop&auto=format" },
-      { name:"Steakhouse Dinner",        desc:"$150 gift card to your local steakhouse", img:"https://images.unsplash.com/photo-1544025162-d76694265947?w=400&h=240&fit=crop&auto=format" },
-      { name:"Nike Air Max",             desc:"$150 Nike gift card — your pick", img:"https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=400&h=240&fit=crop&auto=format" },
-      { name:"Concert Tickets",          desc:"2 tickets to a local show of your choice", img:"https://images.unsplash.com/photo-1501281668745-f7f57925c3b4?w=400&h=240&fit=crop&auto=format" },
-      { name:"Food Delivery Credit",     desc:"$150 DoorDash or Uber Eats credit", img:"https://images.unsplash.com/photo-1565299585323-38d6b0865b47?w=400&h=240&fit=crop&auto=format" },
+      { name:"Fresh Kicks",              desc:"$150 toward Nike Air Forces, Jordans, or your shoe of choice", img:"https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=400&h=240&fit=crop&auto=format" },
+      { name:"Premium Apparel",          desc:"$150 to spend on gear, fits, or streetwear", img:"https://images.unsplash.com/photo-1523381210434-271e8be1f52b?w=400&h=240&fit=crop&auto=format" },
+      { name:"Lagoon Pass or Adventure", desc:"Day pass to local attraction or adventure experience", img:"https://images.unsplash.com/photo-1504701954957-2010ec3bcec1?w=400&h=240&fit=crop&auto=format" },
+      { name:"Cash",                     desc:"$150 straight cash — no questions asked", img:"https://images.unsplash.com/photo-1554672408-730436b60dde?w=400&h=240&fit=crop&auto=format" },
+      { name:"Gift Cards",               desc:"$150 in gift cards to the stores you actually shop at", img:"https://images.unsplash.com/photo-1556742502-ec7c0e9f34b1?w=400&h=240&fit=crop&auto=format" },
     ],
   },
   {
@@ -769,11 +896,11 @@ const INCENTIVE_TIERS = [
     name: "VOLTAGE",
     tagline: "The team is noticing.",
     items: [
-      { name:"Xbox Series X",           desc:"Brand new console + 3 games", img:"https://images.unsplash.com/photo-1605979257913-1704eb7b6246?w=400&h=240&fit=crop&auto=format" },
-      { name:"AutoZone / Summit Racing",desc:"$300 car parts gift card", img:"https://images.unsplash.com/photo-1492144534655-ae79c964c9d7?w=400&h=240&fit=crop&auto=format" },
-      { name:"Hotel Weekend",           desc:"2-night hotel stay anywhere in-state", img:"https://images.unsplash.com/photo-1551882547-ff40c63fe5fa?w=400&h=240&fit=crop&auto=format" },
-      { name:"Range Day + Ammo",        desc:"$300 to your local gun range + ammo", img:"https://images.unsplash.com/photo-1584308666744-24d5c474f2ae?w=400&h=240&fit=crop&auto=format" },
-      { name:"Sony WH-1000XM5",        desc:"Top-tier noise cancelling headphones", img:"https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=400&h=240&fit=crop&auto=format" },
+      { name:"Ray-Bans or Designer Shades", desc:"Premium sunglasses — Tom Ford, Oakley, Ray-Ban", img:"https://images.unsplash.com/photo-1473496169904-658ba7574b0d?w=400&h=240&fit=crop&auto=format" },
+      { name:"Designer Cologne",           desc:"Tom Ford, Chanel, or your signature scent — up to $300", img:"https://images.unsplash.com/photo-1541643600914-78b084683702?w=400&h=240&fit=crop&auto=format" },
+      { name:"Cash",                        desc:"$300 straight cash — spend it how you want", img:"https://images.unsplash.com/photo-1554672408-730436b60dde?w=400&h=240&fit=crop&auto=format" },
+      { name:"Xbox or Gaming Bundle",       desc:"New Xbox or $300 gaming store credit", img:"https://images.unsplash.com/photo-1605979257913-1704eb7b6246?w=400&h=240&fit=crop&auto=format" },
+      { name:"Hotel Weekend",               desc:"2-night hotel stay anywhere in-state with your person", img:"https://images.unsplash.com/photo-1551882547-ff40c63fe5fa?w=400&h=240&fit=crop&auto=format" },
     ],
   },
   {
@@ -784,11 +911,11 @@ const INCENTIVE_TIERS = [
     name: "OVERDRIVE",
     tagline: "Elite territory.",
     items: [
-      { name:"PlayStation 5",           desc:"Brand new PS5 console", img:"https://images.unsplash.com/photo-1607853202273-797f1c22a38e?w=400&h=240&fit=crop&auto=format" },
-      { name:"Supercar Track Day",      desc:"Drive a supercar at a real racing circuit", img:"https://images.unsplash.com/photo-1503376780353-7e6692767b70?w=400&h=240&fit=crop&auto=format" },
-      { name:"Flight + Hotel Weekend",  desc:"Flights + 2 nights in a city of your choice", img:"https://images.unsplash.com/photo-1436491865332-7a61a109cc05?w=400&h=240&fit=crop&auto=format" },
-      { name:"Custom Wheels",           desc:"$600 toward rims, tires, or suspension", img:"https://images.unsplash.com/photo-1558618666-fcd25c85cd64?w=400&h=240&fit=crop&auto=format" },
-      { name:"Nixon 500 Watch",         desc:"Gold Nixon 500 — clean, bold, built for you", img:"https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=400&h=240&fit=crop&auto=format" },
+      { name:"Insta360 X5 Camera",         desc:"The sickest action cam — full kit", img:"https://images.unsplash.com/photo-1516035069371-29a1b244cc32?w=400&h=240&fit=crop&auto=format" },
+      { name:"Apple Watch",                 desc:"Latest Apple Watch — your pick of model", img:"https://images.unsplash.com/photo-1434493789847-2f02dc6ca35d?w=400&h=240&fit=crop&auto=format" },
+      { name:"Flights + Trip",              desc:"Domestic flights + hotel — pick your destination", img:"https://images.unsplash.com/photo-1436491865332-7a61a109cc05?w=400&h=240&fit=crop&auto=format" },
+      { name:"Car Parts Fund",              desc:"$600 toward wheels, tires, suspension, or your build", img:"https://images.unsplash.com/photo-1558618666-fcd25c85cd64?w=400&h=240&fit=crop&auto=format" },
+      { name:"Cash",                        desc:"$600 in your pocket — no strings attached", img:"https://images.unsplash.com/photo-1554672408-730436b60dde?w=400&h=240&fit=crop&auto=format" },
     ],
   },
   {
@@ -799,11 +926,11 @@ const INCENTIVE_TIERS = [
     name: "LEGEND",
     tagline: "One of one.",
     items: [
-      { name:"3-Day Cruise",            desc:"Carnival or Royal Caribbean, you + a guest", img:"https://images.unsplash.com/photo-1548574505-5e239809ee19?w=400&h=240&fit=crop&auto=format" },
-      { name:"All-Inclusive Resort",    desc:"3 nights Cancun or Dominican Republic", img:"https://images.unsplash.com/photo-1571896349842-33c89424de2d?w=400&h=240&fit=crop&auto=format" },
-      { name:"Performance Build Fund",  desc:"$1,200 toward your car build, no questions asked", img:"https://images.unsplash.com/photo-1544636331-e26879cd4d9b?w=400&h=240&fit=crop&auto=format" },
-      { name:"VIP Concert Package",    desc:"Floor seats + backstage passes + hotel night", img:"https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=400&h=240&fit=crop&auto=format" },
-      { name:"Vegas Trip",             desc:"Flights + 3 nights on the Strip + spending cash", img:"https://images.unsplash.com/photo-1605833556294-ea5c2a5339fd?w=400&h=240&fit=crop&auto=format" },
+      { name:"All-Inclusive Resort",        desc:"Cancun, Dominican Republic, or your pick — you + a guest", img:"https://images.unsplash.com/photo-1571896349842-33c89424de2d?w=400&h=240&fit=crop&auto=format" },
+      { name:"S&P 500 / Roth IRA Contribution", desc:"$1,200 invested directly into your future — stocks or retirement", img:"https://images.unsplash.com/photo-1611974789855-9c2a0a7236a3?w=400&h=240&fit=crop&auto=format" },
+      { name:"Performance Car Build",       desc:"$1,200 no-questions-asked contribution to your car build", img:"https://images.unsplash.com/photo-1544636331-e26879cd4d9b?w=400&h=240&fit=crop&auto=format" },
+      { name:"VIP Concert + Hotel",         desc:"Floor seats to a major show + hotel night for you and a +1", img:"https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=400&h=240&fit=crop&auto=format" },
+      { name:"Paid Time Off Bonus",         desc:"Take time off + $1,200 spending money — you earned it", img:"https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=400&h=240&fit=crop&auto=format" },
     ],
   },
 ];
@@ -966,7 +1093,7 @@ function TechDashboard({ tech, techs, upsells, switchovers, reviews, onLogout })
               <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"6px", padding:"16px 18px" }}>
                 <Label>My Badges</Label>
                 <div style={{ display:"flex", flexWrap:"wrap", gap:"6px" }}>
-                  {BADGE_DEFS.filter(b=>tech.badges.includes(b.id)).map(b=>(
+                  {ALL_BADGE_DEFS.filter(b=>tech.badges?.includes(b.id)).map(b=>(
                     <div key={b.id} style={{ background:`${C.blue}18`, border:`1px solid ${C.blue}44`, borderRadius:"4px", padding:"6px 10px", display:"flex", alignItems:"center", gap:"6px" }}>
                       <span style={{ fontSize:"16px" }}>{b.icon}</span>
                       <div>
@@ -1705,7 +1832,7 @@ function AdminPanel({ techs, upsells, switchovers, reviews, rideAlongs, schedule
             </select>
             <select value={awardForm.badgeId} onChange={e=>setAwardForm(f=>({...f,badgeId:e.target.value}))} style={sel(awardForm.badgeId)}>
               <option value="">— Select Badge —</option>
-              {BADGE_DEFS.map(b=><option key={b.id} value={b.id}>{b.icon} {b.name} (+{b.pts} pts)</option>)}
+              {ALL_BADGE_DEFS.map(b=><option key={b.id} value={b.id}>{b.icon} {b.name} ({b.pts>0?`+${b.pts} pts`:"Trophy"})</option>)}
             </select>
             <button onClick={awardBadge} disabled={saving} style={btn(C.blue)}>{saving?"Saving...":"Award Badge"}</button>
           </div>
