@@ -42,9 +42,9 @@ const C = {
 };
 
 const ADMIN_PIN = "0000";
-const UPSELL_PTS_PER_DOLLAR = 1.0;
-const REVIEW_PTS = 12;
-const REVIEW_BONUS_PTS = 40;
+const UPSELL_PTS_PER_DOLLAR = 0.5; // $2 = 1 pt
+const REVIEW_PTS = 5;
+const REVIEW_BONUS_PTS = 20; // bonus at 10+ reviews in a month
 const CALLBACK_PTS = -300; // deducted per callback — nearly a full week of work
 
 // ─── QUOTA CONFIG (Kyle sets these in admin) ──────────────────────────────────
@@ -119,10 +119,10 @@ const PLAN_MAP = Object.fromEntries(SERVICE_PLANS.map(p => [p.id, p]));
 const PLAN_COLORS = { biannual:C.green, quarterly:C.blue, bimonthly:C.purple, monthly:C.blue, biweekly:C.gold, weekly:C.orange };
 
 const JOURNEY_TIERS = [
-  { id:"bronze",   name:"BRONZE",   icon:"🥉", minPts:0,    maxPts:1499,   color:"#cd7f32", bg:"#1a1000", reward:"Tier 1 — $150",   perks:["$150 Skylo Cash","Badge tracking","Weekly upsells"] },
-  { id:"silver",   name:"SILVER",   icon:"🥈", minPts:1500, maxPts:2799,   color:"#a8c0d6", bg:"#0e1520", reward:"Tier 2 — $300",   perks:["$300 Skylo Cash","Switchover bonuses","Monthly spotlight"] },
-  { id:"gold",     name:"GOLD",     icon:"🥇", minPts:2800, maxPts:5199,   color:"#ffd600", bg:"#1a1400", reward:"Tier 3 — $600",   perks:["$600 Skylo Cash","Featured on board","Priority scheduling"] },
-  { id:"platinum", name:"PLATINUM", icon:"💎", minPts:5200, maxPts:Infinity,color:"#c4b5fd", bg:"#0d0520", reward:"Tier 4 — $1,200", perks:["$1,200 Skylo Cash","Legend nomination","Annual award"] },
+  { id:"bronze",   name:"BRONZE",   icon:"🥉", minPts:0,    maxPts:749,    color:"#cd7f32", bg:"#1a1000", reward:"Tier 1 — $150",   perks:["$150 Skylo Cash","Badge tracking","Weekly upsells"] },
+  { id:"silver",   name:"SILVER",   icon:"🥈", minPts:750,  maxPts:1399,   color:"#a8c0d6", bg:"#0e1520", reward:"Tier 2 — $300",   perks:["$300 Skylo Cash","Switchover bonuses","Monthly spotlight"] },
+  { id:"gold",     name:"GOLD",     icon:"🥇", minPts:1400, maxPts:2599,   color:"#ffd600", bg:"#1a1400", reward:"Tier 3 — $600",   perks:["$600 Skylo Cash","Featured on board","Priority scheduling"] },
+  { id:"platinum", name:"PLATINUM", icon:"💎", minPts:2600, maxPts:Infinity,color:"#c4b5fd", bg:"#0d0520", reward:"Tier 4 — $1,200", perks:["$1,200 Skylo Cash","Legend nomination","Annual award"] },
 ];
 function getTier(pts) { return [...JOURNEY_TIERS].reverse().find(t => pts >= t.minPts) || JOURNEY_TIERS[0]; }
 
@@ -821,13 +821,19 @@ function JourneyCard({ tech, rank, total, onClick, expanded, upsells, quota }) {
         </div>
 
         {tech.nextTier?(
-          <div style={{ marginBottom:"14px" }}>
-            <div style={{ display:"flex", justifyContent:"space-between", marginBottom:"5px" }}>
-              <span style={{ fontSize:"10px", color:C.muted, letterSpacing:"1px", textTransform:"uppercase" }}>Next: {tech.nextTier.name}</span>
-              <span style={{ fontSize:"10px", color:tier.color, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>{tech.ptsToNext.toLocaleString()} pts away</span>
+          <div style={{ background:`${tier.color}12`, border:`1px solid ${tier.color}44`, borderRadius:"10px", padding:"12px 14px", marginBottom:"14px" }}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:"8px" }}>
+              <div>
+                <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontStyle:"italic", fontSize:"13px", color:tier.color, letterSpacing:"1px" }}>🎯 WORKING TOWARD</div>
+                <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"22px", color:C.black, lineHeight:1, marginTop:"2px" }}>{tech.nextTier.reward}</div>
+              </div>
+              <div style={{ textAlign:"right", flexShrink:0 }}>
+                <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"22px", color:tier.color, lineHeight:1 }}>{tech.ptsToNext.toLocaleString()}</div>
+                <div style={{ fontSize:"10px", color:C.muted, letterSpacing:"1px" }}>PTS TO GO</div>
+              </div>
             </div>
-            <Bar pct={tech.tierPct} color={tier.color} h={6}/>
-            <div style={{ fontSize:"10px", color:C.muted, marginTop:"4px" }}>{tech.tierPct}% · 🎁 {tech.nextTier.reward}</div>
+            <Bar pct={tech.tierPct} color={tier.color} h={7}/>
+            <div style={{ fontSize:"10px", color:C.muted, marginTop:"5px" }}>{tech.tierPct}% of the way there · {tech.total.toLocaleString()} / {tech.nextTier.minPts.toLocaleString()} pts</div>
           </div>
         ):(
           <div style={{ marginBottom:"14px", background:`${tier.color}18`, border:`1px solid ${tier.color}44`, borderRadius:"8px", padding:"8px 12px", textAlign:"center" }}>
@@ -1094,7 +1100,7 @@ function KyleBonusTab({ techs, upsells, switchovers, reviews, quota }) {
 // ─── INCENTIVE BOARD ─────────────────────────────────────────────────────────
 const INCENTIVE_TIERS = [
   {
-    pts: 1500,
+    pts: 750,
     prize: "$150",
     color: "#cd7f32",
     icon: "🔥",
@@ -1109,7 +1115,7 @@ const INCENTIVE_TIERS = [
     ],
   },
   {
-    pts: 2800,
+    pts: 1400,
     prize: "$300",
     color: "#a8c0d6",
     icon: "⚡",
@@ -1124,7 +1130,7 @@ const INCENTIVE_TIERS = [
     ],
   },
   {
-    pts: 3900,
+    pts: 1950,
     prize: "$600",
     color: "#ffd600",
     icon: "🏆",
@@ -1139,7 +1145,7 @@ const INCENTIVE_TIERS = [
     ],
   },
   {
-    pts: 5200,
+    pts: 2600,
     prize: "$1,200",
     color: "#c4b5fd",
     icon: "👑",
@@ -1163,14 +1169,14 @@ function IncentiveBoard({ techs, upsells, switchovers, reviews, callbacks, curre
         <div style={{ fontSize:"13px", color:C.muted, marginBottom:"8px" }}>Stack your points from upsells, switchovers, reviews, and badges. Hit a tier, claim your Skylo Cash — then your points reset and the grind starts again.</div>
         <div style={{ background:`${C.blue}12`, border:`1px solid ${C.border}`, borderRadius:"8px", padding:"10px 14px", fontSize:"12px", color:C.muted, display:"flex", gap:"6px", alignItems:"flex-start" }}>
           <span style={{ color:C.blue, fontSize:"14px" }}>ℹ️</span>
-          <span><strong style={{ color:C.black }}>How it works:</strong> Upsells are the biggest earner — $1 upselled = 1 pt. Reviews are 12 pts each (+40 bonus at 10/mo). Switchovers are 15–120 pts by plan. Hit 1,500 pts ($150) · 2,800 pts ($300) · 3,900 pts ($600) · 5,200 pts ($1,200) — then points reset and you climb again.</span>
+          <span><strong style={{ color:C.black }}>How it works:</strong> Every $2 upselled = 1 pt. Reviews are 5 pts each (+20 bonus at 10/mo). Switchovers are 15–120 pts by plan. Hit 750 pts ($150) · 1,400 pts ($300) · 1,950 pts ($600) · 2,600 pts ($1,200) — then points reset and you climb again.</span>
         </div>
         <div style={{ display:"grid", gridTemplateColumns:"repeat(2,1fr)", gap:"8px", marginTop:"14px" }}>
           {[
-            {l:"Upsells",    v:"$2 = 1 pt",       c:C.green},
-            {l:"Reviews",    v:"25 pts each",      c:C.gold},
-            {l:"Switchovers",v:"25–350 pts",       c:C.purple},
-            {l:"Badges",     v:"50–1,500 pts",     c:C.blue},
+            {l:"Upsells",    v:"$2 = 1 pt",        c:C.green},
+            {l:"Reviews",    v:"5 pts each",        c:C.gold},
+            {l:"Switchovers",v:"15–120 pts",        c:C.purple},
+            {l:"Badges",     v:"40–1,000 pts",      c:C.blue},
           ].map(item=>(
             <div key={item.l} style={{ background:C.cardLt, borderRadius:"4px", padding:"8px 12px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
               <span style={{ fontSize:"12px", color:C.muted }}>{item.l}</span>
@@ -1291,8 +1297,8 @@ function TechDashboard({ tech, techs, upsells, switchovers, reviews, callbacks, 
         {nextTier&&(
           <div style={{ marginBottom:"14px" }}>
             <div style={{ display:"flex", justifyContent:"space-between", marginBottom:"5px" }}>
-              <span style={{ fontSize:"10px", color:C.muted, letterSpacing:"1px" }}>NEXT: {nextTier.name} · {nextTier.reward}</span>
-              <span style={{ fontSize:"10px", color:tier.color, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>{(nextTier.minPts-tt.total).toLocaleString()} PTS AWAY</span>
+              <span style={{ fontSize:"10px", color:C.muted, letterSpacing:"1px" }}>🎯 WORKING TOWARD: {nextTier.reward}</span>
+              <span style={{ fontSize:"10px", color:tier.color, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>{(nextTier.minPts-tt.total).toLocaleString()} PTS TO GO</span>
             </div>
             <Bar pct={Math.round(((tt.total-tier.minPts)/(nextTier.minPts-tier.minPts))*100)} color={tier.color} h={4}/>
           </div>
