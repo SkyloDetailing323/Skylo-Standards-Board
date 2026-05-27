@@ -119,10 +119,10 @@ const PLAN_MAP = Object.fromEntries(SERVICE_PLANS.map(p => [p.id, p]));
 const PLAN_COLORS = { biannual:C.green, quarterly:C.blue, bimonthly:C.purple, monthly:C.blue, biweekly:C.gold, weekly:C.orange };
 
 const JOURNEY_TIERS = [
-  { id:"bronze",   name:"BRONZE",   icon:"🥉", minPts:0,    maxPts:749,    color:"#cd7f32", bg:"#1a1000", reward:"Tier 1 — $150",   perks:["$150 Skylo Cash","Badge tracking","Weekly upsells"] },
-  { id:"silver",   name:"SILVER",   icon:"🥈", minPts:750,  maxPts:1399,   color:"#a8c0d6", bg:"#0e1520", reward:"Tier 2 — $300",   perks:["$300 Skylo Cash","Switchover bonuses","Monthly spotlight"] },
-  { id:"gold",     name:"GOLD",     icon:"🥇", minPts:1400, maxPts:2599,   color:"#ffd600", bg:"#1a1400", reward:"Tier 3 — $600",   perks:["$600 Skylo Cash","Featured on board","Priority scheduling"] },
-  { id:"platinum", name:"PLATINUM", icon:"💎", minPts:2600, maxPts:Infinity,color:"#c4b5fd", bg:"#0d0520", reward:"Tier 4 — $1,200", perks:["$1,200 Skylo Cash","Legend nomination","Annual award"] },
+  { id:"bronze",   name:"BRONZE",   icon:"🥉", minPts:0,    maxPts:2499,   color:"#cd7f32", bg:"#1a1000", reward:"Tier 1 — $150",   perks:["$150 Skylo Cash","Badge tracking","Weekly upsells"] },
+  { id:"silver",   name:"SILVER",   icon:"🥈", minPts:2500, maxPts:4499,   color:"#a8c0d6", bg:"#0e1520", reward:"Tier 2 — $300",   perks:["$300 Skylo Cash","Switchover bonuses","Monthly spotlight"] },
+  { id:"gold",     name:"GOLD",     icon:"🥇", minPts:4500, maxPts:5999,   color:"#ffd600", bg:"#1a1400", reward:"Tier 3 — $600",   perks:["$600 Skylo Cash","Featured on board","Priority scheduling"] },
+  { id:"platinum", name:"PLATINUM", icon:"💎", minPts:6000, maxPts:Infinity,color:"#c4b5fd", bg:"#0d0520", reward:"Tier 4 — $1,200", perks:["$1,200 Skylo Cash","Legend nomination","Annual award"] },
 ];
 function getTier(pts) { return [...JOURNEY_TIERS].reverse().find(t => pts >= t.minPts) || JOURNEY_TIERS[0]; }
 
@@ -1100,7 +1100,7 @@ function KyleBonusTab({ techs, upsells, switchovers, reviews, quota }) {
 // ─── INCENTIVE BOARD ─────────────────────────────────────────────────────────
 const INCENTIVE_TIERS = [
   {
-    pts: 750,
+    pts: 2500,
     prize: "$150",
     color: "#cd7f32",
     icon: "🔥",
@@ -1115,7 +1115,7 @@ const INCENTIVE_TIERS = [
     ],
   },
   {
-    pts: 1400,
+    pts: 4500,
     prize: "$300",
     color: "#a8c0d6",
     icon: "⚡",
@@ -1130,7 +1130,7 @@ const INCENTIVE_TIERS = [
     ],
   },
   {
-    pts: 1950,
+    pts: 6000,
     prize: "$600",
     color: "#ffd600",
     icon: "🏆",
@@ -1145,7 +1145,7 @@ const INCENTIVE_TIERS = [
     ],
   },
   {
-    pts: 2600,
+    pts: 8000,
     prize: "$1,200",
     color: "#c4b5fd",
     icon: "👑",
@@ -1169,7 +1169,7 @@ function IncentiveBoard({ techs, upsells, switchovers, reviews, callbacks, curre
         <div style={{ fontSize:"13px", color:C.muted, marginBottom:"8px" }}>Stack your points from upsells, switchovers, reviews, and badges. Hit a tier, claim your Skylo Cash — then your points reset and the grind starts again.</div>
         <div style={{ background:`${C.blue}12`, border:`1px solid ${C.border}`, borderRadius:"8px", padding:"10px 14px", fontSize:"12px", color:C.muted, display:"flex", gap:"6px", alignItems:"flex-start" }}>
           <span style={{ color:C.blue, fontSize:"14px" }}>ℹ️</span>
-          <span><strong style={{ color:C.black }}>How it works:</strong> Every $2 upselled = 1 pt. Reviews are 5 pts each (+20 bonus at 10/mo). Switchovers are 15–120 pts by plan. Hit 750 pts ($150) · 1,400 pts ($300) · 1,950 pts ($600) · 2,600 pts ($1,200) — then points reset and you climb again.</span>
+          <span><strong style={{ color:C.black }}>How it works:</strong> Every $2 upselled = 1 pt. Reviews are 5 pts each (+20 bonus at 10/mo). Switchovers are 15–120 pts by plan. Hit 2,500 pts ($150) · 4,500 pts ($300) · 6,000 pts ($600) · 8,000 pts ($1,200) — then points reset and you climb again.</span>
         </div>
         <div style={{ display:"grid", gridTemplateColumns:"repeat(2,1fr)", gap:"8px", marginTop:"14px" }}>
           {[
