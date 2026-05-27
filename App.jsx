@@ -659,7 +659,7 @@ function ReviewLeaderboard({ techs, reviews, currentId }) {
 }
 
 // ─── TOTAL LEADERBOARD ────────────────────────────────────────────────────────
-function TotalLeaderboard({ techs, upsells, switchovers, reviews }) {
+function TotalLeaderboard({ techs, upsells, switchovers, reviews, callbacks }) {
   const ranked = [...techs].map(t=>{ const tt=calcTotals(t,upsells,switchovers,reviews,callbacks||[]); return {...t,...tt,tier:getTier(tt.total)}; }).sort((a,b)=>b.total-a.total);
   const top = ranked[0]?.total||1;
   return (
@@ -702,7 +702,7 @@ function TotalLeaderboard({ techs, upsells, switchovers, reviews }) {
 }
 
 // ─── JOURNEY BOARD ────────────────────────────────────────────────────────────
-function JourneyBoard({ techs, upsells, switchovers, reviews, quota }) {
+function JourneyBoard({ techs, upsells, switchovers, reviews, quota, callbacks }) {
   const [selected, setSelected] = useState(null);
   const mk = getMonthKey();
   const ranked = [...techs].map(t=>{
@@ -1153,7 +1153,7 @@ const INCENTIVE_TIERS = [
   },
 ];
 
-function IncentiveBoard({ techs, upsells, switchovers, reviews, currentId }) {
+function IncentiveBoard({ techs, upsells, switchovers, reviews, callbacks, currentId }) {
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:"16px" }}>
       <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.blue}`, borderRadius:"12px", padding:"16px 18px" }}>
@@ -1391,17 +1391,17 @@ function TechDashboard({ tech, techs, upsells, switchovers, reviews, callbacks, 
         {tab==="upsells"&&<UpsellLeaderboard techs={techs} upsells={upsells} currentId={tech.id}/>}
         {tab==="switchovers"&&<SwitchoverLeaderboard techs={techs} switchovers={switchovers} currentId={tech.id}/>}
         {tab==="reviews"&&<ReviewLeaderboard techs={techs} reviews={reviews} currentId={tech.id}/>}
-        {tab==="total"&&<TotalLeaderboard techs={techs} upsells={upsells} switchovers={switchovers} reviews={reviews}/>}
+        {tab==="total"&&<TotalLeaderboard techs={techs} upsells={upsells} switchovers={switchovers} reviews={reviews} callbacks={callbacks||[]}/}
         {tab==="journey"&&(
           <div>
             <div style={{ fontSize:"13px", color:C.muted, marginBottom:"16px" }}>Tap any card to expand full breakdown.</div>
-            <JourneyBoard techs={techs} upsells={upsells} switchovers={switchovers} reviews={reviews} quota={q}/>
+            <JourneyBoard techs={techs} upsells={upsells} switchovers={switchovers} reviews={reviews} quota={q} callbacks={callbacks||[]}/
           </div>
         )}
         {tab==="incentive"&&(
           <div>
             <div style={{ fontSize:"13px", color:C.muted, marginBottom:"16px" }}>Your personal progress toward each reward tier.</div>
-            <IncentiveBoard techs={techs} upsells={upsells} switchovers={switchovers} reviews={reviews} currentId={tech.id}/>
+            <IncentiveBoard techs={techs} upsells={upsells} switchovers={switchovers} reviews={reviews} callbacks={callbacks||[]} currentId={tech.id}/
           </div>
         )}
       </div>
@@ -2260,7 +2260,7 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
         {tab==="journey"&&(
           <div>
             <div style={{ fontSize:"13px", color:C.muted, marginBottom:"16px" }}>Tap any card to expand full breakdown.</div>
-            <JourneyBoard techs={techs} upsells={upsells} switchovers={switchovers} reviews={reviews} quota={quota}/>
+            <JourneyBoard techs={techs} upsells={upsells} switchovers={switchovers} reviews={reviews} quota={quota} callbacks={callbacks||[]}/
           </div>
         )}
         {tab==="kyle"&&(
@@ -2272,7 +2272,7 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
         {tab==="incentive"&&(
           <div>
             <div style={{ fontSize:"13px", color:C.muted, marginBottom:"16px" }}>Team rewards overview — all tiers and prizes.</div>
-            <IncentiveBoard techs={techs} upsells={upsells} switchovers={switchovers} reviews={reviews} currentId={null}/>
+            <IncentiveBoard techs={techs} upsells={upsells} switchovers={switchovers} reviews={reviews} callbacks={callbacks||[]} currentId={null}/
           </div>
         )}
 
