@@ -1636,8 +1636,41 @@ function TechDashboard({ tech, techs, upsells, switchovers, reviews, callbacks, 
             <IncentiveBoard techs={techs} upsells={upsells} switchovers={switchovers} reviews={reviews} callbacks={callbacks||[]} currentId={tech.id}/>
           </div>
         )}
-        {tab==="myteam"&&tech.is_lead&&(
-          <TeamLeadPanel tech={tech} techs={techs} upsells={upsells} switchovers={switchovers} reviews={reviews} callbacks={callbacks||[]} quota={q}/>
+        {tab==="myteam"&&(
+          tech.is_lead
+            ? <TeamLeadPanel tech={tech} techs={techs} upsells={upsells} switchovers={switchovers} reviews={reviews} callbacks={callbacks||[]} quota={q}/>
+            : (() => {
+                const myLead = techs.find(t=>t.id===tech.team_lead_id);
+                const myTeam = techs.filter(t=>t.team_lead_id===tech.team_lead_id&&t.id!==tech.id);
+                const teamName = myLead?.team_name;
+                return (
+                  <div style={{ display:"flex", flexDirection:"column", gap:"14px" }}>
+                    <div style={{ background:C.white, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.gold}`, borderRadius:"12px", padding:"18px 20px", boxShadow:"0 2px 8px rgba(43,156,240,0.08)" }}>
+                      <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontStyle:"italic", fontSize:"22px", color:C.black, marginBottom:"4px" }}>{teamName||"Your Team"}</div>
+                      {myLead&&(
+                        <div style={{ display:"flex", alignItems:"center", gap:"10px", marginBottom:"16px", paddingBottom:"14px", borderBottom:`1px solid ${C.border}` }}>
+                          <div style={{ width:"40px", height:"40px", borderRadius:"50%", background:`${C.gold}22`, border:`2px solid ${C.gold}`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:"14px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", color:C.gold }}>{myLead.avatar}</div>
+                          <div>
+                            <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"16px", color:C.black }}>{myLead.name}</div>
+                            <div style={{ fontSize:"10px", color:C.gold, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", letterSpacing:"1px" }}>👑 TEAM LEAD</div>
+                          </div>
+                        </div>
+                      )}
+                      <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"11px", color:C.muted, letterSpacing:"2px", marginBottom:"10px" }}>TEAMMATES</div>
+                      <div style={{ display:"flex", flexDirection:"column", gap:"8px" }}>
+                        {myTeam.map(m=>(
+                          <div key={m.id} style={{ display:"flex", alignItems:"center", gap:"10px", background:C.cardLt, borderRadius:"8px", padding:"10px 12px" }}>
+                            <div style={{ width:"32px", height:"32px", borderRadius:"50%", background:`${C.blue}22`, border:`1px solid ${C.blue}44`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:"11px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", color:C.blue }}>{m.avatar}</div>
+                            <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", fontSize:"14px", color:C.black }}>{m.name}</div>
+                          </div>
+                        ))}
+                        {myTeam.length===0&&<div style={{ fontSize:"13px", color:C.muted }}>No teammates assigned yet</div>}
+                      </div>
+                      {!myLead&&<div style={{ fontSize:"13px", color:C.muted, marginTop:"12px" }}>You haven't been assigned to a team yet.</div>}
+                    </div>
+                  </div>
+                );
+              })()
         )}
       </div>
     </div>
