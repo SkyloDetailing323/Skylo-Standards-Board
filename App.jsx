@@ -1550,8 +1550,8 @@ function TechDashboard({ tech, techs, upsells, switchovers, reviews, callbacks, 
                 ))}
               </div>
               {!allQuotaHit&&(
-                <div style={{ marginTop:"12px", fontSize:"11px", color:C.muted, fontStyle:"italic" }}>
-                  Keep pushing — hit all 3 and Kyle earns his bonus too 💪
+                <div style={{ fontSize:"11px", color:C.muted, fontStyle:"italic", marginTop:"12px" }}>
+                  Keep pushing — hit all 3 targets this month 💪
                 </div>
               )}
             </div>
