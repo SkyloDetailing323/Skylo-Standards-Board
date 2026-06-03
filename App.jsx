@@ -2537,7 +2537,17 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
             {techs.map(t=>(
               <div key={t.id} style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"16px 18px" }}>
                 <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:"10px" }}>
-                  <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"17px", color:C.black }}>{t.name}</div>
+                  <input
+                    defaultValue={t.name}
+                    onBlur={async e=>{
+                      const val = e.target.value.trim();
+                      if (!val || val===t.name) return;
+                      await sb(`techs?id=eq.${t.id}`,{method:"PATCH",body:JSON.stringify({name:val}),prefer:"return=minimal"});
+                      await refreshAll();
+                      showToast(`✅ Name updated to ${val}`);
+                    }}
+                    style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"17px", color:C.black, background:"transparent", border:"none", borderBottom:`1px dashed ${C.border}`, padding:"2px 4px", width:"200px", cursor:"text" }}
+                  />
                   <span style={{ fontSize:"12px", color:C.muted, fontFamily:"'Barlow Condensed',sans-serif" }}>PIN: {t.pin}</span>
                 </div>
                 <div style={{ display:"flex", alignItems:"center", gap:"10px", marginBottom:"10px" }}>
