@@ -109,6 +109,13 @@ exports.handler = async (event) => {
     return { statusCode: 200, body: "No job data" };
   }
 
+  // Only process completed jobs
+  const jobStatus = job.work_status || job.status || "";
+  if (!jobStatus.toLowerCase().includes("complete")) {
+    console.log(`Job ${job.id} not completed (status: ${jobStatus}), skipping`);
+    return { statusCode: 200, body: "Job not completed yet" };
+  }
+
   // Get the assigned employee
   const assignedEmployee = job.assigned_employees?.[0] || job.employee;
   if (!assignedEmployee) {
