@@ -104,9 +104,35 @@ exports.handler = async (event) => {
 
   // Handle both job and invoice events
   const job = payload.job || payload.data?.job || payload.data || null;
-  const invoice = payload.invoice || null;
+  const jobId = String(job?.id || "");
+  if (!jobId) return { statusCode: 200, body: "No job ID" };
 
-  // Fetch full job details from HCP API (includes line items)
+  const assignedEmployee = job?.assigned_employees?.[0] || job?.employee || null;
+  console.log(`Employee: ${JSON.stringify(assignedEmployee)}`);
+
+  if (!assignedEmployee) {
+    console.log("No employee found in payload");
+    return { statusCode: 200, body: "No employee" };
+  }
+
+  const hcpName = `${assignedEmployee.first_name} ${assignedEmployee.last_name}`.trim();
+  console.log(`HCP employee name: "${hcpName}"`);
+  const skyloName = TECH_MAP[hcpName];
+
+  if (!skyloName) {
+    console.log(`No Skylo mapping for: ${hcpName}`);
+    return { statusCode: 200, body: `No mapping for ${hcpName}` };
+  }
+
+  // Look up tech in Supabase
+  const techs = await supabase(`techs?name=eq.${encodeURIComponent(skyloName)}&select=id,name`);
+  if (!techs || techs.length === 0) {
+    console.log(`Tech not found in Skylo: ${skyloName}`);
+    return { statusCode: 200, body: `Tech not found: ${skyloName}` };
+  }
+  const tech = techs[0];
+
+  // Fetch full job details from HCP API to get line items
   console.log(`Fetching full job details for: ${jobId}`);
 
   const hcpRes = await fetch(`https://api.housecallpro.com/jobs/${jobId}`, {
@@ -134,31 +160,6 @@ exports.handler = async (event) => {
     || [];
 
   console.log(`Found ${lineItems.length} line items`);
-  const assignedEmployee = job?.assigned_employees?.[0] || job?.employee || null;
-  console.log(`Employee: ${JSON.stringify(assignedEmployee)}`);
-
-  if (!assignedEmployee) {
-    console.log("No employee found in payload");
-    return { statusCode: 200, body: "No employee" };
-  }
-
-  const hcpName = `${assignedEmployee.first_name} ${assignedEmployee.last_name}`.trim();
-  console.log(`HCP employee name: "${hcpName}"`);
-  const skyloName = TECH_MAP[hcpName];
-
-  if (!skyloName) {
-    console.log(`No Skylo mapping for: ${hcpName}`);
-    return { statusCode: 200, body: `No mapping for ${hcpName}` };
-  }
-
-  // Look up tech in Supabase
-  const techs = await supabase(`techs?name=eq.${encodeURIComponent(skyloName)}&select=id,name`);
-  if (!techs || techs.length === 0) {
-    console.log(`Tech not found in Skylo: ${skyloName}`);
-    return { statusCode: 200, body: `Tech not found: ${skyloName}` };
-  }
-  const tech = techs[0];
-
   // Find upsell line items
   let upsellTotal = 0;
   const upsellItems = [];
