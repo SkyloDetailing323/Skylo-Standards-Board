@@ -1536,33 +1536,50 @@ function TechDashboard({ tech, techs, upsells, switchovers, reviews, callbacks, 
               <StatBlock label="Month Reviews" value={monthReviews} color={C.gold} sub={`All-time ${reviews.filter(r=>r.tech_id===tech.id).reduce((s,r)=>s+r.count,0)}`} accent={C.gold}/>
             </div>
 
-            {/* Team info */}
-            {(tech.team_lead_id || tech.is_lead) && (() => {
+            {/* Team info — always show if assigned, show unassigned message if not */}
+            {(() => {
               const myLead = techs.find(t=>t.id===tech.team_lead_id);
-              const myTeam = tech.is_lead ? techs.filter(t=>t.team_lead_id===tech.id) : techs.filter(t=>t.team_lead_id===tech.team_lead_id&&t.id!==tech.id);
+              const myTeam = tech.is_lead
+                ? techs.filter(t=>t.team_lead_id===tech.id)
+                : techs.filter(t=>t.team_lead_id===tech.team_lead_id&&t.id!==tech.id);
+              const teamName = tech.is_lead ? tech.team_name : myLead?.team_name;
+              const isOnTeam = tech.team_lead_id || tech.is_lead;
+
               return (
                 <div style={{ background:C.white, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.gold}`, borderRadius:"12px", padding:"14px 16px", boxShadow:"0 2px 8px rgba(43,156,240,0.08)" }}>
-                  <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontStyle:"italic", fontSize:"13px", color:C.gold, letterSpacing:"1px", marginBottom:"10px" }}>👥 YOUR TEAM</div>
-                  {myLead&&(
-                    <div style={{ display:"flex", alignItems:"center", gap:"8px", marginBottom:"8px", paddingBottom:"8px", borderBottom:`1px solid ${C.border}` }}>
-                      <div style={{ width:"32px", height:"32px", borderRadius:"50%", background:`${C.gold}22`, border:`1px solid ${C.gold}`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:"11px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", color:C.gold }}>{myLead.avatar}</div>
-                      <div>
-                        <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"14px", color:C.black }}>{myLead.name}</div>
-                        <div style={{ fontSize:"10px", color:C.gold, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", letterSpacing:"1px" }}>TEAM LEAD</div>
-                      </div>
-                    </div>
-                  )}
-                  {tech.is_lead&&(
-                    <div style={{ fontSize:"11px", color:C.gold, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", marginBottom:"6px" }}>YOU ARE THE TEAM LEAD</div>
-                  )}
-                  <div style={{ display:"flex", flexWrap:"wrap", gap:"6px" }}>
-                    {myTeam.map(m=>(
-                      <div key={m.id} style={{ background:C.cardLt, border:`1px solid ${C.border}`, borderRadius:"20px", padding:"4px 12px", display:"flex", alignItems:"center", gap:"6px" }}>
-                        <span style={{ fontSize:"11px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", color:C.black }}>{m.name}</span>
-                      </div>
-                    ))}
-                    {myTeam.length===0&&<div style={{ fontSize:"12px", color:C.muted }}>No teammates assigned yet</div>}
+                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:"10px" }}>
+                    <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontStyle:"italic", fontSize:"13px", color:C.gold, letterSpacing:"1px" }}>👥 YOUR TEAM</div>
+                    {teamName&&<div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontStyle:"italic", fontSize:"16px", color:C.black }}>{teamName}</div>}
                   </div>
+
+                  {!isOnTeam&&(
+                    <div style={{ fontSize:"12px", color:C.muted }}>You haven't been assigned to a team yet — check with your manager.</div>
+                  )}
+
+                  {isOnTeam&&(
+                    <>
+                      {myLead&&(
+                        <div style={{ display:"flex", alignItems:"center", gap:"8px", marginBottom:"8px", paddingBottom:"8px", borderBottom:`1px solid ${C.border}` }}>
+                          <div style={{ width:"32px", height:"32px", borderRadius:"50%", background:`${C.gold}22`, border:`1px solid ${C.gold}`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:"11px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", color:C.gold }}>{myLead.avatar}</div>
+                          <div>
+                            <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"14px", color:C.black }}>{myLead.name}</div>
+                            <div style={{ fontSize:"10px", color:C.gold, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", letterSpacing:"1px" }}>TEAM LEAD</div>
+                          </div>
+                        </div>
+                      )}
+                      {tech.is_lead&&(
+                        <div style={{ fontSize:"11px", color:C.gold, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", marginBottom:"8px", letterSpacing:"1px" }}>👑 YOU ARE THE TEAM LEAD</div>
+                      )}
+                      <div style={{ display:"flex", flexWrap:"wrap", gap:"6px" }}>
+                        {myTeam.map(m=>(
+                          <div key={m.id} style={{ background:C.cardLt, border:`1px solid ${C.border}`, borderRadius:"20px", padding:"4px 12px" }}>
+                            <span style={{ fontSize:"11px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", color:C.black }}>{m.name}</span>
+                          </div>
+                        ))}
+                        {myTeam.length===0&&<div style={{ fontSize:"12px", color:C.muted }}>No teammates assigned yet</div>}
+                      </div>
+                    </>
+                  )}
                 </div>
               );
             })()}
@@ -2540,6 +2557,21 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
                     </div>
                     {t.is_lead&&(
                       <div>
+                        <div style={{ fontSize:"11px", color:C.muted, marginBottom:"6px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>TEAM NAME</div>
+                        <div style={{ display:"flex", gap:"8px", marginBottom:"10px" }}>
+                          <input
+                            placeholder="e.g. Team Maverick"
+                            defaultValue={t.team_name||""}
+                            onBlur={async e=>{
+                              const val = e.target.value.trim();
+                              if (val === (t.team_name||"")) return;
+                              await sb(`techs?id=eq.${t.id}`,{method:"PATCH",body:JSON.stringify({team_name:val||null}),prefer:"return=minimal"});
+                              await refreshAll();
+                              showToast(`✅ Team name saved!`);
+                            }}
+                            style={{ flex:1, background:C.white, border:`1px solid ${C.border}`, color:C.black, padding:"8px 12px", borderRadius:"8px", fontSize:"14px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}
+                          />
+                        </div>
                         <div style={{ fontSize:"11px", color:C.muted, marginBottom:"6px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>TEAM MEMBERS</div>
                         <div style={{ display:"flex", flexWrap:"wrap", gap:"6px" }}>
                           {techs.filter(m=>m.id!==t.id).map(m=>{
