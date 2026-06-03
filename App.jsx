@@ -1176,13 +1176,127 @@ function KyleBonusTab({ techs, upsells, switchovers, reviews, quota }) {
 // ─── TEAM LEAD PANEL ─────────────────────────────────────────────────────────
 function TeamLeadPanel({ tech, techs, upsells, switchovers, reviews, callbacks, quota }) {
   const q = quota || DEFAULT_QUOTA;
-  const { overridePts, overridePct, teamMemberStats, allTeamHit, partialHit, leadHitsQuota, teamTotalPts, hittingCount, totalMembers } = calcTeamOverride(tech, techs, upsells, switchovers, reviews, callbacks, q);
-  const teamMembers = techs.filter(t=>t.team_lead_id===tech.id);
-  if (teamMembers.length===0) return null;
+  const teamMembers = (techs||[]).filter(t=>t.team_lead_id===tech.id);
   const mk = getMonthKey();
+  const now = new Date(); const y=now.getFullYear(); const mo=String(now.getMonth()+1).padStart(2,"0");
+
+  // Lead's own quota
+  const leadUpsells  = (upsells||[]).filter(u=>u.tech_id===tech.id&&u.week_key?.startsWith(`${y}-${mo}`)).reduce((s,u)=>s+u.amount,0);
+  const leadReviews  = (reviews||[]).filter(r=>r.tech_id===tech.id&&r.month_key===mk).reduce((s,r)=>s+r.count,0);
+  const leadSwitches = (switchovers||[]).filter(s=>s.tech_id===tech.id&&s.week_key?.startsWith(`${y}-${mo}`)).length;
+  const leadHitsQuota = leadUpsells>=q.upsells && leadReviews>=q.reviews && leadSwitches>=q.switchovers;
+
+  // Team member stats
+  const teamMemberStats = teamMembers.map(m=>{
+    const monthUpsellAmt   = (upsells||[]).filter(u=>u.tech_id===m.id&&u.week_key?.startsWith(`${y}-${mo}`)).reduce((s,u)=>s+u.amount,0);
+    const monthReviewCount = (reviews||[]).filter(r=>r.tech_id===m.id&&r.month_key===mk).reduce((s,r)=>s+r.count,0);
+    const monthSwitchCount = (switchovers||[]).filter(s=>s.tech_id===m.id&&s.week_key?.startsWith(`${y}-${mo}`)).length;
+    const upHit=monthUpsellAmt>=q.upsells, revHit=monthReviewCount>=q.reviews, swHit=monthSwitchCount>=q.switchovers;
+    const tt = calcTotals(m,upsells||[],switchovers||[],reviews||[],callbacks||[]);
+    return { ...m, monthUpsellAmt, monthReviewCount, monthSwitchCount, upHit, revHit, swHit, allHit:upHit&&revHit&&swHit, total:tt.total };
+  });
+
+  const hittingCount   = teamMemberStats.filter(m=>m.allHit).length;
+  const totalMembers   = teamMembers.length;
   const neededForPartial = Math.ceil(totalMembers * (2/3));
-  const statusColor = allTeamHit ? C.green : partialHit ? C.gold : C.muted;
-  const statusLabel = allTeamHit ? "🏆 10% OVERRIDE UNLOCKED" : partialHit ? "⚡ 5% OVERRIDE UNLOCKED" : "⏳ TEAM LEAD OVERRIDE";
+  const allTeamHit     = leadHitsQuota && hittingCount === totalMembers && totalMembers > 0;
+  const partialHit     = leadHitsQuota && hittingCount >= neededForPartial && !allTeamHit && totalMembers > 0;
+  const teamTotalPts   = teamMemberStats.reduce((s,m)=>s+m.total,0);
+  const overridePct    = allTeamHit ? 0.10 : partialHit ? 0.05 : 0;
+  const overridePts    = Math.round(teamTotalPts * overridePct);
+  const statusColor    = allTeamHit ? C.green : partialHit ? C.gold : C.blue;
+
+  return (
+    <div style={{ display:"flex", flexDirection:"column", gap:"14px" }}>
+
+      {/* No members yet */}
+      {totalMembers===0&&(
+        <div style={{ background:C.white, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.gold}`, borderRadius:"12px", padding:"24px 20px", textAlign:"center", boxShadow:"0 2px 8px rgba(43,156,240,0.08)" }}>
+          <div style={{ fontSize:"32px", marginBottom:"10px" }}>👥</div>
+          <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontStyle:"italic", fontSize:"20px", color:C.black, marginBottom:"6px" }}>No Team Members Yet</div>
+          <div style={{ fontSize:"13px", color:C.muted }}>Ask your admin to assign members to your team.</div>
+        </div>
+      )}
+
+      {/* Override status card */}
+      {totalMembers>0&&(
+        <div style={{ background:(allTeamHit||partialHit)?`${statusColor}12`:C.white, border:`2px solid ${allTeamHit||partialHit?statusColor:C.border}`, borderTop:`4px solid ${statusColor}`, borderRadius:"16px", padding:"18px 20px", boxShadow:"0 4px 16px rgba(43,156,240,0.10)" }}>
+          <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontStyle:"italic", fontSize:"13px", color:statusColor, letterSpacing:"2px", marginBottom:"6px" }}>
+            {allTeamHit?"🏆 10% OVERRIDE UNLOCKED":partialHit?"⚡ 5% OVERRIDE UNLOCKED":"⏳ TEAM LEAD OVERRIDE"}
+          </div>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:"14px" }}>
+            <div>
+              <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontStyle:"italic", fontSize:"36px", color:overridePts>0?statusColor:C.black, lineHeight:1 }}>
+                {overridePts>0?`+${overridePts.toLocaleString()} PTS`:"LOCKED"}
+              </div>
+              <div style={{ fontSize:"12px", color:C.muted, marginTop:"4px" }}>
+                {overridePct>0?`${Math.round(overridePct*100)}% of team's ${teamTotalPts.toLocaleString()} pts`:"Get your team to quota to unlock"}
+              </div>
+            </div>
+            <div style={{ textAlign:"right" }}>
+              <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"22px", color:C.black }}>{hittingCount}/{totalMembers}</div>
+              <div style={{ fontSize:"10px", color:C.muted, letterSpacing:"1px" }}>ON QUOTA</div>
+            </div>
+          </div>
+
+          {/* Conditions */}
+          <div style={{ display:"flex", flexDirection:"column", gap:"8px", marginBottom:"12px" }}>
+            {[
+              { label:"Your own quota hit", hit:leadHitsQuota },
+              { label:`${neededForPartial}/${totalMembers} teammates hit quota → 5% override`, hit:hittingCount>=neededForPartial, pts:Math.round(teamTotalPts*0.05) },
+              { label:`All ${totalMembers}/${totalMembers} teammates hit quota → 10% override`, hit:allTeamHit, pts:Math.round(teamTotalPts*0.10) },
+            ].map((row,i)=>(
+              <div key={i} style={{ display:"flex", alignItems:"center", gap:"8px", background:row.hit?`${C.green}10`:`${C.border}30`, border:`1px solid ${row.hit?C.green:C.border}`, borderRadius:"8px", padding:"8px 12px" }}>
+                <span style={{ color:row.hit?C.green:"#ef4444", fontSize:"16px", flexShrink:0 }}>{row.hit?"✓":"✗"}</span>
+                <span style={{ fontSize:"12px", color:row.hit?C.black:C.muted, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", flex:1 }}>{row.label}</span>
+                {i>0&&<span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"12px", color:row.hit?C.green:C.muted }}>+{row.pts} pts</span>}
+              </div>
+            ))}
+          </div>
+
+          {!leadHitsQuota&&<div style={{ fontSize:"12px", color:C.muted, fontStyle:"italic" }}>Hit your own quota first to unlock any override.</div>}
+          {leadHitsQuota&&!partialHit&&totalMembers>0&&<div style={{ fontSize:"12px", color:C.muted, fontStyle:"italic" }}>Get {neededForPartial-hittingCount} more teammate{neededForPartial-hittingCount!==1?"s":""} to quota to unlock 5%.</div>}
+          {partialHit&&!allTeamHit&&<div style={{ fontSize:"12px", color:C.gold, fontStyle:"italic", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>5% unlocked! Get {totalMembers-hittingCount} more to quota for the full 10%.</div>}
+        </div>
+      )}
+
+      {/* Team member cards */}
+      {totalMembers>0&&(
+        <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:"12px", overflow:"hidden", boxShadow:"0 2px 8px rgba(43,156,240,0.08)" }}>
+          <div style={{ padding:"14px 18px", borderBottom:`1px solid ${C.border}`, background:C.cardLt }}>
+            <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontStyle:"italic", fontSize:"16px", color:C.black }}>👥 {tech.team_name||"Your Team"} — {formatMonthLabel(mk)}</div>
+            <div style={{ fontSize:"11px", color:C.muted, marginTop:"2px" }}>Push your guys to hit all 3 before month end</div>
+          </div>
+          <div style={{ padding:"14px 18px", display:"flex", flexDirection:"column", gap:"10px" }}>
+            {teamMemberStats.map(m=>(
+              <div key={m.id} style={{ background:m.allHit?`${C.green}10`:C.cardLt, border:`1px solid ${m.allHit?C.green:C.border}`, borderRadius:"10px", padding:"12px 14px" }}>
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:"8px" }}>
+                  <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontStyle:"italic", fontSize:"16px", color:C.black }}>{m.name}</div>
+                  <div style={{ display:"flex", alignItems:"center", gap:"8px" }}>
+                    <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"12px", color:m.allHit?C.green:C.muted }}>{m.allHit?"✅ ALL HIT":`${[m.upHit,m.revHit,m.swHit].filter(Boolean).length}/3`}</span>
+                    <span style={{ fontSize:"11px", color:C.gold, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>+{Math.round(m.total*overridePct)} pts override</span>
+                  </div>
+                </div>
+                <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:"6px" }}>
+                  {[
+                    { label:"Upsells",  val:`$${m.monthUpsellAmt}`, target:`$${q.upsells}`,  hit:m.upHit,  color:C.green },
+                    { label:"Reviews",  val:m.monthReviewCount,      target:q.reviews,         hit:m.revHit, color:C.gold  },
+                    { label:"Converts", val:m.monthSwitchCount,      target:q.switchovers,     hit:m.swHit,  color:C.blue  },
+                  ].map(col=>(
+                    <div key={col.label} style={{ background:col.hit?`${col.color}15`:C.white, border:`1px solid ${col.hit?col.color:C.border}`, borderRadius:"6px", padding:"6px 8px", textAlign:"center" }}>
+                      <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"14px", color:col.hit?col.color:C.black }}>{col.val}{col.hit?" ✓":""}</div>
+                      <div style={{ fontSize:"9px", color:C.muted, textTransform:"uppercase", letterSpacing:"1px" }}>{col.label} / {col.target}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:"14px" }}>
@@ -1637,40 +1751,7 @@ function TechDashboard({ tech, techs, upsells, switchovers, reviews, callbacks, 
           </div>
         )}
         {tab==="myteam"&&(
-          tech.is_lead
-            ? <TeamLeadPanel tech={tech} techs={techs} upsells={upsells} switchovers={switchovers} reviews={reviews} callbacks={callbacks||[]} quota={q}/>
-            : (() => {
-                const myLead = techs.find(t=>t.id===tech.team_lead_id);
-                const myTeam = techs.filter(t=>t.team_lead_id===tech.team_lead_id&&t.id!==tech.id);
-                const teamName = myLead?.team_name;
-                return (
-                  <div style={{ display:"flex", flexDirection:"column", gap:"14px" }}>
-                    <div style={{ background:C.white, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.gold}`, borderRadius:"12px", padding:"18px 20px", boxShadow:"0 2px 8px rgba(43,156,240,0.08)" }}>
-                      <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontStyle:"italic", fontSize:"22px", color:C.black, marginBottom:"4px" }}>{teamName||"Your Team"}</div>
-                      {myLead&&(
-                        <div style={{ display:"flex", alignItems:"center", gap:"10px", marginBottom:"16px", paddingBottom:"14px", borderBottom:`1px solid ${C.border}` }}>
-                          <div style={{ width:"40px", height:"40px", borderRadius:"50%", background:`${C.gold}22`, border:`2px solid ${C.gold}`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:"14px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", color:C.gold }}>{myLead.avatar}</div>
-                          <div>
-                            <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"16px", color:C.black }}>{myLead.name}</div>
-                            <div style={{ fontSize:"10px", color:C.gold, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", letterSpacing:"1px" }}>👑 TEAM LEAD</div>
-                          </div>
-                        </div>
-                      )}
-                      <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"11px", color:C.muted, letterSpacing:"2px", marginBottom:"10px" }}>TEAMMATES</div>
-                      <div style={{ display:"flex", flexDirection:"column", gap:"8px" }}>
-                        {myTeam.map(m=>(
-                          <div key={m.id} style={{ display:"flex", alignItems:"center", gap:"10px", background:C.cardLt, borderRadius:"8px", padding:"10px 12px" }}>
-                            <div style={{ width:"32px", height:"32px", borderRadius:"50%", background:`${C.blue}22`, border:`1px solid ${C.blue}44`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:"11px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", color:C.blue }}>{m.avatar}</div>
-                            <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", fontSize:"14px", color:C.black }}>{m.name}</div>
-                          </div>
-                        ))}
-                        {myTeam.length===0&&<div style={{ fontSize:"13px", color:C.muted }}>No teammates assigned yet</div>}
-                      </div>
-                      {!myLead&&<div style={{ fontSize:"13px", color:C.muted, marginTop:"12px" }}>You haven't been assigned to a team yet.</div>}
-                    </div>
-                  </div>
-                );
-              })()
+          <TeamLeadPanel tech={tech} techs={techs} upsells={upsells} switchovers={switchovers} reviews={reviews} callbacks={callbacks||[]} quota={q}/>
         )}
       </div>
     </div>
