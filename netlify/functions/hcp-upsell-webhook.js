@@ -152,33 +152,56 @@ exports.handler = async (event) => {
   }
 
   if (upsellTotal === 0) {
-    console.log(`No upsell line items found for job ${job.id}`);
+    // If upsells were removed, zero out the existing entry if there is one
+    const jobId = String(job.id);
+    const existing = await supabase(`upsells?hcp_job_id=eq.${jobId}&select=id`).catch(() => []);
+    if (existing && existing.length > 0) {
+      await supabase(`upsells?id=eq.${existing[0].id}`, {
+        method: "PATCH",
+        prefer: "return=minimal",
+        body: JSON.stringify({ amount: 0, note: "Upsells removed" }),
+      });
+      console.log(`Zeroed out upsell for job ${jobId} — upsells removed`);
+    }
     return { statusCode: 200, body: "No upsells in this job" };
   }
 
   console.log(`Found upsells for ${skyloName}: $${upsellTotal}`, upsellItems);
 
-  // Check if we already logged this job (avoid duplicates)
+  // Always upsert by job ID — overwrite if exists, insert if new
   const jobId = String(job.id);
-  const existing = await supabase(`upsells?hcp_job_id=eq.${jobId}&tech_id=eq.${tech.id}&select=id`).catch(() => []);
-  if (existing && existing.length > 0) {
-    console.log(`Job ${jobId} already logged for ${skyloName}, skipping`);
-    return { statusCode: 200, body: "Already logged" };
-  }
-
-  // Insert into Supabase upsells table
   const weekKey = getWeekKey();
-  await supabase("upsells", {
-    method: "POST",
-    prefer: "return=minimal",
-    body: JSON.stringify({
-      tech_id:     tech.id,
-      week_key:    weekKey,
-      amount:      upsellTotal,
-      hcp_job_id:  jobId,
-      note:        upsellItems.map(i => `${i.name} ($${i.amount})`).join(", "),
-    }),
-  });
+
+  // Check if this job already has an entry
+  const existing = await supabase(`upsells?hcp_job_id=eq.${jobId}&select=id`).catch(() => []);
+
+  if (existing && existing.length > 0) {
+    // Update existing entry with latest amount
+    await supabase(`upsells?id=eq.${existing[0].id}`, {
+      method: "PATCH",
+      prefer: "return=minimal",
+      body: JSON.stringify({
+        amount:   upsellTotal,
+        note:     upsellItems.map(i => `${i.name} ($${i.amount})`).join(", "),
+        week_key: weekKey,
+      }),
+    });
+    console.log(`✅ Updated existing upsell for job ${jobId} — ${skyloName} $${upsellTotal}`);
+  } else {
+    // Insert new entry
+    await supabase("upsells", {
+      method: "POST",
+      prefer: "return=minimal",
+      body: JSON.stringify({
+        tech_id:    tech.id,
+        week_key:   weekKey,
+        amount:     upsellTotal,
+        hcp_job_id: jobId,
+        note:       upsellItems.map(i => `${i.name} ($${i.amount})`).join(", "),
+      }),
+    });
+    console.log(`✅ Logged new upsell for job ${jobId} — ${skyloName} $${upsellTotal}`);
+  }
 
   console.log(`✅ Logged $${upsellTotal} upsell for ${skyloName} (week ${weekKey})`);
   return {
