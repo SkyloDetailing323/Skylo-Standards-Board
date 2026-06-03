@@ -97,41 +97,61 @@ exports.handler = async (event) => {
 
   console.log("HCP webhook received:", JSON.stringify(payload, null, 2));
 
-  // HCP sends different event types — we only care about job completed/updated
-  const eventType = payload.event;
-  if (!eventType || (!eventType.includes("job") && !eventType.includes("invoice"))) {
-    return { statusCode: 200, body: "Ignored event type" };
+  // HCP sends different event types
+  const eventType = payload.event || "";
+  console.log("Event type:", eventType);
+  console.log("Full payload keys:", Object.keys(payload));
+
+  // Handle both job and invoice events
+  const job = payload.job || payload.data?.job || payload.data || null;
+  const invoice = payload.invoice || null;
+
+  // Fetch full job details from HCP API (includes line items)
+  console.log(`Fetching full job details for: ${jobId}`);
+
+  const hcpRes = await fetch(`https://api.housecallpro.com/jobs/${jobId}`, {
+    headers: {
+      "Authorization": `Token ${process.env.HCP_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+  });
+
+  if (!hcpRes.ok) {
+    const errText = await hcpRes.text();
+    console.log(`HCP API error: ${hcpRes.status} — ${errText}`);
+    return { statusCode: 200, body: "Could not fetch job details" };
   }
 
-  // Get the job data
-  const job = payload.job || payload.data;
-  if (!job) {
-    return { statusCode: 200, body: "No job data" };
-  }
+  const fullJob = await hcpRes.json();
+  console.log("Full job keys:", Object.keys(fullJob));
+  console.log("Full job sample:", JSON.stringify(fullJob).substring(0, 1000));
 
-  // Only process completed jobs
-  const jobStatus = job.work_status || job.status || "";
-  if (!jobStatus.toLowerCase().includes("complete")) {
-    console.log(`Job ${job.id} not completed (status: ${jobStatus}), skipping`);
-    return { statusCode: 200, body: "Job not completed yet" };
-  }
+  // Try every possible location for line items
+  const lineItems = fullJob?.line_items
+    || fullJob?.invoice?.line_items
+    || fullJob?.invoices?.[0]?.line_items
+    || fullJob?.work_order?.line_items
+    || [];
 
-  // Get the assigned employee
-  const assignedEmployee = job.assigned_employees?.[0] || job.employee;
+  console.log(`Found ${lineItems.length} line items`);
+  const assignedEmployee = job?.assigned_employees?.[0] || job?.employee || null;
+  console.log(`Employee: ${JSON.stringify(assignedEmployee)}`);
+
   if (!assignedEmployee) {
-    console.log("No employee assigned to job");
+    console.log("No employee found in payload");
     return { statusCode: 200, body: "No employee" };
   }
 
   const hcpName = `${assignedEmployee.first_name} ${assignedEmployee.last_name}`.trim();
+  console.log(`HCP employee name: "${hcpName}"`);
   const skyloName = TECH_MAP[hcpName];
 
   if (!skyloName) {
-    console.log(`No Skylo mapping for HCP employee: ${hcpName}`);
+    console.log(`No Skylo mapping for: ${hcpName}`);
     return { statusCode: 200, body: `No mapping for ${hcpName}` };
   }
 
-  // Look up the tech in Supabase by name
+  // Look up tech in Supabase
   const techs = await supabase(`techs?name=eq.${encodeURIComponent(skyloName)}&select=id,name`);
   if (!techs || techs.length === 0) {
     console.log(`Tech not found in Skylo: ${skyloName}`);
@@ -139,16 +159,14 @@ exports.handler = async (event) => {
   }
   const tech = techs[0];
 
-  // Find upsell line items in the job
-  const lineItems = job.line_items || job.invoice?.line_items || [];
+  // Find upsell line items
   let upsellTotal = 0;
   const upsellItems = [];
+  console.log("Checking line items for upsells...");
 
   for (const item of lineItems) {
     const itemName = (item.name || item.description || "").trim();
-    const isUpsell = UPSELL_SERVICES.some(u =>
-      u.toLowerCase() === itemName.toLowerCase()
-    );
+    const isUpsell = UPSELL_SERVICES.some(u => u.toLowerCase() === itemName.toLowerCase());
     if (isUpsell) {
       const qty = item.quantity || 1;
       const price = parseFloat(item.unit_price || item.price || 0);
