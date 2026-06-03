@@ -1,20 +1,6 @@
-// ─── Netlify Serverless Function: hcp-upsell-webhook.js ──────────────────────
-// Place this file in your project at: netlify/functions/hcp-upsell-webhook.js
-//
-// What it does:
-//   1. Receives a webhook from HouseCall Pro when a job is updated/completed
-//   2. Looks for upsell line items in the job
-//   3. Matches the HCP employee to a Skylo tech
-//   4. Writes the upsell amount to Supabase automatically
-//
-// Environment variables to set in Netlify (Site → Environment Variables):
-//   HCP_API_KEY       = your new HouseCall Pro API key
-//   SUPABASE_URL      = https://mjmwxxvqcsptrocwucis.supabase.co
-//   SUPABASE_KEY      = your Supabase anon/service key (Settings → API → anon public)
-// ─────────────────────────────────────────────────────────────────────────────
+// netlify/functions/hcp-upsell-webhook.js
+// Receives HCP webhook, fetches job details, logs upsell line items to Supabase
 
-// ── Upsell service names from your HCP pricebook ─────────────────────────────
-// These must match EXACTLY how they appear in HCP (case-insensitive match used)
 const UPSELL_SERVICES = [
   "Seat Steam and Shampoo",
   "Engine Bay Cleaning",
@@ -24,9 +10,6 @@ const UPSELL_SERVICES = [
   "Full Exterior Detail",
 ];
 
-// ── HCP employee name → Skylo tech name mapping ──────────────────────────────
-// Left side: full name as it appears in HCP
-// Right side: name as it appears in your Skylo app
 const TECH_MAP = {
   "Myles Madarieta":   "Myles Madarieta",
   "Kade Andrew":       "Kade Andrew",
@@ -48,9 +31,7 @@ const TECH_MAP = {
   "Jackson Vaughn":    "Jackson Vaughn",
 };
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
 function getWeekKey() {
-  // Monday-based week key in MT (UTC-6)
   const mt = new Date(Date.now() - 6 * 60 * 60 * 1000);
   const day = mt.getDay();
   const daysBack = day === 0 ? 6 : day - 1;
@@ -62,7 +43,7 @@ function getWeekKey() {
   return `${y}-${m}-${d}`;
 }
 
-async function supabase(path, options = {}) {
+async function sbFetch(path, options = {}) {
   const url = `${process.env.SUPABASE_URL}/rest/v1/${path}`;
   const res = await fetch(url, {
     ...options,
@@ -74,16 +55,11 @@ async function supabase(path, options = {}) {
       ...(options.headers || {}),
     },
   });
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`Supabase error ${res.status}: ${text}`);
-  }
-  return res.status === 204 ? null : res.json();
+  if (res.status === 204) return null;
+  return res.json();
 }
 
-// ── Main handler ──────────────────────────────────────────────────────────────
 exports.handler = async (event) => {
-  // Only accept POST requests
   if (event.httpMethod !== "POST") {
     return { statusCode: 405, body: "Method not allowed" };
   }
@@ -91,50 +67,56 @@ exports.handler = async (event) => {
   let payload;
   try {
     payload = JSON.parse(event.body);
-  } catch {
+  } catch (e) {
     return { statusCode: 400, body: "Invalid JSON" };
   }
 
-  console.log("HCP webhook received:", JSON.stringify(payload, null, 2));
-
-  // HCP sends different event types
   const eventType = payload.event || "";
+  console.log("Event:", eventType);
+
+  // Get job from payload
+  const job = payload.job || payload.data || null;
+  if (!job) {
+    console.log("No job in payload");
+    return { statusCode: 200, body: "No job data" };
+  }
+
+  const jobId = String(job.id || "");
+  if (!jobId) {
+    console.log("No job ID");
+    return { statusCode: 200, body: "No job ID" };
+  }
+
+  console.log("Job ID:", jobId);
   console.log("Event type:", eventType);
-  console.log("Full payload keys:", Object.keys(payload));
 
-  // Handle both job and invoice events
-  const job = payload.job || payload.data?.job || payload.data || null;
-  const jobId = String(job?.id || "");
-  if (!jobId) return { statusCode: 200, body: "No job ID" };
-
-  const assignedEmployee = job?.assigned_employees?.[0] || job?.employee || null;
-  console.log(`Employee: ${JSON.stringify(assignedEmployee)}`);
-
-  if (!assignedEmployee) {
-    console.log("No employee found in payload");
+  // Get employee from payload
+  const employee = (job.assigned_employees || [])[0] || job.employee || null;
+  if (!employee) {
+    console.log("No employee on job");
     return { statusCode: 200, body: "No employee" };
   }
 
-  const hcpName = `${assignedEmployee.first_name} ${assignedEmployee.last_name}`.trim();
-  console.log(`HCP employee name: "${hcpName}"`);
-  const skyloName = TECH_MAP[hcpName];
+  const hcpName = `${employee.first_name} ${employee.last_name}`.trim();
+  console.log("HCP name:", hcpName);
 
+  const skyloName = TECH_MAP[hcpName];
   if (!skyloName) {
-    console.log(`No Skylo mapping for: ${hcpName}`);
+    console.log("No mapping for:", hcpName);
     return { statusCode: 200, body: `No mapping for ${hcpName}` };
   }
 
-  // Look up tech in Supabase
-  const techs = await supabase(`techs?name=eq.${encodeURIComponent(skyloName)}&select=id,name`);
+  // Find tech in Supabase
+  const techs = await sbFetch(`techs?name=eq.${encodeURIComponent(skyloName)}&select=id,name`);
   if (!techs || techs.length === 0) {
-    console.log(`Tech not found in Skylo: ${skyloName}`);
+    console.log("Tech not found:", skyloName);
     return { statusCode: 200, body: `Tech not found: ${skyloName}` };
   }
   const tech = techs[0];
+  console.log("Found tech:", tech.name);
 
-  // Fetch full job details from HCP API to get line items
-  console.log(`Fetching full job details for: ${jobId}`);
-
+  // Fetch full job from HCP API to get line items
+  console.log("Fetching full job from HCP API...");
   const hcpRes = await fetch(`https://api.housecallpro.com/jobs/${jobId}`, {
     headers: {
       "Authorization": `Token ${process.env.HCP_API_KEY}`,
@@ -142,102 +124,83 @@ exports.handler = async (event) => {
     },
   });
 
-  if (!hcpRes.ok) {
-    const errText = await hcpRes.text();
-    console.log(`HCP API error: ${hcpRes.status} — ${errText}`);
-    return { statusCode: 200, body: "Could not fetch job details" };
+  let lineItems = [];
+  if (hcpRes.ok) {
+    const fullJob = await hcpRes.json();
+    console.log("Full job keys:", Object.keys(fullJob));
+    lineItems = fullJob.line_items
+      || fullJob.invoice?.line_items
+      || fullJob.invoices?.[0]?.line_items
+      || [];
+    console.log("Line items found:", lineItems.length);
+    console.log("Line items:", JSON.stringify(lineItems));
+  } else {
+    console.log("HCP API error:", hcpRes.status, await hcpRes.text());
   }
 
-  const fullJob = await hcpRes.json();
-  console.log("Full job keys:", Object.keys(fullJob));
-  console.log("Full job sample:", JSON.stringify(fullJob).substring(0, 1000));
-
-  // Try every possible location for line items
-  const lineItems = fullJob?.line_items
-    || fullJob?.invoice?.line_items
-    || fullJob?.invoices?.[0]?.line_items
-    || fullJob?.work_order?.line_items
-    || [];
-
-  console.log(`Found ${lineItems.length} line items`);
-  // Find upsell line items
+  // Find upsell items
   let upsellTotal = 0;
   const upsellItems = [];
-  console.log("Checking line items for upsells...");
 
   for (const item of lineItems) {
-    const itemName = (item.name || item.description || "").trim();
-    const isUpsell = UPSELL_SERVICES.some(u => u.toLowerCase() === itemName.toLowerCase());
+    const name = (item.name || item.description || "").trim();
+    const isUpsell = UPSELL_SERVICES.some(s => s.toLowerCase() === name.toLowerCase());
     if (isUpsell) {
       const qty = item.quantity || 1;
       const price = parseFloat(item.unit_price || item.price || 0);
       const total = qty * price;
       upsellTotal += total;
-      upsellItems.push({ name: itemName, amount: total });
+      upsellItems.push({ name, amount: total });
+      console.log("Upsell found:", name, "$" + total);
     }
   }
 
   if (upsellTotal === 0) {
-    // If upsells were removed, zero out the existing entry if there is one
-    const jobId = String(job.id);
-    const existing = await supabase(`upsells?hcp_job_id=eq.${jobId}&select=id`).catch(() => []);
+    // Zero out if upsells were removed
+    const existing = await sbFetch(`upsells?hcp_job_id=eq.${jobId}&select=id`).catch(() => []);
     if (existing && existing.length > 0) {
-      await supabase(`upsells?id=eq.${existing[0].id}`, {
+      await sbFetch(`upsells?id=eq.${existing[0].id}`, {
         method: "PATCH",
         prefer: "return=minimal",
-        body: JSON.stringify({ amount: 0, note: "Upsells removed" }),
+        body: JSON.stringify({ amount: 0, note: "No upsells" }),
       });
-      console.log(`Zeroed out upsell for job ${jobId} — upsells removed`);
     }
-    return { statusCode: 200, body: "No upsells in this job" };
+    console.log("No upsell items found");
+    return { statusCode: 200, body: "No upsells" };
   }
 
-  console.log(`Found upsells for ${skyloName}: $${upsellTotal}`, upsellItems);
-
-  // Always upsert by job ID — overwrite if exists, insert if new
-  const jobId = String(job.id);
+  // Upsert — update if exists, insert if new
   const weekKey = getWeekKey();
-
-  // Check if this job already has an entry
-  const existing = await supabase(`upsells?hcp_job_id=eq.${jobId}&select=id`).catch(() => []);
+  const existing = await sbFetch(`upsells?hcp_job_id=eq.${jobId}&select=id`).catch(() => []);
 
   if (existing && existing.length > 0) {
-    // Update existing entry with latest amount
-    await supabase(`upsells?id=eq.${existing[0].id}`, {
+    await sbFetch(`upsells?id=eq.${existing[0].id}`, {
       method: "PATCH",
       prefer: "return=minimal",
       body: JSON.stringify({
-        amount:   upsellTotal,
-        note:     upsellItems.map(i => `${i.name} ($${i.amount})`).join(", "),
+        amount: upsellTotal,
+        note: upsellItems.map(i => `${i.name} ($${i.amount})`).join(", "),
         week_key: weekKey,
       }),
     });
-    console.log(`✅ Updated existing upsell for job ${jobId} — ${skyloName} $${upsellTotal}`);
+    console.log("Updated existing upsell — $" + upsellTotal);
   } else {
-    // Insert new entry
-    await supabase("upsells", {
+    await sbFetch("upsells", {
       method: "POST",
       prefer: "return=minimal",
       body: JSON.stringify({
-        tech_id:    tech.id,
-        week_key:   weekKey,
-        amount:     upsellTotal,
+        tech_id: tech.id,
+        week_key: weekKey,
+        amount: upsellTotal,
         hcp_job_id: jobId,
-        note:       upsellItems.map(i => `${i.name} ($${i.amount})`).join(", "),
+        note: upsellItems.map(i => `${i.name} ($${i.amount})`).join(", "),
       }),
     });
-    console.log(`✅ Logged new upsell for job ${jobId} — ${skyloName} $${upsellTotal}`);
+    console.log("Inserted new upsell — $" + upsellTotal);
   }
 
-  console.log(`✅ Logged $${upsellTotal} upsell for ${skyloName} (week ${weekKey})`);
   return {
     statusCode: 200,
-    body: JSON.stringify({
-      success: true,
-      tech: skyloName,
-      amount: upsellTotal,
-      items: upsellItems,
-      week: weekKey,
-    }),
+    body: JSON.stringify({ success: true, tech: skyloName, amount: upsellTotal }),
   };
 };
