@@ -1535,6 +1535,37 @@ function TechDashboard({ tech, techs, upsells, switchovers, reviews, callbacks, 
               <StatBlock label="Week Upsells" value={`$${weekUpsell.toLocaleString()}`} color={C.green} sub={`All-time $${Math.round(tt.upsellAmt).toLocaleString()}`} accent={C.green}/>
               <StatBlock label="Month Reviews" value={monthReviews} color={C.gold} sub={`All-time ${reviews.filter(r=>r.tech_id===tech.id).reduce((s,r)=>s+r.count,0)}`} accent={C.gold}/>
             </div>
+
+            {/* Team info */}
+            {(tech.team_lead_id || tech.is_lead) && (() => {
+              const myLead = techs.find(t=>t.id===tech.team_lead_id);
+              const myTeam = tech.is_lead ? techs.filter(t=>t.team_lead_id===tech.id) : techs.filter(t=>t.team_lead_id===tech.team_lead_id&&t.id!==tech.id);
+              return (
+                <div style={{ background:C.white, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.gold}`, borderRadius:"12px", padding:"14px 16px", boxShadow:"0 2px 8px rgba(43,156,240,0.08)" }}>
+                  <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontStyle:"italic", fontSize:"13px", color:C.gold, letterSpacing:"1px", marginBottom:"10px" }}>👥 YOUR TEAM</div>
+                  {myLead&&(
+                    <div style={{ display:"flex", alignItems:"center", gap:"8px", marginBottom:"8px", paddingBottom:"8px", borderBottom:`1px solid ${C.border}` }}>
+                      <div style={{ width:"32px", height:"32px", borderRadius:"50%", background:`${C.gold}22`, border:`1px solid ${C.gold}`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:"11px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", color:C.gold }}>{myLead.avatar}</div>
+                      <div>
+                        <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"14px", color:C.black }}>{myLead.name}</div>
+                        <div style={{ fontSize:"10px", color:C.gold, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", letterSpacing:"1px" }}>TEAM LEAD</div>
+                      </div>
+                    </div>
+                  )}
+                  {tech.is_lead&&(
+                    <div style={{ fontSize:"11px", color:C.gold, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", marginBottom:"6px" }}>YOU ARE THE TEAM LEAD</div>
+                  )}
+                  <div style={{ display:"flex", flexWrap:"wrap", gap:"6px" }}>
+                    {myTeam.map(m=>(
+                      <div key={m.id} style={{ background:C.cardLt, border:`1px solid ${C.border}`, borderRadius:"20px", padding:"4px 12px", display:"flex", alignItems:"center", gap:"6px" }}>
+                        <span style={{ fontSize:"11px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", color:C.black }}>{m.name}</span>
+                      </div>
+                    ))}
+                    {myTeam.length===0&&<div style={{ fontSize:"12px", color:C.muted }}>No teammates assigned yet</div>}
+                  </div>
+                </div>
+              );
+            })()}
             <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${tier.color}`, borderRadius:"12px", padding:"16px 18px" }}>
               <Label color={tier.color}>Points Breakdown</Label>
               <div style={{ display:"grid", gridTemplateColumns:"repeat(2,1fr)", gap:"8px" }}>
@@ -1788,7 +1819,7 @@ function AdminUpsellEntry({ techs, upsells, saving, setSaving, refreshAll, showT
           Logging for: {formatWeekLabel(activeWeek)}{activeWeek===wk?" (Current Week)":""}
         </div>
 
-        {techs.map(t=>(
+        {[...techs].sort((a,b)=>(weekData[b.id]||0)-(weekData[a.id]||0)).map(t=>(
           <div key={t.id} style={{ display:"flex", alignItems:"center", gap:"12px" }}>
             <div style={{ width:"150px" }}>
               <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", fontSize:"15px", color:C.black }}>{t.name}</div>
