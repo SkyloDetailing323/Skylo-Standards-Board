@@ -6,4 +6,4 @@
   SECRETS_SCAN_OMIT_KEYS = "SUPABASE_URL"
 
 [functions."hcp-upsell-sync"]
-  schedule = "0 * * * *"
+  schedule = "*/30 * * * *"
