@@ -1,5 +1,6 @@
 // netlify/functions/hcp-upsell-sync.js
-// Scheduled: runs every hour, fetches today's completed HCP jobs, syncs upsells to Supabase
+// Scheduled every 30 min: fetches today's completed HCP jobs, writes revenue+hours
+// to the jobs table and upsell amounts to the upsells table.
 
 const UPSELL_SERVICES = [
   "Seat Steam and Shampoo",
@@ -31,17 +32,17 @@ const TECH_MAP = {
   "Jackson Vaughn":    "Jackson Vaughn",
 };
 
-// Mountain Time approximation (UTC-6) — matches existing week-key logic
-function getTodayMT() {
+// Mountain Time approximation (UTC-6, matches week-key logic across app)
+function getMT() {
   const mt = new Date(Date.now() - 6 * 60 * 60 * 1000);
   const y = mt.getUTCFullYear();
   const m = String(mt.getUTCMonth() + 1).padStart(2, "0");
   const d = String(mt.getUTCDate()).padStart(2, "0");
-  return { y, m, d };
+  return { y, m, d, str: `${y}-${m}-${d}` };
 }
 
 function getTodayRange() {
-  const { y, m, d } = getTodayMT();
+  const { y, m, d } = getMT();
   return {
     start: `${y}-${m}-${d}T00:00:00-06:00`,
     end:   `${y}-${m}-${d}T23:59:59-06:00`,
@@ -77,12 +78,11 @@ async function sbFetch(path, options = {}) {
 }
 
 async function fetchAllCompletedJobs(start, end) {
-  const jobs = [];
+  const allJobs = [];
   let page = 1;
   const pageSize = 100;
 
   while (true) {
-    // Build query string manually to preserve work_status[] bracket syntax
     const qs = [
       `work_status[]=completed`,
       `scheduled_start_min=${encodeURIComponent(start)}`,
@@ -105,22 +105,27 @@ async function fetchAllCompletedJobs(start, end) {
 
     const data = await res.json();
     const batch = data.jobs || data.results || [];
-    jobs.push(...batch);
+    allJobs.push(...batch);
 
     const total = data.total_items || 0;
-    if (batch.length < pageSize || jobs.length >= total) break;
+    if (batch.length < pageSize || allJobs.length >= total) break;
     page++;
   }
 
-  return jobs;
+  return allJobs;
 }
 
 exports.handler = async () => {
   const { start, end } = getTodayRange();
+  const { str: todayStr } = getMT();
   console.log(`Syncing completed jobs from ${start} to ${end}`);
 
   const jobs = await fetchAllCompletedJobs(start, end);
   console.log(`Fetched ${jobs.length} completed jobs`);
+
+  // Fetch all techs once — avoids N Supabase queries
+  const allTechs = await sbFetch("techs?select=id,name");
+  const techByName = Object.fromEntries((allTechs || []).map(t => [t.name, t]));
 
   const weekKey = getWeekKey();
   let synced = 0;
@@ -136,7 +141,13 @@ exports.handler = async () => {
     const skyloName = TECH_MAP[hcpName];
     if (!skyloName) continue;
 
-    // Fetch full job to get line items (list endpoint omits them)
+    const tech = techByName[skyloName];
+    if (!tech) {
+      console.log("Tech not found in Supabase:", skyloName);
+      continue;
+    }
+
+    // Fetch full job for line items, revenue, and schedule
     const jobRes = await fetch(`https://api.housecallpro.com/jobs/${jobId}`, {
       headers: {
         "Authorization": `Token ${process.env.HCP_API_KEY}`,
@@ -148,6 +159,28 @@ exports.handler = async () => {
       continue;
     }
     const fullJob = await jobRes.json();
+
+    // Revenue — try multiple paths the HCP API uses
+    const revenue = parseFloat(
+      fullJob.total_amount ||
+      fullJob.invoice?.total ||
+      fullJob.invoices?.[0]?.total ||
+      0
+    );
+
+    // Hours from scheduled start/end
+    let hours = 0;
+    if (fullJob.schedule?.start && fullJob.schedule?.end) {
+      const diff = new Date(fullJob.schedule.end) - new Date(fullJob.schedule.start);
+      hours = Math.round((diff / 3600000) * 100) / 100;
+    }
+
+    // Job date (prefer schedule start date, fall back to today)
+    const jobDate = fullJob.schedule?.start
+      ? fullJob.schedule.start.split("T")[0]
+      : todayStr;
+
+    // Scan line items for upsell services
     const lineItems =
       fullJob.line_items ||
       fullJob.invoice?.line_items ||
@@ -167,36 +200,42 @@ exports.handler = async () => {
       }
     }
 
-    if (upsellTotal === 0) continue;
-
-    const techs = await sbFetch(
-      `techs?name=eq.${encodeURIComponent(skyloName)}&select=id`
-    );
-    if (!techs || techs.length === 0) {
-      console.log("Tech not found in Supabase:", skyloName);
-      continue;
-    }
-
-    const note = upsellItems.map(i => `${i.name} ($${i.amount})`).join(", ");
-
-    // Upsert on hcp_job_id — requires UNIQUE constraint on that column in Supabase
-    await sbFetch("upsells?on_conflict=hcp_job_id", {
+    // Always upsert job record (revenue + hours + upsell snapshot)
+    await sbFetch("jobs?on_conflict=hcp_job_id", {
       method: "POST",
       prefer: "resolution=merge-duplicates,return=minimal",
       body: JSON.stringify({
-        tech_id: techs[0].id,
-        week_key: weekKey,
-        amount: upsellTotal,
-        hcp_job_id: jobId,
-        note,
+        hcp_job_id:    jobId,
+        tech_id:       tech.id,
+        job_date:      jobDate,
+        revenue,
+        upsell_amount: upsellTotal,
+        hours,
+        week_key:      weekKey,
       }),
     });
 
-    console.log(`Upserted: ${skyloName} job ${jobId} $${upsellTotal}`);
+    // Upsert upsell record only when there are matching line items
+    if (upsellTotal > 0) {
+      const note = upsellItems.map(i => `${i.name} ($${i.amount})`).join(", ");
+      await sbFetch("upsells?on_conflict=hcp_job_id", {
+        method: "POST",
+        prefer: "resolution=merge-duplicates,return=minimal",
+        body: JSON.stringify({
+          tech_id:    tech.id,
+          week_key:   weekKey,
+          amount:     upsellTotal,
+          hcp_job_id: jobId,
+          note,
+        }),
+      });
+    }
+
+    console.log(`Synced: ${skyloName} | job ${jobId} | $${revenue} rev | ${hours}h | $${upsellTotal} upsells`);
     synced++;
   }
 
-  console.log(`Done. Synced ${synced} upsell record(s).`);
+  console.log(`Done. Synced ${synced} job(s).`);
   return {
     statusCode: 200,
     body: JSON.stringify({ ok: true, synced }),
