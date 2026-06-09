@@ -1135,12 +1135,6 @@ function Leaderboard({ techs, jobs, upsells, reviews, callbacks, switchovers }) 
     if (metric==="revhr")   return b.revhr-a.revhr;
     if (metric==="reviews") return b.mRevs-a.mRevs;
     return b.pts-a.pts;
-  }).filter(r => {
-    if (metric==="revenue") return r.revenue>0;
-    if (metric==="upsells") return r.wkUps>0;
-    if (metric==="revhr")   return r.revhr>0;
-    if (metric==="reviews") return r.mRevs>0;
-    return r.pts>0;
   });
 
   const getValue = r => {
@@ -3106,6 +3100,40 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
 
         {tab==="manage"&&(
           <div style={{ display:"flex", flexDirection:"column", gap:"10px" }}>
+            {/* HCP Backfill */}
+            {(()=>{
+              const [bfDays, setBfDays] = useState(30);
+              const [bfRunning, setBfRunning] = useState(false);
+              const [bfResult, setBfResult] = useState(null);
+              async function runBackfill() {
+                setBfRunning(true); setBfResult(null);
+                try {
+                  const res = await fetch("/.netlify/functions/hcp-backfill", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({days:bfDays}) });
+                  const data = await res.json();
+                  setBfResult(data);
+                  if (data.ok) { await refreshAll(); showToast(`✅ Backfill done — ${data.synced} jobs synced`); }
+                  else showToast("Backfill failed — check logs", false);
+                } catch(e) { showToast("Backfill error: "+e.message, false); }
+                setBfRunning(false);
+              }
+              return (
+                <div style={{ background:C.card, border:`2px solid ${C.blue}`, borderRadius:"12px", padding:"16px 18px", marginBottom:"4px" }}>
+                  <Label color={C.blue}>🔄 Pull Historical Jobs from HCP</Label>
+                  <div style={{ fontSize:"12px", color:C.muted, marginBottom:"12px" }}>Imports past completed jobs into the jobs table so Reports, Payroll, and Leaderboard show real data. Safe to run multiple times — no duplicates.</div>
+                  <div style={{ display:"flex", gap:"10px", alignItems:"center", marginBottom:"12px" }}>
+                    <span style={{ fontSize:"12px", color:C.muted }}>Pull last</span>
+                    <select value={bfDays} onChange={e=>setBfDays(parseInt(e.target.value))} style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"6px 10px", borderRadius:"8px", fontSize:"13px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>
+                      {[7,14,30,60,90].map(d=><option key={d} value={d}>{d} days</option>)}
+                    </select>
+                    <span style={{ fontSize:"12px", color:C.muted }}>of jobs</span>
+                  </div>
+                  <button onClick={runBackfill} disabled={bfRunning} style={{ background:bfRunning?C.border:C.blue, border:"none", color:C.white, padding:"12px 20px", borderRadius:"10px", cursor:bfRunning?"not-allowed":"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"13px", letterSpacing:"2px", textTransform:"uppercase" }}>
+                    {bfRunning?"⏳ Pulling Jobs...":"🔄 Run Backfill"}
+                  </button>
+                  {bfResult&&<div style={{ marginTop:"10px", fontSize:"12px", color:bfResult.ok?C.green:C.red }}>{bfResult.ok?`✅ ${bfResult.synced} jobs synced, ${bfResult.skipped} skipped (${bfResult.days} days)`:`❌ Error — check function logs`}</div>}
+                </div>
+              );
+            })()}
             {techs.map(t=>(
               <div key={t.id} style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"16px 18px" }}>
                 <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:"10px" }}>
