@@ -3360,7 +3360,11 @@ export default function App() {
     } catch(e) { setDbError(e.message); return false; }
   }, []);
 
-  useEffect(() => { (async()=>{ const ok=await loadAll(); setLoading(false); if(!ok)return; })(); }, []);
+  useEffect(() => {
+    (async()=>{ const ok=await loadAll(); setLoading(false); if(!ok)return; })();
+    const interval = setInterval(() => { loadAll(); }, 60_000);
+    return () => clearInterval(interval);
+  }, [loadAll]);
 
   function handlePin(pin) {
     if (pin===ADMIN_PIN) { setUser({type:"admin"}); return true; }

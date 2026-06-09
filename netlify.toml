@@ -6,7 +6,7 @@
   SECRETS_SCAN_OMIT_KEYS = "SUPABASE_URL"
 
 [functions."hcp-upsell-sync"]
-  schedule = "*/30 * * * *"
+  schedule = "*/5 * * * *"
 
 [functions."hcp-backfill"]
   timeout = 26
