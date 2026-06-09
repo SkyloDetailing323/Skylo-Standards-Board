@@ -103,6 +103,8 @@ exports.handler = async (event) => {
     const jobs = data.jobs || data.results || [];
     if (jobs.length === 0) break;
 
+    // Build batch for this page — one Supabase call per page instead of per job
+    const batch = [];
     for (const job of jobs) {
       const jobId = String(job.id || "");
       if (!jobId) { skipped++; continue; }
@@ -117,10 +119,8 @@ exports.handler = async (event) => {
       const tech = techByName[skyloName];
       if (!tech) { skipped++; continue; }
 
-      // HCP returns amounts in cents — divide by 100
       const revenue = (job.total_amount || 0) / 100;
 
-      // Hours from scheduled start/end on list response
       const schedStart = job.schedule?.scheduled_start;
       const schedEnd   = job.schedule?.scheduled_end;
       let hours = 0;
@@ -128,25 +128,26 @@ exports.handler = async (event) => {
         hours = Math.round(((new Date(schedEnd) - new Date(schedStart)) / 3600000) * 100) / 100;
       }
 
-      const jobDate  = schedStart ? schedStart.split("T")[0] : fmt(now);
-      const weekKey  = getWeekKey(jobDate);
+      const jobDate = schedStart ? schedStart.split("T")[0] : fmt(now);
+      batch.push({
+        hcp_job_id:    jobId,
+        tech_id:       tech.id,
+        job_date:      jobDate,
+        revenue,
+        upsell_amount: 0,
+        hours,
+        tips:          0,
+        week_key:      getWeekKey(jobDate),
+      });
+    }
 
+    if (batch.length > 0) {
       await sbFetch("jobs?on_conflict=hcp_job_id", {
         method: "POST",
         prefer: "resolution=merge-duplicates,return=minimal",
-        body: JSON.stringify({
-          hcp_job_id:    jobId,
-          tech_id:       tech.id,
-          job_date:      jobDate,
-          revenue,
-          upsell_amount: 0,
-          hours,
-          tips:          0,
-          week_key:      weekKey,
-        }),
+        body: JSON.stringify(batch),
       });
-
-      synced++;
+      synced += batch.length;
     }
 
     console.log(`Page ${page}: ${jobs.length} jobs, synced so far: ${synced}`);

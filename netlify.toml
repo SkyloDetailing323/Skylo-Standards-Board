@@ -7,3 +7,6 @@
 
 [functions."hcp-upsell-sync"]
   schedule = "*/30 * * * *"
+
+[functions."hcp-backfill"]
+  timeout = 26
