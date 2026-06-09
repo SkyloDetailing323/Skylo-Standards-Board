@@ -42,6 +42,7 @@ const C = {
 };
 
 const ADMIN_PIN = "0000";
+const PP_ANCHOR_END = "2026-06-13"; // known period end: pay date Jun 19, submit Jun 17
 const UPSELL_PTS_PER_DOLLAR = 0.5; // $2 = 1 pt
 const REVIEW_PTS = 5;
 const REVIEW_BONUS_PTS = 20; // bonus at 10+ reviews in a month
@@ -157,6 +158,28 @@ function formatWeekLabel(key) {
 function formatMonthLabel(key) {
   const [y,m] = key.split("-");
   return new Date(y,m-1).toLocaleDateString("en-US",{month:"long",year:"numeric"});
+}
+function fmtShortDate(str) {
+  return new Date(str+"T12:00:00").toLocaleDateString("en-US",{month:"short",day:"numeric"});
+}
+function getPayPeriods() {
+  const anchor = new Date(PP_ANCHOR_END+"T12:00:00");
+  const today = new Date(Date.now()-6*60*60*1000).toISOString().split("T")[0];
+  const periods = [];
+  for (let i=-52; i<=4; i++) {
+    const end = new Date(anchor); end.setDate(anchor.getDate()+i*14);
+    const start = new Date(end);  start.setDate(end.getDate()-13);
+    const submit= new Date(end);  submit.setDate(end.getDate()+4);
+    const payout= new Date(end);  payout.setDate(end.getDate()+6);
+    const fmt = d=>d.toISOString().split("T")[0];
+    periods.push({ key:fmt(end), start:fmt(start), end:fmt(end), submit:fmt(submit), payout:fmt(payout) });
+  }
+  return periods.sort((a,b)=>b.key.localeCompare(a.key));
+}
+function currentPPKey() {
+  const today = new Date(Date.now()-6*60*60*1000).toISOString().split("T")[0];
+  const p = getPayPeriods().find(p=>today>=p.start&&today<=p.end);
+  return p?.key || PP_ANCHOR_END;
 }
 function formatTenure(startDate) {
   if (!startDate) return null;
@@ -808,12 +831,17 @@ function ReportsTab({ techs, jobs, techId=null }) {
   const upsellPct      = totalRevenue > 0 ? (totalUpsells/totalRevenue)*100 : 0;
   const laborPct       = totalRevenue > 0 ? (totalLabor/totalRevenue)*100 : 0;
 
+  const allWkKeys = [...new Set(inRange.map(j=>j.week_key))].filter(Boolean).sort();
   const techRows = techId ? [] : techs.map(t => {
     const tj = inRange.filter(j=>j.tech_id===t.id);
     const rev = tj.reduce((s,j)=>s+(j.revenue||0),0);
     const hrs = tj.reduce((s,j)=>s+(j.hours||0),0);
     const ups = tj.reduce((s,j)=>s+(j.upsell_amount||0),0);
-    return { ...t, rev, hrs, ups, revPerHr:hrs>0?rev/hrs:0, upsellPct:rev>0?(ups/rev)*100:0 };
+    const wkBreakdown = allWkKeys.map(wk=>{
+      const wj=tj.filter(j=>j.week_key===wk);
+      return { wk, rev:wj.reduce((s,j)=>s+(j.revenue||0),0), count:wj.length };
+    }).filter(w=>w.rev>0);
+    return { ...t, rev, hrs, ups, revPerHr:hrs>0?rev/hrs:0, upsellPct:rev>0?(ups/rev)*100:0, wkBreakdown };
   }).filter(t=>t.rev>0||t.hrs>0).sort((a,b)=>b.rev-a.rev);
 
   const metricStyle = { background:C.white, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"16px", boxShadow:"0 2px 8px rgba(43,156,240,0.08)" };
@@ -893,6 +921,16 @@ function ReportsTab({ techs, jobs, techId=null }) {
                         </div>
                       ))}
                     </div>
+                    {t.wkBreakdown?.length>0&&(
+                      <div style={{ marginTop:"8px", borderTop:`1px solid ${C.border}`, paddingTop:"8px", display:"flex", flexDirection:"column", gap:"3px" }}>
+                        {t.wkBreakdown.map(w=>(
+                          <div key={w.wk} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"4px 8px", background:C.white, borderRadius:"4px" }}>
+                            <div style={{ fontSize:"11px", color:C.muted, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>{formatWeekLabel(w.wk)} · {w.count} job{w.count!==1?"s":""}</div>
+                            <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"13px", color:C.green }}>${Math.round(w.rev).toLocaleString()}</div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
@@ -906,45 +944,64 @@ function ReportsTab({ techs, jobs, techId=null }) {
 
 // ─── PAYROLL TAB ──────────────────────────────────────────────────────────────
 function PayrollTab({ techs, jobs }) {
-  const wk = getWeekKey();
-  const allKeys = [...new Set(jobs.map(j=>j.week_key))].filter(Boolean).sort((a,b)=>b.localeCompare(a));
-  const [selWeek, setSelWeek] = useState(wk);
+  const allPeriods = getPayPeriods();
+  const activePeriods = allPeriods.filter(p=>jobs.some(j=>j.job_date>=p.start&&j.job_date<=p.end)||p.key===currentPPKey());
+  const [selKey, setSelKey] = useState(currentPPKey());
+  const period = allPeriods.find(p=>p.key===selKey) || allPeriods[0];
+  if (!period) return null;
 
-  const rows = techs.map(t => {
-    const wjobs   = jobs.filter(j=>j.tech_id===t.id&&j.week_key===selWeek);
-    const revenue = wjobs.reduce((s,j)=>s+(j.revenue||0),0);
-    const tips    = wjobs.reduce((s,j)=>s+(j.tips||0),0);
+  const periodJobs = jobs.filter(j=>j.job_date>=period.start&&j.job_date<=period.end);
+  const wkKeys = [...new Set(periodJobs.map(j=>j.week_key))].filter(Boolean).sort();
+
+  const rows = techs.map(t=>{
+    const tj      = periodJobs.filter(j=>j.tech_id===t.id);
+    const revenue = tj.reduce((s,j)=>s+(j.revenue||0),0);
+    const tips    = tj.reduce((s,j)=>s+(j.tips||0),0);
     const rate    = t.commission_rate||27;
     const commission = revenue*(rate/100);
     const total   = commission+tips;
-    return { ...t, revenue, tips, rate, commission, total };
+    const weeks   = wkKeys.map(wk=>{
+      const wj=tj.filter(j=>j.week_key===wk);
+      return { wk, rev:wj.reduce((s,j)=>s+(j.revenue||0),0), tips:wj.reduce((s,j)=>s+(j.tips||0),0), count:wj.length };
+    }).filter(w=>w.rev>0||w.tips>0);
+    return { ...t, revenue, tips, rate, commission, total, weeks };
   }).filter(r=>r.revenue>0||r.tips>0).sort((a,b)=>b.total-a.total);
 
-  const teamTotal = rows.reduce((s,r)=>s+r.total, 0);
+  const teamTotal = rows.reduce((s,r)=>s+r.total,0);
 
   function exportCSV() {
-    const lines = [
-      "Tech,Revenue,Commission Rate,Commission,Tips,Total Pay",
-      ...rows.map(r=>[
-        r.name, `$${r.revenue.toFixed(2)}`, `${r.rate}%`,
-        `$${r.commission.toFixed(2)}`, `$${r.tips.toFixed(2)}`, `$${r.total.toFixed(2)}`,
-      ].join(","))
-    ].join("\n");
-    const url = URL.createObjectURL(new Blob([lines],{type:"text/csv"}));
-    const a = Object.assign(document.createElement("a"),{href:url,download:`skylo-payroll-${selWeek}.csv`});
+    const lines=["Tech,Revenue,Commission Rate,Commission,Tips,Total Pay",...rows.map(r=>[r.name,`$${r.revenue.toFixed(2)}`,`${r.rate}%`,`$${r.commission.toFixed(2)}`,`$${r.tips.toFixed(2)}`,`$${r.total.toFixed(2)}`].join(","))].join("\n");
+    const url=URL.createObjectURL(new Blob([lines],{type:"text/csv"}));
+    const a=Object.assign(document.createElement("a"),{href:url,download:`skylo-payroll-${selKey}.csv`});
     a.click(); URL.revokeObjectURL(url);
   }
 
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:"16px" }}>
+
+      {/* Period selector */}
       <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.green}`, borderRadius:"12px", padding:"16px 18px" }}>
-        <Label color={C.green}>💵 Payroll — Select Week</Label>
-        <select value={selWeek} onChange={e=>setSelWeek(e.target.value)} style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"10px 14px", borderRadius:"12px", fontSize:"14px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", width:"100%", cursor:"pointer" }}>
-          {allKeys.length===0&&<option value={wk}>{formatWeekLabel(wk)}</option>}
-          {allKeys.map(w=><option key={w} value={w}>{formatWeekLabel(w)}{w===wk?" — Current":""}</option>)}
+        <Label color={C.green}>💵 Pay Period</Label>
+        <select value={selKey} onChange={e=>setSelKey(e.target.value)} style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"10px 14px", borderRadius:"12px", fontSize:"14px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", width:"100%", cursor:"pointer", marginBottom:"12px" }}>
+          {activePeriods.map(p=>(
+            <option key={p.key} value={p.key}>{fmtShortDate(p.start)} – {fmtShortDate(p.end)}{p.key===currentPPKey()?" — Current":""}</option>
+          ))}
         </select>
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:"8px" }}>
+          {[
+            { l:"Pay Period",  v:`${fmtShortDate(period.start)} – ${fmtShortDate(period.end)}` },
+            { l:"Submit By",   v:fmtShortDate(period.submit) },
+            { l:"Pay Date",    v:fmtShortDate(period.payout) },
+          ].map(s=>(
+            <div key={s.l} style={{ background:C.cardLt, borderRadius:"8px", padding:"8px 10px", textAlign:"center" }}>
+              <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"14px", color:C.black }}>{s.v}</div>
+              <div style={{ fontSize:"9px", color:C.muted, letterSpacing:"1px", textTransform:"uppercase", marginTop:"2px" }}>{s.l}</div>
+            </div>
+          ))}
+        </div>
       </div>
 
+      {/* Team total */}
       <div style={{ background:`${C.green}15`, border:`2px solid ${C.green}44`, borderRadius:"12px", padding:"16px 20px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
         <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontStyle:"italic", fontSize:"13px", color:C.green, letterSpacing:"2px" }}>TEAM TOTAL</div>
         <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"34px", color:C.black }}>${teamTotal.toFixed(2)}</div>
@@ -952,7 +1009,7 @@ function PayrollTab({ techs, jobs }) {
 
       {rows.length===0?(
         <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"32px", textAlign:"center", color:C.muted, fontSize:"13px" }}>
-          No jobs synced for this week yet. Data populates automatically every 30 min from HCP.
+          No jobs synced for this pay period yet. HCP sync runs every 30 min.
         </div>
       ):(
         <div style={{ display:"flex", flexDirection:"column", gap:"10px" }}>
@@ -965,11 +1022,11 @@ function PayrollTab({ techs, jobs }) {
                   <div style={{ fontSize:"10px", color:C.muted, letterSpacing:"1px" }}>TOTAL PAY</div>
                 </div>
               </div>
-              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:"8px" }}>
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:"8px", marginBottom:r.weeks.length>1?"10px":0 }}>
                 {[
-                  { l:"Revenue",             v:`$${r.revenue.toFixed(2)}`,    c:C.blue  },
-                  { l:`Commission (${r.rate}%)`, v:`$${r.commission.toFixed(2)}`, c:C.green },
-                  { l:"Tips",                v:`$${r.tips.toFixed(2)}`,       c:C.gold  },
+                  { l:"Revenue",                v:`$${Math.round(r.revenue).toLocaleString()}`, c:C.blue  },
+                  { l:`Commission (${r.rate}%)`, v:`$${r.commission.toFixed(2)}`,                c:C.green },
+                  { l:"Tips",                   v:`$${r.tips.toFixed(2)}`,                      c:C.gold  },
                 ].map(item=>(
                   <div key={item.l} style={{ background:C.cardLt, borderRadius:"8px", padding:"10px 12px" }}>
                     <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"18px", color:item.c }}>{item.v}</div>
@@ -977,13 +1034,29 @@ function PayrollTab({ techs, jobs }) {
                   </div>
                 ))}
               </div>
+              {r.weeks.length>1&&(
+                <div style={{ borderTop:`1px solid ${C.border}`, paddingTop:"10px" }}>
+                  <div style={{ fontSize:"10px", color:C.muted, letterSpacing:"1px", textTransform:"uppercase", marginBottom:"6px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>Week Breakdown</div>
+                  <div style={{ display:"flex", flexDirection:"column", gap:"4px" }}>
+                    {r.weeks.map(w=>(
+                      <div key={w.wk} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", background:C.cardLt, borderRadius:"6px", padding:"6px 10px" }}>
+                        <div style={{ fontSize:"12px", color:C.muted, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>{formatWeekLabel(w.wk)} · {w.count} job{w.count!==1?"s":""}</div>
+                        <div style={{ display:"flex", gap:"10px", alignItems:"center" }}>
+                          <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"13px", color:C.blue }}>${Math.round(w.rev).toLocaleString()}</span>
+                          {w.tips>0&&<span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", fontSize:"12px", color:C.gold }}>+${w.tips.toFixed(0)} tips</span>}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           ))}
         </div>
       )}
 
       <button onClick={exportCSV} style={{ background:C.blue, border:"none", color:C.white, padding:"13px", borderRadius:"12px", cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"13px", letterSpacing:"2px", textTransform:"uppercase" }}>
-        📥 Export CSV — {formatWeekLabel(selWeek)}
+        📥 Export CSV — {fmtShortDate(period.start)} to {fmtShortDate(period.end)}
       </button>
     </div>
   );
