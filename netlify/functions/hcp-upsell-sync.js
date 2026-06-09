@@ -23,7 +23,7 @@ const TECH_MAP = {
   "Milos Lewit":       "Milos Lewit",
   "Mason Dixon":       "Mason Dixon",
   "Tom Lorenc":        "Tom Lorenc",
-  "Ethan Hansen":      "Ethan Hansen",
+  "Ethan Hamilton":    "Ethan Hamilton",
   "Caleb McDaniel":    "Caleb McDaniel",
   "Riley Lyon":        "Riley Lyon",
   "Britton Dookhran":  "Britton Dookhran",
