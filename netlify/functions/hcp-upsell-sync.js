@@ -74,7 +74,9 @@ async function sbFetch(path, options = {}) {
     },
   });
   if (res.status === 204) return null;
-  return res.json();
+  const text = await res.text();
+  if (!text) return null;
+  return JSON.parse(text);
 }
 
 async function fetchAllCompletedJobs(start, end) {
@@ -160,22 +162,21 @@ exports.handler = async () => {
     }
     const fullJob = await jobRes.json();
 
-    // Revenue — try multiple paths the HCP API uses
-    const revenue = parseFloat(
+    // HCP returns amounts in cents — divide by 100
+    const revenue = (
       fullJob.total_amount ||
       fullJob.invoice?.total ||
       fullJob.invoices?.[0]?.total ||
       0
-    );
+    ) / 100;
 
-    // Tips — try multiple paths
-    const tips = parseFloat(
+    const tips = (
       fullJob.tip_amount ||
       fullJob.tips ||
       fullJob.invoice?.tip_amount ||
       fullJob.invoices?.[0]?.tip_amount ||
       0
-    );
+    ) / 100;
 
     // Hours from scheduled start/end
     let hours = 0;

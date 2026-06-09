@@ -1,16 +1,7 @@
 // netlify/functions/hcp-backfill.js
-// One-time / on-demand backfill: pulls last N days of completed HCP jobs
-// and upserts them into the jobs + upsells tables.
-// Call via: POST /.netlify/functions/hcp-backfill  { "days": 30 }
-
-const UPSELL_SERVICES = [
-  "Seat Steam and Shampoo",
-  "Engine Bay Cleaning",
-  "Carpet Steam and Shampoo",
-  "Heavy Pet Hair Removal Service",
-  "Full Interior Detail",
-  "Full Exterior Detail",
-];
+// On-demand backfill: pulls last N days of completed HCP jobs using the LIST
+// endpoint only (no per-job fetches) to stay well within function timeout.
+// HCP returns monetary values in CENTS — divide by 100 for dollars.
 
 const TECH_MAP = {
   "Myles Madarieta":   "Myles Madarieta",
@@ -34,55 +25,32 @@ const TECH_MAP = {
 };
 
 function getWeekKey(dateStr) {
-  const d = new Date(dateStr + "T12:00:00");
-  const day = d.getDay();
+  const d = new Date(dateStr + "T12:00:00Z");
+  const day = d.getUTCDay();
   const daysBack = day === 0 ? 6 : day - 1;
   const monday = new Date(d);
-  monday.setDate(d.getDate() - daysBack);
-  const y = monday.getFullYear();
-  const m = String(monday.getMonth() + 1).padStart(2, "0");
-  const dd = String(monday.getDate()).padStart(2, "0");
+  monday.setUTCDate(d.getUTCDate() - daysBack);
+  const y = monday.getUTCFullYear();
+  const m = String(monday.getUTCMonth() + 1).padStart(2, "0");
+  const dd = String(monday.getUTCDate()).padStart(2, "0");
   return `${y}-${m}-${dd}`;
 }
 
 async function sbFetch(path, options = {}) {
-  const { prefer, method, body } = options;
   const res = await fetch(`${process.env.SUPABASE_URL}/rest/v1/${path}`, {
-    method: method || "GET",
-    body,
+    method: options.method || "GET",
+    body: options.body,
     headers: {
       "Content-Type": "application/json",
       "apikey": process.env.SUPABASE_KEY,
       "Authorization": `Bearer ${process.env.SUPABASE_KEY}`,
-      "Prefer": prefer || "return=representation",
+      "Prefer": options.prefer || "return=representation",
     },
   });
   if (res.status === 204) return null;
-  return res.json();
-}
-
-async function fetchJobsForRange(start, end) {
-  const allJobs = [];
-  let page = 1;
-  while (true) {
-    const qs = [
-      `work_status[]=completed`,
-      `scheduled_start_min=${encodeURIComponent(start)}`,
-      `scheduled_start_max=${encodeURIComponent(end)}`,
-      `page=${page}`,
-      `page_size=100`,
-    ].join("&");
-    const res = await fetch(`https://api.housecallpro.com/jobs?${qs}`, {
-      headers: { "Authorization": `Token ${process.env.HCP_API_KEY}`, "Content-Type": "application/json" },
-    });
-    if (!res.ok) break;
-    const data = await res.json();
-    const batch = data.jobs || data.results || [];
-    allJobs.push(...batch);
-    if (batch.length < 100 || allJobs.length >= (data.total_items || 0)) break;
-    page++;
-  }
-  return allJobs;
+  const text = await res.text();
+  if (!text) return null;
+  return JSON.parse(text);
 }
 
 exports.handler = async (event) => {
@@ -91,94 +59,107 @@ exports.handler = async (event) => {
   }
 
   let days = 30;
-  try { days = parseInt(JSON.parse(event.body || "{}").days) || 30; } catch {}
-  days = Math.min(days, 90); // cap at 90 days
+  try { days = Math.min(parseInt(JSON.parse(event.body || "{}").days) || 30, 90); } catch {}
 
   const now = new Date();
   const startDate = new Date(now);
   startDate.setDate(now.getDate() - days);
 
-  const start = startDate.toISOString().split("T")[0] + "T00:00:00-06:00";
-  const end   = now.toISOString().split("T")[0]       + "T23:59:59-06:00";
+  const fmt = d => d.toISOString().split("T")[0];
+  const start = fmt(startDate) + "T00:00:00-06:00";
+  const end   = fmt(now)       + "T23:59:59-06:00";
 
-  console.log(`Backfill: ${days} days from ${start} to ${end}`);
+  console.log(`Backfill: last ${days} days | ${start} → ${end}`);
 
-  const jobs = await fetchJobsForRange(start, end);
-  console.log(`Fetched ${jobs.length} completed jobs`);
-
+  // Fetch all techs once
   const allTechs = await sbFetch("techs?select=id,name");
-  const techByName = Object.fromEntries((allTechs || []).map(t => [t.name, t]));
+  if (!allTechs) return { statusCode: 500, body: JSON.stringify({ ok: false, error: "Could not load techs from Supabase" }) };
+  const techByName = Object.fromEntries(allTechs.map(t => [t.name, t]));
 
-  let synced = 0, skipped = 0;
+  let synced = 0, skipped = 0, page = 1;
+  const pageSize = 100;
 
-  for (const job of jobs) {
-    const jobId = String(job.id || "");
-    if (!jobId) continue;
+  while (true) {
+    const qs = [
+      `work_status[]=completed`,
+      `scheduled_start_min=${encodeURIComponent(start)}`,
+      `scheduled_start_max=${encodeURIComponent(end)}`,
+      `page=${page}`,
+      `page_size=${pageSize}`,
+    ].join("&");
 
-    const employee = (job.assigned_employees || [])[0] || job.employee || null;
-    if (!employee) { skipped++; continue; }
-
-    const hcpName = `${employee.first_name || ""} ${employee.last_name || ""}`.trim();
-    const skyloName = TECH_MAP[hcpName];
-    if (!skyloName) { skipped++; continue; }
-
-    const tech = techByName[skyloName];
-    if (!tech) { skipped++; continue; }
-
-    const jobRes = await fetch(`https://api.housecallpro.com/jobs/${jobId}`, {
+    const res = await fetch(`https://api.housecallpro.com/jobs?${qs}`, {
       headers: { "Authorization": `Token ${process.env.HCP_API_KEY}`, "Content-Type": "application/json" },
     });
-    if (!jobRes.ok) { skipped++; continue; }
-    const fullJob = await jobRes.json();
 
-    const revenue = parseFloat(fullJob.total_amount || fullJob.invoice?.total || fullJob.invoices?.[0]?.total || 0);
-    const tips    = parseFloat(fullJob.tip_amount || fullJob.tips || fullJob.invoice?.tip_amount || fullJob.invoices?.[0]?.tip_amount || 0);
-
-    let hours = 0;
-    if (fullJob.schedule?.start && fullJob.schedule?.end) {
-      hours = Math.round(((new Date(fullJob.schedule.end) - new Date(fullJob.schedule.start)) / 3600000) * 100) / 100;
+    if (!res.ok) {
+      console.error("HCP error:", res.status);
+      break;
     }
 
-    const jobDate = fullJob.schedule?.start
-      ? fullJob.schedule.start.split("T")[0]
-      : now.toISOString().split("T")[0];
+    const text = await res.text();
+    if (!text) break;
+    const data = JSON.parse(text);
+    const jobs = data.jobs || data.results || [];
+    if (jobs.length === 0) break;
 
-    const weekKey = getWeekKey(jobDate);
+    for (const job of jobs) {
+      const jobId = String(job.id || "");
+      if (!jobId) { skipped++; continue; }
 
-    const lineItems = fullJob.line_items || fullJob.invoice?.line_items || fullJob.invoices?.[0]?.line_items || [];
-    let upsellTotal = 0;
-    const upsellItems = [];
-    for (const item of lineItems) {
-      const name = (item.name || item.description || "").trim();
-      if (UPSELL_SERVICES.some(s => s.toLowerCase() === name.toLowerCase())) {
-        const total = (item.quantity || 1) * parseFloat(item.unit_price || item.price || 0);
-        upsellTotal += total;
-        upsellItems.push({ name, amount: total });
+      const employee = (job.assigned_employees || [])[0];
+      if (!employee) { skipped++; continue; }
+
+      const hcpName = `${employee.first_name || ""} ${employee.last_name || ""}`.trim();
+      const skyloName = TECH_MAP[hcpName];
+      if (!skyloName) { skipped++; continue; }
+
+      const tech = techByName[skyloName];
+      if (!tech) { skipped++; continue; }
+
+      // HCP returns amounts in cents — divide by 100
+      const revenue = (job.total_amount || 0) / 100;
+
+      // Hours from scheduled start/end on list response
+      const schedStart = job.schedule?.scheduled_start;
+      const schedEnd   = job.schedule?.scheduled_end;
+      let hours = 0;
+      if (schedStart && schedEnd) {
+        hours = Math.round(((new Date(schedEnd) - new Date(schedStart)) / 3600000) * 100) / 100;
       }
-    }
 
-    await sbFetch("jobs?on_conflict=hcp_job_id", {
-      method: "POST",
-      prefer: "resolution=merge-duplicates,return=minimal",
-      body: JSON.stringify({ hcp_job_id: jobId, tech_id: tech.id, job_date: jobDate, revenue, upsell_amount: upsellTotal, hours, tips, week_key: weekKey }),
-    });
+      const jobDate  = schedStart ? schedStart.split("T")[0] : fmt(now);
+      const weekKey  = getWeekKey(jobDate);
 
-    if (upsellTotal > 0) {
-      const note = upsellItems.map(i => `${i.name} ($${i.amount})`).join(", ");
-      await sbFetch("upsells?on_conflict=hcp_job_id", {
+      await sbFetch("jobs?on_conflict=hcp_job_id", {
         method: "POST",
         prefer: "resolution=merge-duplicates,return=minimal",
-        body: JSON.stringify({ tech_id: tech.id, week_key: weekKey, amount: upsellTotal, hcp_job_id: jobId, note }),
+        body: JSON.stringify({
+          hcp_job_id:    jobId,
+          tech_id:       tech.id,
+          job_date:      jobDate,
+          revenue,
+          upsell_amount: 0,
+          hours,
+          tips:          0,
+          week_key:      weekKey,
+        }),
       });
+
+      synced++;
     }
 
-    synced++;
+    console.log(`Page ${page}: ${jobs.length} jobs, synced so far: ${synced}`);
+
+    const totalItems = data.total_items || 0;
+    if (jobs.length < pageSize || synced + skipped >= totalItems) break;
+    page++;
   }
 
-  console.log(`Backfill done. Synced: ${synced}, Skipped: ${skipped}`);
+  console.log(`Backfill complete. Synced: ${synced}, Skipped: ${skipped}`);
   return {
     statusCode: 200,
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ok: true, synced, skipped, days, total: jobs.length }),
+    body: JSON.stringify({ ok: true, synced, skipped, days }),
   };
 };
