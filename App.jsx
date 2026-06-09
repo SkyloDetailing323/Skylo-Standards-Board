@@ -312,20 +312,64 @@ function Logo({ h=40 }) {
   return <img src={LOGO_SRC} alt="Skylo" style={{ height:`${h}px`, objectFit:"contain" }}/>;
 }
 
-function Header({ right, title, subtitle }) {
+function Header({ right, left, title, subtitle }) {
   return (
-    <div style={{ background:C.white, borderBottom:`3px solid ${C.blue}`, padding:"0 20px", display:"flex", alignItems:"center", justifyContent:"space-between", height:"64px", boxShadow:"0 2px 12px rgba(43,156,240,0.12)" }}>
-      <div style={{ display:"flex", alignItems:"center", gap:"14px" }}>
-        <Logo h={36}/>
+    <div style={{ background:C.white, borderBottom:`3px solid ${C.blue}`, padding:"0 16px", display:"flex", alignItems:"center", justifyContent:"space-between", height:"64px", boxShadow:"0 2px 12px rgba(43,156,240,0.12)", position:"sticky", top:0, zIndex:100 }}>
+      <div style={{ display:"flex", alignItems:"center", gap:"12px" }}>
+        {left}
+        <Logo h={34}/>
         {title && (
           <div>
-            <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontStyle:"italic", fontSize:"18px", letterSpacing:"1px", textTransform:"uppercase", color:C.black, lineHeight:1 }}>{title}</div>
+            <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontStyle:"italic", fontSize:"17px", letterSpacing:"1px", textTransform:"uppercase", color:C.black, lineHeight:1 }}>{title}</div>
             {subtitle && <div style={{ fontSize:"10px", color:C.muted, letterSpacing:"2px", textTransform:"uppercase", marginTop:"2px" }}>{subtitle}</div>}
           </div>
         )}
       </div>
       {right}
     </div>
+  );
+}
+
+function HamburgerBtn({ onClick }) {
+  return (
+    <button onClick={onClick} style={{ background:"none", border:"none", cursor:"pointer", padding:"6px", display:"flex", flexDirection:"column", gap:"5px", flexShrink:0 }}>
+      <div style={{ width:"20px", height:"2px", background:C.black, borderRadius:"1px" }}/>
+      <div style={{ width:"20px", height:"2px", background:C.black, borderRadius:"1px" }}/>
+      <div style={{ width:"20px", height:"2px", background:C.black, borderRadius:"1px" }}/>
+    </button>
+  );
+}
+
+function SideNav({ sections, active, setActive, open, onClose, name, role }) {
+  return (
+    <>
+      {open&&<div onClick={onClose} style={{ position:"fixed", inset:0, background:"rgba(13,34,64,0.55)", zIndex:300 }}/>}
+      <div style={{ position:"fixed", top:0, left:0, height:"100%", width:"272px", background:C.white, zIndex:301, transform:open?"translateX(0)":"translateX(-100%)", transition:"transform 0.22s cubic-bezier(.4,0,.2,1)", boxShadow:"6px 0 24px rgba(0,0,0,0.18)", display:"flex", flexDirection:"column", overflowY:"auto" }}>
+        {/* Drawer header */}
+        <div style={{ background:`linear-gradient(135deg, ${C.blue} 0%, #0077cc 100%)`, padding:"20px 18px 16px", flexShrink:0 }}>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:"12px" }}>
+            <Logo h={30}/>
+            <button onClick={onClose} style={{ background:"rgba(255,255,255,0.15)", border:"none", color:"#fff", width:"28px", height:"28px", borderRadius:"50%", cursor:"pointer", fontSize:"14px", display:"flex", alignItems:"center", justifyContent:"center" }}>✕</button>
+          </div>
+          <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontStyle:"italic", fontSize:"20px", color:"#fff", lineHeight:1 }}>{name}</div>
+          {role&&<div style={{ fontSize:"11px", color:"rgba(255,255,255,0.7)", letterSpacing:"2px", textTransform:"uppercase", marginTop:"3px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"600" }}>{role}</div>}
+        </div>
+        {/* Nav sections */}
+        <div style={{ flex:1, paddingBottom:"24px" }}>
+          {sections.map((sec,si)=>(
+            <div key={si} style={{ paddingTop:"8px" }}>
+              {sec.label&&<div style={{ padding:"10px 18px 4px", fontSize:"9px", color:C.muted, letterSpacing:"2px", textTransform:"uppercase", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>{sec.label}</div>}
+              {sec.items.map(([id,icon,label])=>(
+                <button key={id} onClick={()=>{ setActive(id); onClose(); }} style={{ width:"100%", display:"flex", alignItems:"center", gap:"12px", padding:"11px 18px", background:active===id?`${C.blue}12`:"none", border:"none", borderLeft:active===id?`3px solid ${C.blue}`:"3px solid transparent", cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:active===id?"900":"700", fontSize:"14px", color:active===id?C.blue:C.black, textAlign:"left", transition:"background 0.12s" }}>
+                  <span style={{ fontSize:"17px", width:"24px", textAlign:"center" }}>{icon}</span>
+                  {label}
+                </button>
+              ))}
+            </div>
+          ))}
+        </div>
+      </div>
+    </>
   );
 }
 
@@ -1062,6 +1106,100 @@ function PayrollTab({ techs, jobs }) {
   );
 }
 
+// ─── LEADERBOARD ─────────────────────────────────────────────────────────────
+function Leaderboard({ techs, jobs, upsells, reviews, callbacks, switchovers }) {
+  const METRICS = [
+    { id:"revenue",  label:"Revenue",    icon:"💰" },
+    { id:"upsells",  label:"Upsells",    icon:"📈" },
+    { id:"revhr",    label:"Rev / Hr",   icon:"⚡" },
+    { id:"reviews",  label:"Reviews",    icon:"⭐" },
+    { id:"pts",      label:"Pts",        icon:"🏆" },
+  ];
+  const [metric, setMetric] = useState("revenue");
+
+  const wk = getWeekKey();
+  const rows = techs.map(t => {
+    const tj      = jobs.filter(j=>j.tech_id===t.id&&j.week_key===wk);
+    const revenue = tj.reduce((s,j)=>s+(j.revenue||0),0);
+    const hours   = tj.reduce((s,j)=>s+(j.hours||0),0);
+    const wkUps   = upsells.filter(u=>u.tech_id===t.id&&u.week_key===wk).reduce((s,u)=>s+u.amount,0);
+    const mk      = getMonthKey();
+    const mRevs   = reviews.filter(r=>r.tech_id===t.id&&r.month_key===mk).reduce((s,r)=>s+r.count,0);
+    const tt      = calcTotals(t,upsells,switchovers,reviews,callbacks||[]);
+    return { ...t, revenue, hours, revhr:hours>0?revenue/hours:0, wkUps, mRevs, pts:tt.total };
+  });
+
+  const sorted = [...rows].sort((a,b) => {
+    if (metric==="revenue") return b.revenue-a.revenue;
+    if (metric==="upsells") return b.wkUps-a.wkUps;
+    if (metric==="revhr")   return b.revhr-a.revhr;
+    if (metric==="reviews") return b.mRevs-a.mRevs;
+    return b.pts-a.pts;
+  }).filter(r => {
+    if (metric==="revenue") return r.revenue>0;
+    if (metric==="upsells") return r.wkUps>0;
+    if (metric==="revhr")   return r.revhr>0;
+    if (metric==="reviews") return r.mRevs>0;
+    return r.pts>0;
+  });
+
+  const getValue = r => {
+    if (metric==="revenue") return `$${Math.round(r.revenue).toLocaleString()}`;
+    if (metric==="upsells") return `$${Math.round(r.wkUps).toLocaleString()}`;
+    if (metric==="revhr")   return `$${r.revhr.toFixed(0)}/hr`;
+    if (metric==="reviews") return r.mRevs;
+    return r.pts.toLocaleString()+" pts";
+  };
+  const getLabel = r => {
+    if (metric==="revenue") return "this week";
+    if (metric==="upsells") return "this week";
+    if (metric==="revhr")   return "this week";
+    if (metric==="reviews") return "this month";
+    return "all time";
+  };
+
+  const medals = ["🥇","🥈","🥉"];
+  const colors = [C.gold, C.muted, "#cd7f32"];
+
+  return (
+    <div style={{ display:"flex", flexDirection:"column", gap:"16px" }}>
+      {/* Metric toggle */}
+      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.gold}`, borderRadius:"12px", padding:"14px 16px" }}>
+        <Label color={C.gold}>🏆 Leaderboard</Label>
+        <div style={{ display:"flex", gap:"6px", flexWrap:"wrap" }}>
+          {METRICS.map(m=>(
+            <button key={m.id} onClick={()=>setMetric(m.id)} style={{ background:metric===m.id?C.gold:C.cardLt, border:`1px solid ${metric===m.id?C.gold:C.border}`, color:metric===m.id?C.white:C.muted, padding:"6px 14px", borderRadius:"20px", cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", fontSize:"12px", letterSpacing:"1px" }}>
+              {m.icon} {m.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {sorted.length===0?(
+        <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"32px", textAlign:"center", color:C.muted, fontSize:"13px" }}>
+          No data yet for this period. Check back after jobs sync from HCP.
+        </div>
+      ):(
+        <div style={{ display:"flex", flexDirection:"column", gap:"8px" }}>
+          {sorted.map((r,i)=>(
+            <div key={r.id} style={{ background:C.card, border:`1px solid ${i<3?colors[i]+"55":C.border}`, borderLeft:`4px solid ${i<3?colors[i]:C.border}`, borderRadius:"12px", padding:"14px 16px", display:"flex", alignItems:"center", gap:"14px" }}>
+              <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"22px", width:"32px", textAlign:"center", color:i<3?colors[i]:C.muted }}>
+                {i<3?medals[i]:i+1}
+              </div>
+              <div style={{ width:"40px", height:"40px", borderRadius:"50%", background:i<3?`${colors[i]}22`:`${C.blue}15`, border:`2px solid ${i<3?colors[i]:C.border}`, display:"flex", alignItems:"center", justifyContent:"center", fontFamily:"'Barlow Condensed',sans-serif", fontSize:"13px", fontWeight:"900", color:i<3?colors[i]:C.blue, flexShrink:0 }}>{r.avatar}</div>
+              <div style={{ flex:1 }}>
+                <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontStyle:"italic", fontSize:"17px", color:C.black }}>{r.name}</div>
+                <div style={{ fontSize:"10px", color:C.muted, letterSpacing:"1px" }}>{getLabel(r)}</div>
+              </div>
+              <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"22px", color:i<3?colors[i]:C.black }}>{getValue(r)}</div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── JOURNEY BOARD ────────────────────────────────────────────────────────────
 function JourneyBoard({ techs, upsells, switchovers, reviews, quota, callbacks }) {
   const [selected, setSelected] = useState(null);
@@ -1763,6 +1901,7 @@ function IncentiveBoard({ techs, upsells, switchovers, reviews, callbacks, curre
 function TechDashboard({ tech, techs, upsells, switchovers, reviews, callbacks, quota, jobs, onLogout }) {
   const q = quota || DEFAULT_QUOTA;
   const [tab, setTab] = useState("overview");
+  const [menuOpen, setMenuOpen] = useState(false);
   const tt = calcTotals(tech, upsells, switchovers, reviews, callbacks);
   const tier = getTier(tt.total);
   const nextTier = JOURNEY_TIERS.find(t=>t.minPts>tt.total);
@@ -1782,36 +1921,56 @@ function TechDashboard({ tech, techs, upsells, switchovers, reviews, callbacks, 
   const swHit  = monthSwitchCount >= q.switchovers;
   const allQuotaHit = upHit && revHit && swHit;
   const quotaHitCount = [upHit,revHit,swHit].filter(Boolean).length;
+  const techNavSections = [
+    { label:null, items:[
+      ["overview","🏠","Overview"],
+      ["reports","📊","My Reports"],
+      ["leaderboard","🏆","Leaderboard"],
+    ]},
+    { label:"Journey", items:[
+      ["journey","🗺️","Journey Map"],
+      ["total","🎯","Total Score"],
+      ["badges","🥇","Badges"],
+      ["incentive","🎁","Rewards"],
+    ]},
+    { label:"My Stats", items:[
+      ["upsells","💰","Upsells"],
+      ["switchovers","🔄","Converts"],
+      ["reviews","⭐","Reviews"],
+      ...(tech.is_lead?[["myteam","👥","My Team"]]:[]),
+    ]},
+  ];
+
   return (
     <div style={{ minHeight:"100vh", background:"#f0f8ff" }}>
       <style>{GS}</style>
-      <Header right={<LogoutBtn onLogout={onLogout}/>}/>
-      <div style={{ background:C.white, borderBottom:`1px solid ${C.border}`, padding:"16px 20px 0", boxShadow:"0 2px 12px rgba(43,156,240,0.08)" }}>
-        <div style={{ display:"flex", alignItems:"center", gap:"14px", marginBottom:"16px" }}>
-          <div style={{ width:"52px", height:"52px", borderRadius:"50%", background:`${C.blue}18`, border:`2px solid ${C.blue}`, display:"flex", alignItems:"center", justifyContent:"center", fontFamily:"'Barlow Condensed',sans-serif", fontSize:"16px", fontWeight:"900", color:C.blue, flexShrink:0 }}>{tech.avatar}</div>
+      <SideNav sections={techNavSections} active={tab} setActive={setTab} open={menuOpen} onClose={()=>setMenuOpen(false)} name={tech.name} role={`${tier.icon} ${tier.name}`}/>
+      <Header left={<HamburgerBtn onClick={()=>setMenuOpen(true)}/>} right={<LogoutBtn onLogout={onLogout}/>}/>
+      <div style={{ background:C.white, borderBottom:`1px solid ${C.border}`, padding:"14px 20px 0", boxShadow:"0 2px 12px rgba(43,156,240,0.08)" }}>
+        <div style={{ display:"flex", alignItems:"center", gap:"14px", marginBottom:"14px" }}>
+          <div style={{ width:"50px", height:"50px", borderRadius:"50%", background:`${C.blue}18`, border:`2px solid ${C.blue}`, display:"flex", alignItems:"center", justifyContent:"center", fontFamily:"'Barlow Condensed',sans-serif", fontSize:"16px", fontWeight:"900", color:C.blue, flexShrink:0 }}>{tech.avatar}</div>
           <div style={{ flex:1 }}>
-            <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontStyle:"italic", fontSize:"26px", color:C.black, lineHeight:1 }}>{tech.name}</div>
+            <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontStyle:"italic", fontSize:"24px", color:C.black, lineHeight:1 }}>{tech.name}</div>
             <div style={{ display:"flex", gap:"8px", alignItems:"center", marginTop:"4px", flexWrap:"wrap" }}>
               <Pill color={tier.color}>{tier.icon} {tier.name}</Pill>
               {tenure&&<span style={{ fontSize:"11px", color:C.muted }}>⏱ {tenure}</span>}
             </div>
           </div>
           <div style={{ textAlign:"right" }}>
-            <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontStyle:"italic", fontSize:"36px", color:C.blue, lineHeight:1 }}>{tt.total.toLocaleString()}</div>
+            <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontStyle:"italic", fontSize:"34px", color:C.blue, lineHeight:1 }}>{tt.total.toLocaleString()}</div>
             <div style={{ fontSize:"10px", color:C.muted, letterSpacing:"2px" }}>TOTAL PTS</div>
           </div>
         </div>
         {nextTier&&(
-          <div style={{ marginBottom:"14px" }}>
+          <div style={{ marginBottom:"12px" }}>
             <div style={{ display:"flex", justifyContent:"space-between", marginBottom:"5px" }}>
-              <span style={{ fontSize:"10px", color:C.muted, letterSpacing:"1px" }}>🎯 WORKING TOWARD: {nextTier.reward}</span>
+              <span style={{ fontSize:"10px", color:C.muted, letterSpacing:"1px" }}>🎯 TOWARD: {nextTier.reward}</span>
               <span style={{ fontSize:"10px", color:tier.color, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>{(nextTier.minPts-tt.total).toLocaleString()} PTS TO GO</span>
             </div>
             <Bar pct={Math.round(((tt.total-tier.minPts)/(nextTier.minPts-tier.minPts))*100)} color={tier.color} h={4}/>
           </div>
         )}
       </div>
-      <TabBar tabs={[["overview","Overview"],["reports","📊 Reports"],["journey","🗺️ Journey"],["total","🏆 Total"],["badges","Badges"],["upsells","Upsells"],["switchovers","Converts"],["reviews","⭐ Reviews"],["incentive","🎁 Rewards"],...(tech.is_lead?[["myteam","👥 My Team"]]:[ ])]} active={tab} setActive={setTab}/>
       <div style={{ padding:"20px", maxWidth:"800px", margin:"0 auto" }}>
         {tab==="overview"&&(
           <div style={{ display:"flex", flexDirection:"column", gap:"16px" }}>
@@ -2021,6 +2180,7 @@ function TechDashboard({ tech, techs, upsells, switchovers, reviews, callbacks, 
           </div>
         )}
         {tab==="reports"&&<ReportsTab techs={techs} jobs={jobs||[]} techId={tech.id}/>}
+        {tab==="leaderboard"&&<Leaderboard techs={techs} jobs={jobs||[]} upsells={upsells} reviews={reviews} callbacks={callbacks||[]} switchovers={switchovers}/>}
         {tab==="badges"&&<BadgeGrid earned={tech.badges}/>}
         {tab==="upsells"&&<UpsellLeaderboard techs={techs} upsells={upsells} currentId={tech.id}/>}
         {tab==="switchovers"&&<SwitchoverLeaderboard techs={techs} switchovers={switchovers} currentId={tech.id}/>}
@@ -2641,6 +2801,7 @@ function RideAlongTab({ techs, rideAlongs, schedules, onSave, onSaveSchedule, sa
 // ─── ADMIN PANEL ──────────────────────────────────────────────────────────────
 function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlongs, schedules, quota, setQuota, jobs, onLogout, refreshAll }) {
   const [tab, setTab] = useState("upsells");
+  const [menuOpen, setMenuOpen] = useState(false);
   const [awardForm, setAwardForm] = useState({techId:"",badgeId:""});
   const [addForm, setAddForm] = useState({name:"",pin:"",avatar:"",start_date:"",commission_rate:27});
   const [upsellForm, setUpsellForm] = useState({});
@@ -2787,11 +2948,41 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
   const sel=(val)=>({...inp, color:val?C.black:C.muted});
   const btn=(color)=>({ background:saving?C.border:color||C.blue, border:"none", color:C.black, padding:"13px", borderRadius:"24px", cursor:saving?"not-allowed":"pointer", fontSize:"13px", fontWeight:"900", fontStyle:"italic", letterSpacing:"2px", fontFamily:"'Barlow Condensed',sans-serif", width:"100%", textTransform:"uppercase" });
 
+  const adminNavSections = [
+    { label:"Analytics", items:[
+      ["reports","📊","Reports"],
+      ["leaderboard","🏆","Leaderboard"],
+      ["payroll","💵","Payroll"],
+      ["kyle","👑","Kyle Bonus"],
+    ]},
+    { label:"Team Activity", items:[
+      ["upsells","💰","Upsells"],
+      ["reviews","⭐","Reviews"],
+      ["switchovers","🔄","Converts"],
+      ["callbacks","📞","Callbacks"],
+      ["ridealong","🚗","Ride-Alongs"],
+    ]},
+    { label:"Journey", items:[
+      ["journey","🗺️","Journey Map"],
+      ["incentive","🎁","Rewards"],
+      ["award","🥇","Award Badge"],
+    ]},
+    { label:"Management", items:[
+      ["add","➕","Add Tech"],
+      ["manage","✏️","Manage"],
+      ["teams","👥","Teams"],
+      ["quota","📋","Quota"],
+      ["delete","🗑️","Delete Tech"],
+    ]},
+  ];
+
+  const adminTabLabel = adminNavSections.flatMap(s=>s.items).find(([id])=>id===tab)?.[2] || "Dashboard";
+
   return (
     <div style={{ minHeight:"100vh", background:"#f0f8ff" }}>
       <style>{GS}</style>
-      <Header title="Admin Panel" subtitle="Skylo Standard Board" right={<LogoutBtn onLogout={onLogout}/>}/>
-      <TabBar tabs={[["upsells","Upsells"],["reviews","⭐ Reviews"],["switchovers","Converts"],["callbacks","📞 Callbacks"],["reports","📊 Reports"],["payroll","💵 Payroll"],["award","Award Badge"],["add","Add Tech"],["manage","Manage"],["teams","👥 Teams"],["delete","🗑️ Delete"],["journey","🗺️ Journey"],["kyle","👑 Kyle Bonus"],["quota","📋 Quota"],["incentive","🎁 Rewards"],["ridealong","🚗 Ride-Alongs"]]} active={tab} setActive={setTab} accent={C.green}/>
+      <SideNav sections={adminNavSections} active={tab} setActive={setTab} open={menuOpen} onClose={()=>setMenuOpen(false)} name="Admin Panel" role="Skylo Standard Board"/>
+      <Header left={<HamburgerBtn onClick={()=>setMenuOpen(true)}/>} title={adminTabLabel} right={<LogoutBtn onLogout={onLogout}/>}/>
       <div style={{ padding:"20px", maxWidth:"700px", margin:"0 auto" }}>
 
         {tab==="upsells"&&(
@@ -3055,6 +3246,9 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
 
         {tab==="reports"&&(
           <ReportsTab techs={techs} jobs={jobs||[]} techId={null}/>
+        )}
+        {tab==="leaderboard"&&(
+          <Leaderboard techs={techs} jobs={jobs||[]} upsells={upsells} reviews={reviews} callbacks={callbacks||[]} switchovers={switchovers}/>
         )}
         {tab==="payroll"&&(
           <PayrollTab techs={techs} jobs={jobs||[]} upsells={upsells}/>
