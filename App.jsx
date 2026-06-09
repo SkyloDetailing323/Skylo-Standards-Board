@@ -802,8 +802,8 @@ function ReportsTab({ techs, jobs, techId=null }) {
   const totalRevenue   = inRange.reduce((s,j) => s+(j.revenue||0), 0);
   const totalHours     = inRange.reduce((s,j) => s+(j.hours||0), 0);
   const totalUpsells   = inRange.reduce((s,j) => s+(j.upsell_amount||0), 0);
-  const rateMap        = Object.fromEntries(techs.map(t => [t.id, t.hourly_rate||0]));
-  const totalLabor     = inRange.reduce((s,j) => s+(j.hours||0)*(rateMap[j.tech_id]||0), 0);
+  const commMap        = Object.fromEntries(techs.map(t => [t.id, (t.commission_rate||27)/100]));
+  const totalLabor     = inRange.reduce((s,j) => s+(j.revenue||0)*(commMap[j.tech_id]||0.27), 0);
   const revPerHr       = totalHours > 0 ? totalRevenue/totalHours : 0;
   const upsellPct      = totalRevenue > 0 ? (totalUpsells/totalRevenue)*100 : 0;
   const laborPct       = totalRevenue > 0 ? (totalLabor/totalRevenue)*100 : 0;
@@ -905,36 +905,34 @@ function ReportsTab({ techs, jobs, techId=null }) {
 }
 
 // ─── PAYROLL TAB ──────────────────────────────────────────────────────────────
-function PayrollTab({ techs, jobs, upsells }) {
+function PayrollTab({ techs, jobs }) {
   const wk = getWeekKey();
-  const allKeys = [...new Set([...jobs.map(j=>j.week_key),...upsells.map(u=>u.week_key)])].filter(Boolean).sort((a,b)=>b.localeCompare(a));
+  const allKeys = [...new Set(jobs.map(j=>j.week_key))].filter(Boolean).sort((a,b)=>b.localeCompare(a));
   const [selWeek, setSelWeek] = useState(wk);
 
   const rows = techs.map(t => {
-    const wjobs = jobs.filter(j=>j.tech_id===t.id&&j.week_key===selWeek);
-    const hours = wjobs.reduce((s,j)=>s+(j.hours||0),0);
-    const rate  = t.hourly_rate||0;
-    const base  = hours*rate;
-    const weekUpsellAmt = upsells.filter(u=>u.tech_id===t.id&&u.week_key===selWeek).reduce((s,u)=>s+u.amount,0);
-    const { totalPay:bonus, rate:upsellRate } = calcWeeklyPay(weekUpsellAmt);
-    return { ...t, hours, rate, base, weekUpsellAmt, bonus, upsellRate, total:base+bonus };
-  }).filter(r=>r.hours>0||r.weekUpsellAmt>0).sort((a,b)=>b.total-a.total);
+    const wjobs   = jobs.filter(j=>j.tech_id===t.id&&j.week_key===selWeek);
+    const revenue = wjobs.reduce((s,j)=>s+(j.revenue||0),0);
+    const tips    = wjobs.reduce((s,j)=>s+(j.tips||0),0);
+    const rate    = t.commission_rate||27;
+    const commission = revenue*(rate/100);
+    const total   = commission+tips;
+    return { ...t, revenue, tips, rate, commission, total };
+  }).filter(r=>r.revenue>0||r.tips>0).sort((a,b)=>b.total-a.total);
 
   const teamTotal = rows.reduce((s,r)=>s+r.total, 0);
 
   function exportCSV() {
     const lines = [
-      "Tech,Hours,Hourly Rate,Base Pay,Upsell Amount,Upsell Rate,Upsell Bonus,Total",
+      "Tech,Revenue,Commission Rate,Commission,Tips,Total Pay",
       ...rows.map(r=>[
-        r.name, r.hours.toFixed(2), `$${r.rate.toFixed(2)}`, `$${r.base.toFixed(2)}`,
-        `$${r.weekUpsellAmt.toFixed(2)}`, `${Math.round(r.upsellRate*100)}%`,
-        `$${r.bonus.toFixed(2)}`, `$${r.total.toFixed(2)}`,
+        r.name, `$${r.revenue.toFixed(2)}`, `${r.rate}%`,
+        `$${r.commission.toFixed(2)}`, `$${r.tips.toFixed(2)}`, `$${r.total.toFixed(2)}`,
       ].join(","))
     ].join("\n");
     const url = URL.createObjectURL(new Blob([lines],{type:"text/csv"}));
     const a = Object.assign(document.createElement("a"),{href:url,download:`skylo-payroll-${selWeek}.csv`});
-    a.click();
-    URL.revokeObjectURL(url);
+    a.click(); URL.revokeObjectURL(url);
   }
 
   return (
@@ -954,7 +952,7 @@ function PayrollTab({ techs, jobs, upsells }) {
 
       {rows.length===0?(
         <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"32px", textAlign:"center", color:C.muted, fontSize:"13px" }}>
-          No hours or upsells logged for this week. Make sure hourly rates are set in the Manage tab.
+          No jobs synced for this week yet. Data populates automatically every 30 min from HCP.
         </div>
       ):(
         <div style={{ display:"flex", flexDirection:"column", gap:"10px" }}>
@@ -967,14 +965,15 @@ function PayrollTab({ techs, jobs, upsells }) {
                   <div style={{ fontSize:"10px", color:C.muted, letterSpacing:"1px" }}>TOTAL PAY</div>
                 </div>
               </div>
-              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"8px" }}>
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:"8px" }}>
                 {[
-                  { l:`Base  —  ${r.hours.toFixed(1)}h × $${r.rate}/hr`, v:`$${r.base.toFixed(2)}`,  c:C.blue  },
-                  { l:`Upsell bonus  —  ${Math.round(r.upsellRate*100)}% of $${r.weekUpsellAmt}`,    v:`$${r.bonus.toFixed(2)}`, c:C.green },
+                  { l:"Revenue",             v:`$${r.revenue.toFixed(2)}`,    c:C.blue  },
+                  { l:`Commission (${r.rate}%)`, v:`$${r.commission.toFixed(2)}`, c:C.green },
+                  { l:"Tips",                v:`$${r.tips.toFixed(2)}`,       c:C.gold  },
                 ].map(item=>(
                   <div key={item.l} style={{ background:C.cardLt, borderRadius:"8px", padding:"10px 12px" }}>
-                    <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"20px", color:item.c }}>{item.v}</div>
-                    <div style={{ fontSize:"10px", color:C.muted, marginTop:"3px", lineHeight:"1.3" }}>{item.l}</div>
+                    <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"18px", color:item.c }}>{item.v}</div>
+                    <div style={{ fontSize:"10px", color:C.muted, marginTop:"3px" }}>{item.l}</div>
                   </div>
                 ))}
               </div>
@@ -1833,6 +1832,38 @@ function TechDashboard({ tech, techs, upsells, switchovers, reviews, callbacks, 
               );
             })()}
 
+            {/* ── EARNINGS CARD ── */}
+            {(()=>{
+              const wkJobs    = (jobs||[]).filter(j=>j.tech_id===tech.id&&j.week_key===wk);
+              const wkRevenue = wkJobs.reduce((s,j)=>s+(j.revenue||0),0);
+              const wkTips    = wkJobs.reduce((s,j)=>s+(j.tips||0),0);
+              if (wkRevenue===0&&wkTips===0) return null;
+              const rate       = tech.commission_rate||27;
+              const commission = wkRevenue*(rate/100);
+              const total      = commission+wkTips;
+              return (
+                <div style={{ background:C.white, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.green}`, borderRadius:"12px", padding:"16px 18px", boxShadow:"0 2px 8px rgba(43,156,240,0.08)" }}>
+                  <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontStyle:"italic", fontSize:"12px", color:C.green, letterSpacing:"2px", marginBottom:"12px" }}>💵 YOUR EARNINGS — THIS WEEK</div>
+                  <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:"8px", marginBottom:"10px" }}>
+                    {[
+                      { l:"Revenue",             v:`$${wkRevenue.toLocaleString()}`,   c:C.blue  },
+                      { l:`Commission (${rate}%)`,v:`$${commission.toFixed(2)}`,        c:C.green },
+                      { l:"Tips",                v:`$${wkTips.toFixed(2)}`,            c:C.gold  },
+                    ].map(s=>(
+                      <div key={s.l} style={{ background:C.cardLt, borderRadius:"8px", padding:"10px", textAlign:"center" }}>
+                        <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"18px", color:s.c }}>{s.v}</div>
+                        <div style={{ fontSize:"9px", color:C.muted, letterSpacing:"1px", textTransform:"uppercase", marginTop:"3px" }}>{s.l}</div>
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{ background:`${C.green}15`, border:`1px solid ${C.green}44`, borderRadius:"8px", padding:"10px 14px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                    <div style={{ fontSize:"11px", color:C.green, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", letterSpacing:"1px" }}>TOTAL THIS WEEK</div>
+                    <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"26px", color:C.black }}>${total.toFixed(2)}</div>
+                  </div>
+                </div>
+              );
+            })()}
+
             {/* Team info — always show if assigned, show unassigned message if not */}
             {(() => {
               const myLead = techs.find(t=>t.id===tech.team_lead_id);
@@ -2538,7 +2569,7 @@ function RideAlongTab({ techs, rideAlongs, schedules, onSave, onSaveSchedule, sa
 function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlongs, schedules, quota, setQuota, jobs, onLogout, refreshAll }) {
   const [tab, setTab] = useState("upsells");
   const [awardForm, setAwardForm] = useState({techId:"",badgeId:""});
-  const [addForm, setAddForm] = useState({name:"",pin:"",avatar:"",start_date:"",hourly_rate:""});
+  const [addForm, setAddForm] = useState({name:"",pin:"",avatar:"",start_date:"",commission_rate:27});
   const [upsellForm, setUpsellForm] = useState({});
   const [swForm, setSwForm] = useState({techId:"",planId:""});
   const [reviewForm, setReviewForm] = useState({});
@@ -2581,7 +2612,7 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
     if (!addForm.name||!addForm.pin||addForm.pin.length!==4) return showToast("Name + 4-digit PIN required",false);
     if (techs.find(t=>t.pin===addForm.pin)) return showToast("PIN already in use",false);
     setSaving(true);
-    try { const avatar=addForm.avatar||addForm.name.split(" ").map(w=>w[0]).join("").toUpperCase().slice(0,2); await sb("techs",{method:"POST",body:JSON.stringify({name:addForm.name,pin:addForm.pin,avatar,badges:["day_one"],start_date:addForm.start_date||null,hourly_rate:parseFloat(addForm.hourly_rate)||0})}); await refreshAll(); showToast(`✅ ${addForm.name} added!`); setAddForm({name:"",pin:"",avatar:"",start_date:"",hourly_rate:""}); }
+    try { const avatar=addForm.avatar||addForm.name.split(" ").map(w=>w[0]).join("").toUpperCase().slice(0,2); await sb("techs",{method:"POST",body:JSON.stringify({name:addForm.name,pin:addForm.pin,avatar,badges:["day_one"],start_date:addForm.start_date||null,commission_rate:parseInt(addForm.commission_rate)||27})}); await refreshAll(); showToast(`✅ ${addForm.name} added!`); setAddForm({name:"",pin:"",avatar:"",start_date:"",commission_rate:27}); }
     catch(e){ showToast("Error: "+e.message,false); }
     setSaving(false);
   }
@@ -2800,8 +2831,10 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
               <input type="date" value={addForm.start_date} onChange={e=>setAddForm(f=>({...f,start_date:e.target.value}))} style={inp}/>
             </div>
             <div>
-              <div style={{ fontSize:"12px", color:C.muted, marginBottom:"6px" }}>Hourly Rate ($/hr)</div>
-              <input type="number" placeholder="e.g. 18" min={0} step={0.5} value={addForm.hourly_rate} onChange={e=>setAddForm(f=>({...f,hourly_rate:e.target.value}))} style={inp}/>
+              <div style={{ fontSize:"12px", color:C.muted, marginBottom:"6px" }}>Commission Rate</div>
+              <select value={addForm.commission_rate} onChange={e=>setAddForm(f=>({...f,commission_rate:e.target.value}))} style={inp}>
+                {[27,28,29,30,31,32].map(p=><option key={p} value={p}>{p}%</option>)}
+              </select>
             </div>
             <button onClick={addTech} disabled={saving} style={btn(C.green)}>{saving?"Saving...":"Add Tech"}</button>
           </div>
@@ -2831,16 +2864,16 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
                   {t.start_date&&<span style={{ fontSize:"12px", color:C.blue, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>{formatTenure(t.start_date)}</span>}
                 </div>
                 <div style={{ display:"flex", alignItems:"center", gap:"10px", marginBottom:"10px" }}>
-                  <span style={{ fontSize:"12px", color:C.muted }}>Hourly rate:</span>
-                  <input type="number" defaultValue={t.hourly_rate||0} min={0} step={0.5}
-                    onBlur={async e=>{
-                      const val=parseFloat(e.target.value);
-                      if(isNaN(val)||val===(t.hourly_rate||0)) return;
-                      await sb(`techs?id=eq.${t.id}`,{method:"PATCH",body:JSON.stringify({hourly_rate:val}),prefer:"return=minimal"});
+                  <span style={{ fontSize:"12px", color:C.muted }}>Commission rate:</span>
+                  <select defaultValue={t.commission_rate||27}
+                    onChange={async e=>{
+                      const val=parseInt(e.target.value);
+                      await sb(`techs?id=eq.${t.id}`,{method:"PATCH",body:JSON.stringify({commission_rate:val}),prefer:"return=minimal"});
                       await refreshAll(); showToast(`✅ Rate saved for ${t.name}`);
                     }}
-                    style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"4px 8px", borderRadius:"4px", fontSize:"14px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", width:"72px" }}/>
-                  <span style={{ fontSize:"12px", color:C.muted }}>$/hr</span>
+                    style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"4px 8px", borderRadius:"4px", fontSize:"14px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", cursor:"pointer" }}>
+                    {[27,28,29,30,31,32].map(p=><option key={p} value={p}>{p}%</option>)}
+                  </select>
                 </div>
                 <div style={{ display:"flex", flexWrap:"wrap", gap:"5px" }}>
                   {t.badges.map(bid=>{ const b=BADGE_MAP[bid]; return b?(
@@ -3054,6 +3087,7 @@ export default function App() {
 alter table techs add column if not exists is_lead boolean default false;
 alter table techs add column if not exists team_lead_id uuid references techs(id);
 alter table techs add column if not exists hourly_rate numeric default 0;
+alter table techs add column if not exists commission_rate integer default 27;
 
 create table if not exists reviews (
   id uuid primary key default gen_random_uuid(),
@@ -3099,7 +3133,8 @@ create table if not exists jobs (
 alter table jobs enable row level security;
 drop policy if exists "public access" on jobs;
 create policy "public access" on jobs for all using (true) with check (true);
-create unique index if not exists jobs_hcp_job_id_key on jobs(hcp_job_id);`}
+create unique index if not exists jobs_hcp_job_id_key on jobs(hcp_job_id);
+alter table jobs add column if not exists tips numeric default 0;`}
         </code><br/>
         <button onClick={()=>{setDbError(null);setLoading(true);loadAll().then(()=>setLoading(false));}} style={{ background:C.blue, border:"none", color:C.black, padding:"12px 28px", borderRadius:"24px", cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontSize:"14px", fontWeight:"900", fontStyle:"italic", letterSpacing:"2px" }}>RETRY</button>
       </div>

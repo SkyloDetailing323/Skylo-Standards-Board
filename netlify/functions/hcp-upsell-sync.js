@@ -168,6 +168,15 @@ exports.handler = async () => {
       0
     );
 
+    // Tips — try multiple paths
+    const tips = parseFloat(
+      fullJob.tip_amount ||
+      fullJob.tips ||
+      fullJob.invoice?.tip_amount ||
+      fullJob.invoices?.[0]?.tip_amount ||
+      0
+    );
+
     // Hours from scheduled start/end
     let hours = 0;
     if (fullJob.schedule?.start && fullJob.schedule?.end) {
@@ -200,7 +209,7 @@ exports.handler = async () => {
       }
     }
 
-    // Always upsert job record (revenue + hours + upsell snapshot)
+    // Always upsert job record (revenue + hours + tips + upsell snapshot)
     await sbFetch("jobs?on_conflict=hcp_job_id", {
       method: "POST",
       prefer: "resolution=merge-duplicates,return=minimal",
@@ -211,6 +220,7 @@ exports.handler = async () => {
         revenue,
         upsell_amount: upsellTotal,
         hours,
+        tips,
         week_key:      weekKey,
       }),
     });
@@ -231,7 +241,7 @@ exports.handler = async () => {
       });
     }
 
-    console.log(`Synced: ${skyloName} | job ${jobId} | $${revenue} rev | ${hours}h | $${upsellTotal} upsells`);
+    console.log(`Synced: ${skyloName} | job ${jobId} | $${revenue} rev | ${hours}h | $${tips} tips | $${upsellTotal} upsells`);
     synced++;
   }
 
