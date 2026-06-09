@@ -2793,6 +2793,46 @@ function RideAlongTab({ techs, rideAlongs, schedules, onSave, onSaveSchedule, sa
 }
 
 // ─── ADMIN PANEL ──────────────────────────────────────────────────────────────
+function BackfillCard({ refreshAll, showToast }) {
+  const [days, setDays] = useState(30);
+  const [running, setRunning] = useState(false);
+  const [result, setResult] = useState(null);
+
+  async function run() {
+    setRunning(true); setResult(null);
+    try {
+      const res = await fetch("/.netlify/functions/hcp-backfill", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({days}) });
+      const data = await res.json();
+      setResult(data);
+      if (data.ok) { await refreshAll(); showToast(`✅ ${data.synced} jobs synced from HCP`); }
+      else showToast("Backfill failed — check logs", false);
+    } catch(e) { showToast("Backfill error: "+e.message, false); }
+    setRunning(false);
+  }
+
+  return (
+    <div style={{ background:"#fff", border:`2px solid ${C.blue}`, borderRadius:"12px", padding:"16px 18px" }}>
+      <Label color={C.blue}>🔄 Pull Historical Jobs from HCP</Label>
+      <div style={{ fontSize:"12px", color:C.muted, marginBottom:"12px" }}>Imports past completed jobs so Reports, Payroll &amp; Leaderboard show real data. Safe to run multiple times — no duplicates created.</div>
+      <div style={{ display:"flex", gap:"10px", alignItems:"center", marginBottom:"12px", flexWrap:"wrap" }}>
+        <span style={{ fontSize:"12px", color:C.muted }}>Pull last</span>
+        <select value={days} onChange={e=>setDays(parseInt(e.target.value))} style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"6px 10px", borderRadius:"8px", fontSize:"13px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>
+          {[7,14,30,60,90].map(d=><option key={d} value={d}>{d} days</option>)}
+        </select>
+        <span style={{ fontSize:"12px", color:C.muted }}>of jobs</span>
+      </div>
+      <button onClick={run} disabled={running} style={{ background:running?C.border:C.blue, border:"none", color:"#fff", padding:"12px 20px", borderRadius:"10px", cursor:running?"not-allowed":"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"13px", letterSpacing:"2px", textTransform:"uppercase", opacity:running?0.7:1 }}>
+        {running?"⏳ Syncing Jobs...":"🔄 Run Backfill"}
+      </button>
+      {result&&(
+        <div style={{ marginTop:"10px", fontSize:"12px", color:result.ok?C.green:C.red, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>
+          {result.ok?`✅ ${result.synced} jobs synced, ${result.skipped} skipped (last ${result.days} days)`:"❌ Something went wrong — check function logs"}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlongs, schedules, quota, setQuota, jobs, onLogout, refreshAll }) {
   const [tab, setTab] = useState("upsells");
   const [menuOpen, setMenuOpen] = useState(false);
@@ -3100,40 +3140,7 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
 
         {tab==="manage"&&(
           <div style={{ display:"flex", flexDirection:"column", gap:"10px" }}>
-            {/* HCP Backfill */}
-            {(()=>{
-              const [bfDays, setBfDays] = useState(30);
-              const [bfRunning, setBfRunning] = useState(false);
-              const [bfResult, setBfResult] = useState(null);
-              async function runBackfill() {
-                setBfRunning(true); setBfResult(null);
-                try {
-                  const res = await fetch("/.netlify/functions/hcp-backfill", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({days:bfDays}) });
-                  const data = await res.json();
-                  setBfResult(data);
-                  if (data.ok) { await refreshAll(); showToast(`✅ Backfill done — ${data.synced} jobs synced`); }
-                  else showToast("Backfill failed — check logs", false);
-                } catch(e) { showToast("Backfill error: "+e.message, false); }
-                setBfRunning(false);
-              }
-              return (
-                <div style={{ background:C.card, border:`2px solid ${C.blue}`, borderRadius:"12px", padding:"16px 18px", marginBottom:"4px" }}>
-                  <Label color={C.blue}>🔄 Pull Historical Jobs from HCP</Label>
-                  <div style={{ fontSize:"12px", color:C.muted, marginBottom:"12px" }}>Imports past completed jobs into the jobs table so Reports, Payroll, and Leaderboard show real data. Safe to run multiple times — no duplicates.</div>
-                  <div style={{ display:"flex", gap:"10px", alignItems:"center", marginBottom:"12px" }}>
-                    <span style={{ fontSize:"12px", color:C.muted }}>Pull last</span>
-                    <select value={bfDays} onChange={e=>setBfDays(parseInt(e.target.value))} style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"6px 10px", borderRadius:"8px", fontSize:"13px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>
-                      {[7,14,30,60,90].map(d=><option key={d} value={d}>{d} days</option>)}
-                    </select>
-                    <span style={{ fontSize:"12px", color:C.muted }}>of jobs</span>
-                  </div>
-                  <button onClick={runBackfill} disabled={bfRunning} style={{ background:bfRunning?C.border:C.blue, border:"none", color:C.white, padding:"12px 20px", borderRadius:"10px", cursor:bfRunning?"not-allowed":"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"13px", letterSpacing:"2px", textTransform:"uppercase" }}>
-                    {bfRunning?"⏳ Pulling Jobs...":"🔄 Run Backfill"}
-                  </button>
-                  {bfResult&&<div style={{ marginTop:"10px", fontSize:"12px", color:bfResult.ok?C.green:C.red }}>{bfResult.ok?`✅ ${bfResult.synced} jobs synced, ${bfResult.skipped} skipped (${bfResult.days} days)`:`❌ Error — check function logs`}</div>}
-                </div>
-              );
-            })()}
+            <BackfillCard refreshAll={refreshAll} showToast={showToast}/>
             {techs.map(t=>(
               <div key={t.id} style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"16px 18px" }}>
                 <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:"10px" }}>
