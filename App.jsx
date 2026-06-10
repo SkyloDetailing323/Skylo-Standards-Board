@@ -2898,22 +2898,23 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
     try { await sb(`techs?id=eq.${techId}`,{method:"PATCH",body:JSON.stringify({start_date:date||null}),prefer:"return=minimal"}); await refreshAll(); showToast("✅ Start date saved!"); }
     catch(e){ showToast("Error: "+e.message,false); }
   }
-  async function deleteTech(tech) {
-    const confirmed = window.confirm(`⚠️ Delete ${tech.name}?\n\nThis will permanently remove them AND all their upsells, reviews, switchovers, and callbacks. This cannot be undone.`);
+  async function archiveTech(tech) {
+    const confirmed = window.confirm(`Archive ${tech.name}?\n\nThey'll be removed from the leaderboard but their revenue and job history stay in the system. You can reactivate them anytime.`);
     if (!confirmed) return;
     setSaving(true);
     try {
-      // Delete all associated data first
-      await Promise.all([
-        sb(`upsells?tech_id=eq.${tech.id}`,{method:"DELETE",prefer:"return=minimal"}),
-        sb(`reviews?tech_id=eq.${tech.id}`,{method:"DELETE",prefer:"return=minimal"}),
-        sb(`switchovers?tech_id=eq.${tech.id}`,{method:"DELETE",prefer:"return=minimal"}),
-        sb(`callbacks?tech_id=eq.${tech.id}`,{method:"DELETE",prefer:"return=minimal"}).catch(()=>{}),
-      ]);
-      // Then delete the tech
-      await sb(`techs?id=eq.${tech.id}`,{method:"DELETE",prefer:"return=minimal"});
+      await sb(`techs?id=eq.${tech.id}`,{method:"PATCH",body:JSON.stringify({is_active:false}),prefer:"return=minimal"});
       await refreshAll();
-      showToast(`🗑️ ${tech.name} removed`);
+      showToast(`${tech.name} archived`);
+    } catch(e){ showToast("Error: "+e.message,false); }
+    setSaving(false);
+  }
+  async function reactivateTech(tech) {
+    setSaving(true);
+    try {
+      await sb(`techs?id=eq.${tech.id}`,{method:"PATCH",body:JSON.stringify({is_active:true}),prefer:"return=minimal"});
+      await refreshAll();
+      showToast(`✅ ${tech.name} reactivated`);
     } catch(e){ showToast("Error: "+e.message,false); }
     setSaving(false);
   }
@@ -3041,7 +3042,7 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
             <Label color={C.purple}>Log a Switchover · {formatWeekLabel(wk)}</Label>
             <select value={swForm.techId} onChange={e=>setSwForm(f=>({...f,techId:e.target.value}))} style={sel(swForm.techId)}>
               <option value="">— Select Tech —</option>
-              {techs.map(t=><option key={t.id} value={t.id}>{t.name}</option>)}
+              {techs.filter(t=>t.is_active!==false).map(t=><option key={t.id} value={t.id}>{t.name}</option>)}
             </select>
             <select value={swForm.planId} onChange={e=>setSwForm(f=>({...f,planId:e.target.value}))} style={sel(swForm.planId)}>
               <option value="">— Select Plan —</option>
@@ -3118,7 +3119,7 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
             <Label color={C.blue}>Award a Badge</Label>
             <select value={awardForm.techId} onChange={e=>setAwardForm(f=>({...f,techId:e.target.value}))} style={sel(awardForm.techId)}>
               <option value="">— Select Tech —</option>
-              {techs.map(t=><option key={t.id} value={t.id}>{t.name}</option>)}
+              {techs.filter(t=>t.is_active!==false).map(t=><option key={t.id} value={t.id}>{t.name}</option>)}
             </select>
             <select value={awardForm.badgeId} onChange={e=>setAwardForm(f=>({...f,badgeId:e.target.value}))} style={sel(awardForm.badgeId)}>
               <option value="">— Select Badge —</option>
@@ -3151,7 +3152,7 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
         {tab==="manage"&&(
           <div style={{ display:"flex", flexDirection:"column", gap:"10px" }}>
             <BackfillCard refreshAll={refreshAll} showToast={showToast}/>
-            {techs.map(t=>(
+            {techs.filter(t=>t.is_active!==false).map(t=>(
               <div key={t.id} style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"16px 18px" }}>
                 <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:"10px" }}>
                   <input
@@ -3193,12 +3194,31 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
                   ):null; })}
                 </div>
                 <div style={{ marginTop:"12px", paddingTop:"12px", borderTop:`1px solid ${C.border}` }}>
-                  <button onClick={()=>deleteTech(t)} disabled={saving} style={{ background:"none", border:"1px solid #ef4444", color:"#ef4444", padding:"7px 16px", borderRadius:"8px", cursor:saving?"not-allowed":"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"12px", letterSpacing:"1px", textTransform:"uppercase" }}>
-                    🗑️ Remove {t.name} from Skylo
+                  <button onClick={()=>archiveTech(t)} disabled={saving} style={{ background:"none", border:"1px solid #f59e0b", color:"#f59e0b", padding:"7px 16px", borderRadius:"8px", cursor:saving?"not-allowed":"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"12px", letterSpacing:"1px", textTransform:"uppercase" }}>
+                    📦 Archive {t.name}
                   </button>
                 </div>
               </div>
             ))}
+            {/* Archived techs */}
+            {techs.filter(t=>t.is_active===false).length>0&&(
+              <div style={{ background:"#fff8e6", border:"1px solid #f59e0b44", borderTop:"3px solid #f59e0b", borderRadius:"12px", padding:"16px 18px" }}>
+                <div style={{ fontSize:"11px", color:"#f59e0b", letterSpacing:"2px", textTransform:"uppercase", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", marginBottom:"12px" }}>📦 Archived Techs — Revenue still counted in totals</div>
+                <div style={{ display:"flex", flexDirection:"column", gap:"8px" }}>
+                  {techs.filter(t=>t.is_active===false).map(t=>(
+                    <div key={t.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", background:"#fff", border:"1px solid #f59e0b33", borderRadius:"8px", padding:"10px 14px" }}>
+                      <div>
+                        <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"15px", color:C.muted }}>{t.name}</div>
+                        <div style={{ fontSize:"10px", color:C.muted, letterSpacing:"1px" }}>ARCHIVED · NOT ON LEADERBOARD</div>
+                      </div>
+                      <button onClick={()=>reactivateTech(t)} disabled={saving} style={{ background:"none", border:"1px solid #00c853", color:"#00c853", padding:"6px 14px", borderRadius:"8px", cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"11px", letterSpacing:"1px" }}>
+                        REACTIVATE
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -3382,6 +3402,7 @@ export default function App() {
     if (tech) { setUser({type:"tech",techId:tech.id}); return true; }
     return false;
   }
+  const activeTechs = (techs || []).filter(t => t.is_active !== false);
   const currentTech = user?.type==="tech" ? techs?.find(t=>t.id===user.techId) : null;
 
   if (loading) return (
@@ -3477,7 +3498,7 @@ alter table jobs add column if not exists tips numeric default 0;`}
       jobs={jobs} onLogout={()=>setUser(null)} refreshAll={loadAll}/>
   );
   if (user.type==="tech"&&currentTech) return (
-    <TechDashboard tech={currentTech} techs={techs} upsells={upsells} switchovers={switchovers}
+    <TechDashboard tech={currentTech} techs={activeTechs} upsells={upsells} switchovers={switchovers}
       reviews={reviews} callbacks={callbacks} quota={quota} jobs={jobs} onLogout={()=>setUser(null)}/>
   );
   return null;

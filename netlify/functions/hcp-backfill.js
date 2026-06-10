@@ -21,6 +21,13 @@ const TECH_MAP = {
   "Landon White":      "Landon White",
   "Jackson Vaughn":    "Jackson Vaughn",
   "Brian Wheelus":     "Brian Wheelus",
+  // Archived techs — no longer active but include for historical revenue accuracy
+  "Ethan Hansen":      "Ethan Hansen",
+  "Riley Wooden":      "Riley Wooden",
+  "Will Faulkner":     "Will Faulkner",
+  "Cole Burtenshaw":   "Cole Burtenshaw",
+  "Max Hancock":       "Max Hancock",
+  "Trevor Prince":     "Trevor Prince",
 };
 
 function getWeekKey(dateStr) {
