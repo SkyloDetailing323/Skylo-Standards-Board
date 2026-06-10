@@ -119,19 +119,18 @@ exports.handler = async () => {
   const allTechs = await sbFetch("techs?select=id,name");
   const techByName = Object.fromEntries((allTechs || []).map(t => [t.name, t]));
 
-  // Fetch today's invoices — this is where line items live
+  // Fetch recent invoices — date filters don't work reliably on HCP's invoice endpoint.
+  // Instead, grab the last 3 pages (300 invoices) and match by job_id to today's jobs.
+  const jobIds = new Set(Object.keys(jobMeta));
   const allInvoices = [];
-  page = 1;
-  while (true) {
-    const qs = `service_date_min=${encodeURIComponent(start)}&service_date_max=${encodeURIComponent(end)}&page=${page}&page_size=100`;
-    const data = await hcpGet(`invoices?${qs}`);
+  for (let p = 1; p <= 3; p++) {
+    const data = await hcpGet(`invoices?page=${p}&page_size=100`);
     if (!data) break;
-    const batch = data.invoices || [];
+    const batch = (data.invoices || []).filter(inv => jobIds.has(inv.job_id));
     allInvoices.push(...batch);
-    if (batch.length < 100 || allInvoices.length >= (data.total_items || 0)) break;
-    page++;
+    if ((data.invoices || []).length < 100) break; // no more pages
   }
-  console.log(`${allInvoices.length} invoices`);
+  console.log(`${allInvoices.length} invoices matched today's jobs`);
 
   let synced = 0;
 
