@@ -919,7 +919,7 @@ function ReportsTab({ techs, jobs, techId=null }) {
 
       {inRange.length===0?(
         <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"32px", textAlign:"center", color:C.muted, fontSize:"13px" }}>
-          No jobs found for this period. The HCP sync runs every 30 minutes.
+          No jobs found for this period. The HCP sync runs every 5 minutes.
         </div>
       ):(
         <>
@@ -1063,7 +1063,7 @@ function PayrollTab({ techs, jobs }) {
 
       {rows.length===0?(
         <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"32px", textAlign:"center", color:C.muted, fontSize:"13px" }}>
-          No jobs synced for this pay period yet. HCP sync runs every 30 min.
+          No jobs synced for this pay period yet. HCP sync runs every 5 min.
         </div>
       ):(
         <div style={{ display:"flex", flexDirection:"column", gap:"10px" }}>
@@ -2063,7 +2063,7 @@ function TechDashboard({ tech, techs, upsells, switchovers, reviews, callbacks, 
                       </div>
                     ))}
                   </div>
-                  <div style={{ fontSize:"10px", color:C.muted, marginTop:"8px" }}>Based on {daysElapsed} day{daysElapsed!==1?"s":""} of pace · refreshes every 30 min</div>
+                  <div style={{ fontSize:"10px", color:C.muted, marginTop:"8px" }}>Based on {daysElapsed} day{daysElapsed!==1?"s":""} of pace · refreshes every 5 min</div>
                 </div>
               );
             })()}
