@@ -9,12 +9,10 @@
 const TECH_MAP = {
   "Myles Madarieta":   "Myles Madarieta",
   "Kade Andrew":       "Kade Andrew",
-  "Trevor Prince":     "Trevor Prince",
   "Kyle Reiff":        "Kyle Rieff",
   "Zak Lundblade":     "Zak Lundblade",
   "Josh Halafuka":     "Josh Halufuka",
   "Matthew Durkovich": "Matthew Durkovich",
-  "Max Hancock":       "Max Hancock",
   "Milos Lewit":       "Milos Lewit",
   "Mason Dixon":       "Mason Dixon",
   "Tom Lorenc":        "Tom Lorenc",

@@ -6,12 +6,10 @@
 const TECH_MAP = {
   "Myles Madarieta":   "Myles Madarieta",
   "Kade Andrew":       "Kade Andrew",
-  "Trevor Prince":     "Trevor Prince",
-  "Kyle Reiff":        "Kyle Reiff",
+  "Kyle Reiff":        "Kyle Rieff",        // HCP → Supabase spelling
   "Zak Lundblade":     "Zak Lundblade",
-  "Josh Halafuka":     "Josh Halafuka",
+  "Josh Halafuka":     "Josh Halufuka",     // HCP → Supabase spelling
   "Matthew Durkovich": "Matthew Durkovich",
-  "Max Hancock":       "Max Hancock",
   "Milos Lewit":       "Milos Lewit",
   "Mason Dixon":       "Mason Dixon",
   "Tom Lorenc":        "Tom Lorenc",
@@ -19,9 +17,10 @@ const TECH_MAP = {
   "Caleb McDaniel":    "Caleb McDaniel",
   "Riley Lyon":        "Riley Lyon",
   "Britton Dookhran":  "Britton Dookhran",
-  "Atticus Andersen":  "Atticus Andersen",
+  "Atticus Andersen":  "Atticus Anderson",  // HCP → Supabase spelling
   "Landon White":      "Landon White",
   "Jackson Vaughn":    "Jackson Vaughn",
+  "Brian Wheelus":     "Brian Wheelus",
 };
 
 function getWeekKey(dateStr) {
