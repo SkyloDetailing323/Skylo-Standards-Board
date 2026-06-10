@@ -867,6 +867,7 @@ function ReportsTab({ techs, jobs, techId=null }) {
   });
 
   const totalRevenue   = inRange.reduce((s,j) => s+(j.revenue||0), 0);
+  const totalTips      = inRange.reduce((s,j) => s+(j.tips||0), 0);
   const totalHours     = inRange.reduce((s,j) => s+(j.hours||0), 0);
   const totalUpsells   = inRange.reduce((s,j) => s+(j.upsell_amount||0), 0);
   const commMap        = Object.fromEntries(techs.map(t => [t.id, (t.commission_rate||27)/100]));
@@ -878,14 +879,15 @@ function ReportsTab({ techs, jobs, techId=null }) {
   const allWkKeys = [...new Set(inRange.map(j=>j.week_key))].filter(Boolean).sort();
   const techRows = techId ? [] : techs.map(t => {
     const tj = inRange.filter(j=>j.tech_id===t.id);
-    const rev = tj.reduce((s,j)=>s+(j.revenue||0),0);
-    const hrs = tj.reduce((s,j)=>s+(j.hours||0),0);
-    const ups = tj.reduce((s,j)=>s+(j.upsell_amount||0),0);
+    const rev  = tj.reduce((s,j)=>s+(j.revenue||0),0);
+    const hrs  = tj.reduce((s,j)=>s+(j.hours||0),0);
+    const ups  = tj.reduce((s,j)=>s+(j.upsell_amount||0),0);
+    const tips = tj.reduce((s,j)=>s+(j.tips||0),0);
     const wkBreakdown = allWkKeys.map(wk=>{
       const wj=tj.filter(j=>j.week_key===wk);
-      return { wk, rev:wj.reduce((s,j)=>s+(j.revenue||0),0), count:wj.length };
+      return { wk, rev:wj.reduce((s,j)=>s+(j.revenue||0),0), tips:wj.reduce((s,j)=>s+(j.tips||0),0), count:wj.length };
     }).filter(w=>w.rev>0);
-    return { ...t, rev, hrs, ups, revPerHr:hrs>0?rev/hrs:0, upsellPct:rev>0?(ups/rev)*100:0, wkBreakdown };
+    return { ...t, rev, hrs, ups, tips, revPerHr:hrs>0?rev/hrs:0, upsellPct:rev>0?(ups/rev)*100:0, wkBreakdown };
   }).filter(t=>t.rev>0||t.hrs>0).sort((a,b)=>b.rev-a.rev);
 
   const metricStyle = { background:C.white, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"16px", boxShadow:"0 2px 8px rgba(43,156,240,0.08)" };
@@ -924,8 +926,9 @@ function ReportsTab({ techs, jobs, techId=null }) {
           {/* Metric cards */}
           <div style={{ display:"grid", gridTemplateColumns:"repeat(2,1fr)", gap:"10px" }}>
             {[
-              { label:"Revenue",      value:`$${Math.round(totalRevenue).toLocaleString()}`,  color:C.green,                                              sub:`${inRange.length} jobs` },
-              { label:"Hours",        value:totalHours.toFixed(1),                             color:C.blue,                                               sub:`avg ${inRange.length>0?(totalHours/inRange.length).toFixed(1):0}h/job` },
+              { label:"Serviced Revenue", value:`$${Math.round(totalRevenue).toLocaleString()}`, color:C.green,                                              sub:`${inRange.length} jobs` },
+              { label:"Tips",            value:`$${Math.round(totalTips).toLocaleString()}`,   color:C.gold,                                               sub:"separate from revenue" },
+              { label:"Hours",           value:totalHours.toFixed(1),                          color:C.blue,                                               sub:`avg ${inRange.length>0?(totalHours/inRange.length).toFixed(1):0}h/job` },
               { label:"Rev / Hour",   value:`$${revPerHr.toFixed(2)}`,                         color:revPerHr>=75?C.green:C.orange,                        sub:"Target: >$75/hr" },
               { label:"Upsell $",     value:`$${Math.round(totalUpsells).toLocaleString()}`,   color:C.gold,                                               sub:`of $${Math.round(totalRevenue).toLocaleString()} revenue` },
               { label:"Upsell Rate",  value:`${upsellPct.toFixed(1)}%`,                        color:upsellPct>=10?C.green:C.orange,                       sub:"Target: >10%" },
@@ -948,9 +951,13 @@ function ReportsTab({ techs, jobs, techId=null }) {
               <div style={{ padding:"14px 18px", display:"flex", flexDirection:"column", gap:"10px" }}>
                 {techRows.map((t,i)=>(
                   <div key={t.id} style={{ background:C.cardLt, border:`1px solid ${C.border}`, borderRadius:"10px", padding:"12px 14px" }}>
-                    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:"8px" }}>
+                    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:"8px" }}>
                       <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontStyle:"italic", fontSize:"16px", color:C.black }}>{medal(i)} {t.name}</div>
-                      <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"22px", color:C.green }}>${Math.round(t.rev).toLocaleString()}</div>
+                      <div style={{ textAlign:"right" }}>
+                        <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"22px", color:C.green, lineHeight:1 }}>${Math.round(t.rev).toLocaleString()}</div>
+                        <div style={{ fontSize:"9px", color:C.muted, letterSpacing:"1px", textTransform:"uppercase", marginBottom:"2px" }}>serviced</div>
+                        {t.tips>0&&<div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"14px", color:C.gold }}>${t.tips.toFixed(0)} tips</div>}
+                      </div>
                     </div>
                     <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:"6px" }}>
                       {[
@@ -970,7 +977,10 @@ function ReportsTab({ techs, jobs, techId=null }) {
                         {t.wkBreakdown.map(w=>(
                           <div key={w.wk} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"4px 8px", background:C.white, borderRadius:"4px" }}>
                             <div style={{ fontSize:"11px", color:C.muted, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>{formatWeekLabel(w.wk)} · {w.count} job{w.count!==1?"s":""}</div>
-                            <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"13px", color:C.green }}>${Math.round(w.rev).toLocaleString()}</div>
+                            <div style={{ display:"flex", gap:"8px", alignItems:"center" }}>
+                              <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"13px", color:C.green }}>${Math.round(w.rev).toLocaleString()}</span>
+                              {w.tips>0&&<span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", fontSize:"12px", color:C.gold }}>+${w.tips.toFixed(0)} tips</span>}
+                            </div>
                           </div>
                         ))}
                       </div>
