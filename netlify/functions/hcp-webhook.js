@@ -3,15 +3,7 @@
 // Set this URL in HCP Settings → Integrations → Webhooks:
 //   https://skylotechleaderboard.netlify.app/.netlify/functions/hcp-webhook
 
-const UPSELL_SERVICES = [
-  "Seat Steam and Shampoo",
-  "Engine Bay Cleaning",
-  "Carpet Steam and Shampoo",
-  "Heavy Pet Hair Removal Service",
-  "Full Interior Detail",
-  "Full Exterior Detail",
-  "Full Synthetic Hand Wax",
-];
+// Any line item whose name starts with "Additional Upgrade" counts as an upsell.
 
 const TECH_MAP = {
   "Myles Madarieta":   "Myles Madarieta",
@@ -128,7 +120,7 @@ exports.handler = async (event) => {
   const upsellItems = [];
   for (const item of lineItems) {
     const name = (item.name || item.description || "").trim();
-    if (UPSELL_SERVICES.some(s => s.toLowerCase() === name.toLowerCase())) {
+    if (name.toLowerCase().startsWith("additional upgrade")) {
       const qty   = item.quantity || 1;
       const price = (item.unit_price || item.price || 0) / 100; // cents → dollars
       const total = qty * price;

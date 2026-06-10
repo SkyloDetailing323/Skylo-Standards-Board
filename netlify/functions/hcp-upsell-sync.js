@@ -3,15 +3,8 @@
 // endpoint (which exposes line items the jobs endpoint never returns).
 // HCP amounts are in cents — divide by 100.
 
-const UPSELL_SERVICES = [
-  "Seat Steam and Shampoo",
-  "Engine Bay Cleaning",
-  "Carpet Steam and Shampoo",
-  "Heavy Pet Hair Removal Service",
-  "Full Interior Detail",
-  "Full Exterior Detail",
-  "Full Synthetic Hand Wax",
-];
+// Any line item whose name starts with "Additional Upgrade" counts as an upsell.
+// This matches the HCP pricebook category prefix so new services are picked up automatically.
 
 const TECH_MAP = {
   "Myles Madarieta":   "Myles Madarieta",
@@ -159,7 +152,7 @@ exports.handler = async () => {
     const upsellItems = [];
     for (const item of items) {
       const name = (item.name || "").trim();
-      if (UPSELL_SERVICES.some(s => s.toLowerCase() === name.toLowerCase())) {
+      if (name.toLowerCase().startsWith("additional upgrade")) {
         // qty_in_hundredths: 100 = 1 unit. amount is already qty×price in cents.
         const amount = (item.amount || 0) / 100;
         upsellTotal += amount;
