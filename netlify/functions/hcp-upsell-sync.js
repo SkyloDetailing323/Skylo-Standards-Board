@@ -100,9 +100,10 @@ exports.handler = async () => {
     if (!skyloName) continue;
     jobMeta[job.id] = {
       skyloName,
-      schedStart: job.schedule?.scheduled_start,
-      schedEnd:   job.schedule?.scheduled_end,
+      schedStart:  job.schedule?.scheduled_start,
+      schedEnd:    job.schedule?.scheduled_end,
       totalAmount: job.total_amount || 0,
+      subtotal:    job.subtotal || 0,
     };
   }
 
@@ -114,7 +115,7 @@ exports.handler = async () => {
   // Instead, grab the last 3 pages (300 invoices) and match by job_id to today's jobs.
   const jobIds = new Set(Object.keys(jobMeta));
   const allInvoices = [];
-  for (let p = 1; p <= 3; p++) {
+  for (let p = 1; p <= 6; p++) {
     const data = await hcpGet(`invoices?page=${p}&page_size=100`);
     if (!data) break;
     const batch = (data.invoices || []).filter(inv => jobIds.has(inv.job_id));
@@ -137,7 +138,10 @@ exports.handler = async () => {
 
     const jobDate = meta.schedStart ? meta.schedStart.split("T")[0] : todayStr;
     const weekKey = getWeekKey(jobDate);
-    const revenue = meta.totalAmount / 100;
+
+    // subtotal = line items only; total_amount includes tips; difference = tips
+    const revenue = (meta.subtotal || 0) / 100;
+    const tips    = Math.max(0, ((meta.totalAmount || 0) - (meta.subtotal || 0))) / 100;
 
     let hours = 0;
     if (meta.schedStart && meta.schedEnd) {
@@ -157,9 +161,6 @@ exports.handler = async () => {
         upsellItems.push({ name, amount });
       }
     }
-
-    // Tips from invoice
-    const tips = (invoice.tip_amount || 0) / 100;
 
     // Upsert job record
     await sbFetch("jobs?on_conflict=hcp_job_id", {

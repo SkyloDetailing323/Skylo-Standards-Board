@@ -99,8 +99,9 @@ exports.handler = async (event) => {
     return { statusCode: 200, body: "ok" };
   }
 
-  const revenue = (job.total_amount || 0) / 100;
-  const tips    = (job.tip_amount || job.tips || 0) / 100;
+  // subtotal = line items only (no tips); total_amount includes tips
+  const revenue = (job.subtotal || 0) / 100;
+  const tips    = Math.max(0, ((job.total_amount || 0) - (job.subtotal || 0))) / 100;
 
   const schedStart = job.schedule?.scheduled_start || job.schedule?.start;
   const schedEnd   = job.schedule?.scheduled_end   || job.schedule?.end;

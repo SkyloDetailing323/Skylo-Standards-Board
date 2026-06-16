@@ -2334,6 +2334,7 @@ function AdminUpsellEntry({ techs, upsells, saving, setSaving, refreshAll, showT
   const [form, setForm] = useState({});
   const [useCustomDate, setUseCustomDate] = useState(false);
   const [customDate, setCustomDate] = useState("");
+  const [pullResult, setPullResult] = useState(null);
 
   // Get week key from any date
   function weekKeyFromDate(dateStr) {
@@ -2366,6 +2367,33 @@ function AdminUpsellEntry({ techs, upsells, saving, setSaving, refreshAll, showT
       showToast("✅ Upsells saved for " + formatWeekLabel(activeWeek) + "!");
       setForm({});
     } catch(e){ showToast("Error: "+e.message,false); }
+    setSaving(false);
+  }
+
+  async function pullFromHCP() {
+    setSaving(true);
+    setPullResult(null);
+    try {
+      // from = Monday of selected week, to = Sunday of that week (or today if current week)
+      const from = activeWeek;
+      const toDate = new Date(activeWeek + "T12:00:00Z");
+      toDate.setUTCDate(toDate.getUTCDate() + 6);
+      const todayStr = new Date(Date.now() - 6*3600000).toISOString().split("T")[0];
+      const to = toDate.toISOString().split("T")[0] > todayStr ? todayStr : toDate.toISOString().split("T")[0];
+      const res = await fetch("/.netlify/functions/hcp-upsell-repair", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ from, to }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        await refreshAll();
+        setPullResult(data);
+        showToast(`✅ Found ${data.upsellsFound} upsell${data.upsellsFound===1?"":"s"} from HCP`);
+      } else {
+        showToast("Pull failed — check logs", false);
+      }
+    } catch(e){ showToast("Error: "+e.message, false); }
     setSaving(false);
   }
 
@@ -2414,6 +2442,19 @@ function AdminUpsellEntry({ techs, upsells, saving, setSaving, refreshAll, showT
             </div>
           </div>
         ))}
+        {/* Pull from HCP button */}
+        <div style={{ display:"flex", flexDirection:"column", gap:"8px" }}>
+          <button onClick={pullFromHCP} disabled={saving} style={{ background:saving?"#333":C.blue, border:"none", color:C.white, padding:"13px", borderRadius:"12px", cursor:saving?"not-allowed":"pointer", fontSize:"13px", fontWeight:"700", letterSpacing:"2px", fontFamily:"'Barlow Condensed',sans-serif", width:"100%", textTransform:"uppercase" }}>
+            {saving?"Scanning...":"Pull Upsells from HCP"}
+          </button>
+          {pullResult&&(
+            <div style={{ background:C.cardLt, borderRadius:"8px", padding:"10px 14px", fontSize:"12px", color:C.muted }}>
+              Scanned <strong style={{color:C.black}}>{pullResult.jobsScanned}</strong> jobs · matched <strong style={{color:C.black}}>{pullResult.invoicesMatched}</strong> invoices · found <strong style={{color:C.green}}>{pullResult.upsellsFound} upsell{pullResult.upsellsFound===1?"":"s"}</strong> with "Additional Upgrade" line items
+            </div>
+          )}
+        </div>
+
+        <div style={{ fontSize:"11px", color:C.muted, textAlign:"center" }}>— or enter amounts manually below —</div>
         <button onClick={handleSave} disabled={saving} style={{ background:saving?"#333":C.green, border:"none", color:saving?"#666":C.black, padding:"13px", borderRadius:"12px", cursor:saving?"not-allowed":"pointer", fontSize:"13px", fontWeight:"700", letterSpacing:"2px", fontFamily:"'Barlow Condensed',sans-serif", width:"100%", textTransform:"uppercase" }}>{saving?"Saving...":"Save Upsells"}</button>
       </div>
       <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"16px 18px" }}>
@@ -2811,11 +2852,17 @@ function BackfillCard({ refreshAll, showToast }) {
   async function run() {
     setRunning(true); setResult(null);
     try {
-      const res = await fetch("/.netlify/functions/hcp-backfill", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({days}) });
-      const data = await res.json();
-      setResult(data);
-      if (data.ok) { await refreshAll(); showToast(`✅ ${data.synced} jobs synced from HCP`); }
-      else showToast("Backfill failed — check logs", false);
+      const res = await fetch("/.netlify/functions/hcp-backfill-background", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({days}) });
+      if (res.status === 202) {
+        showToast("✅ Backfill started — data will update within 1–2 minutes");
+        setTimeout(() => refreshAll(), 90000);
+        setResult({ ok: true, message: "Running in background…" });
+      } else {
+        const data = await res.json().catch(() => ({}));
+        setResult(data);
+        if (data.ok) { await refreshAll(); showToast(`✅ ${data.synced} jobs synced from HCP`); }
+        else showToast("Backfill failed — check logs", false);
+      }
     } catch(e) { showToast("Backfill error: "+e.message, false); }
     setRunning(false);
   }

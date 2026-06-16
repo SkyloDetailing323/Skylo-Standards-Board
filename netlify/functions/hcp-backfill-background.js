@@ -1,5 +1,6 @@
-// netlify/functions/hcp-backfill.js
-// On-demand backfill: pulls last N days of completed HCP jobs.
+// netlify/functions/hcp-backfill-background.js
+// Background version of backfill — no timeout limit (up to 15 min).
+// Trigger via POST to /.netlify/functions/hcp-backfill-background
 // Uses job.tip_amount (not invoice) to split tips from service revenue.
 // HCP returns monetary values in CENTS — divide by 100 for dollars.
 
@@ -60,10 +61,6 @@ async function sbFetch(path, options = {}) {
 }
 
 exports.handler = async (event) => {
-  if (event.httpMethod !== "POST") {
-    return { statusCode: 405, body: JSON.stringify({ error: "POST only" }) };
-  }
-
   let days = 30;
   try { days = Math.min(parseInt(JSON.parse(event.body || "{}").days) || 30, 90); } catch {}
 
@@ -75,11 +72,11 @@ exports.handler = async (event) => {
   const start = fmt(startDate) + "T00:00:00-06:00";
   const end   = fmt(now)       + "T23:59:59-06:00";
 
-  console.log(`Backfill: last ${days} days | ${start} → ${end}`);
+  console.log(`Backfill (background): last ${days} days | ${start} → ${end}`);
 
   // Fetch all techs once
   const allTechs = await sbFetch("techs?select=id,name");
-  if (!allTechs) return { statusCode: 500, body: JSON.stringify({ ok: false, error: "Could not load techs from Supabase" }) };
+  if (!allTechs) { console.error("Could not load techs"); return { statusCode: 500, body: "" }; }
   const techByName = Object.fromEntries(allTechs.map(t => [t.name, t]));
 
   let synced = 0, skipped = 0, page = 1;
