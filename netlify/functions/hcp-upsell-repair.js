@@ -123,14 +123,13 @@ exports.handler = async (event) => {
   // Fetch invoices and match to jobs in range
   const jobIds = new Set(Object.keys(jobMeta));
   const allInvoices = [];
-  for (let p = 1; p <= 15; p++) {
+  for (let p = 1; p <= 50; p++) {
     const data = await hcpGet(`invoices?page=${p}&page_size=100`);
     if (!data) break;
     const invoices = data.invoices || [];
     const matched = invoices.filter(inv => jobIds.has(String(inv.job_id)));
     allInvoices.push(...matched);
-    if (invoices.length < 100) break;
-    if (allInvoices.length >= jobIds.size) break;
+    if (invoices.length < 100) break; // last page — stop
   }
   console.log(`Matched ${allInvoices.length} invoices`);
 

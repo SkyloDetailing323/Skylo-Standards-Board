@@ -2335,6 +2335,11 @@ function AdminUpsellEntry({ techs, upsells, saving, setSaving, refreshAll, showT
   const [useCustomDate, setUseCustomDate] = useState(false);
   const [customDate, setCustomDate] = useState("");
   const [pullResult, setPullResult] = useState(null);
+  const todayDefault = new Date(Date.now() - 6*3600000).toISOString().split("T")[0];
+  const [repairFrom, setRepairFrom] = useState("2026-06-01");
+  const [repairTo,   setRepairTo]   = useState(todayDefault);
+  const [repairResult, setRepairResult] = useState(null);
+  const [repairing, setRepairing] = useState(false);
 
   // Get week key from any date
   function weekKeyFromDate(dateStr) {
@@ -2368,6 +2373,27 @@ function AdminUpsellEntry({ techs, upsells, saving, setSaving, refreshAll, showT
       setForm({});
     } catch(e){ showToast("Error: "+e.message,false); }
     setSaving(false);
+  }
+
+  async function repairFromHCP() {
+    setRepairing(true);
+    setRepairResult(null);
+    try {
+      const res = await fetch("/.netlify/functions/hcp-upsell-repair", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ from: repairFrom, to: repairTo }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        await refreshAll();
+        setRepairResult(data);
+        showToast(`✅ Found ${data.upsellsFound} upsell${data.upsellsFound===1?"":"s"} from HCP`);
+      } else {
+        showToast("Repair failed — check Netlify logs", false);
+      }
+    } catch(e) { showToast("Error: "+e.message, false); }
+    setRepairing(false);
   }
 
   async function pullFromHCP() {
@@ -2457,6 +2483,28 @@ function AdminUpsellEntry({ techs, upsells, saving, setSaving, refreshAll, showT
         <div style={{ fontSize:"11px", color:C.muted, textAlign:"center" }}>— or enter amounts manually below —</div>
         <button onClick={handleSave} disabled={saving} style={{ background:saving?"#333":C.green, border:"none", color:saving?"#666":C.black, padding:"13px", borderRadius:"12px", cursor:saving?"not-allowed":"pointer", fontSize:"13px", fontWeight:"700", letterSpacing:"2px", fontFamily:"'Barlow Condensed',sans-serif", width:"100%", textTransform:"uppercase" }}>{saving?"Saving...":"Save Upsells"}</button>
       </div>
+      {/* ── Repair / Backfill ── */}
+      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.orange}`, borderRadius:"12px", padding:"20px", display:"flex", flexDirection:"column", gap:"12px" }}>
+        <Label color={C.orange}>Repair Upsells from HCP</Label>
+        <div style={{ fontSize:"12px", color:C.muted }}>Scans every "Additional Upgrades" line item across a custom date range and writes the real amounts to the board. Use this to fix missing or wrong upsells.</div>
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"8px" }}>
+          {[["FROM", repairFrom, setRepairFrom], ["TO", repairTo, setRepairTo]].map(([lbl, val, set]) => (
+            <div key={lbl}>
+              <div style={{ fontSize:"10px", color:C.muted, letterSpacing:"2px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", marginBottom:"4px" }}>{lbl}</div>
+              <input type="date" value={val} onChange={e => set(e.target.value)} style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"8px 10px", borderRadius:"8px", fontSize:"13px", fontFamily:"'Barlow',sans-serif", width:"100%", boxSizing:"border-box" }}/>
+            </div>
+          ))}
+        </div>
+        <button onClick={repairFromHCP} disabled={repairing} style={{ background:repairing?"#333":C.orange, border:"none", color:C.white, padding:"13px", borderRadius:"12px", cursor:repairing?"not-allowed":"pointer", fontSize:"13px", fontWeight:"700", letterSpacing:"2px", fontFamily:"'Barlow Condensed',sans-serif", width:"100%", textTransform:"uppercase" }}>
+          {repairing ? "Scanning HCP — this may take ~20 sec..." : "Repair Upsells"}
+        </button>
+        {repairResult && (
+          <div style={{ background:C.cardLt, borderRadius:"8px", padding:"10px 14px", fontSize:"12px", color:C.muted }}>
+            Scanned <strong style={{color:C.black}}>{repairResult.jobsScanned}</strong> jobs · matched <strong style={{color:C.black}}>{repairResult.invoicesMatched}</strong> invoices · wrote <strong style={{color:C.orange}}>{repairResult.upsellsFound} upsell{repairResult.upsellsFound===1?"":"s"}</strong> to the board
+          </div>
+        )}
+      </div>
+
       <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"16px 18px" }}>
         <Label color={C.green}>All-Time Totals</Label>
         {[...techs].sort((a,b)=>(allTimeUp[b.id]||0)-(allTimeUp[a.id]||0)).map((t,i)=>(
