@@ -126,23 +126,26 @@ exports.handler = async (event) => {
     };
   }
 
-  // Fetch invoices and match to jobs in range
-  const jobIds = new Set(Object.keys(jobMeta));
+  // Fetch invoice for each job directly — avoids scanning all pages and timeout risk
+  const jobIds = Object.keys(jobMeta);
   const allInvoices = [];
-  for (let p = 1; p <= 50; p++) {
-    const data = await hcpGet(`invoices?page=${p}&page_size=100`);
-    if (!data) break;
-    const invoices = data.invoices || [];
-    const matched = invoices.filter(inv => jobIds.has(String(inv.job_id)));
-    allInvoices.push(...matched);
-    if (invoices.length < 100) break; // last page — stop
+  const BATCH = 5; // parallel HCP requests per batch
+  for (let i = 0; i < jobIds.length; i += BATCH) {
+    const batch = jobIds.slice(i, i + BATCH);
+    const results = await Promise.all(
+      batch.map(jid => hcpGet(`invoices?job_id=${jid}&page_size=5`))
+    );
+    for (const data of results) {
+      if (!data) continue;
+      allInvoices.push(...(data.invoices || []));
+    }
   }
-  console.log(`Matched ${allInvoices.length} invoices`);
+  console.log(`Fetched ${allInvoices.length} invoices for ${jobIds.length} jobs`);
 
   // Scan for "Additional Upgrade" items
   let upsellsFound = 0;
   for (const invoice of allInvoices) {
-    const jobId = String(invoice.job_id);
+    const jobId = String(invoice.job_id || "");
     const meta = jobMeta[jobId];
     if (!meta) continue;
 
@@ -189,6 +192,6 @@ exports.handler = async (event) => {
   return {
     statusCode: 200,
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ok: true, upsellsFound, jobsScanned: allJobs.length, invoicesMatched: allInvoices.length }),
+    body: JSON.stringify({ ok: true, upsellsFound, jobsScanned: allJobs.length, techJobsFound: jobIds.length, invoicesFetched: allInvoices.length }),
   };
 };
