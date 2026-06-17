@@ -112,8 +112,9 @@ exports.handler = async (event) => {
     const tech = techByName[skyloName];
     if (!tech) continue;
 
-    const revenue = (job.subtotal    || 0) / 100;
-    const tips    = Math.max(0, ((job.total_amount || 0) - (job.subtotal || 0))) / 100;
+    const tipAmount = job.tip_amount || 0;
+    const tips    = tipAmount / 100;
+    const revenue = Math.max(0, ((job.total_amount || 0) - tipAmount)) / 100;
     const schedStart = job.schedule?.scheduled_start;
     const schedEnd   = job.schedule?.scheduled_end;
     let hours = 0;
