@@ -852,7 +852,7 @@ function TotalLeaderboard({ techs, upsells, switchovers, reviews, callbacks }) {
 }
 
 // ─── REPORTS TAB ─────────────────────────────────────────────────────────────
-function ReportsTab({ techs, jobs, techId=null }) {
+function ReportsTab({ techs, jobs, upsells=[], techId=null }) {
   const [preset, setPreset] = useState("wtd");
   const [cStart, setCStart] = useState("");
   const [cEnd,   setCEnd]   = useState("");
@@ -866,10 +866,27 @@ function ReportsTab({ techs, jobs, techId=null }) {
     return j.job_date >= start && j.job_date <= end;
   });
 
+  // Compute upsell totals from the upsells table (source of truth — includes manual entries)
+  function dateToWeekKey(dateStr) {
+    const d = new Date(dateStr + "T12:00:00Z");
+    const day = d.getUTCDay();
+    const back = day === 0 ? 6 : day - 1;
+    d.setUTCDate(d.getUTCDate() - back);
+    return d.toISOString().split("T")[0];
+  }
+  const startWk = dateToWeekKey(start);
+  const endWk   = dateToWeekKey(end);
+  const upsellByTech = {};
+  (upsells || []).forEach(u => {
+    if (u.week_key < startWk || u.week_key > endWk) return;
+    if (techId && u.tech_id !== techId) return;
+    upsellByTech[u.tech_id] = (upsellByTech[u.tech_id] || 0) + u.amount;
+  });
+  const totalUpsells = Object.values(upsellByTech).reduce((a,b)=>a+b,0);
+
   const totalRevenue   = inRange.reduce((s,j) => s+(j.revenue||0), 0);
   const totalTips      = inRange.reduce((s,j) => s+(j.tips||0), 0);
   const totalHours     = inRange.reduce((s,j) => s+(j.hours||0), 0);
-  const totalUpsells   = inRange.reduce((s,j) => s+(j.upsell_amount||0), 0);
   const commMap        = Object.fromEntries(techs.map(t => [t.id, (t.commission_rate||27)/100]));
   const totalLabor     = inRange.reduce((s,j) => s+(j.revenue||0)*(commMap[j.tech_id]||0.27), 0);
   const revPerHr       = totalHours > 0 ? totalRevenue/totalHours : 0;
@@ -881,7 +898,7 @@ function ReportsTab({ techs, jobs, techId=null }) {
     const tj = inRange.filter(j=>j.tech_id===t.id);
     const rev  = tj.reduce((s,j)=>s+(j.revenue||0),0);
     const hrs  = tj.reduce((s,j)=>s+(j.hours||0),0);
-    const ups  = tj.reduce((s,j)=>s+(j.upsell_amount||0),0);
+    const ups  = upsellByTech[t.id] || 0;
     const tips = tj.reduce((s,j)=>s+(j.tips||0),0);
     const wkBreakdown = allWkKeys.map(wk=>{
       const wj=tj.filter(j=>j.week_key===wk);
@@ -2183,7 +2200,7 @@ function TechDashboard({ tech, techs, upsells, switchovers, reviews, callbacks, 
             )}
           </div>
         )}
-        {tab==="reports"&&<ReportsTab techs={techs} jobs={jobs||[]} techId={tech.id}/>}
+        {tab==="reports"&&<ReportsTab techs={techs} jobs={jobs||[]} upsells={upsells||[]} techId={tech.id}/>}
         {tab==="leaderboard"&&<Leaderboard techs={techs} jobs={jobs||[]} upsells={upsells} reviews={reviews} callbacks={callbacks||[]} switchovers={switchovers}/>}
         {tab==="badges"&&<BadgeGrid earned={tech.badges}/>}
         {tab==="upsells"&&<UpsellLeaderboard techs={techs} upsells={upsells} currentId={tech.id}/>}
@@ -3433,7 +3450,7 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
         )}
 
         {tab==="reports"&&(
-          <ReportsTab techs={techs} jobs={jobs||[]} techId={null}/>
+          <ReportsTab techs={techs} jobs={jobs||[]} upsells={upsells||[]} techId={null}/>
         )}
         {tab==="leaderboard"&&(
           <Leaderboard techs={techs} jobs={jobs||[]} upsells={upsells} reviews={reviews} callbacks={callbacks||[]} switchovers={switchovers}/>
