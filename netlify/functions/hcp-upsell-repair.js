@@ -127,8 +127,8 @@ exports.handler = async (event) => {
       skyloName,
       schedStart:  job.schedule?.scheduled_start,
       schedEnd:    job.schedule?.scheduled_end,
-      subtotal:    job.subtotal    || 0,
       totalAmount: job.total_amount || 0,
+      tipAmount:   job.tip_amount   || 0,
     };
   }
 
@@ -137,8 +137,9 @@ exports.handler = async (event) => {
   for (const [jobId, meta] of Object.entries(jobMeta)) {
     const tech = techByName[meta.skyloName];
     if (!tech) continue;
-    const revenue = meta.subtotal / 100;
-    const tips    = Math.max(0, (meta.totalAmount - meta.subtotal)) / 100;
+    // revenue = total collected minus tip (handles subscription discounts automatically)
+    const tips    = meta.tipAmount / 100;
+    const revenue = Math.max(0, (meta.totalAmount - meta.tipAmount)) / 100;
     let hours = 0;
     if (meta.schedStart && meta.schedEnd) {
       hours = Math.round(((new Date(meta.schedEnd) - new Date(meta.schedStart)) / 3600000) * 100) / 100;
@@ -177,7 +178,8 @@ exports.handler = async (event) => {
   }
   console.log(`Matched ${allInvoices.length} invoices (scanned up to 8 pages)`);
 
-  // Scan invoice items — split tips, upsells, and base service revenue
+  // Scan invoice items for "Additional Upgrade" upsells only
+  // (revenue/tips are already correct from the job-level batch above)
   let upsellsFound = 0;
   for (const invoice of allInvoices) {
     if (Date.now() > DEADLINE) { console.log("Deadline reached during upsell scan"); break; }
@@ -190,54 +192,34 @@ exports.handler = async (event) => {
 
     const items = invoice.items || [];
     let upsellTotal = 0;
-    let tipLineTotal = 0;
-    let serviceTotal = 0;
     const upsellItems = [];
-
     for (const item of items) {
       const name = (item.name || "").trim();
-      const nameLower = name.toLowerCase();
-      const amount = (item.amount || 0) / 100;
-      if (nameLower.startsWith("additional upgrade")) {
+      if (name.toLowerCase().startsWith("additional upgrade")) {
+        const amount = (item.amount || 0) / 100;
         upsellTotal += amount;
-        serviceTotal += amount;
         upsellItems.push({ name, amount });
-      } else if (nameLower.includes("tip") || nameLower.includes("gratuity")) {
-        tipLineTotal += amount;
-      } else {
-        serviceTotal += amount;
       }
     }
 
-    // Tips from separate card payment (total_amount - subtotal) + any tip line items
-    const jobTips = Math.max(0, ((meta.totalAmount || 0) - (meta.subtotal || 0))) / 100;
-    const totalTips = tipLineTotal + jobTips;
+    if (upsellTotal <= 0) continue;
 
     const jobDate = meta.schedStart ? meta.schedStart.split("T")[0] : from;
     const weekKey = getWeekKey(jobDate);
+    const note = upsellItems.map(i => `${i.name} ($${i.amount.toFixed(2)})`).join(", ");
 
-    // Update revenue (invoice-based, excludes tip line items) and tips
+    await sbFetch("upsells?on_conflict=hcp_job_id", {
+      method: "POST",
+      prefer: "resolution=merge-duplicates,return=minimal",
+      body: JSON.stringify({ tech_id: tech.id, week_key: weekKey, amount: upsellTotal, hcp_job_id: jobId, note }),
+    });
     await sbFetch(`jobs?hcp_job_id=eq.${jobId}`, {
       method: "PATCH",
       prefer: "return=minimal",
-      body: JSON.stringify({ revenue: serviceTotal, tips: totalTips }),
+      body: JSON.stringify({ upsell_amount: upsellTotal }),
     });
-
-    if (upsellTotal > 0) {
-      const note = upsellItems.map(i => `${i.name} ($${i.amount.toFixed(2)})`).join(", ");
-      await sbFetch("upsells?on_conflict=hcp_job_id", {
-        method: "POST",
-        prefer: "resolution=merge-duplicates,return=minimal",
-        body: JSON.stringify({ tech_id: tech.id, week_key: weekKey, amount: upsellTotal, hcp_job_id: jobId, note }),
-      });
-      await sbFetch(`jobs?hcp_job_id=eq.${jobId}`, {
-        method: "PATCH",
-        prefer: "return=minimal",
-        body: JSON.stringify({ upsell_amount: upsellTotal }),
-      });
-      console.log(`Upsell: ${meta.skyloName} | ${note} | $${upsellTotal}`);
-      upsellsFound++;
-    }
+    console.log(`Upsell: ${meta.skyloName} | ${note} | $${upsellTotal}`);
+    upsellsFound++;
   }
 
   console.log(`Done. ${upsellsFound} upsells written.`);
