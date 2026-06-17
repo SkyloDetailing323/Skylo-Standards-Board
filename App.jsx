@@ -2341,22 +2341,34 @@ function AdminUpsellEntry({ techs, upsells, saving, setSaving, refreshAll, showT
   const [repairResult, setRepairResult] = useState(null);
   const [repairing, setRepairing] = useState(false);
 
-  // Get week key from any date
+  // Get week key (Monday) from any date string
   function weekKeyFromDate(dateStr) {
-    const d = new Date(dateStr + "T00:00:00");
+    const d = new Date(dateStr + "T12:00:00Z");
+    const day = d.getUTCDay();
+    const daysBack = day === 0 ? 6 : day - 1;
     const start = new Date(d);
-    start.setDate(d.getDate() - d.getDay());
-    return `${start.getFullYear()}-${String(start.getMonth()+1).padStart(2,"0")}-${String(start.getDate()).padStart(2,"0")}`;
+    start.setUTCDate(d.getUTCDate() - daysBack);
+    return `${start.getUTCFullYear()}-${String(start.getUTCMonth()+1).padStart(2,"0")}-${String(start.getUTCDate()).padStart(2,"0")}`;
   }
 
   const activeWeek = useCustomDate && customDate ? weekKeyFromDate(customDate) : targetWeek;
   const weekData = {};
   upsells.filter(u=>u.week_key===activeWeek).forEach(u=>{weekData[u.tech_id]=u.amount;});
 
-  // All weeks that have data
+  // Always show the last 8 Mondays so weeks appear even when empty
+  const recentMondays = [];
+  const today = new Date(Date.now() - 6*3600000);
+  const todayDay = today.getUTCDay();
+  const thisMon = new Date(today);
+  thisMon.setUTCDate(today.getUTCDate() - (todayDay === 0 ? 6 : todayDay - 1));
+  for (let i = 0; i < 8; i++) {
+    const d = new Date(thisMon);
+    d.setUTCDate(thisMon.getUTCDate() - i * 7);
+    recentMondays.push(`${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,"0")}-${String(d.getUTCDate()).padStart(2,"0")}`);
+  }
   const byWeek = {};
   upsells.forEach(u=>{ byWeek[u.week_key]=(byWeek[u.week_key]||0)+1; });
-  const existingWeeks = Object.keys(byWeek).sort((a,b)=>b.localeCompare(a));
+  const existingWeeks = [...new Set([...recentMondays, ...Object.keys(byWeek)])].sort((a,b)=>b.localeCompare(a));
 
   async function handleSave() {
     setSaving(true);
