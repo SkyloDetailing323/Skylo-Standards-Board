@@ -856,6 +856,39 @@ function ReportsTab({ techs, jobs, upsells=[], techId=null }) {
   const [preset, setPreset] = useState("wtd");
   const [cStart, setCStart] = useState("");
   const [cEnd,   setCEnd]   = useState("");
+  const [syncing, setSyncing] = useState(false);
+
+  async function syncRevenue() {
+    setSyncing(true);
+    try {
+      const chunks = [];
+      let cur = new Date(start + "T12:00:00Z");
+      const endD = new Date(end + "T12:00:00Z");
+      while (cur <= endD) {
+        const chunkFrom = cur.toISOString().split("T")[0];
+        const chunkEnd = new Date(cur);
+        chunkEnd.setUTCDate(chunkEnd.getUTCDate() + 6);
+        const chunkTo = chunkEnd > endD ? end : chunkEnd.toISOString().split("T")[0];
+        chunks.push({ from: chunkFrom, to: chunkTo });
+        cur.setUTCDate(cur.getUTCDate() + 7);
+      }
+      let total = 0;
+      for (const chunk of chunks) {
+        const res = await fetch("/.netlify/functions/hcp-revenue-sync", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(chunk),
+        });
+        const data = await res.json();
+        if (!data.ok) throw new Error("Sync failed on " + chunk.from);
+        total += data.jobsSynced || 0;
+      }
+      window.location.reload();
+    } catch(e) {
+      alert("Revenue sync failed: " + e.message);
+      setSyncing(false);
+    }
+  }
 
   const PRESETS = [["wtd","WTD"],["last_week","Last Week"],["mtd","MTD"],["last_month","Last Month"],["ytd","YTD"],["custom","Custom"]];
   const { start, end } = getDateRangeBounds(preset, cStart, cEnd);
@@ -929,8 +962,13 @@ function ReportsTab({ techs, jobs, upsells=[], techId=null }) {
             ))}
           </div>
         )}
-        <div style={{ fontSize:"11px", color:C.blue, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", marginTop:"8px" }}>
-          {start} → {end} · {inRange.length} job{inRange.length!==1?"s":""}
+        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginTop:"8px", flexWrap:"wrap", gap:"8px" }}>
+          <div style={{ fontSize:"11px", color:C.blue, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>
+            {start} → {end} · {inRange.length} job{inRange.length!==1?"s":""}
+          </div>
+          <button onClick={syncRevenue} disabled={syncing} style={{ background:syncing?C.muted:C.green, border:"none", color:C.white, padding:"5px 12px", borderRadius:"6px", cursor:syncing?"not-allowed":"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", fontSize:"11px", letterSpacing:"1px", opacity:syncing?0.7:1 }}>
+            {syncing?"SYNCING...":"SYNC REVENUE"}
+          </button>
         </div>
       </div>
 
