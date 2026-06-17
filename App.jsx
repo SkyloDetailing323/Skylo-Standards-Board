@@ -2353,7 +2353,7 @@ function AdminUpsellEntry({ techs, upsells, saving, setSaving, refreshAll, showT
 
   const activeWeek = useCustomDate && customDate ? weekKeyFromDate(customDate) : targetWeek;
   const weekData = {};
-  upsells.filter(u=>u.week_key===activeWeek).forEach(u=>{weekData[u.tech_id]=u.amount;});
+  upsells.filter(u=>u.week_key===activeWeek).forEach(u=>{weekData[u.tech_id]=(weekData[u.tech_id]||0)+u.amount;});
 
   // Always show the last 8 Mondays so weeks appear even when empty
   const recentMondays = [];
