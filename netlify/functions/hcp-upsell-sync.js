@@ -24,6 +24,12 @@ const TECH_MAP = {
   "Landon White":      "Landon White",
   "Jackson Vaughn":    "Jackson Vaughn",
   "Brian Wheelus":     "Brian Wheelus",
+  "Cole Burtenshaw":   "Cole Burtenshaw",
+  "Ethan Hansen":      "Ethan Hansen",
+  "Max Hancock":       "Max Hancock",
+  "Riley Wooden":      "Riley Wooden",
+  "Trevor Prince":     "Trevor Prince",
+  "Will Faulkner":     "Will Faulkner",
 };
 
 function getMT() {
