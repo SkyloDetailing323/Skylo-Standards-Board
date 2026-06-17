@@ -73,6 +73,9 @@ exports.handler = async (event) => {
     return { statusCode: 405, body: JSON.stringify({ error: "POST only" }) };
   }
 
+  // Hard deadline — return clean JSON before Netlify's 26s limit kills the function
+  const DEADLINE = Date.now() + 22000;
+
   let from, to;
   try {
     const body = JSON.parse(event.body || "{}");
@@ -157,7 +160,8 @@ exports.handler = async (event) => {
   const jobIds = new Set(Object.keys(jobMeta));
   const allInvoices = [];
   const foundJobIds = new Set();
-  for (let p = 1; p <= 20; p++) {
+  for (let p = 1; p <= 8; p++) {
+    if (Date.now() > DEADLINE) { console.log("Deadline reached during invoice scan"); break; }
     const data = await hcpGet(`invoices?page=${p}&page_size=100`);
     if (!data) break;
     const invoices = data.invoices || [];
@@ -171,7 +175,7 @@ exports.handler = async (event) => {
     if (invoices.length < 100) break;
     if (foundJobIds.size >= jobIds.size) break; // found all target jobs — stop early
   }
-  console.log(`Matched ${allInvoices.length} invoices (scanned up to 20 pages)`);
+  console.log(`Matched ${allInvoices.length} invoices (scanned up to 8 pages)`);
 
   // Scan for "Additional Upgrade" items
   let upsellsFound = 0;
