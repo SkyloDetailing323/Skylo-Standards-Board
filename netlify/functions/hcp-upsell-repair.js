@@ -177,9 +177,10 @@ exports.handler = async (event) => {
   }
   console.log(`Matched ${allInvoices.length} invoices (scanned up to 8 pages)`);
 
-  // Scan for "Additional Upgrade" items
+  // Scan invoice items — split tips, upsells, and base service revenue
   let upsellsFound = 0;
   for (const invoice of allInvoices) {
+    if (Date.now() > DEADLINE) { console.log("Deadline reached during upsell scan"); break; }
     const jobId = String(invoice.job_id);
     const meta = jobMeta[jobId];
     if (!meta) continue;
@@ -189,38 +190,54 @@ exports.handler = async (event) => {
 
     const items = invoice.items || [];
     let upsellTotal = 0;
+    let tipLineTotal = 0;
+    let serviceTotal = 0;
     const upsellItems = [];
+
     for (const item of items) {
       const name = (item.name || "").trim();
-      if (name.toLowerCase().startsWith("additional upgrade")) {
-        const amount = (item.amount || 0) / 100;
+      const nameLower = name.toLowerCase();
+      const amount = (item.amount || 0) / 100;
+      if (nameLower.startsWith("additional upgrade")) {
         upsellTotal += amount;
+        serviceTotal += amount;
         upsellItems.push({ name, amount });
+      } else if (nameLower.includes("tip") || nameLower.includes("gratuity")) {
+        tipLineTotal += amount;
+      } else {
+        serviceTotal += amount;
       }
     }
 
-    if (upsellTotal <= 0) continue;
+    // Tips from separate card payment (total_amount - subtotal) + any tip line items
+    const jobTips = Math.max(0, ((meta.totalAmount || 0) - (meta.subtotal || 0))) / 100;
+    const totalTips = tipLineTotal + jobTips;
 
     const jobDate = meta.schedStart ? meta.schedStart.split("T")[0] : from;
     const weekKey = getWeekKey(jobDate);
-    const note = upsellItems.map(i => `${i.name} ($${i.amount.toFixed(2)})`).join(", ");
 
-    // Upsert to upsells table (hcp_job_id prevents duplicates)
-    await sbFetch("upsells?on_conflict=hcp_job_id", {
-      method: "POST",
-      prefer: "resolution=merge-duplicates,return=minimal",
-      body: JSON.stringify({ tech_id: tech.id, week_key: weekKey, amount: upsellTotal, hcp_job_id: jobId, note }),
-    });
-
-    // Update the job's upsell_amount column (for Reports tab)
+    // Update revenue (invoice-based, excludes tip line items) and tips
     await sbFetch(`jobs?hcp_job_id=eq.${jobId}`, {
       method: "PATCH",
       prefer: "return=minimal",
-      body: JSON.stringify({ upsell_amount: upsellTotal }),
+      body: JSON.stringify({ revenue: serviceTotal, tips: totalTips }),
     });
 
-    console.log(`Upsell: ${meta.skyloName} | ${note} | $${upsellTotal}`);
-    upsellsFound++;
+    if (upsellTotal > 0) {
+      const note = upsellItems.map(i => `${i.name} ($${i.amount.toFixed(2)})`).join(", ");
+      await sbFetch("upsells?on_conflict=hcp_job_id", {
+        method: "POST",
+        prefer: "resolution=merge-duplicates,return=minimal",
+        body: JSON.stringify({ tech_id: tech.id, week_key: weekKey, amount: upsellTotal, hcp_job_id: jobId, note }),
+      });
+      await sbFetch(`jobs?hcp_job_id=eq.${jobId}`, {
+        method: "PATCH",
+        prefer: "return=minimal",
+        body: JSON.stringify({ upsell_amount: upsellTotal }),
+      });
+      console.log(`Upsell: ${meta.skyloName} | ${note} | $${upsellTotal}`);
+      upsellsFound++;
+    }
   }
 
   console.log(`Done. ${upsellsFound} upsells written.`);

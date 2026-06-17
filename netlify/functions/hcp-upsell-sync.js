@@ -145,28 +145,35 @@ exports.handler = async () => {
     const jobDate = meta.schedStart ? meta.schedStart.split("T")[0] : todayStr;
     const weekKey = getWeekKey(jobDate);
 
-    // subtotal = line items only; total_amount includes tips; difference = tips
-    const revenue = (meta.subtotal || 0) / 100;
-    const tips    = Math.max(0, ((meta.totalAmount || 0) - (meta.subtotal || 0))) / 100;
-
     let hours = 0;
     if (meta.schedStart && meta.schedEnd) {
       hours = Math.round(((new Date(meta.schedEnd) - new Date(meta.schedStart)) / 3600000) * 100) / 100;
     }
 
-    // Scan invoice items for upsell services
+    // Split invoice items into services, tips, and upsells
     const items = invoice.items || [];
     let upsellTotal = 0;
+    let tipLineTotal = 0;
+    let serviceTotal = 0;
     const upsellItems = [];
     for (const item of items) {
       const name = (item.name || "").trim();
-      if (name.toLowerCase().startsWith("additional upgrade")) {
-        // qty_in_hundredths: 100 = 1 unit. amount is already qty×price in cents.
-        const amount = (item.amount || 0) / 100;
+      const nameLower = name.toLowerCase();
+      const amount = (item.amount || 0) / 100;
+      if (nameLower.startsWith("additional upgrade")) {
         upsellTotal += amount;
+        serviceTotal += amount;
         upsellItems.push({ name, amount });
+      } else if (nameLower.includes("tip") || nameLower.includes("gratuity")) {
+        tipLineTotal += amount;
+      } else {
+        serviceTotal += amount;
       }
     }
+    // Tips = invoice tip line items + any separate card tip (total_amount - subtotal)
+    const jobTips = Math.max(0, ((meta.totalAmount || 0) - (meta.subtotal || 0))) / 100;
+    const revenue = serviceTotal;
+    const tips    = tipLineTotal + jobTips;
 
     // Upsert job record
     await sbFetch("jobs?on_conflict=hcp_job_id", {
