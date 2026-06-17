@@ -126,26 +126,30 @@ exports.handler = async (event) => {
     };
   }
 
-  // Fetch invoice for each job directly — avoids scanning all pages and timeout risk
-  const jobIds = Object.keys(jobMeta);
+  // Scan invoice pages (newest-first) until all target jobs are matched or pages run out
+  const jobIds = new Set(Object.keys(jobMeta));
   const allInvoices = [];
-  const BATCH = 5; // parallel HCP requests per batch
-  for (let i = 0; i < jobIds.length; i += BATCH) {
-    const batch = jobIds.slice(i, i + BATCH);
-    const results = await Promise.all(
-      batch.map(jid => hcpGet(`invoices?job_id=${jid}&page_size=5`))
-    );
-    for (const data of results) {
-      if (!data) continue;
-      allInvoices.push(...(data.invoices || []));
+  const foundJobIds = new Set();
+  for (let p = 1; p <= 20; p++) {
+    const data = await hcpGet(`invoices?page=${p}&page_size=100`);
+    if (!data) break;
+    const invoices = data.invoices || [];
+    for (const inv of invoices) {
+      const jid = String(inv.job_id || "");
+      if (jobIds.has(jid)) {
+        allInvoices.push(inv);
+        foundJobIds.add(jid);
+      }
     }
+    if (invoices.length < 100) break;
+    if (foundJobIds.size >= jobIds.size) break; // found all target jobs — stop early
   }
-  console.log(`Fetched ${allInvoices.length} invoices for ${jobIds.length} jobs`);
+  console.log(`Matched ${allInvoices.length} invoices (scanned up to 20 pages)`);
 
   // Scan for "Additional Upgrade" items
   let upsellsFound = 0;
   for (const invoice of allInvoices) {
-    const jobId = String(invoice.job_id || "");
+    const jobId = String(invoice.job_id);
     const meta = jobMeta[jobId];
     if (!meta) continue;
 
@@ -192,6 +196,6 @@ exports.handler = async (event) => {
   return {
     statusCode: 200,
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ok: true, upsellsFound, jobsScanned: allJobs.length, techJobsFound: jobIds.length, invoicesFetched: allInvoices.length }),
+    body: JSON.stringify({ ok: true, upsellsFound, jobsScanned: allJobs.length, invoicesMatched: allInvoices.length }),
   };
 };
