@@ -122,8 +122,35 @@ exports.handler = async (event) => {
     if (!skyloName) continue;
     jobMeta[String(job.id)] = {
       skyloName,
-      schedStart: job.schedule?.scheduled_start,
+      schedStart:  job.schedule?.scheduled_start,
+      schedEnd:    job.schedule?.scheduled_end,
+      subtotal:    job.subtotal    || 0,
+      totalAmount: job.total_amount || 0,
     };
+  }
+
+  // Upsert fresh revenue/tips/hours for every job in range (no upsell_amount — don't overwrite manual data)
+  const revBatch = [];
+  for (const [jobId, meta] of Object.entries(jobMeta)) {
+    const tech = techByName[meta.skyloName];
+    if (!tech) continue;
+    const revenue = meta.subtotal / 100;
+    const tips    = Math.max(0, (meta.totalAmount - meta.subtotal)) / 100;
+    let hours = 0;
+    if (meta.schedStart && meta.schedEnd) {
+      hours = Math.round(((new Date(meta.schedEnd) - new Date(meta.schedStart)) / 3600000) * 100) / 100;
+    }
+    const jobDate = meta.schedStart ? meta.schedStart.split("T")[0] : from;
+    const weekKey = getWeekKey(jobDate);
+    revBatch.push({ hcp_job_id: jobId, tech_id: tech.id, job_date: jobDate, revenue, tips, hours, week_key: weekKey });
+  }
+  if (revBatch.length > 0) {
+    await sbFetch("jobs?on_conflict=hcp_job_id", {
+      method: "POST",
+      prefer: "resolution=merge-duplicates,return=minimal",
+      body: JSON.stringify(revBatch),
+    });
+    console.log(`Refreshed revenue for ${revBatch.length} jobs`);
   }
 
   // Scan invoice pages (newest-first) until all target jobs are matched or pages run out
