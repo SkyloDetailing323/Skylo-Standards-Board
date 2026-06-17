@@ -2379,19 +2379,35 @@ function AdminUpsellEntry({ techs, upsells, saving, setSaving, refreshAll, showT
     setRepairing(true);
     setRepairResult(null);
     try {
-      const res = await fetch("/.netlify/functions/hcp-upsell-repair", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ from: repairFrom, to: repairTo }),
-      });
-      const data = await res.json();
-      if (data.ok) {
-        await refreshAll();
-        setRepairResult(data);
-        showToast(`✅ Found ${data.upsellsFound} upsell${data.upsellsFound===1?"":"s"} from HCP`);
-      } else {
-        showToast("Repair failed — check Netlify logs", false);
+      // Split range into 7-day chunks so each call stays under the 26s Netlify timeout
+      const chunks = [];
+      let cur = new Date(repairFrom + "T12:00:00Z");
+      const end = new Date(repairTo + "T12:00:00Z");
+      while (cur <= end) {
+        const chunkFrom = cur.toISOString().split("T")[0];
+        const chunkEnd = new Date(cur);
+        chunkEnd.setUTCDate(chunkEnd.getUTCDate() + 6);
+        const chunkTo = chunkEnd > end ? repairTo : chunkEnd.toISOString().split("T")[0];
+        chunks.push({ from: chunkFrom, to: chunkTo });
+        cur.setUTCDate(cur.getUTCDate() + 7);
       }
+      let totalUpsells = 0, totalJobs = 0;
+      for (let i = 0; i < chunks.length; i++) {
+        const chunk = chunks[i];
+        showToast(`Scanning week ${i+1} of ${chunks.length}...`);
+        const res = await fetch("/.netlify/functions/hcp-upsell-repair", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(chunk),
+        });
+        const data = await res.json();
+        if (!data.ok) { showToast("Repair failed on week " + chunk.from, false); setRepairing(false); return; }
+        totalUpsells += data.upsellsFound || 0;
+        totalJobs += data.jobsScanned || 0;
+      }
+      await refreshAll();
+      setRepairResult({ upsellsFound: totalUpsells, jobsScanned: totalJobs });
+      showToast(`✅ Found ${totalUpsells} upsell${totalUpsells===1?"":"s"} from HCP`);
     } catch(e) { showToast("Error: "+e.message, false); }
     setRepairing(false);
   }
