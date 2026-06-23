@@ -117,28 +117,10 @@ exports.handler = async () => {
   const allTechs = await sbFetch("techs?select=id,name");
   const techByName = Object.fromEntries((allTechs || []).map(t => [t.name, t]));
 
-  // Fetch recent invoices — date filters don't work reliably on HCP's invoice endpoint.
-  // Instead, grab the last 3 pages (300 invoices) and match by job_id to today's jobs.
-  const jobIds = new Set(Object.keys(jobMeta));
-  const allInvoices = [];
-  for (let p = 1; p <= 6; p++) {
-    const data = await hcpGet(`invoices?page=${p}&page_size=100`);
-    if (!data) break;
-    const batch = (data.invoices || []).filter(inv => jobIds.has(inv.job_id));
-    allInvoices.push(...batch);
-    if ((data.invoices || []).length < 100) break; // no more pages
-  }
-  console.log(`${allInvoices.length} invoices matched today's jobs`);
-
   let synced = 0;
 
-  for (const invoice of allInvoices) {
-    const jobId = invoice.job_id;
-    if (!jobId) continue;
-
-    const meta = jobMeta[jobId];
-    if (!meta) continue; // job not in today's completed list
-
+  // Process each job: fetch its invoice directly by job_id (avoids page-scan type-mismatch bug)
+  for (const [jobId, meta] of Object.entries(jobMeta)) {
     const tech = techByName[meta.skyloName];
     if (!tech) { console.log("Tech not in Supabase:", meta.skyloName); continue; }
 
@@ -150,20 +132,22 @@ exports.handler = async () => {
       hours = Math.round(((new Date(meta.schedEnd) - new Date(meta.schedStart)) / 3600000) * 100) / 100;
     }
 
-    // revenue = total collected minus tip (handles subscription discounts automatically)
     const tips    = meta.tipAmount / 100;
     const revenue = Math.max(0, (meta.totalAmount - meta.tipAmount)) / 100;
 
-    // Scan invoice items for upsells
-    const items = invoice.items || [];
+    // Fetch this job's invoice directly — reliable, no page scanning, no type mismatch
+    const invData = await hcpGet(`invoices?job_id=${jobId}`);
+    const invoices = invData?.invoices || [];
     let upsellTotal = 0;
     const upsellItems = [];
-    for (const item of items) {
-      const name = (item.name || "").trim();
-      if (name.toLowerCase().startsWith("additional upgrade")) {
-        const amount = (item.amount || 0) / 100;
-        upsellTotal += amount;
-        upsellItems.push({ name, amount });
+    for (const invoice of invoices) {
+      for (const item of (invoice.items || [])) {
+        const name = (item.name || "").trim();
+        if (name.toLowerCase().startsWith("additional upgrade")) {
+          const amount = (item.amount || 0) / 100;
+          upsellTotal += amount;
+          upsellItems.push({ name, amount });
+        }
       }
     }
 
@@ -185,7 +169,7 @@ exports.handler = async () => {
       console.log(`UPSELL: ${meta.skyloName} | ${note}`);
     }
 
-    console.log(`Synced: ${meta.skyloName} | $${revenue} | $${upsellTotal} upsells | ${hours}h`);
+    console.log(`Synced: ${meta.skyloName} | rev=$${revenue} tips=$${tips} upsells=$${upsellTotal} hrs=${hours}`);
     synced++;
   }
 
