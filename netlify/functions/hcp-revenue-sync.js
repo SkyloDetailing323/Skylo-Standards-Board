@@ -140,7 +140,7 @@ exports.handler = async (event) => {
   for (const entry of jobEntries) {
     const invData = await hcpGet(`invoices?job_id=${entry.hcp_job_id}`);
     // Filter client-side in case HCP returns more than just this job's invoice
-    const invoices = (invData?.invoices || []).filter(inv => String(inv.job_id) === entry.hcp_job_id);
+    const invoices = (invData?.invoices || invData?.results || []).filter(inv => String(inv.job_id) === entry.hcp_job_id);
 
     if (invoices.length === 0) {
       batch.push(entry);  // keep job-level fallback

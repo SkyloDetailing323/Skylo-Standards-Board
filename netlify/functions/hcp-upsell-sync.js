@@ -146,7 +146,7 @@ exports.handler = async () => {
   for (let p = 1; p <= 5; p++) {
     const data = await hcpGet(`invoices?page=${p}&page_size=100`);
     if (!data) break;
-    const invoices = data.invoices || [];
+    const invoices = data.invoices || data.results || [];
     for (const inv of invoices) {
       const jid = String(inv.job_id || "");
       if (!jobIds.has(jid) || invoiceData[jid]) continue;

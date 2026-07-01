@@ -160,17 +160,25 @@ exports.handler = async (event) => {
   const jobIds = new Set(Object.keys(jobMeta));
   const invoiceData = {};  // jobId -> parsed invoice result
 
-  // Diagnostic: capture sample IDs from both sides so we can confirm format match
+  // Diagnostic: capture sample IDs and raw API keys so we can confirm format match
   const sampleJobIds = Object.keys(jobMeta).slice(0, 3);
   let sampleInvJobIds = [];
+  let apiResponseKeys = [];
+  let totalInvoicesReported = 0;
 
   for (let p = 1; p <= 20; p++) {
     if (Date.now() > DEADLINE) { console.log("Deadline reached during invoice scan"); break; }
     const data = await hcpGet(`invoices?page=${p}&page_size=100`);
-    if (!data) break;
-    const invoices = data.invoices || [];
-    if (p === 1 && invoices.length > 0) {
-      sampleInvJobIds = invoices.slice(0, 5).map(i => String(i.job_id || ""));
+    if (!data) { console.log(`Invoice page ${p}: null response`); break; }
+    // HCP may return invoices under "invoices" or "results" — handle both
+    const invoices = data.invoices || data.results || [];
+    if (p === 1) {
+      apiResponseKeys = Object.keys(data);
+      totalInvoicesReported = data.total_items || 0;
+      console.log(`Invoice page 1: keys=${JSON.stringify(apiResponseKeys)} total=${totalInvoicesReported} got=${invoices.length}`);
+      if (invoices.length > 0) {
+        sampleInvJobIds = invoices.slice(0, 5).map(i => String(i.job_id || ""));
+      }
     }
     for (const inv of invoices) {
       const jid = String(inv.job_id || "");
@@ -240,6 +248,6 @@ exports.handler = async (event) => {
   return {
     statusCode: 200,
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ok: true, upsellsFound, jobsScanned: allJobs.length, invoicesMatched: Object.keys(invoiceData).length, debug: { sampleJobIds, sampleInvJobIds } }),
+    body: JSON.stringify({ ok: true, upsellsFound, jobsScanned: allJobs.length, invoicesMatched: Object.keys(invoiceData).length, debug: { sampleJobIds, sampleInvJobIds, apiResponseKeys, totalInvoicesReported } }),
   };
 };

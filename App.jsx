@@ -2587,9 +2587,11 @@ function AdminUpsellEntry({ techs, upsells, saving, setSaving, refreshAll, showT
           <div style={{ background:C.cardLt, borderRadius:"8px", padding:"10px 14px", fontSize:"12px", color:C.muted, display:"flex", flexDirection:"column", gap:"6px" }}>
             <div>Scanned <strong style={{color:C.black}}>{repairResult.jobsScanned}</strong> jobs · matched <strong style={{color:C.black}}>{repairResult.invoicesMatched}</strong> invoices · wrote <strong style={{color:C.orange}}>{repairResult.upsellsFound} upsell{repairResult.upsellsFound===1?"":"s"}</strong> to the board</div>
             {repairResult.debug && (
-              <div style={{ fontSize:"10px", color:C.muted, fontFamily:"monospace", background:"#f0f0f0", padding:"6px 8px", borderRadius:"4px" }}>
+              <div style={{ fontSize:"10px", color:"#333", fontFamily:"monospace", background:"#f0f0f0", padding:"6px 8px", borderRadius:"4px" }}>
                 <div>Job IDs: {JSON.stringify(repairResult.debug.sampleJobIds)}</div>
-                <div>Invoice job_ids: {JSON.stringify(repairResult.debug.sampleInvJobIds)}</div>
+                <div>Invoice job_ids (pg1): {JSON.stringify(repairResult.debug.sampleInvJobIds)}</div>
+                <div>API keys: {JSON.stringify(repairResult.debug.apiResponseKeys)}</div>
+                <div>Total invoices: {repairResult.debug.totalInvoicesReported}</div>
               </div>
             )}
           </div>
