@@ -138,21 +138,20 @@ exports.handler = async (event) => {
   // For each job, fetch its invoice to get accurate revenue and tips from line items
   const batch = [];
   for (const entry of jobEntries) {
-    const invData = await hcpGet(`invoices?job_id=${entry.hcp_job_id}`);
-    // Filter client-side in case HCP returns more than just this job's invoice
-    const invoices = (invData?.invoices || invData?.results || []).filter(inv => String(inv.job_id) === entry.hcp_job_id);
+    const invData = await hcpGet(`jobs/${entry.hcp_job_id}/invoices`);
+    const invoices = invData?.invoices || [];
 
     if (invoices.length === 0) {
       batch.push(entry);  // keep job-level fallback
       continue;
     }
 
-    // Use the first (most recent) invoice
     const inv = invoices[0];
     const lineItemsCents = (inv.items || []).reduce((s, item) => s + (item.amount || 0), 0);
     const discountCents  = (inv.discounts || []).reduce((s, d) => s + (d.amount || 0), 0);
     const revenue = Math.max(0, (lineItemsCents - discountCents)) / 100;
-    const tips    = inv.tip_amount != null ? inv.tip_amount / 100 : entry.tips;
+    // Tips come from job.tip_amount — the invoice object has no tip field
+    const tips = entry.tips;
 
     batch.push({ ...entry, revenue, tips });
   }

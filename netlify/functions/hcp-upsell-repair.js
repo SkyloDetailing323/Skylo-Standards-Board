@@ -1,11 +1,12 @@
 // netlify/functions/hcp-upsell-repair.js
 // On-demand repair for a date range.
 // POST { from: "YYYY-MM-DD", to: "YYYY-MM-DD" }
-// Computes from invoice data:
+// For each completed job, fetches its invoices via GET /jobs/{job_id}/invoices
+// and computes:
 //   revenue = sum(items[].amount) - sum(discounts[].amount)
-//   tips    = invoice.tip_amount (separate, not in revenue)
-//   upsells = line items starting with "Additional Upgrade"
-// Falls back to job.total_amount / job.tip_amount for jobs with no matched invoice.
+//   tips    = job.tip_amount (invoice has no tip field)
+//   upsells = items whose name starts with "Additional Upgrade"
+// Falls back to job.total_amount / job.tip_amount if no invoice found.
 
 const TECH_MAP = {
   "Myles Madarieta":   "Myles Madarieta",
@@ -73,11 +74,11 @@ async function hcpGet(path) {
 }
 
 function parseInvoice(inv) {
+  // Revenue = sum of line item amounts minus discounts (negative items auto-subtract).
+  // Discounts in the separate discounts section must be explicitly subtracted.
   const lineItemsCents = (inv.items || []).reduce((s, item) => s + (item.amount || 0), 0);
   const discountCents  = (inv.discounts || []).reduce((s, d) => s + (d.amount || 0), 0);
   const revenue = Math.max(0, (lineItemsCents - discountCents)) / 100;
-
-  const tips = inv.tip_amount != null ? inv.tip_amount / 100 : null;
 
   let upsellCents = 0;
   const upsellItems = [];
@@ -89,7 +90,7 @@ function parseInvoice(inv) {
     }
   }
 
-  return { revenue, tips, upsellTotal: upsellCents / 100, upsellItems };
+  return { revenue, upsellTotal: upsellCents / 100, upsellItems };
 }
 
 exports.handler = async (event) => {
@@ -155,42 +156,20 @@ exports.handler = async (event) => {
     };
   }
 
-  // Scan invoice pages (newest-first), match to target jobs, parse revenue/tips/upsells.
-  // 20 pages × 100 per page = 2000 invoices, covers ~2–3 months of history.
-  const jobIds = new Set(Object.keys(jobMeta));
-  const invoiceData = {};  // jobId -> parsed invoice result
+  // Fetch each job's invoices using GET /jobs/{job_id}/invoices
+  const invoiceData = {};
+  let invoicesMatched = 0;
 
-  // Diagnostic: capture sample IDs and raw API keys so we can confirm format match
-  const sampleJobIds = Object.keys(jobMeta).slice(0, 3);
-  let sampleInvJobIds = [];
-  let apiResponseKeys = [];
-  let totalInvoicesReported = 0;
-
-  for (let p = 1; p <= 20; p++) {
-    if (Date.now() > DEADLINE) { console.log("Deadline reached during invoice scan"); break; }
-    const data = await hcpGet(`invoices?page=${p}&page_size=100`);
-    if (!data) { console.log(`Invoice page ${p}: null response`); break; }
-    // HCP may return invoices under "invoices" or "results" — handle both
-    const invoices = data.invoices || data.results || [];
-    if (p === 1) {
-      apiResponseKeys = Object.keys(data);
-      totalInvoicesReported = data.total_items || 0;
-      console.log(`Invoice page 1: keys=${JSON.stringify(apiResponseKeys)} total=${totalInvoicesReported} got=${invoices.length}`);
-      if (invoices.length > 0) {
-        sampleInvJobIds = invoices.slice(0, 5).map(i => String(i.job_id || ""));
-      }
-    }
-    for (const inv of invoices) {
-      const jid = String(inv.job_id || "");
-      if (!jobIds.has(jid) || invoiceData[jid]) continue;
-      invoiceData[jid] = parseInvoice(inv);
-    }
-    if (invoices.length < 100) break;
-    if (Object.keys(invoiceData).length >= jobIds.size) break;
+  for (const jobId of Object.keys(jobMeta)) {
+    if (Date.now() > DEADLINE) { console.log("Deadline reached during invoice fetch"); break; }
+    const data = await hcpGet(`jobs/${jobId}/invoices`);
+    if (!data) continue;
+    const invoices = data.invoices || [];
+    if (invoices.length === 0) continue;
+    invoiceData[jobId] = parseInvoice(invoices[0]);
+    invoicesMatched++;
   }
-  console.log(`Matched invoices for ${Object.keys(invoiceData).length}/${jobIds.size} jobs`);
-  console.log(`Sample job IDs: ${JSON.stringify(sampleJobIds)}`);
-  console.log(`Sample invoice job_ids (page 1): ${JSON.stringify(sampleInvJobIds)}`);
+  console.log(`Fetched invoices for ${invoicesMatched}/${Object.keys(jobMeta).length} jobs`);
 
   // Write all jobs to DB + upsell records
   let upsellsFound = 0;
@@ -208,10 +187,11 @@ exports.handler = async (event) => {
       hours = Math.round(((new Date(meta.schedEnd) - new Date(meta.schedStart)) / 3600000) * 100) / 100;
     }
 
+    // Tips come from job.tip_amount — the invoice object has no tip field
+    const tips = meta.tipAmount / 100;
+
     const inv = invoiceData[jobId];
-    // Fall back to job-level amounts for any job whose invoice wasn't found in the scan
     const revenue     = inv ? inv.revenue    : Math.max(0, (meta.totalAmount - meta.tipAmount)) / 100;
-    const tips        = inv ? (inv.tips !== null ? inv.tips : meta.tipAmount / 100) : meta.tipAmount / 100;
     const upsellTotal = inv ? inv.upsellTotal : 0;
 
     jobBatch.push({ hcp_job_id: jobId, tech_id: tech.id, job_date: jobDate, revenue, tips, hours, upsell_amount: upsellTotal, week_key: weekKey });
@@ -226,8 +206,7 @@ exports.handler = async (event) => {
       console.log(`Upsell: ${meta.skyloName} | ${note} | $${inv.upsellTotal}`);
       upsellsFound++;
     } else if (inv) {
-      // Invoice was found but has no "Additional Upgrade" items — delete any stale upsell record
-      // so inflated values from the old sync don't persist.
+      // Invoice found but no upsells — delete any stale inflated record
       await sbFetch(`upsells?hcp_job_id=eq.${jobId}`, {
         method: "DELETE",
         prefer: "return=minimal",
@@ -248,6 +227,6 @@ exports.handler = async (event) => {
   return {
     statusCode: 200,
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ok: true, upsellsFound, jobsScanned: allJobs.length, invoicesMatched: Object.keys(invoiceData).length, debug: { sampleJobIds, sampleInvJobIds, apiResponseKeys, totalInvoicesReported } }),
+    body: JSON.stringify({ ok: true, upsellsFound, jobsScanned: allJobs.length, invoicesMatched }),
   };
 };

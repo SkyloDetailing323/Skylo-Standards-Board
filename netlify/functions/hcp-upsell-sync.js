@@ -83,8 +83,6 @@ function parseInvoice(inv) {
   const discountCents  = (inv.discounts || []).reduce((s, d) => s + (d.amount || 0), 0);
   const revenue = Math.max(0, (lineItemsCents - discountCents)) / 100;
 
-  const tips = inv.tip_amount != null ? inv.tip_amount / 100 : null;
-
   let upsellCents = 0;
   const upsellItems = [];
   for (const item of (inv.items || [])) {
@@ -95,7 +93,7 @@ function parseInvoice(inv) {
     }
   }
 
-  return { revenue, tips, upsellTotal: upsellCents / 100, upsellItems };
+  return { revenue, upsellTotal: upsellCents / 100, upsellItems };
 }
 
 exports.handler = async () => {
@@ -138,24 +136,16 @@ exports.handler = async () => {
   const allTechs = await sbFetch("techs?select=id,name");
   const techByName = Object.fromEntries((allTechs || []).map(t => [t.name, t]));
 
-  // Scan invoice pages (newest-first) to find today's job invoices.
-  // Today's invoices are the most recent so they appear on the first pages.
-  const jobIds = new Set(Object.keys(jobMeta));
-  const invoiceData = {};  // jobId -> { revenue, tips, upsellTotal, upsellItems }
-
-  for (let p = 1; p <= 5; p++) {
-    const data = await hcpGet(`invoices?page=${p}&page_size=100`);
-    if (!data) break;
-    const invoices = data.invoices || data.results || [];
-    for (const inv of invoices) {
-      const jid = String(inv.job_id || "");
-      if (!jobIds.has(jid) || invoiceData[jid]) continue;
-      invoiceData[jid] = parseInvoice(inv);
-    }
-    if (invoices.length < 100) break;
-    if (Object.keys(invoiceData).length >= jobIds.size) break;
+  // Fetch each job's invoices using GET /jobs/{job_id}/invoices
+  const invoiceData = {};
+  for (const jobId of Object.keys(jobMeta)) {
+    const data = await hcpGet(`jobs/${jobId}/invoices`);
+    if (!data) continue;
+    const invoices = data.invoices || [];
+    if (invoices.length === 0) continue;
+    invoiceData[jobId] = parseInvoice(invoices[0]);
   }
-  console.log(`Matched invoices for ${Object.keys(invoiceData).length}/${jobIds.size} jobs`);
+  console.log(`Fetched invoices for ${Object.keys(invoiceData).length}/${Object.keys(jobMeta).length} jobs`);
 
   let synced = 0;
   for (const [jobId, meta] of Object.entries(jobMeta)) {
@@ -170,8 +160,8 @@ exports.handler = async () => {
     }
 
     const inv = invoiceData[jobId];
-    const revenue     = inv ? inv.revenue : 0;
-    const tips        = inv ? (inv.tips !== null ? inv.tips : meta.tipFallback / 100) : meta.tipFallback / 100;
+    const revenue     = inv ? inv.revenue    : 0;
+    const tips        = meta.tipFallback / 100;  // invoice has no tip field; use job.tip_amount
     const upsellTotal = inv ? inv.upsellTotal : 0;
 
     await sbFetch("jobs?on_conflict=hcp_job_id", {
