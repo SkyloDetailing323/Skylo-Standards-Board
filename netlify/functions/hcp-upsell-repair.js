@@ -160,11 +160,18 @@ exports.handler = async (event) => {
   const jobIds = new Set(Object.keys(jobMeta));
   const invoiceData = {};  // jobId -> parsed invoice result
 
+  // Diagnostic: capture sample IDs from both sides so we can confirm format match
+  const sampleJobIds = Object.keys(jobMeta).slice(0, 3);
+  let sampleInvJobIds = [];
+
   for (let p = 1; p <= 20; p++) {
     if (Date.now() > DEADLINE) { console.log("Deadline reached during invoice scan"); break; }
     const data = await hcpGet(`invoices?page=${p}&page_size=100`);
     if (!data) break;
     const invoices = data.invoices || [];
+    if (p === 1 && invoices.length > 0) {
+      sampleInvJobIds = invoices.slice(0, 5).map(i => String(i.job_id || ""));
+    }
     for (const inv of invoices) {
       const jid = String(inv.job_id || "");
       if (!jobIds.has(jid) || invoiceData[jid]) continue;
@@ -174,6 +181,8 @@ exports.handler = async (event) => {
     if (Object.keys(invoiceData).length >= jobIds.size) break;
   }
   console.log(`Matched invoices for ${Object.keys(invoiceData).length}/${jobIds.size} jobs`);
+  console.log(`Sample job IDs: ${JSON.stringify(sampleJobIds)}`);
+  console.log(`Sample invoice job_ids (page 1): ${JSON.stringify(sampleInvJobIds)}`);
 
   // Write all jobs to DB + upsell records
   let upsellsFound = 0;
@@ -231,6 +240,6 @@ exports.handler = async (event) => {
   return {
     statusCode: 200,
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ok: true, upsellsFound, jobsScanned: allJobs.length, invoicesMatched: Object.keys(invoiceData).length }),
+    body: JSON.stringify({ ok: true, upsellsFound, jobsScanned: allJobs.length, invoicesMatched: Object.keys(invoiceData).length, debug: { sampleJobIds, sampleInvJobIds } }),
   };
 };

@@ -2458,7 +2458,7 @@ function AdminUpsellEntry({ techs, upsells, saving, setSaving, refreshAll, showT
         chunks.push({ from: chunkFrom, to: chunkTo });
         cur.setUTCDate(cur.getUTCDate() + 7);
       }
-      let totalUpsells = 0, totalJobs = 0;
+      let totalUpsells = 0, totalJobs = 0, totalInvMatched = 0, lastDebug = null;
       for (let i = 0; i < chunks.length; i++) {
         const chunk = chunks[i];
         showToast(`Scanning week ${i+1} of ${chunks.length}...`);
@@ -2471,9 +2471,11 @@ function AdminUpsellEntry({ techs, upsells, saving, setSaving, refreshAll, showT
         if (!data.ok) { showToast("Repair failed on week " + chunk.from, false); setRepairing(false); return; }
         totalUpsells += data.upsellsFound || 0;
         totalJobs += data.jobsScanned || 0;
+        totalInvMatched += data.invoicesMatched || 0;
+        if (data.debug && i === 0) lastDebug = data.debug;
       }
       await refreshAll();
-      setRepairResult({ upsellsFound: totalUpsells, jobsScanned: totalJobs });
+      setRepairResult({ upsellsFound: totalUpsells, jobsScanned: totalJobs, invoicesMatched: totalInvMatched, debug: lastDebug });
       showToast(`✅ Found ${totalUpsells} upsell${totalUpsells===1?"":"s"} from HCP`);
     } catch(e) { showToast("Error: "+e.message, false); }
     setRepairing(false);
@@ -2582,8 +2584,14 @@ function AdminUpsellEntry({ techs, upsells, saving, setSaving, refreshAll, showT
           {repairing ? "Scanning HCP — this may take ~20 sec..." : "Repair Upsells"}
         </button>
         {repairResult && (
-          <div style={{ background:C.cardLt, borderRadius:"8px", padding:"10px 14px", fontSize:"12px", color:C.muted }}>
-            Scanned <strong style={{color:C.black}}>{repairResult.jobsScanned}</strong> jobs · matched <strong style={{color:C.black}}>{repairResult.invoicesMatched}</strong> invoices · wrote <strong style={{color:C.orange}}>{repairResult.upsellsFound} upsell{repairResult.upsellsFound===1?"":"s"}</strong> to the board
+          <div style={{ background:C.cardLt, borderRadius:"8px", padding:"10px 14px", fontSize:"12px", color:C.muted, display:"flex", flexDirection:"column", gap:"6px" }}>
+            <div>Scanned <strong style={{color:C.black}}>{repairResult.jobsScanned}</strong> jobs · matched <strong style={{color:C.black}}>{repairResult.invoicesMatched}</strong> invoices · wrote <strong style={{color:C.orange}}>{repairResult.upsellsFound} upsell{repairResult.upsellsFound===1?"":"s"}</strong> to the board</div>
+            {repairResult.debug && (
+              <div style={{ fontSize:"10px", color:C.muted, fontFamily:"monospace", background:"#f0f0f0", padding:"6px 8px", borderRadius:"4px" }}>
+                <div>Job IDs: {JSON.stringify(repairResult.debug.sampleJobIds)}</div>
+                <div>Invoice job_ids: {JSON.stringify(repairResult.debug.sampleInvJobIds)}</div>
+              </div>
+            )}
           </div>
         )}
       </div>
