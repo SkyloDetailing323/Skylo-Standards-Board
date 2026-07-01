@@ -1,10 +1,9 @@
 // netlify/functions/hcp-upsell-sync.js
-// Scheduled every 5 min. Fetches today's completed HCP jobs via the INVOICES
-// endpoint (which exposes line items the jobs endpoint never returns).
+// Scheduled every 5 min. Fetches today's completed HCP jobs and syncs:
+//   revenue    = sum(items[].amount) - sum(discounts[].amount)  [upsells count toward revenue]
+//   tips       = invoice.tip_amount (separate, NOT included in revenue)
+//   upsells    = line items whose name starts with "Additional Upgrade"
 // HCP amounts are in cents — divide by 100.
-
-// Any line item whose name starts with "Additional Upgrade" counts as an upsell.
-// This matches the HCP pricebook category prefix so new services are picked up automatically.
 
 const TECH_MAP = {
   "Myles Madarieta":   "Myles Madarieta",
@@ -76,13 +75,36 @@ async function hcpGet(path) {
   return JSON.parse(text);
 }
 
+function parseInvoice(inv) {
+  // Revenue = sum of all line item amounts minus any discounts
+  // Negative line items (e.g. manual adjustments) subtract automatically via the sum.
+  // Discounts in the separate "discounts" section are subtracted explicitly.
+  const lineItemsCents = (inv.items || []).reduce((s, item) => s + (item.amount || 0), 0);
+  const discountCents  = (inv.discounts || []).reduce((s, d) => s + (d.amount || 0), 0);
+  const revenue = Math.max(0, (lineItemsCents - discountCents)) / 100;
+
+  const tips = inv.tip_amount != null ? inv.tip_amount / 100 : null;
+
+  let upsellCents = 0;
+  const upsellItems = [];
+  for (const item of (inv.items || [])) {
+    const name = (item.name || "").trim();
+    if (name.toLowerCase().startsWith("additional upgrade")) {
+      upsellCents += (item.amount || 0);
+      upsellItems.push({ name, amount: (item.amount || 0) / 100 });
+    }
+  }
+
+  return { revenue, tips, upsellTotal: upsellCents / 100, upsellItems };
+}
+
 exports.handler = async () => {
   const { str: todayStr } = getMT();
   const start = `${todayStr}T00:00:00-06:00`;
   const end   = `${todayStr}T23:59:59-06:00`;
   console.log(`Syncing ${todayStr}`);
 
-  // Fetch today's completed jobs (for tech assignment + hours)
+  // Fetch today's completed jobs
   const allJobs = [];
   let page = 1;
   while (true) {
@@ -96,7 +118,7 @@ exports.handler = async () => {
   }
   console.log(`${allJobs.length} completed jobs`);
 
-  // Build job lookup: jobId → { tech skyloName, schedStart, schedEnd }
+  // Build job lookup — only techs in TECH_MAP
   const jobMeta = {};
   for (const job of allJobs) {
     const emp = (job.assigned_employees || [])[0];
@@ -104,63 +126,62 @@ exports.handler = async () => {
     const hcpName = `${emp.first_name || ""} ${emp.last_name || ""}`.trim();
     const skyloName = TECH_MAP[hcpName];
     if (!skyloName) continue;
-    jobMeta[job.id] = {
+    jobMeta[String(job.id)] = {
       skyloName,
       schedStart:  job.schedule?.scheduled_start,
       schedEnd:    job.schedule?.scheduled_end,
-      totalAmount: job.total_amount || 0,
-      tipAmount:   job.tip_amount   || 0,
+      tipFallback: job.tip_amount || 0,  // cents, only used if invoice has no tip_amount field
     };
   }
 
-  // Fetch all techs once
+  // Fetch all techs from Supabase
   const allTechs = await sbFetch("techs?select=id,name");
   const techByName = Object.fromEntries((allTechs || []).map(t => [t.name, t]));
 
-  let synced = 0;
+  // Scan invoice pages (newest-first) to find today's job invoices.
+  // Today's invoices are the most recent so they appear on the first pages.
+  const jobIds = new Set(Object.keys(jobMeta));
+  const invoiceData = {};  // jobId -> { revenue, tips, upsellTotal, upsellItems }
 
-  // Process each job: fetch its invoice directly by job_id (avoids page-scan type-mismatch bug)
+  for (let p = 1; p <= 5; p++) {
+    const data = await hcpGet(`invoices?page=${p}&page_size=100`);
+    if (!data) break;
+    const invoices = data.invoices || [];
+    for (const inv of invoices) {
+      const jid = String(inv.job_id || "");
+      if (!jobIds.has(jid) || invoiceData[jid]) continue;
+      invoiceData[jid] = parseInvoice(inv);
+    }
+    if (invoices.length < 100) break;
+    if (Object.keys(invoiceData).length >= jobIds.size) break;
+  }
+  console.log(`Matched invoices for ${Object.keys(invoiceData).length}/${jobIds.size} jobs`);
+
+  let synced = 0;
   for (const [jobId, meta] of Object.entries(jobMeta)) {
     const tech = techByName[meta.skyloName];
     if (!tech) { console.log("Tech not in Supabase:", meta.skyloName); continue; }
 
     const jobDate = meta.schedStart ? meta.schedStart.split("T")[0] : todayStr;
     const weekKey = getWeekKey(jobDate);
-
     let hours = 0;
     if (meta.schedStart && meta.schedEnd) {
       hours = Math.round(((new Date(meta.schedEnd) - new Date(meta.schedStart)) / 3600000) * 100) / 100;
     }
 
-    const tips    = meta.tipAmount / 100;
-    const revenue = Math.max(0, (meta.totalAmount - meta.tipAmount)) / 100;
+    const inv = invoiceData[jobId];
+    const revenue     = inv ? inv.revenue : 0;
+    const tips        = inv ? (inv.tips !== null ? inv.tips : meta.tipFallback / 100) : meta.tipFallback / 100;
+    const upsellTotal = inv ? inv.upsellTotal : 0;
 
-    // Fetch this job's invoice directly — reliable, no page scanning, no type mismatch
-    const invData = await hcpGet(`invoices?job_id=${jobId}`);
-    const invoices = invData?.invoices || [];
-    let upsellTotal = 0;
-    const upsellItems = [];
-    for (const invoice of invoices) {
-      for (const item of (invoice.items || [])) {
-        const name = (item.name || "").trim();
-        if (name.toLowerCase().startsWith("additional upgrade")) {
-          const amount = (item.amount || 0) / 100;
-          upsellTotal += amount;
-          upsellItems.push({ name, amount });
-        }
-      }
-    }
-
-    // Upsert job record
     await sbFetch("jobs?on_conflict=hcp_job_id", {
       method: "POST",
       prefer: "resolution=merge-duplicates,return=minimal",
       body: JSON.stringify({ hcp_job_id: jobId, tech_id: tech.id, job_date: jobDate, revenue, upsell_amount: upsellTotal, hours, tips, week_key: weekKey }),
     });
 
-    // Upsert upsell record if items found
-    if (upsellTotal > 0) {
-      const note = upsellItems.map(i => `${i.name} ($${i.amount.toFixed(2)})`).join(", ");
+    if (upsellTotal > 0 && inv) {
+      const note = inv.upsellItems.map(i => `${i.name} ($${i.amount.toFixed(2)})`).join(", ");
       await sbFetch("upsells?on_conflict=hcp_job_id", {
         method: "POST",
         prefer: "resolution=merge-duplicates,return=minimal",

@@ -1,7 +1,11 @@
 // netlify/functions/hcp-upsell-repair.js
-// On-demand upsell scan for a custom date range.
+// On-demand repair for a date range.
 // POST { from: "YYYY-MM-DD", to: "YYYY-MM-DD" }
-// Scans invoices for "Additional Upgrade" line items and writes to upsells table + jobs.upsell_amount.
+// Computes from invoice data:
+//   revenue = sum(items[].amount) - sum(discounts[].amount)
+//   tips    = invoice.tip_amount (separate, not in revenue)
+//   upsells = line items starting with "Additional Upgrade"
+// Falls back to job.total_amount / job.tip_amount for jobs with no matched invoice.
 
 const TECH_MAP = {
   "Myles Madarieta":   "Myles Madarieta",
@@ -68,12 +72,31 @@ async function hcpGet(path) {
   return JSON.parse(text);
 }
 
+function parseInvoice(inv) {
+  const lineItemsCents = (inv.items || []).reduce((s, item) => s + (item.amount || 0), 0);
+  const discountCents  = (inv.discounts || []).reduce((s, d) => s + (d.amount || 0), 0);
+  const revenue = Math.max(0, (lineItemsCents - discountCents)) / 100;
+
+  const tips = inv.tip_amount != null ? inv.tip_amount / 100 : null;
+
+  let upsellCents = 0;
+  const upsellItems = [];
+  for (const item of (inv.items || [])) {
+    const name = (item.name || "").trim();
+    if (name.toLowerCase().startsWith("additional upgrade")) {
+      upsellCents += (item.amount || 0);
+      upsellItems.push({ name, amount: (item.amount || 0) / 100 });
+    }
+  }
+
+  return { revenue, tips, upsellTotal: upsellCents / 100, upsellItems };
+}
+
 exports.handler = async (event) => {
   if (event.httpMethod !== "POST") {
     return { statusCode: 405, body: JSON.stringify({ error: "POST only" }) };
   }
 
-  // Hard deadline — return clean JSON before Netlify's 26s limit kills the function
   const DEADLINE = Date.now() + 22000;
 
   let from, to;
@@ -89,7 +112,7 @@ exports.handler = async (event) => {
 
   const start = `${from}T00:00:00-06:00`;
   const end   = `${to}T23:59:59-06:00`;
-  console.log(`Upsell repair: ${from} → ${to}`);
+  console.log(`Repair: ${from} → ${to}`);
 
   // Fetch techs
   const allTechs = await sbFetch("techs?select=id,name");
@@ -115,7 +138,7 @@ exports.handler = async (event) => {
   }
   console.log(`Found ${allJobs.length} completed jobs in range`);
 
-  // Build job meta (only techs in TECH_MAP)
+  // Build job meta — only techs in TECH_MAP, keep job-level amounts as fallback
   const jobMeta = {};
   for (const job of allJobs) {
     const emp = (job.assigned_employees || [])[0];
@@ -132,100 +155,75 @@ exports.handler = async (event) => {
     };
   }
 
-  // Upsert fresh revenue/tips/hours for every job in range (no upsell_amount — don't overwrite manual data)
-  const revBatch = [];
-  for (const [jobId, meta] of Object.entries(jobMeta)) {
-    const tech = techByName[meta.skyloName];
-    if (!tech) continue;
-    // revenue = total collected minus tip (handles subscription discounts automatically)
-    const tips    = meta.tipAmount / 100;
-    const revenue = Math.max(0, (meta.totalAmount - meta.tipAmount)) / 100;
-    let hours = 0;
-    if (meta.schedStart && meta.schedEnd) {
-      hours = Math.round(((new Date(meta.schedEnd) - new Date(meta.schedStart)) / 3600000) * 100) / 100;
-    }
-    const jobDate = meta.schedStart ? meta.schedStart.split("T")[0] : from;
-    const weekKey = getWeekKey(jobDate);
-    revBatch.push({ hcp_job_id: jobId, tech_id: tech.id, job_date: jobDate, revenue, tips, hours, week_key: weekKey });
-  }
-  if (revBatch.length > 0) {
-    await sbFetch("jobs?on_conflict=hcp_job_id", {
-      method: "POST",
-      prefer: "resolution=merge-duplicates,return=minimal",
-      body: JSON.stringify(revBatch),
-    });
-    console.log(`Refreshed revenue for ${revBatch.length} jobs`);
-  }
-
-  // Scan invoice pages (newest-first) until all target jobs are matched or pages run out
+  // Scan invoice pages (newest-first), match to target jobs, parse revenue/tips/upsells.
+  // 20 pages × 100 per page = 2000 invoices, covers ~2–3 months of history.
   const jobIds = new Set(Object.keys(jobMeta));
-  const allInvoices = [];
-  const foundJobIds = new Set();
-  for (let p = 1; p <= 8; p++) {
+  const invoiceData = {};  // jobId -> parsed invoice result
+
+  for (let p = 1; p <= 20; p++) {
     if (Date.now() > DEADLINE) { console.log("Deadline reached during invoice scan"); break; }
     const data = await hcpGet(`invoices?page=${p}&page_size=100`);
     if (!data) break;
     const invoices = data.invoices || [];
     for (const inv of invoices) {
       const jid = String(inv.job_id || "");
-      if (jobIds.has(jid)) {
-        allInvoices.push(inv);
-        foundJobIds.add(jid);
-      }
+      if (!jobIds.has(jid) || invoiceData[jid]) continue;
+      invoiceData[jid] = parseInvoice(inv);
     }
     if (invoices.length < 100) break;
-    if (foundJobIds.size >= jobIds.size) break; // found all target jobs — stop early
+    if (Object.keys(invoiceData).length >= jobIds.size) break;
   }
-  console.log(`Matched ${allInvoices.length} invoices (scanned up to 8 pages)`);
+  console.log(`Matched invoices for ${Object.keys(invoiceData).length}/${jobIds.size} jobs`);
 
-  // Scan invoice items for "Additional Upgrade" upsells only
-  // (revenue/tips are already correct from the job-level batch above)
+  // Write all jobs to DB + upsell records
   let upsellsFound = 0;
-  for (const invoice of allInvoices) {
-    if (Date.now() > DEADLINE) { console.log("Deadline reached during upsell scan"); break; }
-    const jobId = String(invoice.job_id);
-    const meta = jobMeta[jobId];
-    if (!meta) continue;
+  const jobBatch = [];
 
+  for (const [jobId, meta] of Object.entries(jobMeta)) {
+    if (Date.now() > DEADLINE) { console.log("Deadline reached during write phase"); break; }
     const tech = techByName[meta.skyloName];
     if (!tech) continue;
 
-    const items = invoice.items || [];
-    let upsellTotal = 0;
-    const upsellItems = [];
-    for (const item of items) {
-      const name = (item.name || "").trim();
-      if (name.toLowerCase().startsWith("additional upgrade")) {
-        const amount = (item.amount || 0) / 100;
-        upsellTotal += amount;
-        upsellItems.push({ name, amount });
-      }
-    }
-
-    if (upsellTotal <= 0) continue;
-
     const jobDate = meta.schedStart ? meta.schedStart.split("T")[0] : from;
     const weekKey = getWeekKey(jobDate);
-    const note = upsellItems.map(i => `${i.name} ($${i.amount.toFixed(2)})`).join(", ");
+    let hours = 0;
+    if (meta.schedStart && meta.schedEnd) {
+      hours = Math.round(((new Date(meta.schedEnd) - new Date(meta.schedStart)) / 3600000) * 100) / 100;
+    }
 
-    await sbFetch("upsells?on_conflict=hcp_job_id", {
-      method: "POST",
-      prefer: "resolution=merge-duplicates,return=minimal",
-      body: JSON.stringify({ tech_id: tech.id, week_key: weekKey, amount: upsellTotal, hcp_job_id: jobId, note }),
-    });
-    await sbFetch(`jobs?hcp_job_id=eq.${jobId}`, {
-      method: "PATCH",
-      prefer: "return=minimal",
-      body: JSON.stringify({ upsell_amount: upsellTotal }),
-    });
-    console.log(`Upsell: ${meta.skyloName} | ${note} | $${upsellTotal}`);
-    upsellsFound++;
+    const inv = invoiceData[jobId];
+    // Fall back to job-level amounts for any job whose invoice wasn't found in the scan
+    const revenue     = inv ? inv.revenue    : Math.max(0, (meta.totalAmount - meta.tipAmount)) / 100;
+    const tips        = inv ? (inv.tips !== null ? inv.tips : meta.tipAmount / 100) : meta.tipAmount / 100;
+    const upsellTotal = inv ? inv.upsellTotal : 0;
+
+    jobBatch.push({ hcp_job_id: jobId, tech_id: tech.id, job_date: jobDate, revenue, tips, hours, upsell_amount: upsellTotal, week_key: weekKey });
+
+    if (inv && inv.upsellTotal > 0) {
+      const note = inv.upsellItems.map(i => `${i.name} ($${i.amount.toFixed(2)})`).join(", ");
+      await sbFetch("upsells?on_conflict=hcp_job_id", {
+        method: "POST",
+        prefer: "resolution=merge-duplicates,return=minimal",
+        body: JSON.stringify({ tech_id: tech.id, week_key: weekKey, amount: inv.upsellTotal, hcp_job_id: jobId, note }),
+      });
+      console.log(`Upsell: ${meta.skyloName} | ${note} | $${inv.upsellTotal}`);
+      upsellsFound++;
+    }
   }
 
-  console.log(`Done. ${upsellsFound} upsells written.`);
+  // Batch write all jobs in one call
+  if (jobBatch.length > 0) {
+    await sbFetch("jobs?on_conflict=hcp_job_id", {
+      method: "POST",
+      prefer: "resolution=merge-duplicates,return=minimal",
+      body: JSON.stringify(jobBatch),
+    });
+  }
+
+  console.log(`Done. ${upsellsFound} upsells, ${jobBatch.length} jobs written.`);
   return {
     statusCode: 200,
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ok: true, upsellsFound, jobsScanned: allJobs.length, invoicesMatched: allInvoices.length }),
+    body: JSON.stringify({ ok: true, upsellsFound, jobsScanned: allJobs.length, invoicesMatched: Object.keys(invoiceData).length }),
   };
 };

@@ -1,6 +1,9 @@
 // netlify/functions/hcp-revenue-sync.js
-// Syncs revenue/tips/hours for completed jobs in a date range.
-// Faster than the full repair — no invoice scanning, just jobs.
+// Syncs revenue, tips, and hours for completed jobs in a date range.
+// Revenue = sum(items[].amount) - sum(discounts[].amount)
+// Tips    = invoice.tip_amount (separate from revenue)
+// Does NOT update upsell_amount — use hcp-upsell-repair for upsells.
+// Falls back to job.total_amount / job.tip_amount if no invoice is found.
 // POST { from: "YYYY-MM-DD", to: "YYYY-MM-DD" }
 
 const TECH_MAP = {
@@ -101,8 +104,8 @@ exports.handler = async (event) => {
     page++;
   }
 
-  // Build upsert batch
-  const batch = [];
+  // Build per-job entries with job-level fallback values
+  const jobEntries = [];
   for (const job of allJobs) {
     const emp = (job.assigned_employees || [])[0];
     if (!emp) continue;
@@ -112,9 +115,6 @@ exports.handler = async (event) => {
     const tech = techByName[skyloName];
     if (!tech) continue;
 
-    const tipAmount = job.tip_amount || 0;
-    const tips    = tipAmount / 100;
-    const revenue = Math.max(0, ((job.total_amount || 0) - tipAmount)) / 100;
     const schedStart = job.schedule?.scheduled_start;
     const schedEnd   = job.schedule?.scheduled_end;
     let hours = 0;
@@ -122,15 +122,39 @@ exports.handler = async (event) => {
       hours = Math.round(((new Date(schedEnd) - new Date(schedStart)) / 3600000) * 100) / 100;
     }
     const jobDate = schedStart ? schedStart.split("T")[0] : from;
-    batch.push({
-      hcp_job_id: String(job.id),
-      tech_id:    tech.id,
-      job_date:   jobDate,
-      revenue,
-      tips,
+
+    jobEntries.push({
+      hcp_job_id:  String(job.id),
+      tech_id:     tech.id,
+      job_date:    jobDate,
+      week_key:    getWeekKey(jobDate),
       hours,
-      week_key:   getWeekKey(jobDate),
+      // fallback values from job level — overwritten below if invoice is found
+      revenue: Math.max(0, ((job.total_amount || 0) - (job.tip_amount || 0))) / 100,
+      tips:    (job.tip_amount || 0) / 100,
     });
+  }
+
+  // For each job, fetch its invoice to get accurate revenue and tips from line items
+  const batch = [];
+  for (const entry of jobEntries) {
+    const invData = await hcpGet(`invoices?job_id=${entry.hcp_job_id}`);
+    // Filter client-side in case HCP returns more than just this job's invoice
+    const invoices = (invData?.invoices || []).filter(inv => String(inv.job_id) === entry.hcp_job_id);
+
+    if (invoices.length === 0) {
+      batch.push(entry);  // keep job-level fallback
+      continue;
+    }
+
+    // Use the first (most recent) invoice
+    const inv = invoices[0];
+    const lineItemsCents = (inv.items || []).reduce((s, item) => s + (item.amount || 0), 0);
+    const discountCents  = (inv.discounts || []).reduce((s, d) => s + (d.amount || 0), 0);
+    const revenue = Math.max(0, (lineItemsCents - discountCents)) / 100;
+    const tips    = inv.tip_amount != null ? inv.tip_amount / 100 : entry.tips;
+
+    batch.push({ ...entry, revenue, tips });
   }
 
   if (batch.length > 0) {
