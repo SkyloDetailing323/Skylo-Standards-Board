@@ -208,6 +208,13 @@ exports.handler = async (event) => {
       });
       console.log(`Upsell: ${meta.skyloName} | ${note} | $${inv.upsellTotal}`);
       upsellsFound++;
+    } else if (inv) {
+      // Invoice was found but has no "Additional Upgrade" items — delete any stale upsell record
+      // so inflated values from the old sync don't persist.
+      await sbFetch(`upsells?hcp_job_id=eq.${jobId}`, {
+        method: "DELETE",
+        prefer: "return=minimal",
+      });
     }
   }
 
