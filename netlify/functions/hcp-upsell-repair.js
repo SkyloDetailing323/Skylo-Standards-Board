@@ -83,6 +83,12 @@ function parseInvoice(inv) {
   const discountCents  = (inv.discounts || []).reduce((s, d) => s + Math.abs(d.amount || 0), 0);
   const revenue = Math.max(0, (lineItemsCents - discountCents)) / 100;
 
+  // Tips are stored as payments with payment_method "tip" — NOT on the job object
+  const tipCents = (inv.payments || [])
+    .filter(p => (p.payment_method || "").toLowerCase() === "tip")
+    .reduce((s, p) => s + (p.amount || 0), 0);
+  const tips = tipCents / 100;
+
   let upsellCents = 0;
   const upsellItems = [];
   for (const item of (inv.items || [])) {
@@ -93,7 +99,7 @@ function parseInvoice(inv) {
     }
   }
 
-  return { revenue, upsellTotal: upsellCents / 100, upsellItems };
+  return { revenue, tips, upsellTotal: upsellCents / 100, upsellItems };
 }
 
 exports.handler = async (event) => {
@@ -204,12 +210,10 @@ exports.handler = async (event) => {
       hours = Math.round(((new Date(meta.schedEnd) - new Date(meta.schedStart)) / 3600000) * 100) / 100;
     }
 
-    // Tips come from job.tip_amount — invoice objects have no tip field
-    const tips = meta.tipAmount / 100;
-
     const inv = invoiceData[jobId];
-    // Fall back to job-level amounts for any job whose invoice wasn't found
     const revenue     = inv ? inv.revenue    : Math.max(0, (meta.totalAmount - meta.tipAmount)) / 100;
+    // Tips come from invoice payments (payment_method "tip"); fall back to job.tip_amount
+    const tips        = inv ? inv.tips       : meta.tipAmount / 100;
     const upsellTotal = inv ? inv.upsellTotal : 0;
 
     jobBatch.push({ hcp_job_id: jobId, tech_id: tech.id, job_date: jobDate, revenue, tips, hours, upsell_amount: upsellTotal, week_key: weekKey });

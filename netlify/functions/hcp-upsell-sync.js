@@ -85,6 +85,12 @@ function parseInvoice(inv) {
   const discountCents  = (inv.discounts || []).reduce((s, d) => s + Math.abs(d.amount || 0), 0);
   const revenue = Math.max(0, (lineItemsCents - discountCents)) / 100;
 
+  // Tips are stored as payments with payment_method "tip"
+  const tipCents = (inv.payments || [])
+    .filter(p => (p.payment_method || "").toLowerCase() === "tip")
+    .reduce((s, p) => s + (p.amount || 0), 0);
+  const tips = tipCents / 100;
+
   let upsellCents = 0;
   const upsellItems = [];
   for (const item of (inv.items || [])) {
@@ -95,7 +101,7 @@ function parseInvoice(inv) {
     }
   }
 
-  return { revenue, upsellTotal: upsellCents / 100, upsellItems };
+  return { revenue, tips, upsellTotal: upsellCents / 100, upsellItems };
 }
 
 exports.handler = async () => {
@@ -170,7 +176,7 @@ exports.handler = async () => {
 
     const inv = invoiceData[jobId];
     const revenue     = inv ? inv.revenue    : 0;
-    const tips        = meta.tipFallback / 100;  // invoice has no tip field; use job.tip_amount
+    const tips        = inv ? inv.tips       : meta.tipFallback / 100;
     const upsellTotal = inv ? inv.upsellTotal : 0;
 
     await sbFetch("jobs?on_conflict=hcp_job_id", {
