@@ -856,40 +856,6 @@ function ReportsTab({ techs, jobs, upsells=[], techId=null }) {
   const [preset, setPreset] = useState("wtd");
   const [cStart, setCStart] = useState("");
   const [cEnd,   setCEnd]   = useState("");
-  const [syncing, setSyncing] = useState(false);
-
-  async function syncRevenue() {
-    setSyncing(true);
-    try {
-      const chunks = [];
-      let cur = new Date(start + "T12:00:00Z");
-      const endD = new Date(end + "T12:00:00Z");
-      while (cur <= endD) {
-        const chunkFrom = cur.toISOString().split("T")[0];
-        const chunkEnd = new Date(cur);
-        chunkEnd.setUTCDate(chunkEnd.getUTCDate() + 6);
-        const chunkTo = chunkEnd > endD ? end : chunkEnd.toISOString().split("T")[0];
-        chunks.push({ from: chunkFrom, to: chunkTo });
-        cur.setUTCDate(cur.getUTCDate() + 7);
-      }
-      let total = 0;
-      for (const chunk of chunks) {
-        const res = await fetch("/.netlify/functions/hcp-revenue-sync", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(chunk),
-        });
-        const data = await res.json();
-        if (!data.ok) throw new Error("Sync failed on " + chunk.from);
-        total += data.jobsSynced || 0;
-      }
-      window.location.reload();
-    } catch(e) {
-      alert("Revenue sync failed: " + e.message);
-      setSyncing(false);
-    }
-  }
-
   const PRESETS = [["wtd","WTD"],["last_week","Last Week"],["mtd","MTD"],["last_month","Last Month"],["ytd","YTD"],["custom","Custom"]];
   const { start, end } = getDateRangeBounds(preset, cStart, cEnd);
 
@@ -962,14 +928,9 @@ function ReportsTab({ techs, jobs, upsells=[], techId=null }) {
             ))}
           </div>
         )}
-        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginTop:"8px", flexWrap:"wrap", gap:"8px" }}>
-          <div style={{ fontSize:"11px", color:C.blue, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>
+        <div style={{ marginTop:"8px", fontSize:"11px", color:C.blue, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>
             {start} → {end} · {inRange.length} job{inRange.length!==1?"s":""}
           </div>
-          <button onClick={syncRevenue} disabled={syncing} style={{ background:syncing?C.muted:C.green, border:"none", color:C.white, padding:"5px 12px", borderRadius:"6px", cursor:syncing?"not-allowed":"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", fontSize:"11px", letterSpacing:"1px", opacity:syncing?0.7:1 }}>
-            {syncing?"SYNCING...":"SYNC REVENUE"}
-          </button>
-        </div>
       </div>
 
       {inRange.length===0?(
@@ -2553,19 +2514,6 @@ function AdminUpsellEntry({ techs, upsells, saving, setSaving, refreshAll, showT
             </div>
           </div>
         ))}
-        {/* Pull from HCP button */}
-        <div style={{ display:"flex", flexDirection:"column", gap:"8px" }}>
-          <button onClick={pullFromHCP} disabled={saving} style={{ background:saving?"#333":C.blue, border:"none", color:C.white, padding:"13px", borderRadius:"12px", cursor:saving?"not-allowed":"pointer", fontSize:"13px", fontWeight:"700", letterSpacing:"2px", fontFamily:"'Barlow Condensed',sans-serif", width:"100%", textTransform:"uppercase" }}>
-            {saving?"Scanning...":"Pull Upsells from HCP"}
-          </button>
-          {pullResult&&(
-            <div style={{ background:C.cardLt, borderRadius:"8px", padding:"10px 14px", fontSize:"12px", color:C.muted }}>
-              Scanned <strong style={{color:C.black}}>{pullResult.jobsScanned}</strong> jobs · matched <strong style={{color:C.black}}>{pullResult.invoicesMatched}</strong> invoices · found <strong style={{color:C.green}}>{pullResult.upsellsFound} upsell{pullResult.upsellsFound===1?"":"s"}</strong> with "Additional Upgrade" line items
-            </div>
-          )}
-        </div>
-
-        <div style={{ fontSize:"11px", color:C.muted, textAlign:"center" }}>— or enter amounts manually below —</div>
         <button onClick={handleSave} disabled={saving} style={{ background:saving?"#333":C.green, border:"none", color:saving?"#666":C.black, padding:"13px", borderRadius:"12px", cursor:saving?"not-allowed":"pointer", fontSize:"13px", fontWeight:"700", letterSpacing:"2px", fontFamily:"'Barlow Condensed',sans-serif", width:"100%", textTransform:"uppercase" }}>{saving?"Saving...":"Save Upsells"}</button>
       </div>
       {/* ── Repair / Backfill ── */}
@@ -2977,52 +2925,6 @@ function RideAlongTab({ techs, rideAlongs, schedules, onSave, onSaveSchedule, sa
 }
 
 // ─── ADMIN PANEL ──────────────────────────────────────────────────────────────
-function BackfillCard({ refreshAll, showToast }) {
-  const [days, setDays] = useState(30);
-  const [running, setRunning] = useState(false);
-  const [result, setResult] = useState(null);
-
-  async function run() {
-    setRunning(true); setResult(null);
-    try {
-      const res = await fetch("/.netlify/functions/hcp-backfill-background", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({days}) });
-      if (res.status === 202) {
-        showToast("✅ Backfill started — data will update within 1–2 minutes");
-        setTimeout(() => refreshAll(), 90000);
-        setResult({ ok: true, message: "Running in background…" });
-      } else {
-        const data = await res.json().catch(() => ({}));
-        setResult(data);
-        if (data.ok) { await refreshAll(); showToast(`✅ ${data.synced} jobs synced from HCP`); }
-        else showToast("Backfill failed — check logs", false);
-      }
-    } catch(e) { showToast("Backfill error: "+e.message, false); }
-    setRunning(false);
-  }
-
-  return (
-    <div style={{ background:"#fff", border:`2px solid ${C.blue}`, borderRadius:"12px", padding:"16px 18px" }}>
-      <Label color={C.blue}>🔄 Pull Historical Jobs from HCP</Label>
-      <div style={{ fontSize:"12px", color:C.muted, marginBottom:"12px" }}>Imports past completed jobs so Reports, Payroll &amp; Leaderboard show real data. Safe to run multiple times — no duplicates created.</div>
-      <div style={{ display:"flex", gap:"10px", alignItems:"center", marginBottom:"12px", flexWrap:"wrap" }}>
-        <span style={{ fontSize:"12px", color:C.muted }}>Pull last</span>
-        <select value={days} onChange={e=>setDays(parseInt(e.target.value))} style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"6px 10px", borderRadius:"8px", fontSize:"13px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>
-          {[7,14,30,60,90].map(d=><option key={d} value={d}>{d} days</option>)}
-        </select>
-        <span style={{ fontSize:"12px", color:C.muted }}>of jobs</span>
-      </div>
-      <button onClick={run} disabled={running} style={{ background:running?C.border:C.blue, border:"none", color:"#fff", padding:"12px 20px", borderRadius:"10px", cursor:running?"not-allowed":"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"13px", letterSpacing:"2px", textTransform:"uppercase", opacity:running?0.7:1 }}>
-        {running?"⏳ Syncing Jobs...":"🔄 Run Backfill"}
-      </button>
-      {result&&(
-        <div style={{ marginTop:"10px", fontSize:"12px", color:result.ok?C.green:C.red, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>
-          {result.ok?`✅ ${result.synced} jobs synced, ${result.skipped} skipped (last ${result.days} days)`:"❌ Something went wrong — check function logs"}
-        </div>
-      )}
-    </div>
-  );
-}
-
 function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlongs, schedules, quota, setQuota, jobs, onLogout, refreshAll }) {
   const [tab, setTab] = useState("upsells");
   const [menuOpen, setMenuOpen] = useState(false);
@@ -3331,7 +3233,6 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
 
         {tab==="manage"&&(
           <div style={{ display:"flex", flexDirection:"column", gap:"10px" }}>
-            <BackfillCard refreshAll={refreshAll} showToast={showToast}/>
             {techs.filter(t=>t.is_active!==false).map(t=>(
               <div key={t.id} style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"16px 18px" }}>
                 <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:"10px" }}>
