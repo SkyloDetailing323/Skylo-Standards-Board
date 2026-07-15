@@ -80,7 +80,7 @@ function parseInvoice(inv) {
   // Negative line items (e.g. manual adjustments) subtract automatically via the sum.
   // Discounts in the separate "discounts" section are subtracted explicitly.
   const lineItemsCents = (inv.items || []).reduce((s, item) => s + (item.amount || 0), 0);
-  const discountCents  = (inv.discounts || []).reduce((s, d) => s + (d.amount || 0), 0);
+  const discountCents  = (inv.discounts || []).reduce((s, d) => s + Math.abs(d.amount || 0), 0);
   const revenue = Math.max(0, (lineItemsCents - discountCents)) / 100;
 
   let upsellCents = 0;
@@ -137,13 +137,20 @@ exports.handler = async () => {
   const techByName = Object.fromEntries((allTechs || []).map(t => [t.name, t]));
 
   // Fetch each job's invoices using GET /jobs/{job_id}/invoices
+  // Fetch today's invoices in bulk — today is newest so they're on page 1-2.
+  // Much faster than one API call per job.
+  const jobIds = new Set(Object.keys(jobMeta));
   const invoiceData = {};
-  for (const jobId of Object.keys(jobMeta)) {
-    const data = await hcpGet(`jobs/${jobId}/invoices`);
-    if (!data) continue;
+  for (let p = 1; p <= 3; p++) {
+    const data = await hcpGet(`invoices?created_at_min=${encodeURIComponent(todayStr + "T00:00:00Z")}&page=${p}&page_size=100`);
+    if (!data) break;
     const invoices = data.invoices || [];
-    if (invoices.length === 0) continue;
-    invoiceData[jobId] = parseInvoice(invoices[0]);
+    for (const inv of invoices) {
+      const jid = String(inv.job_id || "");
+      if (!jobIds.has(jid) || invoiceData[jid]) continue;
+      invoiceData[jid] = parseInvoice(inv);
+    }
+    if (invoices.length < 100 || Object.keys(invoiceData).length >= jobIds.size) break;
   }
   console.log(`Fetched invoices for ${Object.keys(invoiceData).length}/${Object.keys(jobMeta).length} jobs`);
 

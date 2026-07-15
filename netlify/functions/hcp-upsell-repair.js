@@ -1,12 +1,14 @@
 // netlify/functions/hcp-upsell-repair.js
 // On-demand repair for a date range.
 // POST { from: "YYYY-MM-DD", to: "YYYY-MM-DD" }
-// For each completed job, fetches its invoices via GET /jobs/{job_id}/invoices
-// and computes:
-//   revenue = sum(items[].amount) - sum(discounts[].amount)
-//   tips    = job.tip_amount (invoice has no tip field)
-//   upsells = items whose name starts with "Additional Upgrade"
-// Falls back to job.total_amount / job.tip_amount if no invoice found.
+//
+// Fetches all invoices for the date range in bulk (2-3 API calls max) then
+// matches to jobs by invoice.job_id. This avoids one-call-per-job which
+// causes Netlify timeout when a week has 100+ jobs.
+//
+// Revenue = sum(items[].amount) - sum(discounts[].amount)  [cents → dollars]
+// Tips    = job.tip_amount  (invoices have no tip field)
+// Upsells = items whose name starts with "Additional Upgrade"
 
 const TECH_MAP = {
   "Myles Madarieta":   "Myles Madarieta",
@@ -74,10 +76,9 @@ async function hcpGet(path) {
 }
 
 function parseInvoice(inv) {
-  // Revenue = sum of line item amounts minus discounts (negative items auto-subtract).
-  // Discounts in the separate discounts section must be explicitly subtracted.
   const lineItemsCents = (inv.items || []).reduce((s, item) => s + (item.amount || 0), 0);
-  const discountCents  = (inv.discounts || []).reduce((s, d) => s + (d.amount || 0), 0);
+  // Use Math.abs on discounts — HCP may return discount amounts as positive or negative integers
+  const discountCents  = (inv.discounts || []).reduce((s, d) => s + Math.abs(d.amount || 0), 0);
   const revenue = Math.max(0, (lineItemsCents - discountCents)) / 100;
 
   let upsellCents = 0;
@@ -111,22 +112,23 @@ exports.handler = async (event) => {
     return { statusCode: 400, body: JSON.stringify({ error: "from and to dates required (YYYY-MM-DD)" }) };
   }
 
-  const start = `${from}T00:00:00-06:00`;
-  const end   = `${to}T23:59:59-06:00`;
+  // Use UTC timestamps for HCP date filters
+  const start = `${from}T00:00:00Z`;
+  const end   = `${to}T23:59:59Z`;
   console.log(`Repair: ${from} → ${to}`);
 
   // Fetch techs
   const allTechs = await sbFetch("techs?select=id,name");
   const techByName = Object.fromEntries((allTechs || []).map(t => [t.name, t]));
 
-  // Fetch all completed jobs in range
+  // Fetch all completed jobs in range (job scheduled time, Mountain Time)
   const allJobs = [];
   let page = 1;
   while (true) {
     const qs = [
       `work_status[]=completed`,
-      `scheduled_start_min=${encodeURIComponent(start)}`,
-      `scheduled_start_max=${encodeURIComponent(end)}`,
+      `scheduled_start_min=${encodeURIComponent(`${from}T00:00:00-06:00`)}`,
+      `scheduled_start_max=${encodeURIComponent(`${to}T23:59:59-06:00`)}`,
       `page=${page}`,
       `page_size=100`,
     ].join("&");
@@ -156,29 +158,42 @@ exports.handler = async (event) => {
     };
   }
 
-  // Fetch each job's invoices using GET /jobs/{job_id}/invoices
+  // Fetch all invoices for this date range in bulk (2-3 API calls instead of one per job).
+  // Invoices are filtered by created_at so we only get invoices from this period.
+  const jobIds = new Set(Object.keys(jobMeta));
   const invoiceData = {};
   let invoicesMatched = 0;
 
-  for (const jobId of Object.keys(jobMeta)) {
-    if (Date.now() > DEADLINE) { console.log("Deadline reached during invoice fetch"); break; }
-    const data = await hcpGet(`jobs/${jobId}/invoices`);
-    if (!data) continue;
+  for (let p = 1; p <= 10; p++) {
+    if (Date.now() > DEADLINE) { console.log("Deadline during invoice fetch at page", p); break; }
+    const qs = [
+      `created_at_min=${encodeURIComponent(start)}`,
+      `created_at_max=${encodeURIComponent(end)}`,
+      `page=${p}`,
+      `page_size=100`,
+    ].join("&");
+    const data = await hcpGet(`invoices?${qs}`);
+    if (!data) { console.log("Invoice page", p, "returned null"); break; }
     const invoices = data.invoices || [];
-    if (invoices.length === 0) continue;
-    invoiceData[jobId] = parseInvoice(invoices[0]);
-    invoicesMatched++;
+    console.log(`Invoice page ${p}: ${invoices.length} invoices (total_items=${data.total_items})`);
+    for (const inv of invoices) {
+      const jid = String(inv.job_id || "");
+      if (!jobIds.has(jid) || invoiceData[jid]) continue;
+      invoiceData[jid] = parseInvoice(inv);
+      invoicesMatched++;
+    }
+    if (invoices.length < 100) break;
+    if (invoicesMatched >= jobIds.size) break;
   }
-  console.log(`Fetched invoices for ${invoicesMatched}/${Object.keys(jobMeta).length} jobs`);
+  console.log(`Matched ${invoicesMatched}/${Object.keys(jobMeta).length} jobs to invoices`);
 
   // Write all jobs to DB + upsell records
   let upsellsFound = 0;
   const jobBatch = [];
 
   for (const [jobId, meta] of Object.entries(jobMeta)) {
-    if (Date.now() > DEADLINE) { console.log("Deadline reached during write phase"); break; }
     const tech = techByName[meta.skyloName];
-    if (!tech) continue;
+    if (!tech) { console.log("Tech not in Supabase:", meta.skyloName); continue; }
 
     const jobDate = meta.schedStart ? meta.schedStart.split("T")[0] : from;
     const weekKey = getWeekKey(jobDate);
@@ -187,10 +202,11 @@ exports.handler = async (event) => {
       hours = Math.round(((new Date(meta.schedEnd) - new Date(meta.schedStart)) / 3600000) * 100) / 100;
     }
 
-    // Tips come from job.tip_amount — the invoice object has no tip field
+    // Tips come from job.tip_amount — invoice objects have no tip field
     const tips = meta.tipAmount / 100;
 
     const inv = invoiceData[jobId];
+    // Fall back to job-level amounts for any job whose invoice wasn't found
     const revenue     = inv ? inv.revenue    : Math.max(0, (meta.totalAmount - meta.tipAmount)) / 100;
     const upsellTotal = inv ? inv.upsellTotal : 0;
 
@@ -206,7 +222,7 @@ exports.handler = async (event) => {
       console.log(`Upsell: ${meta.skyloName} | ${note} | $${inv.upsellTotal}`);
       upsellsFound++;
     } else if (inv) {
-      // Invoice found but no upsells — delete any stale inflated record
+      // Invoice found, no upsells — delete any stale inflated record
       await sbFetch(`upsells?hcp_job_id=eq.${jobId}`, {
         method: "DELETE",
         prefer: "return=minimal",
@@ -214,7 +230,7 @@ exports.handler = async (event) => {
     }
   }
 
-  // Batch write all jobs in one call
+  // Batch write all jobs
   if (jobBatch.length > 0) {
     await sbFetch("jobs?on_conflict=hcp_job_id", {
       method: "POST",
