@@ -23,6 +23,8 @@ const TECH_MAP = {
   "Atticus Andersen":  "Atticus Anderson",
   "Landon White":      "Landon White",
   "Jackson Vaughn":    "Jackson Vaughn",
+  "Jackson Payne":     "Jackson Payne",
+  "Jamuar Hill":       "Jamuar Hill",
   "Brian Wheelus":     "Brian Wheelus",
   "Cole Burtenshaw":   "Cole Burtenshaw",
   "Ethan Hansen":      "Ethan Hansen",
