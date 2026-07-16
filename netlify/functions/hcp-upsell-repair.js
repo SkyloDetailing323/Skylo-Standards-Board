@@ -77,14 +77,12 @@ async function hcpGet(path) {
   return JSON.parse(text);
 }
 
-let _invoiceDebugLogged = false;
+const _allPayments = [];
 
 function parseInvoice(inv) {
-  if (!_invoiceDebugLogged) {
-    _invoiceDebugLogged = true;
-    console.log("DEBUG invoice keys:", Object.keys(inv).join(", "));
-    console.log("DEBUG invoice.payments:", JSON.stringify(inv.payments || null));
-    console.log("DEBUG invoice.tip_amount:", inv.tip_amount);
+  // Collect all payments for end-of-run debug dump
+  for (const p of (inv.payments || [])) {
+    _allPayments.push({ method: p.payment_method, amount: p.amount, note: p.note });
   }
 
   const lineItemsCents = (inv.items || []).reduce((s, item) => s + (item.amount || 0), 0);
@@ -270,6 +268,13 @@ exports.handler = async (event) => {
       body: JSON.stringify(jobBatch),
     });
   }
+
+  // Dump all payment methods+notes seen — helps identify how tips are stored in HCP
+  const uniqueMethods = [...new Set(_allPayments.map(p => p.method))];
+  console.log("DEBUG all payment_methods seen:", uniqueMethods.join(", "));
+  const tipped = _allPayments.filter(p => (p.note || "").toLowerCase().includes("tip"));
+  if (tipped.length) console.log("DEBUG payments with 'tip' in note:", JSON.stringify(tipped));
+  else console.log("DEBUG no payments had 'tip' in note field");
 
   console.log(`Done. ${upsellsFound} upsells, ${jobBatch.length} jobs written.`);
   return {
