@@ -228,10 +228,17 @@ exports.handler = async (event) => {
     }
 
     const inv = invoiceData[jobId];
-    const revenue     = inv ? inv.revenue    : Math.max(0, (meta.totalAmount - meta.tipAmount)) / 100;
-    // Tips come from invoice payments (payment_method "tip"); fall back to job.tip_amount
-    const tips        = inv ? inv.tips       : meta.tipAmount / 100;
+    const revenue     = inv ? inv.revenue : Math.max(0, (meta.totalAmount - meta.tipAmount)) / 100;
     const upsellTotal = inv ? inv.upsellTotal : 0;
+
+    // Try job.tip_amount first (jobs export confirms it's populated for completed jobs),
+    // fall back to invoice.tip_amount. Log first 5 to confirm which source is working.
+    const jobTipCents = meta.tipAmount || 0;
+    const invTipCents = inv ? Math.round((inv.tips || 0) * 100) : 0;
+    const tips = (jobTipCents > 0 ? jobTipCents : invTipCents) / 100;
+    if (jobBatch.length < 5) {
+      console.log(`TIP: ${meta.skyloName} | job.tip_amount=${jobTipCents}¢ inv.tip_amount=${invTipCents}¢ → $${tips}`);
+    }
 
     jobBatch.push({ hcp_job_id: jobId, tech_id: tech.id, job_date: jobDate, revenue, tips, hours, upsell_amount: upsellTotal, week_key: weekKey });
 

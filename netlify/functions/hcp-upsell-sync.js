@@ -172,9 +172,11 @@ exports.handler = async () => {
     }
 
     const inv = invoiceData[jobId];
-    const revenue     = inv ? inv.revenue    : 0;
-    const tips        = inv ? inv.tips       : meta.tipFallback / 100;
+    const revenue     = inv ? inv.revenue : 0;
     const upsellTotal = inv ? inv.upsellTotal : 0;
+    const jobTipCents = meta.tipFallback || 0;
+    const invTipCents = inv ? Math.round((inv.tips || 0) * 100) : 0;
+    const tips = (jobTipCents > 0 ? jobTipCents : invTipCents) / 100;
 
     await sbFetch("jobs?on_conflict=hcp_job_id", {
       method: "POST",
