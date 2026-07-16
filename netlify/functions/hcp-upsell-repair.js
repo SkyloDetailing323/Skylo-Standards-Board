@@ -77,7 +77,16 @@ async function hcpGet(path) {
   return JSON.parse(text);
 }
 
+let _invoiceDebugLogged = false;
+
 function parseInvoice(inv) {
+  if (!_invoiceDebugLogged) {
+    _invoiceDebugLogged = true;
+    console.log("DEBUG invoice keys:", Object.keys(inv).join(", "));
+    console.log("DEBUG invoice.payments:", JSON.stringify(inv.payments || null));
+    console.log("DEBUG invoice.tip_amount:", inv.tip_amount);
+  }
+
   const lineItemsCents = (inv.items || []).reduce((s, item) => s + (item.amount || 0), 0);
   // Use Math.abs on discounts — HCP may return discount amounts as positive or negative integers
   const discountCents  = (inv.discounts || []).reduce((s, d) => s + Math.abs(d.amount || 0), 0);
@@ -193,7 +202,24 @@ exports.handler = async (event) => {
     if (invoices.length < 100) break;
     if (invoicesMatched >= jobIds.size) break;
   }
-  console.log(`Matched ${invoicesMatched}/${Object.keys(jobMeta).length} jobs to invoices`);
+  console.log(`Matched ${invoicesMatched}/${Object.keys(jobMeta).length} jobs to invoices (bulk)`);
+
+  // For jobs the bulk fetch missed (invoice created_at outside the date range — common when jobs
+  // are booked weeks in advance), fall back to per-job invoice calls. Usually only a handful.
+  const unmatched = [...jobIds].filter(jid => !invoiceData[jid]);
+  if (unmatched.length > 0) {
+    console.log(`Per-job fallback for ${unmatched.length} unmatched jobs`);
+    for (const jobId of unmatched) {
+      if (Date.now() > DEADLINE) { console.log("Deadline during per-job fallback"); break; }
+      const invData = await hcpGet(`jobs/${jobId}/invoices`);
+      const invoices = invData?.invoices || [];
+      if (invoices.length > 0) {
+        invoiceData[jobId] = parseInvoice(invoices[0]);
+        invoicesMatched++;
+      }
+    }
+    console.log(`After fallback: ${invoicesMatched}/${Object.keys(jobMeta).length} matched`);
+  }
 
   // Write all jobs to DB + upsell records
   let upsellsFound = 0;
