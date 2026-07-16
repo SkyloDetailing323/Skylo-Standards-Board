@@ -159,7 +159,21 @@ exports.handler = async () => {
     }
     if (invoices.length < 100 || Object.keys(invoiceData).length >= jobIds.size) break;
   }
-  console.log(`Fetched invoices for ${Object.keys(invoiceData).length}/${Object.keys(jobMeta).length} jobs`);
+  console.log(`Fetched invoices for ${Object.keys(invoiceData).length}/${Object.keys(jobMeta).length} jobs (bulk)`);
+
+  // Per-job fallback for any jobs whose invoice was created before today (booked in advance).
+  const unmatched = [...jobIds].filter(jid => !invoiceData[jid]);
+  if (unmatched.length > 0) {
+    const BATCH = 5;
+    for (let i = 0; i < unmatched.length; i += BATCH) {
+      await Promise.all(unmatched.slice(i, i + BATCH).map(async (jobId) => {
+        const invData = await hcpGet(`jobs/${jobId}/invoices`);
+        const invoices = invData?.invoices || [];
+        if (invoices.length > 0) invoiceData[jobId] = parseInvoice(invoices[0]);
+      }));
+    }
+    console.log(`After fallback: ${Object.keys(invoiceData).length}/${Object.keys(jobMeta).length} matched`);
+  }
 
   let synced = 0;
   for (const [jobId, meta] of Object.entries(jobMeta)) {
