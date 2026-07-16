@@ -80,11 +80,14 @@ async function hcpGet(path) {
 function parseInvoice(inv) {
   const lineItemsCents = (inv.items || []).reduce((s, item) => s + (item.amount || 0), 0);
   const discountCents  = (inv.discounts || []).reduce((s, d) => s + Math.abs(d.amount || 0), 0);
-  const revenue = Math.max(0, (lineItemsCents - discountCents)) / 100;
+  const serviceCents   = Math.max(0, lineItemsCents - discountCents);
+  const revenue        = serviceCents / 100;
 
-  // tip_amount is a dedicated field on the invoice (cents). The payment history shows tip+base
-  // bundled into one charge, so tips are NOT derivable from payments[].
-  const tips = (inv.tip_amount || 0) / 100;
+  // HCP API returns tip_amount=0 on both job and invoice objects.
+  // Derive tip as: total payments collected minus service total.
+  // Customer pays one charge that includes service + tip bundled together.
+  const paidCents = (inv.payments || []).reduce((s, p) => s + (p.amount || 0), 0);
+  const tips      = Math.max(0, paidCents - serviceCents) / 100;
 
   let upsellCents = 0;
   const upsellItems = [];
@@ -228,17 +231,9 @@ exports.handler = async (event) => {
     }
 
     const inv = invoiceData[jobId];
-    const revenue     = inv ? inv.revenue : Math.max(0, (meta.totalAmount - meta.tipAmount)) / 100;
+    const revenue     = inv ? inv.revenue    : Math.max(0, (meta.totalAmount - meta.tipAmount)) / 100;
+    const tips        = inv ? inv.tips       : 0;
     const upsellTotal = inv ? inv.upsellTotal : 0;
-
-    // Try job.tip_amount first (jobs export confirms it's populated for completed jobs),
-    // fall back to invoice.tip_amount. Log first 5 to confirm which source is working.
-    const jobTipCents = meta.tipAmount || 0;
-    const invTipCents = inv ? Math.round((inv.tips || 0) * 100) : 0;
-    const tips = (jobTipCents > 0 ? jobTipCents : invTipCents) / 100;
-    if (jobBatch.length < 5) {
-      console.log(`TIP: ${meta.skyloName} | job.tip_amount=${jobTipCents}¢ inv.tip_amount=${invTipCents}¢ → $${tips}`);
-    }
 
     jobBatch.push({ hcp_job_id: jobId, tech_id: tech.id, job_date: jobDate, revenue, tips, hours, upsell_amount: upsellTotal, week_key: weekKey });
 

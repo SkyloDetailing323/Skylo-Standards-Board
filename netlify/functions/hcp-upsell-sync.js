@@ -83,10 +83,12 @@ function parseInvoice(inv) {
   // Discounts in the separate "discounts" section are subtracted explicitly.
   const lineItemsCents = (inv.items || []).reduce((s, item) => s + (item.amount || 0), 0);
   const discountCents  = (inv.discounts || []).reduce((s, d) => s + Math.abs(d.amount || 0), 0);
-  const revenue = Math.max(0, (lineItemsCents - discountCents)) / 100;
+  const serviceCents   = Math.max(0, lineItemsCents - discountCents);
+  const revenue        = serviceCents / 100;
 
-  // tip_amount is a dedicated field on the invoice (cents).
-  const tips = (inv.tip_amount || 0) / 100;
+  // HCP API returns tip_amount=0; derive tip as total payments minus service total.
+  const paidCents = (inv.payments || []).reduce((s, p) => s + (p.amount || 0), 0);
+  const tips      = Math.max(0, paidCents - serviceCents) / 100;
 
   let upsellCents = 0;
   const upsellItems = [];
