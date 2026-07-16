@@ -85,11 +85,8 @@ function parseInvoice(inv) {
   const discountCents  = (inv.discounts || []).reduce((s, d) => s + Math.abs(d.amount || 0), 0);
   const revenue = Math.max(0, (lineItemsCents - discountCents)) / 100;
 
-  // Tips are stored as payments with payment_method "tip"
-  const tipCents = (inv.payments || [])
-    .filter(p => (p.payment_method || "").toLowerCase() === "tip")
-    .reduce((s, p) => s + (p.amount || 0), 0);
-  const tips = tipCents / 100;
+  // tip_amount is a dedicated field on the invoice (cents).
+  const tips = (inv.tip_amount || 0) / 100;
 
   let upsellCents = 0;
   const upsellItems = [];

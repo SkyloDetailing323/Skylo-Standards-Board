@@ -77,24 +77,14 @@ async function hcpGet(path) {
   return JSON.parse(text);
 }
 
-const _allPayments = [];
-
 function parseInvoice(inv) {
-  // Collect all payments for end-of-run debug dump
-  for (const p of (inv.payments || [])) {
-    _allPayments.push({ method: p.payment_method, amount: p.amount, note: p.note });
-  }
-
   const lineItemsCents = (inv.items || []).reduce((s, item) => s + (item.amount || 0), 0);
-  // Use Math.abs on discounts — HCP may return discount amounts as positive or negative integers
   const discountCents  = (inv.discounts || []).reduce((s, d) => s + Math.abs(d.amount || 0), 0);
   const revenue = Math.max(0, (lineItemsCents - discountCents)) / 100;
 
-  // Tips are stored as payments with payment_method "tip" — NOT on the job object
-  const tipCents = (inv.payments || [])
-    .filter(p => (p.payment_method || "").toLowerCase() === "tip")
-    .reduce((s, p) => s + (p.amount || 0), 0);
-  const tips = tipCents / 100;
+  // tip_amount is a dedicated field on the invoice (cents). The payment history shows tip+base
+  // bundled into one charge, so tips are NOT derivable from payments[].
+  const tips = (inv.tip_amount || 0) / 100;
 
   let upsellCents = 0;
   const upsellItems = [];
@@ -268,13 +258,6 @@ exports.handler = async (event) => {
       body: JSON.stringify(jobBatch),
     });
   }
-
-  // Dump all payment methods+notes seen — helps identify how tips are stored in HCP
-  const uniqueMethods = [...new Set(_allPayments.map(p => p.method))];
-  console.log("DEBUG all payment_methods seen:", uniqueMethods.join(", "));
-  const tipped = _allPayments.filter(p => (p.note || "").toLowerCase().includes("tip"));
-  if (tipped.length) console.log("DEBUG payments with 'tip' in note:", JSON.stringify(tipped));
-  else console.log("DEBUG no payments had 'tip' in note field");
 
   console.log(`Done. ${upsellsFound} upsells, ${jobBatch.length} jobs written.`);
   return {
