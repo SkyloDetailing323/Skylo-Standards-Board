@@ -193,18 +193,21 @@ exports.handler = async (event) => {
   console.log(`Matched ${invoicesMatched}/${Object.keys(jobMeta).length} jobs to invoices (bulk)`);
 
   // For jobs the bulk fetch missed (invoice created_at outside the date range — common when jobs
-  // are booked weeks in advance), fall back to per-job invoice calls. Usually only a handful.
+  // are booked weeks in advance), fetch per-job invoices in parallel batches of 5.
   const unmatched = [...jobIds].filter(jid => !invoiceData[jid]);
   if (unmatched.length > 0) {
     console.log(`Per-job fallback for ${unmatched.length} unmatched jobs`);
-    for (const jobId of unmatched) {
-      if (Date.now() > DEADLINE) { console.log("Deadline during per-job fallback"); break; }
-      const invData = await hcpGet(`jobs/${jobId}/invoices`);
-      const invoices = invData?.invoices || [];
-      if (invoices.length > 0) {
-        invoiceData[jobId] = parseInvoice(invoices[0]);
-        invoicesMatched++;
-      }
+    const BATCH = 5;
+    for (let i = 0; i < unmatched.length; i += BATCH) {
+      if (Date.now() > DEADLINE) { console.log("Deadline during per-job fallback at index", i); break; }
+      await Promise.all(unmatched.slice(i, i + BATCH).map(async (jobId) => {
+        const invData = await hcpGet(`jobs/${jobId}/invoices`);
+        const invoices = invData?.invoices || [];
+        if (invoices.length > 0) {
+          invoiceData[jobId] = parseInvoice(invoices[0]);
+          invoicesMatched++;
+        }
+      }));
     }
     console.log(`After fallback: ${invoicesMatched}/${Object.keys(jobMeta).length} matched`);
   }
