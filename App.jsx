@@ -1021,7 +1021,8 @@ function ReportsTab({ techs, jobs, upsells=[], techHours=[], techId=null, onSave
 function ManualHoursEntry({ techs, techHours, onSaveHours }) {
   const wk = getWeekKey();
   const [selectedWeek, setSelectedWeek] = useState(wk);
-  const [form, setForm] = useState({});
+  const [selectedTechId, setSelectedTechId] = useState(techs[0]?.id||"");
+  const [hoursInput, setHoursInput] = useState("");
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState(null);
 
@@ -1033,69 +1034,70 @@ function ManualHoursEntry({ techs, techHours, onSaveHours }) {
     return d.toISOString().split("T")[0];
   }
 
-  const existingByTech = Object.fromEntries(
-    (techHours||[]).filter(h=>h.week_key===selectedWeek).map(h=>[h.tech_id, h.hours])
-  );
-
+  // Pre-fill hours when tech or week changes
   useEffect(()=>{
-    const prefilled = {};
-    techs.forEach(t=>{ if(existingByTech[t.id]!=null) prefilled[t.id]=String(existingByTech[t.id]); });
-    setForm(prefilled);
-  }, [selectedWeek, techHours.length]);
+    const existing = (techHours||[]).find(h=>h.tech_id===selectedTechId&&h.week_key===selectedWeek);
+    setHoursInput(existing ? String(existing.hours) : "");
+  }, [selectedTechId, selectedWeek, techHours.length]);
 
-  async function saveAll() {
+  async function save() {
+    const hrs = parseFloat(hoursInput);
+    if (isNaN(hrs)||hrs<0||!selectedTechId) return;
     setSaving(true);
-    const entries = techs.filter(t=>form[t.id]!==""&&!isNaN(parseFloat(form[t.id])));
-    let saved=0;
-    for (const t of entries) {
-      const hrs = parseFloat(form[t.id]);
-      if (isNaN(hrs)||hrs<0) continue;
-      await onSaveHours(t.id, selectedWeek, hrs);
-      saved++;
-    }
-    setToast(`✅ Saved hours for ${saved} tech${saved!==1?"s":""}`);
-    setTimeout(()=>setToast(null),3000);
+    await onSaveHours(selectedTechId, selectedWeek, hrs);
+    setToast("✅ Saved!");
+    setTimeout(()=>setToast(null),2500);
     setSaving(false);
   }
+
+  const selectedTech = techs.find(t=>t.id===selectedTechId);
+  const existing = (techHours||[]).find(h=>h.tech_id===selectedTechId&&h.week_key===selectedWeek);
 
   return (
     <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.blue}`, borderRadius:"12px", overflow:"hidden" }}>
       <div style={{ padding:"14px 18px", borderBottom:`1px solid ${C.border}`, background:C.cardLt }}>
         <Label color={C.blue}>⏱ Manual Hours Entry</Label>
-        <div style={{ fontSize:"12px", color:C.muted }}>Enter clock-in/out totals per tech per week. These replace the old auto-calculated job times.</div>
+        <div style={{ fontSize:"12px", color:C.muted }}>Clock-in/out totals from HCP — select a tech and week, enter their hours.</div>
       </div>
       <div style={{ padding:"14px 18px", display:"flex", flexDirection:"column", gap:"14px" }}>
+
+        {/* Tech dropdown */}
+        <div>
+          <div style={{ fontSize:"10px", color:C.muted, letterSpacing:"2px", textTransform:"uppercase", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", marginBottom:"6px" }}>Technician</div>
+          <select value={selectedTechId} onChange={e=>setSelectedTechId(e.target.value)}
+            style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"10px 14px", borderRadius:"12px", fontSize:"14px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", width:"100%", cursor:"pointer" }}>
+            {techs.map(t=><option key={t.id} value={t.id}>{t.name}</option>)}
+          </select>
+        </div>
+
         {/* Week picker */}
         <div>
-          <div style={{ fontSize:"10px", color:C.muted, letterSpacing:"2px", textTransform:"uppercase", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", marginBottom:"6px" }}>Week (pick any date in the week)</div>
+          <div style={{ fontSize:"10px", color:C.muted, letterSpacing:"2px", textTransform:"uppercase", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", marginBottom:"6px" }}>Week</div>
           <input type="date" defaultValue={wk}
             onChange={e=>{ if(e.target.value) setSelectedWeek(weekFromDate(e.target.value)); }}
-            style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"8px 12px", borderRadius:"8px", fontSize:"13px", fontFamily:"'Barlow',sans-serif" }}
+            style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"8px 12px", borderRadius:"8px", fontSize:"13px", fontFamily:"'Barlow',sans-serif", width:"100%" }}
           />
-          <span style={{ marginLeft:"10px", fontSize:"12px", color:C.blue, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>
-            {formatWeekLabel(selectedWeek)}
-          </span>
+          <div style={{ marginTop:"4px", fontSize:"12px", color:C.blue, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>{formatWeekLabel(selectedWeek)}</div>
         </div>
 
-        {/* Tech rows */}
-        <div style={{ display:"flex", flexDirection:"column", gap:"8px" }}>
-          {techs.map(t=>(
-            <div key={t.id} style={{ display:"flex", alignItems:"center", gap:"12px" }}>
-              <div style={{ width:"36px", height:"36px", borderRadius:"50%", background:`${C.blue}22`, border:`1px solid ${C.blue}44`, display:"flex", alignItems:"center", justifyContent:"center", fontFamily:"'Barlow Condensed',sans-serif", fontSize:"12px", fontWeight:"800", color:C.blue, flexShrink:0 }}>{t.avatar}</div>
-              <div style={{ flex:1, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", fontSize:"14px", color:C.black }}>{t.name}</div>
-              <input
-                type="number" min="0" step="0.5" placeholder="0"
-                value={form[t.id]||""}
-                onChange={e=>setForm(f=>({...f,[t.id]:e.target.value}))}
-                style={{ width:"80px", background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"8px", borderRadius:"8px", fontSize:"14px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", textAlign:"right" }}
-              />
-              <span style={{ fontSize:"12px", color:C.muted, width:"24px" }}>hrs</span>
-            </div>
-          ))}
+        {/* Hours input */}
+        <div>
+          <div style={{ fontSize:"10px", color:C.muted, letterSpacing:"2px", textTransform:"uppercase", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", marginBottom:"6px" }}>
+            Hours {existing ? <span style={{ color:C.blue }}>— currently {existing.hours}h saved</span> : ""}
+          </div>
+          <div style={{ display:"flex", gap:"10px", alignItems:"center" }}>
+            <input type="number" min="0" step="0.5" placeholder="e.g. 42.5"
+              value={hoursInput}
+              onChange={e=>setHoursInput(e.target.value)}
+              style={{ flex:1, background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"12px 14px", borderRadius:"12px", fontSize:"18px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900" }}
+            />
+            <span style={{ fontSize:"16px", color:C.muted, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>hrs</span>
+          </div>
         </div>
 
-        <button onClick={saveAll} disabled={saving} style={{ background:saving?C.border:C.blue, border:"none", color:C.white, padding:"13px", borderRadius:"12px", cursor:saving?"not-allowed":"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"13px", letterSpacing:"2px", textTransform:"uppercase" }}>
-          {saving?"SAVING…":"💾 SAVE HOURS"}
+        <button onClick={save} disabled={saving||!hoursInput||isNaN(parseFloat(hoursInput))}
+          style={{ background:saving?C.border:C.blue, border:"none", color:C.white, padding:"13px", borderRadius:"12px", cursor:saving?"not-allowed":"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"13px", letterSpacing:"2px", textTransform:"uppercase" }}>
+          {saving?"SAVING…":`💾 SAVE — ${selectedTech?.name||""} · ${formatWeekLabel(selectedWeek)}`}
         </button>
         {toast&&<div style={{ fontSize:"13px", color:C.green, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", textAlign:"center" }}>{toast}</div>}
       </div>
