@@ -230,17 +230,12 @@ exports.handler = async (event) => {
 
     const jobDate = meta.schedStart ? meta.schedStart.split("T")[0] : from;
     const weekKey = getWeekKey(jobDate);
-    let hours = 0;
-    if (meta.schedStart && meta.schedEnd) {
-      hours = Math.round(((new Date(meta.schedEnd) - new Date(meta.schedStart)) / 3600000) * 100) / 100;
-    }
-
     const inv = invoiceData[jobId];
     const revenue     = inv ? inv.revenue    : Math.max(0, (meta.totalAmount - meta.tipAmount)) / 100;
     const tips        = inv ? inv.tips       : 0;
     const upsellTotal = inv ? inv.upsellTotal : 0;
 
-    jobBatch.push({ hcp_job_id: jobId, tech_id: tech.id, job_date: jobDate, revenue, tips, hours, upsell_amount: upsellTotal, week_key: weekKey });
+    jobBatch.push({ hcp_job_id: jobId, tech_id: tech.id, job_date: jobDate, revenue, tips, hours: 0, upsell_amount: upsellTotal, week_key: weekKey });
 
     if (inv && inv.upsellTotal > 0) {
       const note = inv.upsellItems.map(i => `${i.name} ($${i.amount.toFixed(2)})`).join(", ");

@@ -852,7 +852,7 @@ function TotalLeaderboard({ techs, upsells, switchovers, reviews, callbacks }) {
 }
 
 // ─── REPORTS TAB ─────────────────────────────────────────────────────────────
-function ReportsTab({ techs, jobs, upsells=[], techId=null }) {
+function ReportsTab({ techs, jobs, upsells=[], techHours=[], techId=null, onSaveHours=null }) {
   const [preset, setPreset] = useState("wtd");
   const [cStart, setCStart] = useState("");
   const [cEnd,   setCEnd]   = useState("");
@@ -885,7 +885,7 @@ function ReportsTab({ techs, jobs, upsells=[], techId=null }) {
 
   const totalRevenue   = inRange.reduce((s,j) => s+(j.revenue||0), 0);
   const totalTips      = inRange.reduce((s,j) => s+(j.tips||0), 0);
-  const totalHours     = inRange.reduce((s,j) => s+(j.hours||0), 0);
+  const totalHours     = (techHours||[]).filter(h => h.week_key >= startWk && h.week_key <= endWk && (!techId || h.tech_id === techId)).reduce((s,h) => s+(h.hours||0), 0);
   const commMap        = Object.fromEntries(techs.map(t => [t.id, (t.commission_rate||27)/100]));
   const totalLabor     = inRange.reduce((s,j) => s+(j.revenue||0)*(commMap[j.tech_id]||0.27), 0);
   const revPerHr       = totalHours > 0 ? totalRevenue/totalHours : 0;
@@ -896,7 +896,7 @@ function ReportsTab({ techs, jobs, upsells=[], techId=null }) {
   const techRows = techId ? [] : techs.map(t => {
     const tj = inRange.filter(j=>j.tech_id===t.id);
     const rev  = tj.reduce((s,j)=>s+(j.revenue||0),0);
-    const hrs  = tj.reduce((s,j)=>s+(j.hours||0),0);
+    const hrs  = (techHours||[]).filter(h=>h.tech_id===t.id&&h.week_key>=startWk&&h.week_key<=endWk).reduce((s,h)=>s+(h.hours||0),0);
     const ups  = upsellByTech[t.id] || 0;
     const tips = tj.reduce((s,j)=>s+(j.tips||0),0);
     const wkBreakdown = allWkKeys.map(wk=>{
@@ -944,8 +944,8 @@ function ReportsTab({ techs, jobs, upsells=[], techId=null }) {
             {[
               { label:"Serviced Revenue", value:`$${Math.round(totalRevenue).toLocaleString()}`, color:C.green,                                              sub:`${inRange.length} jobs` },
               { label:"Tips",            value:`$${Math.round(totalTips).toLocaleString()}`,   color:C.gold,                                               sub:"separate from revenue" },
-              { label:"Hours",           value:totalHours.toFixed(1),                          color:C.blue,                                               sub:`avg ${inRange.length>0?(totalHours/inRange.length).toFixed(1):0}h/job` },
-              { label:"Rev / Hour",   value:`$${revPerHr.toFixed(2)}`,                         color:revPerHr>=75?C.green:C.orange,                        sub:"Target: >$75/hr" },
+              { label:"Hours",           value:totalHours>0?totalHours.toFixed(1):"—",            color:C.blue,                                               sub:totalHours>0?`${(totalHours/Math.max(inRange.length,1)).toFixed(1)}h/job avg`:"Enter hours below" },
+              { label:"Rev / Hour",   value:totalHours>0?`$${revPerHr.toFixed(2)}`:"—",        color:totalHours>0?(revPerHr>=75?C.green:C.orange):C.muted, sub:"Target: >$75/hr" },
               { label:"Upsell $",     value:`$${Math.round(totalUpsells).toLocaleString()}`,   color:C.gold,                                               sub:`of $${Math.round(totalRevenue).toLocaleString()} revenue` },
               { label:"Upsell Rate",  value:`${upsellPct.toFixed(1)}%`,                        color:upsellPct>=10?C.green:C.orange,                       sub:"Target: >10%" },
               { label:"Labor Cost %", value:totalLabor>0?`${laborPct.toFixed(1)}%`:"—",        color:totalLabor>0?(laborPct<24?C.green:C.orange):C.muted,  sub:"Target: <24%" },
@@ -1008,6 +1008,97 @@ function ReportsTab({ techs, jobs, upsells=[], techId=null }) {
           )}
         </>
       )}
+
+      {/* Manual Hours Entry — admin only */}
+      {onSaveHours && (
+        <ManualHoursEntry techs={techs} techHours={techHours} onSaveHours={onSaveHours}/>
+      )}
+    </div>
+  );
+}
+
+// ─── MANUAL HOURS ENTRY ───────────────────────────────────────────────────────
+function ManualHoursEntry({ techs, techHours, onSaveHours }) {
+  const wk = getWeekKey();
+  const [selectedWeek, setSelectedWeek] = useState(wk);
+  const [form, setForm] = useState({});
+  const [saving, setSaving] = useState(false);
+  const [toast, setToast] = useState(null);
+
+  function weekFromDate(dateStr) {
+    const d = new Date(dateStr + "T12:00:00Z");
+    const day = d.getUTCDay();
+    const back = day === 0 ? 6 : day - 1;
+    d.setUTCDate(d.getUTCDate() - back);
+    return d.toISOString().split("T")[0];
+  }
+
+  const existingByTech = Object.fromEntries(
+    (techHours||[]).filter(h=>h.week_key===selectedWeek).map(h=>[h.tech_id, h.hours])
+  );
+
+  useEffect(()=>{
+    const prefilled = {};
+    techs.forEach(t=>{ if(existingByTech[t.id]!=null) prefilled[t.id]=String(existingByTech[t.id]); });
+    setForm(prefilled);
+  }, [selectedWeek, techHours.length]);
+
+  async function saveAll() {
+    setSaving(true);
+    const entries = techs.filter(t=>form[t.id]!==""&&!isNaN(parseFloat(form[t.id])));
+    let saved=0;
+    for (const t of entries) {
+      const hrs = parseFloat(form[t.id]);
+      if (isNaN(hrs)||hrs<0) continue;
+      await onSaveHours(t.id, selectedWeek, hrs);
+      saved++;
+    }
+    setToast(`✅ Saved hours for ${saved} tech${saved!==1?"s":""}`);
+    setTimeout(()=>setToast(null),3000);
+    setSaving(false);
+  }
+
+  return (
+    <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.blue}`, borderRadius:"12px", overflow:"hidden" }}>
+      <div style={{ padding:"14px 18px", borderBottom:`1px solid ${C.border}`, background:C.cardLt }}>
+        <Label color={C.blue}>⏱ Manual Hours Entry</Label>
+        <div style={{ fontSize:"12px", color:C.muted }}>Enter clock-in/out totals per tech per week. These replace the old auto-calculated job times.</div>
+      </div>
+      <div style={{ padding:"14px 18px", display:"flex", flexDirection:"column", gap:"14px" }}>
+        {/* Week picker */}
+        <div>
+          <div style={{ fontSize:"10px", color:C.muted, letterSpacing:"2px", textTransform:"uppercase", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", marginBottom:"6px" }}>Week (pick any date in the week)</div>
+          <input type="date" defaultValue={wk}
+            onChange={e=>{ if(e.target.value) setSelectedWeek(weekFromDate(e.target.value)); }}
+            style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"8px 12px", borderRadius:"8px", fontSize:"13px", fontFamily:"'Barlow',sans-serif" }}
+          />
+          <span style={{ marginLeft:"10px", fontSize:"12px", color:C.blue, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>
+            {formatWeekLabel(selectedWeek)}
+          </span>
+        </div>
+
+        {/* Tech rows */}
+        <div style={{ display:"flex", flexDirection:"column", gap:"8px" }}>
+          {techs.map(t=>(
+            <div key={t.id} style={{ display:"flex", alignItems:"center", gap:"12px" }}>
+              <div style={{ width:"36px", height:"36px", borderRadius:"50%", background:`${C.blue}22`, border:`1px solid ${C.blue}44`, display:"flex", alignItems:"center", justifyContent:"center", fontFamily:"'Barlow Condensed',sans-serif", fontSize:"12px", fontWeight:"800", color:C.blue, flexShrink:0 }}>{t.avatar}</div>
+              <div style={{ flex:1, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", fontSize:"14px", color:C.black }}>{t.name}</div>
+              <input
+                type="number" min="0" step="0.5" placeholder="0"
+                value={form[t.id]||""}
+                onChange={e=>setForm(f=>({...f,[t.id]:e.target.value}))}
+                style={{ width:"80px", background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"8px", borderRadius:"8px", fontSize:"14px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", textAlign:"right" }}
+              />
+              <span style={{ fontSize:"12px", color:C.muted, width:"24px" }}>hrs</span>
+            </div>
+          ))}
+        </div>
+
+        <button onClick={saveAll} disabled={saving} style={{ background:saving?C.border:C.blue, border:"none", color:C.white, padding:"13px", borderRadius:"12px", cursor:saving?"not-allowed":"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"13px", letterSpacing:"2px", textTransform:"uppercase" }}>
+          {saving?"SAVING…":"💾 SAVE HOURS"}
+        </button>
+        {toast&&<div style={{ fontSize:"13px", color:C.green, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", textAlign:"center" }}>{toast}</div>}
+      </div>
     </div>
   );
 }
@@ -1918,7 +2009,7 @@ function IncentiveBoard({ techs, upsells, switchovers, reviews, callbacks, curre
 }
 
 // ─── TECH DASHBOARD ───────────────────────────────────────────────────────────
-function TechDashboard({ tech, techs, upsells, switchovers, reviews, callbacks, quota, jobs, onLogout }) {
+function TechDashboard({ tech, techs, upsells, switchovers, reviews, callbacks, quota, jobs, techHours, onLogout }) {
   const q = quota || DEFAULT_QUOTA;
   const [tab, setTab] = useState("overview");
   const [menuOpen, setMenuOpen] = useState(false);
@@ -2199,7 +2290,7 @@ function TechDashboard({ tech, techs, upsells, switchovers, reviews, callbacks, 
             )}
           </div>
         )}
-        {tab==="reports"&&<ReportsTab techs={techs} jobs={jobs||[]} upsells={upsells||[]} techId={tech.id}/>}
+        {tab==="reports"&&<ReportsTab techs={techs} jobs={jobs||[]} upsells={upsells||[]} techHours={techHours||[]} techId={tech.id}/>}
         {tab==="leaderboard"&&<Leaderboard techs={techs} jobs={jobs||[]} upsells={upsells} reviews={reviews} callbacks={callbacks||[]} switchovers={switchovers}/>}
         {tab==="badges"&&<BadgeGrid earned={tech.badges}/>}
         {tab==="upsells"&&<UpsellLeaderboard techs={techs} upsells={upsells} currentId={tech.id}/>}
@@ -2925,7 +3016,7 @@ function RideAlongTab({ techs, rideAlongs, schedules, onSave, onSaveSchedule, sa
 }
 
 // ─── ADMIN PANEL ──────────────────────────────────────────────────────────────
-function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlongs, schedules, quota, setQuota, jobs, onLogout, refreshAll }) {
+function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlongs, schedules, quota, setQuota, jobs, techHours, onLogout, refreshAll }) {
   const [tab, setTab] = useState("upsells");
   const [menuOpen, setMenuOpen] = useState(false);
   const [awardForm, setAwardForm] = useState({techId:"",badgeId:""});
@@ -3391,7 +3482,17 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
         )}
 
         {tab==="reports"&&(
-          <ReportsTab techs={techs} jobs={jobs||[]} upsells={upsells||[]} techId={null}/>
+          <ReportsTab techs={techs} jobs={jobs||[]} upsells={upsells||[]} techHours={techHours||[]} techId={null}
+            onSaveHours={async(tech_id,week_key,hours)=>{
+              setSaving(true);
+              try {
+                await sb("tech_hours?on_conflict=tech_id,week_key",{method:"POST",prefer:"resolution=merge-duplicates,return=minimal",body:JSON.stringify({tech_id,week_key,hours})});
+                await refreshAll();
+                showToast("✅ Hours saved!");
+              } catch(e){ showToast("Error: "+e.message,false); }
+              setSaving(false);
+            }}
+          />
         )}
         {tab==="leaderboard"&&(
           <Leaderboard techs={techs} jobs={jobs||[]} upsells={upsells} reviews={reviews} callbacks={callbacks||[]} switchovers={switchovers}/>
@@ -3443,6 +3544,7 @@ export default function App() {
   const [rideAlongs, setRideAlongs] = useState([]);
   const [schedules, setSchedules] = useState([]);
   const [jobs, setJobs] = useState([]);
+  const [techHours, setTechHours] = useState([]);
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [dbError, setDbError] = useState(null);
@@ -3451,7 +3553,7 @@ export default function App() {
 
   const loadAll = useCallback(async () => {
     try {
-      const [t,u,s,r,ra,sch,settings,cb,jb] = await Promise.all([
+      const [t,u,s,r,ra,sch,settings,cb,jb,th] = await Promise.all([
         sb("techs?select=*&order=name"),
         sb("upsells?select=*"),
         sb("switchovers?select=*"),
@@ -3461,9 +3563,10 @@ export default function App() {
         sb("settings?key=eq.quota&select=*").catch(()=>[]),
         sb("callbacks?select=*&order=created_at.desc").catch(()=>[]),
         sb("jobs?select=*&order=job_date.desc").catch(()=>[]),
+        sb("tech_hours?select=*").catch(()=>[]),
       ]);
       setTechs(t||[]); setUpsells(u||[]); setSwitchovers(s||[]); setReviews(r||[]);
-      setRideAlongs(ra||[]); setSchedules(sch||[]); setCallbacks(cb||[]); setJobs(jb||[]);
+      setRideAlongs(ra||[]); setSchedules(sch||[]); setCallbacks(cb||[]); setJobs(jb||[]); setTechHours(th||[]);
       if (settings&&settings.length>0) {
         try { setQuota(JSON.parse(settings[0].value)); } catch {}
       }
@@ -3576,11 +3679,11 @@ alter table jobs add column if not exists tips numeric default 0;`}
     <AdminPanel techs={techs} setTechs={setTechs} upsells={upsells} setUpsells={setUpsells}
       switchovers={switchovers} setSwitchovers={setSwitchovers} reviews={reviews} setReviews={setReviews}
       callbacks={callbacks} rideAlongs={rideAlongs} schedules={schedules} quota={quota} setQuota={setQuota}
-      jobs={jobs} onLogout={()=>setUser(null)} refreshAll={loadAll}/>
+      jobs={jobs} techHours={techHours} onLogout={()=>setUser(null)} refreshAll={loadAll}/>
   );
   if (user.type==="tech"&&currentTech) return (
     <TechDashboard tech={currentTech} techs={activeTechs} upsells={upsells} switchovers={switchovers}
-      reviews={reviews} callbacks={callbacks} quota={quota} jobs={jobs} onLogout={()=>setUser(null)}/>
+      reviews={reviews} callbacks={callbacks} quota={quota} jobs={jobs} techHours={techHours} onLogout={()=>setUser(null)}/>
   );
   return null;
 }

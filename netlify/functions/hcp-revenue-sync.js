@@ -119,11 +119,6 @@ exports.handler = async (event) => {
     if (!tech) continue;
 
     const schedStart = job.schedule?.scheduled_start;
-    const schedEnd   = job.schedule?.scheduled_end;
-    let hours = 0;
-    if (schedStart && schedEnd) {
-      hours = Math.round(((new Date(schedEnd) - new Date(schedStart)) / 3600000) * 100) / 100;
-    }
     const jobDate = schedStart ? schedStart.split("T")[0] : from;
 
     jobEntries.push({
@@ -131,7 +126,7 @@ exports.handler = async (event) => {
       tech_id:     tech.id,
       job_date:    jobDate,
       week_key:    getWeekKey(jobDate),
-      hours,
+      hours:       0,
       // fallback values from job level — overwritten below if invoice is found
       revenue: Math.max(0, ((job.total_amount || 0) - (job.tip_amount || 0))) / 100,
       tips:    (job.tip_amount || 0) / 100,

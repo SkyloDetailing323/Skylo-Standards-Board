@@ -187,11 +187,6 @@ exports.handler = async () => {
 
     const jobDate = meta.schedStart ? meta.schedStart.split("T")[0] : todayStr;
     const weekKey = getWeekKey(jobDate);
-    let hours = 0;
-    if (meta.schedStart && meta.schedEnd) {
-      hours = Math.round(((new Date(meta.schedEnd) - new Date(meta.schedStart)) / 3600000) * 100) / 100;
-    }
-
     const inv = invoiceData[jobId];
     const revenue     = inv ? inv.revenue : 0;
     const upsellTotal = inv ? inv.upsellTotal : 0;
@@ -202,7 +197,7 @@ exports.handler = async () => {
     await sbFetch("jobs?on_conflict=hcp_job_id", {
       method: "POST",
       prefer: "resolution=merge-duplicates,return=minimal",
-      body: JSON.stringify({ hcp_job_id: jobId, tech_id: tech.id, job_date: jobDate, revenue, upsell_amount: upsellTotal, hours, tips, week_key: weekKey }),
+      body: JSON.stringify({ hcp_job_id: jobId, tech_id: tech.id, job_date: jobDate, revenue, upsell_amount: upsellTotal, hours: 0, tips, week_key: weekKey }),
     });
 
     if (upsellTotal > 0 && inv) {
