@@ -84,11 +84,15 @@ function parseInvoice(inv) {
   const serviceCents   = Math.max(0, lineItemsCents - discountCents);
   const revenue        = serviceCents / 100;
 
-  // HCP API returns tip_amount=0 on both job and invoice objects.
-  // Derive tip as: total payments collected minus service total.
-  // Customer pays one charge that includes service + tip bundled together.
-  const paidCents = (inv.payments || []).reduce((s, p) => s + (p.amount || 0), 0);
-  const tips      = Math.max(0, paidCents - serviceCents) / 100;
+  // Try payment-level tip_amount first — more accurate than deriving from payment surplus.
+  // HCP stores the tip on each payment object even though invoice.tip_amount always returns 0.
+  const payments = inv.payments || [];
+  const tipFromPayments = payments.reduce((s, p) => s + (p.tip_amount || 0), 0);
+  const paidCents       = payments.reduce((s, p) => s + (p.amount || 0), 0);
+  const derivedTip      = Math.max(0, paidCents - serviceCents);
+  console.log(`TIP_DEBUG inv_tip=${inv.tip_amount||0} payment_tip=${tipFromPayments} derived=${derivedTip} service=${serviceCents} paid=${paidCents}`);
+  const tipCents = tipFromPayments > 0 ? tipFromPayments : derivedTip;
+  const tips = tipCents / 100;
 
   let upsellCents = 0;
   const upsellItems = [];

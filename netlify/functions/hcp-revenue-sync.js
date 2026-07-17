@@ -154,8 +154,10 @@ exports.handler = async (event) => {
     const discountCents  = (inv.discounts || []).reduce((s, d) => s + Math.abs(d.amount || 0), 0);
     const serviceCents   = Math.max(0, lineItemsCents - discountCents);
     const revenue        = serviceCents / 100;
-    const paidCents      = (inv.payments || []).reduce((s, p) => s + (p.amount || 0), 0);
-    const tips           = Math.max(0, paidCents - serviceCents) / 100;
+    const payments       = inv.payments || [];
+    const tipFromPay     = payments.reduce((s, p) => s + (p.tip_amount || 0), 0);
+    const paidCents      = payments.reduce((s, p) => s + (p.amount || 0), 0);
+    const tips           = (tipFromPay > 0 ? tipFromPay : Math.max(0, paidCents - serviceCents)) / 100;
 
     batch.push({ ...entry, revenue, tips });
   }
