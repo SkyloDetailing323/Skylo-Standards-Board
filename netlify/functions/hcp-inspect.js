@@ -1,7 +1,7 @@
 // Temporary diagnostic — DELETE after use.
-// Fetches jobs from 2026-07-20 to find job_number 8016040659 (or 8016040429 / 8016040482),
-// then fetches the full job by UUID + invoices + activity endpoints.
-// GET /.netlify/functions/hcp-inspect
+// Fetches jobs Jul 20–25 looking for split jobs (multiple assigned_employees).
+// For each split job found: fetch invoice items to check for per-employee attribution.
+// Also checks invoice_number field (which is the "Job #" display in HCP UI).
 exports.handler = async (event) => {
   try {
     const auth = { "Authorization": `Token ${process.env.HCP_API_KEY}` };
@@ -9,53 +9,56 @@ exports.handler = async (event) => {
     async function hcpGet(path) {
       const res = await fetch(`https://api.housecallpro.com/${path}`, { headers: auth });
       const text = await res.text();
-      return { status: res.status, text };
+      return { status: res.status, body: text ? JSON.parse(text) : null };
     }
 
-    // Fetch jobs on 2026-07-20 to find the split jobs by job_number
+    // Fetch jobs Jul 20–25
     const listRes = await hcpGet(
-      "jobs?scheduled_start_min=2026-07-20T00%3A00%3A00-06%3A00&scheduled_start_max=2026-07-20T23%3A59%3A59-06%3A00&page_size=100"
+      "jobs?scheduled_start_min=2026-07-20T00%3A00%3A00-06%3A00&scheduled_start_max=2026-07-25T23%3A59%3A59-06%3A00&page_size=100"
     );
-    const listData = JSON.parse(listRes.text || "{}");
-    const jobs = listData.jobs || [];
+    const allJobs = listRes.body?.jobs || [];
 
-    // Find jobs by display number (job_number field)
-    const targetNumbers = ["8016040659", "8016040429", "8016040482"];
-    const found = jobs.filter(j =>
-      targetNumbers.includes(String(j.job_number || j.id || ""))
-    );
+    // Find jobs with multiple assigned employees (split jobs)
+    const splitJobs = allJobs.filter(j => (j.assigned_employees || []).length > 1);
 
-    // If none matched by job_number, return the first 3 jobs so we can see the ID shape
-    const sample = found.length > 0 ? found : jobs.slice(0, 3);
-
-    // For the first matched/sample job, fetch full detail + invoice + activity
-    let detail = null;
-    if (sample.length > 0) {
-      const uuid = sample[0].id;
-      const [jobDetail, invoiceRes, actRes, actsRes] = await Promise.all([
-        hcpGet(`jobs/${uuid}`),
-        hcpGet(`jobs/${uuid}/invoices`),
-        hcpGet(`jobs/${uuid}/activity`),
-        hcpGet(`jobs/${uuid}/activities`),
-      ]);
-      detail = {
-        uuid,
-        job_status: jobDetail.status, job_raw: jobDetail.text,
-        inv_status: invoiceRes.status, inv_raw: invoiceRes.text,
-        act_status: actRes.status,    act_raw: actRes.text,
-        acts_status: actsRes.status,  acts_raw: actsRes.text,
+    // For each split job, fetch invoice to see if items have employee attribution
+    const splitDetails = await Promise.all(splitJobs.map(async (job) => {
+      const invRes = await hcpGet(`jobs/${job.id}/invoices`);
+      const inv0 = invRes.body?.invoices?.[0];
+      return {
+        uuid:              job.id,
+        invoice_number:    job.invoice_number,   // this is the "Job #" shown in HCP UI
+        work_status:       job.work_status,
+        total_amount_cents: job.total_amount,
+        assigned_employees: (job.assigned_employees || []).map(e => ({
+          id: e.id,
+          name: `${e.first_name} ${e.last_name}`,
+          // include ALL keys on the employee object to spot any split-related fields
+          all_keys: Object.keys(e),
+          full: e,
+        })),
+        invoice: inv0 ? {
+          id: inv0.id,
+          amount: inv0.amount,
+          items: (inv0.items || []).map(i => ({
+            // include ALL keys on each item to spot any employee attribution
+            all_keys: Object.keys(i),
+            full: i,
+          })),
+          discounts: inv0.discounts,
+          payments: inv0.payments,
+        } : null,
       };
-    }
+    }));
 
     return {
       statusCode: 200,
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        list_status:   listRes.status,
-        total_jobs:    jobs.length,
-        // show id + job_number + assigned_employees of each job in the sample
-        sample_jobs:   sample.map(j => ({ id: j.id, job_number: j.job_number, work_status: j.work_status, assigned_employees: j.assigned_employees, total_amount: j.total_amount })),
-        detail,
+        date_range:       "2026-07-20 to 2026-07-25",
+        total_jobs:       allJobs.length,
+        split_jobs_found: splitJobs.length,
+        split_details:    splitDetails,
       }, null, 2),
     };
   } catch (err) {
