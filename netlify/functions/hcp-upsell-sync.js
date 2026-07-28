@@ -5,34 +5,7 @@
 //   upsells    = line items whose name starts with "Additional Upgrade"
 // HCP amounts are in cents — divide by 100.
 
-const TECH_MAP = {
-  "Myles Madarieta":   "Myles Madarieta",
-  "Kade Andrew":       "Kade Andrew",
-  "Kyle Reiff":        "Kyle Rieff",
-  "Zak Lundblade":     "Zak Lundblade",
-  "Josh Halafuka":     "Josh Halufuka",
-  "Matthew Durkovich": "Matthew Durkovich",
-  "Milos Lewit":       "Milos Lewit",
-  "Mason Dixon":       "Mason Dixon",
-  "Tom Lorenc":        "Tom Lorenc",
-  "Ethan Hamilton":    "Ethan Hamilton",
-  "Caleb McDaniel":    "Caleb McDaniel",
-  "Riley Lyon":        "Riley Lyon",
-  "Britton Dookhran":  "Britton Dookhran",
-  "Atticus Andersen":  "Atticus Anderson",
-  "Landon White":      "Landon White",
-  "Jackson Vaughn":    "Jackson Vaughn",
-  "Jackson Payne":     "Jackson Payne",
-  "JaMuar Hill":       "Jamuar Hill",
-  "Jayden Brownlee":   "Jayden Brownlee",
-  "Brian Wheelus":     "Brian Wheelus",
-  "Cole Burtenshaw":   "Cole Burtenshaw",
-  "Ethan Hansen":      "Ethan Hansen",
-  "Max Hancock":       "Max Hancock",
-  "Riley Wooden":      "Riley Wooden",
-  "Trevor Prince":     "Trevor Prince",
-  "Will Faulkner":     "Will Faulkner",
-};
+const TECH_MAP = require('./lib/techMap');
 
 function getMT() {
   const mt = new Date(Date.now() - 6 * 60 * 60 * 1000);
@@ -210,7 +183,7 @@ exports.handler = async () => {
       console.log(`UPSELL: ${meta.skyloName} | ${note}`);
     }
 
-    console.log(`Synced: ${meta.skyloName} | rev=$${revenue} tips=$${tips} upsells=$${upsellTotal} hrs=${hours}`);
+    console.log(`Synced: ${meta.skyloName} | rev=$${revenue} tips=$${tips} upsells=$${upsellTotal} hrs=0`);
     synced++;
   }
 

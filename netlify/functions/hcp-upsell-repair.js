@@ -10,34 +10,7 @@
 // Tips    = job.tip_amount  (invoices have no tip field)
 // Upsells = items whose name starts with "Additional Upgrade"
 
-const TECH_MAP = {
-  "Myles Madarieta":   "Myles Madarieta",
-  "Kade Andrew":       "Kade Andrew",
-  "Kyle Reiff":        "Kyle Rieff",
-  "Zak Lundblade":     "Zak Lundblade",
-  "Josh Halafuka":     "Josh Halufuka",
-  "Matthew Durkovich": "Matthew Durkovich",
-  "Milos Lewit":       "Milos Lewit",
-  "Mason Dixon":       "Mason Dixon",
-  "Tom Lorenc":        "Tom Lorenc",
-  "Ethan Hamilton":    "Ethan Hamilton",
-  "Caleb McDaniel":    "Caleb McDaniel",
-  "Riley Lyon":        "Riley Lyon",
-  "Britton Dookhran":  "Britton Dookhran",
-  "Atticus Andersen":  "Atticus Anderson",
-  "Landon White":      "Landon White",
-  "Jackson Vaughn":    "Jackson Vaughn",
-  "Jackson Payne":     "Jackson Payne",
-  "JaMuar Hill":       "Jamuar Hill",
-  "Jayden Brownlee":   "Jayden Brownlee",
-  "Brian Wheelus":     "Brian Wheelus",
-  "Cole Burtenshaw":   "Cole Burtenshaw",
-  "Ethan Hansen":      "Ethan Hansen",
-  "Max Hancock":       "Max Hancock",
-  "Riley Wooden":      "Riley Wooden",
-  "Trevor Prince":     "Trevor Prince",
-  "Will Faulkner":     "Will Faulkner",
-};
+const TECH_MAP = require('./lib/techMap');
 
 function getWeekKey(dateStr) {
   const d = new Date(dateStr + "T12:00:00Z");
@@ -232,7 +205,7 @@ exports.handler = async (event) => {
     const weekKey = getWeekKey(jobDate);
     const inv = invoiceData[jobId];
     const revenue     = inv ? inv.revenue    : Math.max(0, (meta.totalAmount - meta.tipAmount)) / 100;
-    const tips        = inv ? inv.tips       : 0;
+    const tips        = inv ? inv.tips       : meta.tipAmount / 100;
     const upsellTotal = inv ? inv.upsellTotal : 0;
 
     jobBatch.push({ hcp_job_id: jobId, tech_id: tech.id, job_date: jobDate, revenue, tips, hours: 0, upsell_amount: upsellTotal, week_key: weekKey });
