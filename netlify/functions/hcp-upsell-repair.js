@@ -56,16 +56,14 @@ function parseInvoice(inv) {
   const discountCents  = (inv.discounts || []).reduce((s, d) => s + Math.abs(d.amount || 0), 0);
   const serviceCents   = Math.max(0, lineItemsCents - discountCents);
   const revenue        = serviceCents / 100;
+  const discount       = discountCents / 100;
 
-  // Try payment-level tip_amount first — more accurate than deriving from payment surplus.
-  // HCP stores the tip on each payment object even though invoice.tip_amount always returns 0.
-  const payments = inv.payments || [];
+  const payments        = inv.payments || [];
   const tipFromPayments = payments.reduce((s, p) => s + (p.tip_amount || 0), 0);
   const paidCents       = payments.reduce((s, p) => s + (p.amount || 0), 0);
   const derivedTip      = Math.max(0, paidCents - serviceCents);
-  console.log(`TIP_DEBUG inv_tip=${inv.tip_amount||0} payment_tip=${tipFromPayments} derived=${derivedTip} service=${serviceCents} paid=${paidCents}`);
-  const tipCents = tipFromPayments > 0 ? tipFromPayments : derivedTip;
-  const tips = tipCents / 100;
+  const tipCents        = tipFromPayments > 0 ? tipFromPayments : derivedTip;
+  const tips            = tipCents / 100;
 
   let upsellCents = 0;
   const upsellItems = [];
@@ -77,7 +75,7 @@ function parseInvoice(inv) {
     }
   }
 
-  return { revenue, tips, upsellTotal: upsellCents / 100, upsellItems };
+  return { revenue, discount, tips, upsellTotal: upsellCents / 100, upsellItems };
 }
 
 exports.handler = async (event) => {
@@ -195,20 +193,26 @@ exports.handler = async (event) => {
 
   // Write all jobs to DB + upsell records
   let upsellsFound = 0;
-  const jobBatch = [];
+  const jobBatch  = [];
+  const jobReport = [];
 
   for (const [jobId, meta] of Object.entries(jobMeta)) {
     const tech = techByName[meta.skyloName];
     if (!tech) { console.log("Tech not in Supabase:", meta.skyloName); continue; }
 
-    const jobDate = meta.schedStart ? meta.schedStart.split("T")[0] : from;
-    const weekKey = getWeekKey(jobDate);
-    const inv = invoiceData[jobId];
-    const revenue     = inv ? inv.revenue    : Math.max(0, (meta.totalAmount - meta.tipAmount)) / 100;
-    const tips        = inv ? inv.tips       : meta.tipAmount / 100;
+    const jobDate     = meta.schedStart ? meta.schedStart.split("T")[0] : from;
+    const weekKey     = getWeekKey(jobDate);
+    const inv         = invoiceData[jobId];
+    const revenue     = inv ? inv.revenue     : Math.max(0, (meta.totalAmount - meta.tipAmount)) / 100;
+    const tips        = inv ? inv.tips        : meta.tipAmount / 100;
     const upsellTotal = inv ? inv.upsellTotal : 0;
+    const discount    = inv ? inv.discount    : 0;
 
     jobBatch.push({ hcp_job_id: jobId, tech_id: tech.id, job_date: jobDate, revenue, tips, hours: 0, upsell_amount: upsellTotal, week_key: weekKey });
+
+    const reportEntry = { jobId, tech: meta.skyloName, date: jobDate, revenue, discount, tip: tips, upsells: upsellTotal, invoiceFound: !!inv };
+    jobReport.push(reportEntry);
+    console.log(`JOB ${jobId} | ${meta.skyloName} | ${jobDate} | rev=$${revenue.toFixed(2)} disc=$${discount.toFixed(2)} tip=$${tips.toFixed(2)} ups=$${upsellTotal.toFixed(2)} | ${inv ? "INVOICE" : "NO INVOICE - fallback"}`);
 
     if (inv && inv.upsellTotal > 0) {
       const note = inv.upsellItems.map(i => `${i.name} ($${i.amount.toFixed(2)})`).join(", ");
@@ -217,14 +221,9 @@ exports.handler = async (event) => {
         prefer: "resolution=merge-duplicates,return=minimal",
         body: JSON.stringify({ tech_id: tech.id, week_key: weekKey, amount: inv.upsellTotal, hcp_job_id: jobId, note }),
       });
-      console.log(`Upsell: ${meta.skyloName} | ${note} | $${inv.upsellTotal}`);
       upsellsFound++;
     } else if (inv) {
-      // Invoice found, no upsells — delete any stale inflated record
-      await sbFetch(`upsells?hcp_job_id=eq.${jobId}`, {
-        method: "DELETE",
-        prefer: "return=minimal",
-      });
+      await sbFetch(`upsells?hcp_job_id=eq.${jobId}`, { method: "DELETE", prefer: "return=minimal" });
     }
   }
 
@@ -241,6 +240,6 @@ exports.handler = async (event) => {
   return {
     statusCode: 200,
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ok: true, upsellsFound, jobsScanned: allJobs.length, invoicesMatched }),
+    body: JSON.stringify({ ok: true, upsellsFound, jobsScanned: allJobs.length, invoicesMatched, jobsWritten: jobBatch.length, jobs: jobReport }),
   };
 };
