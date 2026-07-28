@@ -2512,7 +2512,7 @@ function AdminUpsellEntry({ techs, upsells, saving, setSaving, refreshAll, showT
         chunks.push({ from: chunkFrom, to: chunkTo });
         cur.setUTCDate(cur.getUTCDate() + 7);
       }
-      let totalUpsells = 0, totalJobs = 0, totalInvMatched = 0, lastDebug = null;
+      let totalUpsells = 0, totalJobs = 0, totalInvMatched = 0, allJobRows = [];
       for (let i = 0; i < chunks.length; i++) {
         const chunk = chunks[i];
         showToast(`Scanning week ${i+1} of ${chunks.length}...`);
@@ -2526,10 +2526,10 @@ function AdminUpsellEntry({ techs, upsells, saving, setSaving, refreshAll, showT
         totalUpsells += data.upsellsFound || 0;
         totalJobs += data.jobsScanned || 0;
         totalInvMatched += data.invoicesMatched || 0;
-        if (data.debug && i === 0) lastDebug = data.debug;
+        if (data.jobs) allJobRows.push(...data.jobs);
       }
       await refreshAll();
-      setRepairResult({ upsellsFound: totalUpsells, jobsScanned: totalJobs, invoicesMatched: totalInvMatched, debug: lastDebug });
+      setRepairResult({ upsellsFound: totalUpsells, jobsScanned: totalJobs, invoicesMatched: totalInvMatched, jobs: allJobRows });
       showToast(`✅ Found ${totalUpsells} upsell${totalUpsells===1?"":"s"} from HCP`);
     } catch(e) { showToast("Error: "+e.message, false); }
     setRepairing(false);
@@ -2625,8 +2625,37 @@ function AdminUpsellEntry({ techs, upsells, saving, setSaving, refreshAll, showT
           {repairing ? "Scanning HCP — this may take ~20 sec..." : "Repair Upsells"}
         </button>
         {repairResult && (
-          <div style={{ background:C.cardLt, borderRadius:"8px", padding:"10px 14px", fontSize:"12px", color:C.muted }}>
-            Scanned <strong style={{color:C.black}}>{repairResult.jobsScanned}</strong> jobs · matched <strong style={{color:C.black}}>{repairResult.invoicesMatched}</strong> invoices · wrote <strong style={{color:C.orange}}>{repairResult.upsellsFound} upsell{repairResult.upsellsFound===1?"":"s"}</strong> to the board
+          <div style={{ display:"flex", flexDirection:"column", gap:"8px" }}>
+            <div style={{ background:C.cardLt, borderRadius:"8px", padding:"10px 14px", fontSize:"12px", color:C.muted }}>
+              Scanned <strong style={{color:C.black}}>{repairResult.jobsScanned}</strong> jobs · matched <strong style={{color:C.black}}>{repairResult.invoicesMatched}</strong> invoices · wrote <strong style={{color:C.orange}}>{repairResult.upsellsFound} upsell{repairResult.upsellsFound===1?"":"s"}</strong> to the board
+            </div>
+            {repairResult.jobs && repairResult.jobs.length > 0 && (
+              <div style={{ overflowX:"auto", maxHeight:"320px", overflowY:"auto", borderRadius:"8px", border:`1px solid ${C.border}` }}>
+                <table style={{ width:"100%", borderCollapse:"collapse", fontSize:"11px", fontFamily:"'Barlow',sans-serif" }}>
+                  <thead>
+                    <tr style={{ background:C.card, position:"sticky", top:0 }}>
+                      {["Job ID","Tech","Date","Revenue","Discount","Tip","Upsells","Invoice"].map(h => (
+                        <th key={h} style={{ padding:"6px 10px", textAlign:"left", color:C.muted, fontWeight:"700", letterSpacing:"1px", fontFamily:"'Barlow Condensed',sans-serif", whiteSpace:"nowrap", borderBottom:`1px solid ${C.border}` }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {repairResult.jobs.map((row, i) => (
+                      <tr key={row.jobId} style={{ background: i%2===0 ? C.cardLt : C.card }}>
+                        <td style={{ padding:"5px 10px", color:C.muted, whiteSpace:"nowrap" }}>{row.jobId}</td>
+                        <td style={{ padding:"5px 10px", color:C.black, whiteSpace:"nowrap" }}>{row.tech}</td>
+                        <td style={{ padding:"5px 10px", color:C.muted, whiteSpace:"nowrap" }}>{row.date}</td>
+                        <td style={{ padding:"5px 10px", color:C.green, fontWeight:"700", whiteSpace:"nowrap" }}>${row.revenue.toFixed(2)}</td>
+                        <td style={{ padding:"5px 10px", color: row.discount > 0 ? C.orange : C.muted, whiteSpace:"nowrap" }}>{row.discount > 0 ? `-$${row.discount.toFixed(2)}` : "—"}</td>
+                        <td style={{ padding:"5px 10px", color: row.tip > 0 ? C.green : C.muted, whiteSpace:"nowrap" }}>{row.tip > 0 ? `$${row.tip.toFixed(2)}` : "—"}</td>
+                        <td style={{ padding:"5px 10px", color: row.upsells > 0 ? C.orange : C.muted, fontWeight: row.upsells > 0 ? "700" : "400", whiteSpace:"nowrap" }}>{row.upsells > 0 ? `$${row.upsells.toFixed(2)}` : "—"}</td>
+                        <td style={{ padding:"5px 10px", color: row.invoiceFound ? C.green : C.muted, whiteSpace:"nowrap" }}>{row.invoiceFound ? "✓" : "fallback"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         )}
       </div>
