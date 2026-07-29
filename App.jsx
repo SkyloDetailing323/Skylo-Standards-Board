@@ -3046,8 +3046,121 @@ function RideAlongTab({ techs, rideAlongs, schedules, onSave, onSaveSchedule, sa
   );
 }
 
+// ─── SPLIT JOBS ADMIN ─────────────────────────────────────────────────────────
+function SplitJobsAdmin({ techs, pendingSplits, refreshAll, showToast, saving, setSaving }) {
+  const techById = Object.fromEntries(techs.map(t => [t.id, t]));
+  const [splitInputs, setSplitInputs] = useState({});
+
+  // Group pending rows by hcp_job_id
+  const grouped = {};
+  for (const row of pendingSplits) {
+    if (!grouped[row.hcp_job_id]) grouped[row.hcp_job_id] = [];
+    grouped[row.hcp_job_id].push(row);
+  }
+  const splitJobs = Object.entries(grouped).map(([jobId, rows]) => ({
+    jobId,
+    date:         rows[0]?.job_date,
+    totalRevenue: +(rows.reduce((s, r) => s + (r.revenue || 0), 0)).toFixed(2),
+    totalTips:    +(rows.reduce((s, r) => s + (r.tips    || 0), 0)).toFixed(2),
+    rows,
+  }));
+
+  function getInput(jobId, techId, defaultPct) {
+    return (splitInputs[jobId] || {})[techId] ?? String(defaultPct);
+  }
+  function setInput(jobId, techId, val) {
+    setSplitInputs(prev => ({ ...prev, [jobId]: { ...(prev[jobId] || {}), [techId]: val } }));
+  }
+
+  async function saveSplit(sj) {
+    const n = sj.rows.length;
+    const defPct = Math.round(100 / n);
+    const entries = sj.rows.map(r => ({
+      tech_id: r.tech_id,
+      pct: parseFloat(getInput(sj.jobId, r.tech_id, defPct) || "0"),
+    }));
+    const total = entries.reduce((s, e) => s + e.pct, 0);
+    if (Math.abs(total - 100) > 0.5) {
+      showToast(`Percentages must add up to 100 (got ${total.toFixed(1)}%)`, false);
+      return;
+    }
+    setSaving(true);
+    try {
+      for (const e of entries) {
+        await sb(`job_splits?on_conflict=hcp_job_id,tech_id`, {
+          method: "POST",
+          prefer: "resolution=merge-duplicates,return=minimal",
+          body: JSON.stringify({ hcp_job_id: sj.jobId, tech_id: e.tech_id, percentage: e.pct }),
+        });
+      }
+      showToast(`✅ Split saved — re-run Repair Upsells for ${sj.date} to apply`);
+    } catch(err) { showToast("Error: " + err.message, false); }
+    setSaving(false);
+  }
+
+  return (
+    <div style={{ display:"flex", flexDirection:"column", gap:"16px" }}>
+      <div style={{ background:C.cardLt, borderRadius:"8px", padding:"12px 16px", fontSize:"12px", color:C.muted, lineHeight:"1.6" }}>
+        These jobs have <strong style={{color:C.black}}>multiple techs</strong> with no confirmed revenue split on record — they are currently
+        using <strong style={{color:"#f59e0b"}}>equal split</strong> as a placeholder. Enter the correct percentages below,
+        hit <strong style={{color:C.black}}>Save Split</strong>, then re-run <strong style={{color:C.black}}>Repair Upsells</strong> for that date to apply.
+      </div>
+      {splitJobs.length === 0 ? (
+        <div style={{ background:C.card, borderRadius:"12px", padding:"30px", textAlign:"center", color:C.muted, fontSize:"13px" }}>
+          ✅ No unconfirmed split jobs — all good!
+        </div>
+      ) : splitJobs.map(sj => {
+        const n = sj.rows.length;
+        const defPct = Math.round(100 / n);
+        const vals = sj.rows.map(r => parseFloat(getInput(sj.jobId, r.tech_id, defPct) || "0"));
+        const total = vals.reduce((a, b) => a + b, 0);
+        const ok = Math.abs(total - 100) <= 0.5;
+        return (
+          <div key={sj.jobId} style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid #f59e0b`, borderRadius:"12px", padding:"18px", display:"flex", flexDirection:"column", gap:"12px" }}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
+              <div>
+                <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"13px", color:C.muted, letterSpacing:"1px" }}>...{sj.jobId.slice(-12)}</div>
+                <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", fontSize:"15px", color:C.black, marginTop:"2px" }}>{sj.date}</div>
+              </div>
+              <div style={{ textAlign:"right" }}>
+                <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"15px", color:C.green }}>${sj.totalRevenue.toFixed(2)} rev</div>
+                {sj.totalTips > 0 && <div style={{ fontSize:"11px", color:C.muted }}>${sj.totalTips.toFixed(2)} tips</div>}
+              </div>
+            </div>
+            {sj.rows.map((r, i) => {
+              const tech = techById[r.tech_id];
+              return (
+                <div key={r.tech_id} style={{ display:"grid", gridTemplateColumns:"1fr 70px 16px", gap:"8px", alignItems:"center" }}>
+                  <div style={{ fontSize:"13px", color:C.black, fontWeight:"600" }}>{tech?.name || r.tech_id.slice(0, 8)}</div>
+                  <input
+                    type="number" min="0" max="100" step="0.5"
+                    value={getInput(sj.jobId, r.tech_id, defPct)}
+                    onChange={e => setInput(sj.jobId, r.tech_id, e.target.value)}
+                    style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"6px 8px", borderRadius:"8px", fontSize:"13px", textAlign:"center", width:"100%", boxSizing:"border-box" }}
+                  />
+                  <div style={{ fontSize:"12px", color:C.muted }}>%</div>
+                </div>
+              );
+            })}
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+              <div style={{ fontSize:"12px", color: ok ? C.green : "#ef4444", fontWeight:"700" }}>
+                Total: {total.toFixed(1)}% {ok ? "✓" : "— must equal 100%"}
+              </div>
+              <button
+                onClick={() => saveSplit(sj)}
+                disabled={saving || !ok}
+                style={{ background: saving||!ok ? "#333" : "#f59e0b", border:"none", color: saving||!ok ? "#666" : C.black, padding:"8px 20px", borderRadius:"10px", cursor: saving||!ok ? "not-allowed" : "pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"12px", letterSpacing:"1.5px", textTransform:"uppercase" }}
+              >Save Split</button>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 // ─── ADMIN PANEL ──────────────────────────────────────────────────────────────
-function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlongs, schedules, quota, setQuota, jobs, techHours, onLogout, refreshAll }) {
+function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlongs, schedules, quota, setQuota, jobs, techHours, pendingSplits=[], onLogout, refreshAll }) {
   const [tab, setTab] = useState("upsells");
   const [menuOpen, setMenuOpen] = useState(false);
   const [awardForm, setAwardForm] = useState({techId:"",badgeId:""});
@@ -3216,6 +3329,9 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
       ["incentive","🎁","Rewards"],
       ["award","🥇","Award Badge"],
     ]},
+    { label:"HCP Sync", items:[
+      ["splits","✂️", pendingSplits.length > 0 ? `Split Jobs (${new Set(pendingSplits.map(r=>r.hcp_job_id)).size})` : "Split Jobs"],
+    ]},
     { label:"Management", items:[
       ["add","➕","Add Tech"],
       ["manage","✏️","Manage"],
@@ -3233,6 +3349,10 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
       <SideNav sections={adminNavSections} active={tab} setActive={setTab} open={menuOpen} onClose={()=>setMenuOpen(false)} name="Admin Panel" role="Skylo Standard Board"/>
       <Header left={<HamburgerBtn onClick={()=>setMenuOpen(true)}/>} title={adminTabLabel} right={<LogoutBtn onLogout={onLogout}/>}/>
       <div style={{ padding:"20px", maxWidth:"700px", margin:"0 auto" }}>
+
+        {tab==="splits"&&(
+          <SplitJobsAdmin techs={techs} pendingSplits={pendingSplits} refreshAll={refreshAll} showToast={showToast} saving={saving} setSaving={setSaving}/>
+        )}
 
         {tab==="upsells"&&(
           <AdminUpsellEntry techs={techs} upsells={upsells} saving={saving} setSaving={setSaving} refreshAll={refreshAll} showToast={showToast} allTimeUp={allTimeUp}/>
@@ -3576,6 +3696,7 @@ export default function App() {
   const [schedules, setSchedules] = useState([]);
   const [jobs, setJobs] = useState([]);
   const [techHours, setTechHours] = useState([]);
+  const [pendingSplits, setPendingSplits] = useState([]);
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [dbError, setDbError] = useState(null);
@@ -3584,7 +3705,7 @@ export default function App() {
 
   const loadAll = useCallback(async () => {
     try {
-      const [t,u,s,r,ra,sch,settings,cb,jb,th] = await Promise.all([
+      const [t,u,s,r,ra,sch,settings,cb,jb,th,ps] = await Promise.all([
         sb("techs?select=*&order=name"),
         sb("upsells?select=*"),
         sb("switchovers?select=*"),
@@ -3595,9 +3716,11 @@ export default function App() {
         sb("callbacks?select=*&order=created_at.desc").catch(()=>[]),
         sb("jobs?select=*&order=job_date.desc").catch(()=>[]),
         sb("tech_hours?select=*").catch(()=>[]),
+        sb("jobs?split_confirmed=eq.false&select=hcp_job_id,tech_id,job_date,revenue,tips,upsell_amount&order=job_date.desc").catch(()=>[]),
       ]);
       setTechs(t||[]); setUpsells(u||[]); setSwitchovers(s||[]); setReviews(r||[]);
       setRideAlongs(ra||[]); setSchedules(sch||[]); setCallbacks(cb||[]); setJobs(jb||[]); setTechHours(th||[]);
+      setPendingSplits(ps||[]);
       if (settings&&settings.length>0) {
         try { setQuota(JSON.parse(settings[0].value)); } catch {}
       }
@@ -3710,7 +3833,7 @@ alter table jobs add column if not exists tips numeric default 0;`}
     <AdminPanel techs={techs} setTechs={setTechs} upsells={upsells} setUpsells={setUpsells}
       switchovers={switchovers} setSwitchovers={setSwitchovers} reviews={reviews} setReviews={setReviews}
       callbacks={callbacks} rideAlongs={rideAlongs} schedules={schedules} quota={quota} setQuota={setQuota}
-      jobs={jobs} techHours={techHours} onLogout={()=>setUser(null)} refreshAll={loadAll}/>
+      jobs={jobs} techHours={techHours} pendingSplits={pendingSplits} onLogout={()=>setUser(null)} refreshAll={loadAll}/>
   );
   if (user.type==="tech"&&currentTech) return (
     <TechDashboard tech={currentTech} techs={activeTechs} upsells={upsells} switchovers={switchovers}

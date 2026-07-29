@@ -1,12 +1,10 @@
 // netlify/functions/hcp-revenue-sync.js
-// Syncs revenue, tips, and hours for completed jobs in a date range.
-// Revenue = sum(items[].amount) - sum(discounts[].amount)
-// Tips    = invoice.tip_amount (separate from revenue)
-// Does NOT update upsell_amount — use hcp-upsell-repair for upsells.
-// Falls back to job.total_amount / job.tip_amount if no invoice is found.
+// Syncs revenue and tips for completed jobs in a date range (no upsell handling).
+// Split jobs: revenue/tips divided by confirmed split %, or equal split if unconfirmed.
 // POST { from: "YYYY-MM-DD", to: "YYYY-MM-DD" }
 
 const TECH_MAP = require('./lib/techMap');
+const { fetchJobSplits, resolveSplits } = require('./lib/splitHelper');
 
 function getWeekKey(dateStr) {
   const d = new Date(dateStr + "T12:00:00Z");
@@ -80,65 +78,76 @@ exports.handler = async (event) => {
     page++;
   }
 
-  // Build per-job entries with job-level fallback values
-  const jobEntries = [];
+  // Build job meta — store ALL matched employees
+  const jobMeta = {};
   for (const job of allJobs) {
-    const emp = (job.assigned_employees || [])[0];
-    if (!emp) continue;
-    const hcpName = `${emp.first_name || ""} ${emp.last_name || ""}`.trim();
-    const skyloName = TECH_MAP[hcpName];
-    if (!skyloName) continue;
-    const tech = techByName[skyloName];
-    if (!tech) continue;
-
+    const matchedEmployees = (job.assigned_employees || []).map(e => {
+      const hcpName   = `${e.first_name || ""} ${e.last_name || ""}`.trim();
+      const skyloName = TECH_MAP[hcpName];
+      return skyloName ? { skyloName } : null;
+    }).filter(Boolean);
+    if (matchedEmployees.length === 0) continue;
     const schedStart = job.schedule?.scheduled_start;
-    const jobDate = schedStart ? schedStart.split("T")[0] : from;
-
-    jobEntries.push({
-      hcp_job_id:  String(job.id),
-      tech_id:     tech.id,
-      job_date:    jobDate,
-      week_key:    getWeekKey(jobDate),
-      hours:       0,
-      // fallback values from job level — overwritten below if invoice is found
-      revenue: Math.max(0, ((job.total_amount || 0) - (job.tip_amount || 0))) / 100,
-      tips:    (job.tip_amount || 0) / 100,
-    });
+    jobMeta[String(job.id)] = {
+      employees:   matchedEmployees,
+      jobDate:     schedStart ? schedStart.split("T")[0] : from,
+      totalAmount: job.total_amount || 0,
+      tipAmount:   job.tip_amount   || 0,
+    };
   }
 
-  // For each job, fetch its invoice to get accurate revenue and tips from line items
+  // Fetch confirmed splits for multi-employee jobs
+  const multiIds = Object.entries(jobMeta).filter(([, m]) => m.employees.length > 1).map(([id]) => id);
+  const splitMap = await fetchJobSplits(multiIds, sbFetch);
+
+  // Per-job invoice fetch, then write one row per tech per job
   const batch = [];
-  for (const entry of jobEntries) {
-    const invData = await hcpGet(`jobs/${entry.hcp_job_id}/invoices`);
+  for (const [jobId, meta] of Object.entries(jobMeta)) {
+    const invData  = await hcpGet(`jobs/${jobId}/invoices`);
     const invoices = invData?.invoices || [];
 
-    if (invoices.length === 0) {
-      batch.push(entry);  // keep job-level fallback
-      continue;
+    let totalRev, totalTip;
+    if (invoices.length > 0) {
+      const inv            = invoices[0];
+      const lineItemsCents = (inv.items || []).reduce((s, item) => s + (item.amount || 0), 0);
+      const discountCents  = (inv.discounts || []).reduce((s, d) => s + Math.abs(d.amount || 0), 0);
+      const serviceCents   = Math.max(0, lineItemsCents - discountCents);
+      totalRev             = serviceCents / 100;
+      const payments       = inv.payments || [];
+      const tipFromPay     = payments.reduce((s, p) => s + (p.tip_amount || 0), 0);
+      const paidCents      = payments.reduce((s, p) => s + (p.amount || 0), 0);
+      totalTip = (tipFromPay > 0 ? tipFromPay : Math.max(0, paidCents - serviceCents)) / 100;
+    } else {
+      totalRev = Math.max(0, (meta.totalAmount - meta.tipAmount)) / 100;
+      totalTip = meta.tipAmount / 100;
     }
 
-    const inv = invoices[0];
-    const lineItemsCents = (inv.items || []).reduce((s, item) => s + (item.amount || 0), 0);
-    const discountCents  = (inv.discounts || []).reduce((s, d) => s + Math.abs(d.amount || 0), 0);
-    const serviceCents   = Math.max(0, lineItemsCents - discountCents);
-    const revenue        = serviceCents / 100;
-    const payments       = inv.payments || [];
-    const tipFromPay     = payments.reduce((s, p) => s + (p.tip_amount || 0), 0);
-    const paidCents      = payments.reduce((s, p) => s + (p.amount || 0), 0);
-    const tips           = (tipFromPay > 0 ? tipFromPay : Math.max(0, paidCents - serviceCents)) / 100;
-
-    batch.push({ ...entry, revenue, tips });
+    const splits = resolveSplits(jobId, meta.employees, splitMap, techByName);
+    for (const split of splits) {
+      const tech = techByName[split.skyloName];
+      if (!tech) continue;
+      batch.push({
+        hcp_job_id:      jobId,
+        tech_id:         tech.id,
+        job_date:        meta.jobDate,
+        week_key:        getWeekKey(meta.jobDate),
+        hours:           0,
+        revenue:         +(totalRev * split.pct).toFixed(2),
+        tips:            +(totalTip * split.pct).toFixed(2),
+        split_confirmed: split.confirmed,
+      });
+    }
   }
 
   if (batch.length > 0) {
-    await sbFetch("jobs?on_conflict=hcp_job_id", {
+    await sbFetch("jobs?on_conflict=hcp_job_id,tech_id", {
       method: "POST",
       prefer: "resolution=merge-duplicates,return=minimal",
       body: JSON.stringify(batch),
     });
   }
 
-  console.log(`Revenue sync: ${batch.length} jobs updated for ${from} → ${to}`);
+  console.log(`Revenue sync: ${batch.length} rows written for ${from} → ${to}`);
   return {
     statusCode: 200,
     headers: { "Content-Type": "application/json" },

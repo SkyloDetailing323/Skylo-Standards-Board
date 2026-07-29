@@ -1,11 +1,10 @@
 // netlify/functions/hcp-upsell-sync.js
-// Scheduled every 5 min. Fetches today's completed HCP jobs and syncs:
-//   revenue    = sum(items[].amount) - sum(discounts[].amount)  [upsells count toward revenue]
-//   tips       = invoice.tip_amount (separate, NOT included in revenue)
-//   upsells    = line items whose name starts with "Additional Upgrade"
-// HCP amounts are in cents — divide by 100.
+// Scheduled every 5 min. Fetches today's completed HCP jobs and syncs revenue, tips, upsells.
+// Split jobs: revenue/tips/upsells divided by confirmed split % (job_splits table),
+// falling back to equal split with split_confirmed=false.
 
 const TECH_MAP = require('./lib/techMap');
+const { fetchJobSplits, resolveSplits } = require('./lib/splitHelper');
 
 function getMT() {
   const mt = new Date(Date.now() - 6 * 60 * 60 * 1000);
@@ -52,21 +51,17 @@ async function hcpGet(path) {
 }
 
 function parseInvoice(inv) {
-  // Revenue = sum of all line item amounts minus any discounts
-  // Negative line items (e.g. manual adjustments) subtract automatically via the sum.
-  // Discounts in the separate "discounts" section are subtracted explicitly.
   const lineItemsCents = (inv.items || []).reduce((s, item) => s + (item.amount || 0), 0);
   const discountCents  = (inv.discounts || []).reduce((s, d) => s + Math.abs(d.amount || 0), 0);
   const serviceCents   = Math.max(0, lineItemsCents - discountCents);
   const revenue        = serviceCents / 100;
 
-  // Try payment-level tip_amount first — more accurate than deriving from payment surplus.
-  const payments = inv.payments || [];
+  const payments        = inv.payments || [];
   const tipFromPayments = payments.reduce((s, p) => s + (p.tip_amount || 0), 0);
   const paidCents       = payments.reduce((s, p) => s + (p.amount || 0), 0);
   const derivedTip      = Math.max(0, paidCents - serviceCents);
-  const tipCents = tipFromPayments > 0 ? tipFromPayments : derivedTip;
-  const tips = tipCents / 100;
+  const tipCents        = tipFromPayments > 0 ? tipFromPayments : derivedTip;
+  const tips            = tipCents / 100;
 
   let upsellCents = 0;
   const upsellItems = [];
@@ -101,29 +96,28 @@ exports.handler = async () => {
   }
   console.log(`${allJobs.length} completed jobs`);
 
-  // Build job lookup — only techs in TECH_MAP
+  // Build job meta — store ALL matched employees
   const jobMeta = {};
   for (const job of allJobs) {
-    const emp = (job.assigned_employees || [])[0];
-    if (!emp) continue;
-    const hcpName = `${emp.first_name || ""} ${emp.last_name || ""}`.trim();
-    const skyloName = TECH_MAP[hcpName];
-    if (!skyloName) continue;
+    const matchedEmployees = (job.assigned_employees || []).map(e => {
+      const hcpName   = `${e.first_name || ""} ${e.last_name || ""}`.trim();
+      const skyloName = TECH_MAP[hcpName];
+      return skyloName ? { skyloName } : null;
+    }).filter(Boolean);
+    if (matchedEmployees.length === 0) continue;
     jobMeta[String(job.id)] = {
-      skyloName,
+      employees:   matchedEmployees,
       schedStart:  job.schedule?.scheduled_start,
-      schedEnd:    job.schedule?.scheduled_end,
-      tipFallback: job.tip_amount || 0,  // cents, only used if invoice has no tip_amount field
+      tipFallback: job.tip_amount || 0,
+      totalAmount: job.total_amount || 0,
     };
   }
 
-  // Fetch all techs from Supabase
+  // Fetch techs
   const allTechs = await sbFetch("techs?select=id,name");
   const techByName = Object.fromEntries((allTechs || []).map(t => [t.name, t]));
 
-  // Fetch each job's invoices using GET /jobs/{job_id}/invoices
-  // Fetch today's invoices in bulk — today is newest so they're on page 1-2.
-  // Much faster than one API call per job.
+  // Fetch today's invoices in bulk
   const jobIds = new Set(Object.keys(jobMeta));
   const invoiceData = {};
   for (let p = 1; p <= 3; p++) {
@@ -139,7 +133,7 @@ exports.handler = async () => {
   }
   console.log(`Fetched invoices for ${Object.keys(invoiceData).length}/${Object.keys(jobMeta).length} jobs (bulk)`);
 
-  // Per-job fallback for any jobs whose invoice was created before today (booked in advance).
+  // Per-job fallback
   const unmatched = [...jobIds].filter(jid => !invoiceData[jid]);
   if (unmatched.length > 0) {
     const BATCH = 5;
@@ -153,38 +147,61 @@ exports.handler = async () => {
     console.log(`After fallback: ${Object.keys(invoiceData).length}/${Object.keys(jobMeta).length} matched`);
   }
 
+  // Fetch confirmed splits for multi-employee jobs
+  const multiIds = Object.entries(jobMeta).filter(([, m]) => m.employees.length > 1).map(([id]) => id);
+  const splitMap = await fetchJobSplits(multiIds, sbFetch);
+
   let synced = 0;
   for (const [jobId, meta] of Object.entries(jobMeta)) {
-    const tech = techByName[meta.skyloName];
-    if (!tech) { console.log("Tech not in Supabase:", meta.skyloName); continue; }
+    const jobDate  = meta.schedStart ? meta.schedStart.split("T")[0] : todayStr;
+    const weekKey  = getWeekKey(jobDate);
+    const inv      = invoiceData[jobId];
 
-    const jobDate = meta.schedStart ? meta.schedStart.split("T")[0] : todayStr;
-    const weekKey = getWeekKey(jobDate);
-    const inv = invoiceData[jobId];
-    const revenue     = inv ? inv.revenue : 0;
-    const upsellTotal = inv ? inv.upsellTotal : 0;
-    const jobTipCents = meta.tipFallback || 0;
+    const totalRev    = inv ? inv.revenue : 0;
+    const totalUps    = inv ? inv.upsellTotal : 0;
     const invTipCents = inv ? Math.round((inv.tips || 0) * 100) : 0;
-    const tips = (jobTipCents > 0 ? jobTipCents : invTipCents) / 100;
+    const jobTipCents = meta.tipFallback || 0;
+    const totalTip    = (jobTipCents > 0 ? jobTipCents : invTipCents) / 100;
 
-    await sbFetch("jobs?on_conflict=hcp_job_id", {
-      method: "POST",
-      prefer: "resolution=merge-duplicates,return=minimal",
-      body: JSON.stringify({ hcp_job_id: jobId, tech_id: tech.id, job_date: jobDate, revenue, upsell_amount: upsellTotal, hours: 0, tips, week_key: weekKey }),
-    });
+    const splits = resolveSplits(jobId, meta.employees, splitMap, techByName);
 
-    if (upsellTotal > 0 && inv) {
-      const note = inv.upsellItems.map(i => `${i.name} ($${i.amount.toFixed(2)})`).join(", ");
-      await sbFetch("upsells?on_conflict=hcp_job_id", {
+    for (const split of splits) {
+      const tech = techByName[split.skyloName];
+      if (!tech) { console.log("Tech not in Supabase:", split.skyloName); continue; }
+
+      const revenue = +(totalRev * split.pct).toFixed(2);
+      const tips    = +(totalTip * split.pct).toFixed(2);
+      const upsells = +(totalUps * split.pct).toFixed(2);
+
+      await sbFetch("jobs?on_conflict=hcp_job_id,tech_id", {
         method: "POST",
         prefer: "resolution=merge-duplicates,return=minimal",
-        body: JSON.stringify({ tech_id: tech.id, week_key: weekKey, amount: upsellTotal, hcp_job_id: jobId, note }),
+        body: JSON.stringify({
+          hcp_job_id:      jobId,
+          tech_id:         tech.id,
+          job_date:        jobDate,
+          revenue, tips,
+          upsell_amount:   upsells,
+          hours:           0,
+          week_key:        weekKey,
+          split_confirmed: split.confirmed,
+        }),
       });
-      console.log(`UPSELL: ${meta.skyloName} | ${note}`);
-    }
 
-    console.log(`Synced: ${meta.skyloName} | rev=$${revenue} tips=$${tips} upsells=$${upsellTotal} hrs=0`);
-    synced++;
+      if (upsells > 0 && inv) {
+        const note = inv.upsellItems.map(i => `${i.name} ($${(i.amount * split.pct).toFixed(2)})`).join(", ");
+        await sbFetch("upsells?on_conflict=hcp_job_id,tech_id", {
+          method: "POST",
+          prefer: "resolution=merge-duplicates,return=minimal",
+          body: JSON.stringify({ tech_id: tech.id, week_key: weekKey, amount: upsells, hcp_job_id: jobId, note }),
+        });
+        console.log(`UPSELL: ${split.skyloName} | ${note}`);
+      }
+
+      const pctTag = splits.length > 1 ? ` (${Math.round(split.pct * 100)}%${split.confirmed ? "" : " unconfirmed"})` : "";
+      console.log(`Synced: ${split.skyloName}${pctTag} | rev=$${revenue} tips=$${tips} ups=$${upsells} hrs=0`);
+      synced++;
+    }
   }
 
   console.log(`Done. ${synced} synced.`);

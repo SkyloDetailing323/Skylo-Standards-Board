@@ -2,15 +2,13 @@
 // On-demand repair for a date range.
 // POST { from: "YYYY-MM-DD", to: "YYYY-MM-DD" }
 //
-// Fetches all invoices for the date range in bulk (2-3 API calls max) then
-// matches to jobs by invoice.job_id. This avoids one-call-per-job which
-// causes Netlify timeout when a week has 100+ jobs.
-//
-// Revenue = sum(items[].amount) - sum(discounts[].amount)  [cents → dollars]
-// Tips    = job.tip_amount  (invoices have no tip field)
-// Upsells = items whose name starts with "Additional Upgrade"
+// Split jobs: when a job has multiple assigned employees, revenue/tips/upsells
+// are divided by their confirmed percentage (from job_splits table).
+// Falls back to equal split if no confirmed split exists, and marks those rows
+// split_confirmed=false so the admin Split Jobs tab can flag them for Kyle.
 
 const TECH_MAP = require('./lib/techMap');
+const { fetchJobSplits, resolveSplits } = require('./lib/splitHelper');
 
 function getWeekKey(dateStr) {
   const d = new Date(dateStr + "T12:00:00Z");
@@ -96,7 +94,6 @@ exports.handler = async (event) => {
     return { statusCode: 400, body: JSON.stringify({ error: "from and to dates required (YYYY-MM-DD)" }) };
   }
 
-  // Use UTC timestamps for HCP date filters
   const start = `${from}T00:00:00Z`;
   const end   = `${to}T23:59:59Z`;
   console.log(`Repair: ${from} → ${to}`);
@@ -105,7 +102,7 @@ exports.handler = async (event) => {
   const allTechs = await sbFetch("techs?select=id,name");
   const techByName = Object.fromEntries((allTechs || []).map(t => [t.name, t]));
 
-  // Fetch all completed jobs in range (job scheduled time, Mountain Time)
+  // Fetch all completed jobs in range
   const allJobs = [];
   let page = 1;
   while (true) {
@@ -125,25 +122,24 @@ exports.handler = async (event) => {
   }
   console.log(`Found ${allJobs.length} completed jobs in range`);
 
-  // Build job meta — only techs in TECH_MAP, keep job-level amounts as fallback
+  // Build job meta — store ALL matched employees to support split jobs
   const jobMeta = {};
   for (const job of allJobs) {
-    const emp = (job.assigned_employees || [])[0];
-    if (!emp) continue;
-    const hcpName = `${emp.first_name || ""} ${emp.last_name || ""}`.trim();
-    const skyloName = TECH_MAP[hcpName];
-    if (!skyloName) continue;
+    const matchedEmployees = (job.assigned_employees || []).map(e => {
+      const hcpName   = `${e.first_name || ""} ${e.last_name || ""}`.trim();
+      const skyloName = TECH_MAP[hcpName];
+      return skyloName ? { skyloName } : null;
+    }).filter(Boolean);
+    if (matchedEmployees.length === 0) continue;
     jobMeta[String(job.id)] = {
-      skyloName,
+      employees:   matchedEmployees,
       schedStart:  job.schedule?.scheduled_start,
-      schedEnd:    job.schedule?.scheduled_end,
       totalAmount: job.total_amount || 0,
       tipAmount:   job.tip_amount   || 0,
     };
   }
 
-  // Fetch all invoices for this date range in bulk (2-3 API calls instead of one per job).
-  // Invoices are filtered by created_at so we only get invoices from this period.
+  // Fetch invoices in bulk
   const jobIds = new Set(Object.keys(jobMeta));
   const invoiceData = {};
   let invoicesMatched = 0;
@@ -171,8 +167,7 @@ exports.handler = async (event) => {
   }
   console.log(`Matched ${invoicesMatched}/${Object.keys(jobMeta).length} jobs to invoices (bulk)`);
 
-  // For jobs the bulk fetch missed (invoice created_at outside the date range — common when jobs
-  // are booked weeks in advance), fetch per-job invoices in parallel batches of 5.
+  // Per-job fallback for invoices created outside the date range
   const unmatched = [...jobIds].filter(jid => !invoiceData[jid]);
   if (unmatched.length > 0) {
     console.log(`Per-job fallback for ${unmatched.length} unmatched jobs`);
@@ -191,52 +186,93 @@ exports.handler = async (event) => {
     console.log(`After fallback: ${invoicesMatched}/${Object.keys(jobMeta).length} matched`);
   }
 
-  // Write all jobs to DB + upsell records
+  // Fetch confirmed split percentages for multi-employee jobs
+  const multiIds = Object.entries(jobMeta).filter(([, m]) => m.employees.length > 1).map(([id]) => id);
+  const splitMap = await fetchJobSplits(multiIds, sbFetch);
+  if (multiIds.length > 0) {
+    console.log(`Split jobs: ${multiIds.length} found, ${Object.keys(splitMap).length} have confirmed splits`);
+  }
+
+  // Write all jobs + upsell records
   let upsellsFound = 0;
   const jobBatch  = [];
   const jobReport = [];
 
   for (const [jobId, meta] of Object.entries(jobMeta)) {
-    const tech = techByName[meta.skyloName];
-    if (!tech) { console.log("Tech not in Supabase:", meta.skyloName); continue; }
+    const jobDate  = meta.schedStart ? meta.schedStart.split("T")[0] : from;
+    const weekKey  = getWeekKey(jobDate);
+    const inv      = invoiceData[jobId];
+    const totalRev = inv ? inv.revenue     : Math.max(0, (meta.totalAmount - meta.tipAmount)) / 100;
+    const totalTip = inv ? inv.tips        : meta.tipAmount / 100;
+    const totalUps = inv ? inv.upsellTotal : 0;
+    const totalDsc = inv ? inv.discount    : 0;
 
-    const jobDate     = meta.schedStart ? meta.schedStart.split("T")[0] : from;
-    const weekKey     = getWeekKey(jobDate);
-    const inv         = invoiceData[jobId];
-    const revenue     = inv ? inv.revenue     : Math.max(0, (meta.totalAmount - meta.tipAmount)) / 100;
-    const tips        = inv ? inv.tips        : meta.tipAmount / 100;
-    const upsellTotal = inv ? inv.upsellTotal : 0;
-    const discount    = inv ? inv.discount    : 0;
+    const splits = resolveSplits(jobId, meta.employees, splitMap, techByName);
 
-    jobBatch.push({ hcp_job_id: jobId, tech_id: tech.id, job_date: jobDate, revenue, tips, hours: 0, upsell_amount: upsellTotal, week_key: weekKey });
+    for (const split of splits) {
+      const tech = techByName[split.skyloName];
+      if (!tech) { console.log("Tech not in Supabase:", split.skyloName); continue; }
 
-    const reportEntry = { jobId, tech: meta.skyloName, date: jobDate, revenue, discount, tip: tips, upsells: upsellTotal, invoiceFound: !!inv };
-    jobReport.push(reportEntry);
-    console.log(`JOB ${jobId} | ${meta.skyloName} | ${jobDate} | rev=$${revenue.toFixed(2)} disc=$${discount.toFixed(2)} tip=$${tips.toFixed(2)} ups=$${upsellTotal.toFixed(2)} | ${inv ? "INVOICE" : "NO INVOICE - fallback"}`);
+      const revenue  = +(totalRev * split.pct).toFixed(2);
+      const tips     = +(totalTip * split.pct).toFixed(2);
+      const upsells  = +(totalUps * split.pct).toFixed(2);
+      const discount = +(totalDsc * split.pct).toFixed(2);
+      const pctTag   = splits.length > 1
+        ? ` (${Math.round(split.pct * 100)}%${split.confirmed ? "" : " UNCONFIRMED"})`
+        : "";
 
-    if (inv && inv.upsellTotal > 0) {
-      const note = inv.upsellItems.map(i => `${i.name} ($${i.amount.toFixed(2)})`).join(", ");
-      await sbFetch("upsells?on_conflict=hcp_job_id", {
-        method: "POST",
-        prefer: "resolution=merge-duplicates,return=minimal",
-        body: JSON.stringify({ tech_id: tech.id, week_key: weekKey, amount: inv.upsellTotal, hcp_job_id: jobId, note }),
+      jobBatch.push({
+        hcp_job_id:      jobId,
+        tech_id:         tech.id,
+        job_date:        jobDate,
+        revenue, tips,
+        hours:           0,
+        upsell_amount:   upsells,
+        week_key:        weekKey,
+        split_confirmed: split.confirmed,
       });
-      upsellsFound++;
-    } else if (inv) {
-      await sbFetch(`upsells?hcp_job_id=eq.${jobId}`, { method: "DELETE", prefer: "return=minimal" });
+
+      jobReport.push({
+        jobId,
+        tech:           split.skyloName,
+        date:           jobDate,
+        revenue,
+        discount,
+        tip:            tips,
+        upsells,
+        invoiceFound:   !!inv,
+        splitPct:       Math.round(split.pct * 100),
+        splitConfirmed: split.confirmed,
+      });
+
+      console.log(`JOB ${jobId} | ${split.skyloName}${pctTag} | ${jobDate} | rev=$${revenue.toFixed(2)} disc=$${discount.toFixed(2)} tip=$${tips.toFixed(2)} ups=$${upsells.toFixed(2)} | ${inv ? "INVOICE" : "NO INVOICE - fallback"}`);
+
+      if (inv && upsells > 0) {
+        const note = inv.upsellItems.map(i => `${i.name} ($${(i.amount * split.pct).toFixed(2)})`).join(", ");
+        await sbFetch("upsells?on_conflict=hcp_job_id,tech_id", {
+          method: "POST",
+          prefer: "resolution=merge-duplicates,return=minimal",
+          body: JSON.stringify({ tech_id: tech.id, week_key: weekKey, amount: upsells, hcp_job_id: jobId, note }),
+        });
+        upsellsFound++;
+      } else if (inv) {
+        await sbFetch(`upsells?hcp_job_id=eq.${jobId}&tech_id=eq.${tech.id}`, {
+          method: "DELETE", prefer: "return=minimal",
+        });
+      }
     }
   }
 
-  // Batch write all jobs
+  // Batch write — unique on (hcp_job_id, tech_id) to support one row per tech per split job
   if (jobBatch.length > 0) {
-    await sbFetch("jobs?on_conflict=hcp_job_id", {
+    await sbFetch("jobs?on_conflict=hcp_job_id,tech_id", {
       method: "POST",
       prefer: "resolution=merge-duplicates,return=minimal",
       body: JSON.stringify(jobBatch),
     });
   }
 
-  console.log(`Done. ${upsellsFound} upsells, ${jobBatch.length} jobs written.`);
+  console.log(`Done. ${upsellsFound} upsells, ${jobBatch.length} rows written.`);
   return {
     statusCode: 200,
     headers: { "Content-Type": "application/json" },
