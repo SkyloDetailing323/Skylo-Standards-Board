@@ -2076,6 +2076,7 @@ function TechDashboard({ tech, techs, upsells, switchovers, reviews, callbacks, 
             <div style={{ display:"flex", gap:"8px", alignItems:"center", marginTop:"4px", flexWrap:"wrap" }}>
               <Pill color={tier.color}>{tier.icon} {tier.name}</Pill>
               {tenure&&<span style={{ fontSize:"11px", color:C.muted }}>⏱ {tenure}</span>}
+              {tech.title && <Pill color={C.purple}>🏷 {TITLE_LABELS[tech.title] || tech.title}</Pill>}
               {tech.onboarding_stage && tech.onboarding_stage !== "active" && <Pill color={stageConf.color}>{stageConf.icon} {stageConf.label}</Pill>}
               {eligibleForTechII && <Pill color={C.gold}>🌟 Tech II Eligible</Pill>}
             </div>
@@ -3135,6 +3136,16 @@ const STAGE_CONFIG = {
   hard_fail:      { label:"Hard Fail",      color:"#ef4444", icon:"🚫" },
 };
 
+const TITLE_LABELS = {
+  detail_apprentice:    "Detail Apprentice",
+  detail_pro:           "Detail Pro",
+  senior_detail_pro:    "Senior Detail Pro",
+  lead_detail_pro:      "Lead Detail Pro",
+  equipment_coordinator:"Equipment Coordinator",
+  field_supervisor:     "Field Supervisor",
+};
+const TRAINER_TITLES = ["lead_detail_pro","equipment_coordinator","field_supervisor"];
+
 async function scheduleCheckins(techId, startDate) {
   const MILESTONES = [
     { milestone:"week_1",  days:7  },
@@ -3416,7 +3427,7 @@ function DevelopmentTab({ techs, rideAlongs, refreshAll, showToast }) {
             <span style={{ fontSize:"12px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", color:C.muted, whiteSpace:"nowrap" }}>SIGNING OFF AS:</span>
             <select value={trainerSel} onChange={e=>setTrainerSel(e.target.value)} style={{...sel(trainerSel), flex:1}}>
               <option value="">— Select Trainer —</option>
-              {activeTechs.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+              {activeTechs.filter(t=>TRAINER_TITLES.includes(t.title)).map(t => <option key={t.id} value={t.id}>{t.name} — {TITLE_LABELS[t.title]}</option>)}
             </select>
           </div>
           {activeTechs.map(tech => {
@@ -3516,7 +3527,7 @@ function DevelopmentTab({ techs, rideAlongs, refreshAll, showToast }) {
                 <div style={{ fontSize:"11px", color:C.muted, marginBottom:"4px" }}>Administered By</div>
                 <select value={certAdminBy} onChange={e => setCertAdminBy(e.target.value)} style={sel(certAdminBy)}>
                   <option value="">— Select —</option>
-                  {activeTechs.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                  {activeTechs.filter(t=>TRAINER_TITLES.includes(t.title)).map(t => <option key={t.id} value={t.id}>{t.name} — {TITLE_LABELS[t.title]}</option>)}
                 </select>
               </div>
               <div style={{ flex:1, minWidth:"130px" }}>
@@ -3861,7 +3872,7 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
     if (!addForm.name||!addForm.pin||addForm.pin.length!==4) return showToast("Name + 4-digit PIN required",false);
     if (techs.find(t=>t.pin===addForm.pin)) return showToast("PIN already in use",false);
     setSaving(true);
-    try { const avatar=addForm.avatar||addForm.name.split(" ").map(w=>w[0]).join("").toUpperCase().slice(0,2); const res=await sb("techs",{method:"POST",body:JSON.stringify({name:addForm.name,pin:addForm.pin,avatar,badges:["day_one"],start_date:addForm.start_date||null,commission_rate:parseInt(addForm.commission_rate)||27})}); if(res&&res[0]&&addForm.start_date)await scheduleCheckins(res[0].id,addForm.start_date).catch(()=>{}); await refreshAll(); showToast(`✅ ${addForm.name} added!`); setAddForm({name:"",pin:"",avatar:"",start_date:"",commission_rate:27}); }
+    try { const avatar=addForm.avatar||addForm.name.split(" ").map(w=>w[0]).join("").toUpperCase().slice(0,2); const res=await sb("techs",{method:"POST",body:JSON.stringify({name:addForm.name,pin:addForm.pin,avatar,badges:["day_one"],start_date:addForm.start_date||null,commission_rate:parseInt(addForm.commission_rate)||27,title:addForm.title||"detail_apprentice"})}); if(res&&res[0]&&addForm.start_date)await scheduleCheckins(res[0].id,addForm.start_date).catch(()=>{}); await refreshAll(); showToast(`✅ ${addForm.name} added!`); setAddForm({name:"",pin:"",avatar:"",start_date:"",commission_rate:27,title:"detail_apprentice"}); }
     catch(e){ showToast("Error: "+e.message,false); }
     setSaving(false);
   }
@@ -4145,6 +4156,12 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
               <input type="date" value={addForm.start_date} onChange={e=>setAddForm(f=>({...f,start_date:e.target.value}))} style={inp}/>
             </div>
             <div>
+              <div style={{ fontSize:"12px", color:C.muted, marginBottom:"6px" }}>Title</div>
+              <select value={addForm.title||"detail_apprentice"} onChange={e=>setAddForm(f=>({...f,title:e.target.value}))} style={inp}>
+                {Object.entries(TITLE_LABELS).map(([val,label])=><option key={val} value={val}>{label}</option>)}
+              </select>
+            </div>
+            <div>
               <div style={{ fontSize:"12px", color:C.muted, marginBottom:"6px" }}>Commission Rate</div>
               <select value={addForm.commission_rate} onChange={e=>setAddForm(f=>({...f,commission_rate:e.target.value}))} style={inp}>
                 {[27,28,29,30,31,32].map(p=><option key={p} value={p}>{p}%</option>)}
@@ -4159,23 +4176,37 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
             {techs.filter(t=>t.is_active!==false).map(t=>(
               <div key={t.id} style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"16px 18px" }}>
                 <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:"10px" }}>
-                  <input
-                    defaultValue={t.name}
-                    onBlur={async e=>{
-                      const val = e.target.value.trim();
-                      if (!val || val===t.name) return;
-                      await sb(`techs?id=eq.${t.id}`,{method:"PATCH",body:JSON.stringify({name:val}),prefer:"return=minimal"});
-                      await refreshAll();
-                      showToast(`✅ Name updated to ${val}`);
-                    }}
-                    style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"17px", color:C.black, background:"transparent", border:"none", borderBottom:`1px dashed ${C.border}`, padding:"2px 4px", width:"200px", cursor:"text" }}
-                  />
+                  <div style={{ display:"flex", flexDirection:"column", gap:"2px" }}>
+                    <input
+                      defaultValue={t.name}
+                      onBlur={async e=>{
+                        const val = e.target.value.trim();
+                        if (!val || val===t.name) return;
+                        await sb(`techs?id=eq.${t.id}`,{method:"PATCH",body:JSON.stringify({name:val}),prefer:"return=minimal"});
+                        await refreshAll();
+                        showToast(`✅ Name updated to ${val}`);
+                      }}
+                      style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"17px", color:C.black, background:"transparent", border:"none", borderBottom:`1px dashed ${C.border}`, padding:"2px 4px", width:"200px", cursor:"text" }}
+                    />
+                    <span style={{ fontSize:"11px", color:C.purple, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", paddingLeft:"4px" }}>{TITLE_LABELS[t.title] || "Detail Apprentice"}</span>
+                  </div>
                   <span style={{ fontSize:"12px", color:C.muted, fontFamily:"'Barlow Condensed',sans-serif" }}>PIN: {t.pin}</span>
                 </div>
                 <div style={{ display:"flex", alignItems:"center", gap:"10px", marginBottom:"10px" }}>
                   <span style={{ fontSize:"12px", color:C.muted }}>Start date:</span>
                   <input type="date" defaultValue={t.start_date||""} onBlur={e=>updateStartDate(t.id,e.target.value)} style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"4px 8px", borderRadius:"4px", fontSize:"12px", fontFamily:"'Barlow Condensed',sans-serif" }}/>
                   {t.start_date&&<span style={{ fontSize:"12px", color:C.blue, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>{formatTenure(t.start_date)}</span>}
+                </div>
+                <div style={{ display:"flex", alignItems:"center", gap:"10px", marginBottom:"10px" }}>
+                  <span style={{ fontSize:"12px", color:C.muted }}>Title:</span>
+                  <select defaultValue={t.title||"detail_apprentice"}
+                    onChange={async e=>{
+                      await sb(`techs?id=eq.${t.id}`,{method:"PATCH",body:JSON.stringify({title:e.target.value}),prefer:"return=minimal"});
+                      await refreshAll(); showToast(`✅ Title saved for ${t.name}`);
+                    }}
+                    style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.purple, padding:"4px 8px", borderRadius:"4px", fontSize:"13px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", cursor:"pointer" }}>
+                    {Object.entries(TITLE_LABELS).map(([val,label])=><option key={val} value={val}>{label}</option>)}
+                  </select>
                 </div>
                 <div style={{ display:"flex", alignItems:"center", gap:"10px", marginBottom:"10px" }}>
                   <span style={{ fontSize:"12px", color:C.muted }}>Commission rate:</span>
