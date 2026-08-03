@@ -2011,7 +2011,7 @@ function IncentiveBoard({ techs, upsells, switchovers, reviews, callbacks, curre
 }
 
 // ─── TECH DASHBOARD ───────────────────────────────────────────────────────────
-function TechDashboard({ tech, techs, upsells, switchovers, reviews, callbacks, quota, jobs, techHours, onLogout }) {
+function TechDashboard({ tech, techs, upsells, switchovers, reviews, callbacks, quota, jobs, techHours, rideAlongs=[], onLogout }) {
   const q = quota || DEFAULT_QUOTA;
   const [tab, setTab] = useState("overview");
   const [menuOpen, setMenuOpen] = useState(false);
@@ -2034,6 +2034,12 @@ function TechDashboard({ tech, techs, upsells, switchovers, reviews, callbacks, 
   const swHit  = monthSwitchCount >= q.switchovers;
   const allQuotaHit = upHit && revHit && swHit;
   const quotaHitCount = [upHit,revHit,swHit].filter(Boolean).length;
+  const tenureDays = tech.start_date ? Math.floor((Date.now() - new Date(tech.start_date+"T12:00:00Z")) / 86400000) : 0;
+  const myRecentRA = rideAlongs.filter(r=>r.tech_id===tech.id).sort((a,b)=>b.date?.localeCompare(a.date)).slice(0,3);
+  const raAvgScore = myRecentRA.length ? myRecentRA.reduce((s,r)=>{ const cl=r.checklist?JSON.parse(r.checklist):{}; const v=Object.values(cl); return s+(v.length?v.filter(x=>x==="✅").length/v.length*100:0); },0)/myRecentRA.length : 0;
+  const eligibleForTechII = tenureDays >= 56 && myRecentRA.length >= 3 && raAvgScore >= 85;
+  const stageConf = STAGE_CONFIG[tech.onboarding_stage || "active"] || STAGE_CONFIG.active;
+
   const techNavSections = [
     { label:null, items:[
       ["overview","🏠","Overview"],
@@ -2052,6 +2058,9 @@ function TechDashboard({ tech, techs, upsells, switchovers, reviews, callbacks, 
       ["reviews","⭐","Reviews"],
       ...(tech.is_lead?[["myteam","👥","My Team"]]:[]),
     ]},
+    { label:"Training", items:[
+      ["training","📋","Perfect Day Training"],
+    ]},
   ];
 
   return (
@@ -2067,6 +2076,8 @@ function TechDashboard({ tech, techs, upsells, switchovers, reviews, callbacks, 
             <div style={{ display:"flex", gap:"8px", alignItems:"center", marginTop:"4px", flexWrap:"wrap" }}>
               <Pill color={tier.color}>{tier.icon} {tier.name}</Pill>
               {tenure&&<span style={{ fontSize:"11px", color:C.muted }}>⏱ {tenure}</span>}
+              {tech.onboarding_stage && tech.onboarding_stage !== "active" && <Pill color={stageConf.color}>{stageConf.icon} {stageConf.label}</Pill>}
+              {eligibleForTechII && <Pill color={C.gold}>🌟 Tech II Eligible</Pill>}
             </div>
           </div>
           <div style={{ textAlign:"right" }}>
@@ -2314,6 +2325,7 @@ function TechDashboard({ tech, techs, upsells, switchovers, reviews, callbacks, 
         {tab==="myteam"&&(
           <TeamLeadPanel tech={tech} techs={techs} upsells={upsells} switchovers={switchovers} reviews={reviews} callbacks={callbacks||[]} quota={q}/>
         )}
+        {tab==="training"&&<PerfectDayTrainingPanel tech={tech}/>}
       </div>
     </div>
   );
@@ -3046,10 +3058,606 @@ function RideAlongTab({ techs, rideAlongs, schedules, onSave, onSaveSchedule, sa
   );
 }
 
+// ─── EMPLOYEE DEVELOPMENT ────────────────────────────────────────────────────
+
+const RUBRIC_ITEMS_SEED = [
+  { id:"item_01", sort_order:1,  phase:"night_before",    description:"Manual night-before text reminder sent to next day's clients",                                                                                         has_script:true,  script_text:"Hey [Client Name] this is [Tech Name] from Skylo Detailing, I am the one who will be doing your car tomorrow! Just wanted to give you one last reminder about the appointment and let you know I'll be there around [9/12/3], and if you could have your personal belongings taken out of the vehicle that would be greatly appreciated, see you tomorrow!" },
+  { id:"item_02", sort_order:2,  phase:"night_before",    description:"Checked schedule/route to confirm first job location and departure time from home",                                                                      has_script:false, script_text:"" },
+  { id:"item_03", sort_order:3,  phase:"pre_job",         description:"Pre-job checklist completed",                                                                                                                           has_script:false, script_text:"" },
+  { id:"item_04", sort_order:4,  phase:"pre_job",         description:"Chemicals topped off/full",                                                                                                                              has_script:false, script_text:"" },
+  { id:"item_05", sort_order:5,  phase:"pre_job",         description:"Equipment totes checked and stocked",                                                                                                                    has_script:false, script_text:"" },
+  { id:"item_06", sort_order:6,  phase:"pre_job",         description:"Truck stocked with proper towel count",                                                                                                                  has_script:false, script_text:"" },
+  { id:"item_07", sort_order:7,  phase:"pre_job",         description:"Water tank checked full (topped off if not)",                                                                                                            has_script:false, script_text:"" },
+  { id:"item_08", sort_order:8,  phase:"pre_job",         description:"Generator gas checked full (topped off if not)",                                                                                                         has_script:false, script_text:"" },
+  { id:"item_09", sort_order:9,  phase:"pre_job",         description:"Departed with enough time to arrive 10 min early to first job",                                                                                         has_script:false, script_text:"" },
+  { id:"item_10", sort_order:10, phase:"arrival",         description:"On My Way text sent via HCP automated feature (timing option matching drive time from warehouse)",                                                       has_script:false, script_text:"[Tech Name] is scheduled to arrive in [15/30/45] minutes" },
+  { id:"item_11", sort_order:11, phase:"arrival",         description:"Correct arrival greeting/introduction script used",                                                                                                      has_script:true,  script_text:"Hey [Client Name], my name is [Tech Name] and I will be the one taking care of your premium detail today. If you could come out we can do the pre-job inspection to make sure we are taking care of everything you wanted today. (If client doesn't come out: tech does the pre-job inspection alone and texts the client about any concerns or upsells found.)" },
+  { id:"item_12", sort_order:12, phase:"arrival",         description:"Pre-detail inspection walkthrough completed with client, including upsell script if applicable",                                                         has_script:true,  script_text:"Open all doors and explain what will be done today based on the job's line items. Upsell moment if something is found not on the line items: \"Hey, I noticed there are some [stains on the seat / carpet / pet hair in the carpet] and that will need some extra time and equipment to get that all out. I can go ahead and do that for [$25/$50/$75] today, is that something you'd be interested in?\" If client pushes back: explain the surface will be cleaned as part of the standard detail, but getting it all the way out requires an extra 30-45 minutes and heavier-duty equipment, which is why it's an additional charge." },
+  { id:"item_13", sort_order:13, phase:"arrival",         description:"Before pics taken",                                                                                                                                      has_script:false, script_text:"" },
+  { id:"item_14", sort_order:14, phase:"sequencing",      description:"Correct interior/exterior order chosen based on weather (exterior first in AM if hot/sunny, exterior last if last job of day)",                          has_script:false, script_text:"" },
+  { id:"item_15", sort_order:15, phase:"cleaning",        description:"Trash and floor mats removed",                                                                                                                           has_script:false, script_text:"" },
+  { id:"item_16", sort_order:16, phase:"cleaning",        description:"Full vehicle air compressed",                                                                                                                            has_script:false, script_text:"" },
+  { id:"item_17", sort_order:17, phase:"cleaning",        description:"Vacuumed (or LVP used if vacuum already cleared majority of dirt/debris)",                                                                               has_script:false, script_text:"" },
+  { id:"item_18", sort_order:18, phase:"cleaning",        description:"Interior cleaned starting driver seat, back seat driver side, trunk, back seat passenger side, passenger seat",                                          has_script:false, script_text:"" },
+  { id:"item_19", sort_order:19, phase:"mid_job",         description:"Mid-job update text sent with before/after photo of dirtiest area",                                                                                      has_script:true,  script_text:"Hey [Client Name], the car is coming along well! Here's a before and after of those [stains/issue] we removed in your seats. I should be done in about [time], so if you can be available to come walk through the car with me then that would be awesome!" },
+  { id:"item_20", sort_order:20, phase:"mid_job",         description:"Timing awareness communicated to next client (early/late notice) if applicable",                                                                         has_script:false, script_text:"" },
+  { id:"item_21", sort_order:21, phase:"interior_finish", description:"Mats dried and returned",                                                                                                                                has_script:false, script_text:"" },
+  { id:"item_22", sort_order:22, phase:"interior_finish", description:"Windows cleaned",                                                                                                                                        has_script:false, script_text:"" },
+  { id:"item_23", sort_order:23, phase:"interior_finish", description:"Door jambs cleaned (if exterior is on the job)",                                                                                                         has_script:false, script_text:"" },
+  { id:"item_24", sort_order:24, phase:"interior_finish", description:"Interior checklist completed",                                                                                                                           has_script:false, script_text:"" },
+  { id:"item_25", sort_order:25, phase:"interior_finish", description:"After pics taken (interior)",                                                                                                                            has_script:false, script_text:"" },
+  { id:"item_26", sort_order:26, phase:"exterior",        description:"Pre-rinse completed (mist down, cool and prime surface)",                                                                                                has_script:false, script_text:"" },
+  { id:"item_27", sort_order:27, phase:"exterior",        description:"Tires sprayed and scrubbed, rinsed off",                                                                                                                 has_script:false, script_text:"" },
+  { id:"item_28", sort_order:28, phase:"exterior",        description:"Foam applied (full car if shaded/cool, panel-by-panel if hot)",                                                                                          has_script:false, script_text:"" },
+  { id:"item_29", sort_order:29, phase:"exterior",        description:"Wash wands used to scrub down full vehicle",                                                                                                             has_script:false, script_text:"" },
+  { id:"item_30", sort_order:30, phase:"exterior",        description:"Rinsed off and thoroughly dried",                                                                                                                        has_script:false, script_text:"" },
+  { id:"item_31", sort_order:31, phase:"exterior",        description:"Windows touched up with exterior towel",                                                                                                                 has_script:false, script_text:"" },
+  { id:"item_32", sort_order:32, phase:"exterior",        description:"Rims dried, excess water/dirt removed from rims and tire face",                                                                                          has_script:false, script_text:"" },
+  { id:"item_33", sort_order:33, phase:"exterior",        description:"Tire shine applied",                                                                                                                                     has_script:false, script_text:"" },
+  { id:"item_34", sort_order:34, phase:"exterior",        description:"Exterior checklist completed",                                                                                                                           has_script:false, script_text:"" },
+  { id:"item_35", sort_order:35, phase:"exterior",        description:"After pics taken (exterior), attached in HCP",                                                                                                           has_script:false, script_text:"" },
+  { id:"item_36", sort_order:36, phase:"closeout",        description:"Correct walkthrough script used with client",                                                                                                            has_script:true,  script_text:"Hey [Client Name], I am just finishing up with a few last-minute touches, could you come out so we can walk through it together? Once they come out: Ok so the car is looking awesome, I want to show you how it came out. If you see anything I missed please point it out so I can get it taken care of, 4 eyes are better than 2. We started off by taking out all the trash from the vehicle, then we did a full air compressor blow-out on your vents, seats, carpets and surfaces to get all the dirt and debris out of there, then we did a full vacuum on the vehicle including seats, carpets, all compartments and the trunk, then we cleaned, disinfected, and protected all hard surfaces such as the dash, console, cupholders, door panels, etc., then we did the interior windows and windshield. Then on the exterior we deep cleaned all the tires, rims, and wheel wells, we did a foam bath with a hand wash that removed all contaminants, bugs, and debris from your paint, touched up the windows, and finished off with a tire dressing on the wheel face." },
+  { id:"item_37", sort_order:37, phase:"closeout",        description:"Tap-to-pay invoice completed",                                                                                                                           has_script:false, script_text:"" },
+  { id:"item_38", sort_order:38, phase:"closeout",        description:"Google review ask made",                                                                                                                                 has_script:true,  script_text:"Hey, if you loved the service and thought I did a great job I would love it if you could leave me a 5-star rating on Google, here's the link, and if you just mention my name it would help a ton with a competition we're currently running!" },
+  { id:"item_39", sort_order:39, phase:"closeout",        description:"Referral ask made",                                                                                                                                      has_script:true,  script_text:"Is there any friends, family, or neighbors that you could think of that would love this service? If so, would you mind giving me their number or address so I could reach out to them? You get $20 off your next service for any referral that books and pays for the detail!" },
+  { id:"item_40", sort_order:40, phase:"no_show",         description:"30-second video walkthrough recorded and sent (interior: front seats, vacuum/LVP, windows, back area; exterior: rims, tires, wheel wells, windows, grill, back end)", has_script:false, script_text:"" },
+  { id:"item_41", sort_order:41, phase:"no_show",         description:"Google review link sent via text (same wording as item_38)",                                                                                             has_script:true,  script_text:"Hey, if you loved the service and thought I did a great job I would love it if you could leave me a 5-star rating on Google, here's the link, and if you just mention my name it would help a ton with a competition we're currently running!" },
+  { id:"item_42", sort_order:42, phase:"no_show",         description:"Referral ask sent via text (same wording as item_39)",                                                                                                   has_script:true,  script_text:"Is there any friends, family, or neighbors that you could think of that would love this service? If so, would you mind giving me their number or address so I could reach out to them? You get $20 off your next service for any referral that books and pays for the detail!" },
+  { id:"item_43", sort_order:43, phase:"job_closeout",    description:"3 door hangers placed",                                                                                                                                  has_script:false, script_text:"" },
+  { id:"item_44", sort_order:44, phase:"job_closeout",    description:"Customer satisfaction card placed",                                                                                                                      has_script:false, script_text:"" },
+  { id:"item_45", sort_order:45, phase:"job_closeout",    description:"Photos of door hangers/card attached in HCP",                                                                                                            has_script:false, script_text:"" },
+  { id:"item_46", sort_order:46, phase:"job_closeout",    description:"On My Way text sent to next client",                                                                                                                     has_script:false, script_text:"" },
+  { id:"item_47", sort_order:47, phase:"end_of_day",      description:"All trash removed from truck",                                                                                                                           has_script:false, script_text:"" },
+  { id:"item_48", sort_order:48, phase:"end_of_day",      description:"All personal belongings removed from truck",                                                                                                             has_script:false, script_text:"" },
+  { id:"item_49", sort_order:49, phase:"end_of_day",      description:"Totes and exterior bucket emptied/cleaned out",                                                                                                          has_script:false, script_text:"" },
+  { id:"item_50", sort_order:50, phase:"end_of_day",      description:"Water tank refilled",                                                                                                                                    has_script:false, script_text:"" },
+  { id:"item_51", sort_order:51, phase:"end_of_day",      description:"Clean towels returned to correct bin",                                                                                                                   has_script:false, script_text:"" },
+  { id:"item_52", sort_order:52, phase:"end_of_day",      description:"Dirty towels placed in correct dirty bin",                                                                                                               has_script:false, script_text:"" },
+  { id:"item_53", sort_order:53, phase:"end_of_day",      description:"Next day's schedule checked",                                                                                                                            has_script:false, script_text:"" },
+  { id:"item_54", sort_order:54, phase:"end_of_day",      description:"Night-before texts sent for next day's clients (same script as item_01)",                                                                                has_script:true,  script_text:"Hey [Client Name] this is [Tech Name] from Skylo Detailing, I am the one who will be doing your car tomorrow! Just wanted to give you one last reminder about the appointment and let you know I'll be there around [9/12/3], and if you could have your personal belongings taken out of the vehicle that would be greatly appreciated, see you tomorrow!" },
+  { id:"item_55", sort_order:55, phase:"end_of_day",      description:"First job location confirmed for next day (to plan departure/arrival time)",                                                                             has_script:false, script_text:"" },
+];
+
+const PHASE_LABELS = {
+  night_before:"Night Before", pre_job:"Pre-Job", arrival:"Arrival",
+  sequencing:"Interior/Exterior Sequencing", cleaning:"Cleaning Sequence",
+  mid_job:"Mid-Job Communication", interior_finish:"Interior Finish",
+  exterior:"Exterior", closeout:"Client Walkthrough & Close",
+  no_show:"No-Show Protocol", job_closeout:"Job Close-Out", end_of_day:"End of Day",
+};
+
+const STAGE_CONFIG = {
+  classroom:      { label:"Classroom",      color:"#2b9cf0", icon:"📚" },
+  field_training: { label:"Field Training", color:"#7c3aed", icon:"🔧" },
+  cert_pending:   { label:"Cert Pending",   color:"#f59e0b", icon:"⏳" },
+  cert_passed:    { label:"Certified",      color:"#00c853", icon:"✅" },
+  active:         { label:"Active",         color:"#00c853", icon:"⭐" },
+  hard_fail:      { label:"Hard Fail",      color:"#ef4444", icon:"🚫" },
+};
+
+async function scheduleCheckins(techId, startDate) {
+  const MILESTONES = [
+    { milestone:"week_1",  days:7  },
+    { milestone:"week_2",  days:14 },
+    { milestone:"week_4",  days:28 },
+    { milestone:"week_6",  days:42 },
+    { milestone:"week_12", days:84 },
+  ];
+  const base = new Date(startDate + "T12:00:00Z");
+  for (const { milestone, days } of MILESTONES) {
+    const existing = await sb(`checkins?tech_id=eq.${techId}&milestone=eq.${milestone}&select=id`).catch(()=>[]);
+    if (existing && existing.length > 0) continue;
+    const d = new Date(base);
+    d.setUTCDate(base.getUTCDate() + days);
+    await sb("checkins", { method:"POST", body:JSON.stringify({ tech_id:techId, milestone, scheduled_date:d.toISOString().split("T")[0] }) });
+  }
+}
+
+function PerfectDayTrainingPanel({ tech }) {
+  const [rubricItems, setRubricItems] = useState([]);
+  const [signoffs, setSignoffs] = useState({});
+  const [expandedScript, setExpandedScript] = useState({});
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    Promise.all([
+      sb("rubric_items?select=*&order=sort_order"),
+      sb(`training_signoffs?tech_id=eq.${tech.id}&select=rubric_item_id,signed_off`),
+    ]).then(([items, offs]) => {
+      setRubricItems(items || []);
+      const map = {};
+      for (const o of (offs || [])) map[o.rubric_item_id] = o.signed_off;
+      setSignoffs(map);
+      setLoading(false);
+    }).catch(() => setLoading(false));
+  }, [tech.id]);
+
+  if (loading) return <div style={{ color:C.muted, padding:"16px" }}>Loading training progress...</div>;
+
+  const total = rubricItems.length;
+  const done = rubricItems.filter(i => signoffs[i.id]).length;
+  const pct = total ? Math.round((done / total) * 100) : 0;
+
+  const byPhase = {}, phases = [];
+  for (const item of rubricItems) {
+    if (!byPhase[item.phase]) { byPhase[item.phase] = []; phases.push(item.phase); }
+    byPhase[item.phase].push(item);
+  }
+
+  return (
+    <div style={{ display:"flex", flexDirection:"column", gap:"12px" }}>
+      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"16px" }}>
+        <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"16px", color:C.black, marginBottom:"10px" }}>
+          Perfect Day Training — {done}/{total} items signed off
+        </div>
+        <Bar pct={pct} color={done === total && total > 0 ? C.green : C.blue} h={8}/>
+        <div style={{ fontSize:"11px", color:C.muted, marginTop:"4px" }}>
+          {pct}% complete{done === total && total > 0 ? " — eligible for cert!" : ""}
+        </div>
+      </div>
+      {total === 0 && (
+        <div style={{ background:C.cardLt, border:`1px solid ${C.border}`, borderRadius:"10px", padding:"14px", fontSize:"13px", color:C.muted }}>
+          Rubric items not seeded yet. Ask an admin to seed them in the Development tab.
+        </div>
+      )}
+      {phases.map(phase => (
+        <div key={phase} style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", overflow:"hidden" }}>
+          <div style={{ background:C.cardLt, padding:"10px 16px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"13px", color:C.blue, letterSpacing:"1px" }}>
+            {PHASE_LABELS[phase] || phase}
+          </div>
+          {byPhase[phase].map(item => (
+            <div key={item.id} style={{ padding:"10px 16px", borderBottom:`1px solid ${C.border}40` }}>
+              <div style={{ display:"flex", alignItems:"flex-start", gap:"10px" }}>
+                <div style={{ width:"18px", height:"18px", borderRadius:"3px", border:`2px solid ${signoffs[item.id] ? C.green : C.border}`, background:signoffs[item.id] ? C.green : "transparent", flexShrink:0, display:"flex", alignItems:"center", justifyContent:"center", marginTop:"1px" }}>
+                  {signoffs[item.id] && <span style={{ color:C.white, fontSize:"11px", lineHeight:1 }}>✓</span>}
+                </div>
+                <div style={{ flex:1 }}>
+                  <div style={{ fontSize:"13px", color:signoffs[item.id] ? C.muted : C.black, textDecoration:signoffs[item.id] ? "line-through" : "none" }}>
+                    <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", color:C.muted, marginRight:"4px" }}>#{item.sort_order}</span>
+                    {item.description}
+                  </div>
+                  {item.has_script && (
+                    <button onClick={() => setExpandedScript(s => ({...s, [item.id]: !s[item.id]}))} style={{ background:"none", border:"none", color:C.blue, fontSize:"11px", cursor:"pointer", padding:"2px 0", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>
+                      {expandedScript[item.id] ? "▲ Hide script" : "▼ View script"}
+                    </button>
+                  )}
+                  {item.has_script && expandedScript[item.id] && (
+                    <div style={{ background:C.blueXlt, border:`1px solid ${C.border}`, borderRadius:"6px", padding:"8px 10px", fontSize:"12px", color:C.black, marginTop:"4px", lineHeight:1.5 }}>
+                      {item.script_text}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function DevelopmentTab({ techs, rideAlongs, refreshAll, showToast }) {
+  const inp = { background:C.white, border:`1px solid ${C.border}`, color:C.black, padding:"10px 14px", borderRadius:"8px", fontSize:"14px", fontFamily:"'Barlow',sans-serif", width:"100%", boxSizing:"border-box" };
+  const sel = (val) => ({...inp, color:val ? C.black : C.muted });
+  const btn = (color) => ({ background:color||C.blue, border:"none", color:C.white, padding:"11px 18px", borderRadius:"20px", cursor:"pointer", fontSize:"12px", fontWeight:"900", fontStyle:"italic", letterSpacing:"2px", fontFamily:"'Barlow Condensed',sans-serif", textTransform:"uppercase" });
+  const btnSm = (color) => ({...btn(color), padding:"6px 14px", fontSize:"11px" });
+
+  const [devView, setDevView] = useState("signoff");
+  const [rubricItems, setRubricItems] = useState(null);
+  const [signoffs, setSignoffs] = useState([]);
+  const [certs, setCerts] = useState([]);
+  const [certResults, setCertResults] = useState([]);
+  const [checkins, setCheckins] = useState([]);
+  const [loadingDev, setLoadingDev] = useState(true);
+  const [seeding, setSeeding] = useState(false);
+
+  const [trainerSel, setTrainerSel] = useState("");
+  const [expandedTech, setExpandedTech] = useState(null);
+  const [expandedScript, setExpandedScript] = useState({});
+
+  const [certTechSel, setCertTechSel] = useState("");
+  const [certAdminBy, setCertAdminBy] = useState("");
+  const [certDate, setCertDate] = useState(new Date().toISOString().split("T")[0]);
+  const [certScores, setCertScores] = useState({});
+  const [submittingCert, setSubmittingCert] = useState(false);
+  const [lastCertResult, setLastCertResult] = useState(null);
+
+  const [selectedCheckin, setSelectedCheckin] = useState(null);
+  const [checkinForm, setCheckinForm] = useState({});
+  const [savingCheckin, setSavingCheckin] = useState(false);
+
+  useEffect(() => { loadDevData(); }, []);
+
+  async function loadDevData() {
+    setLoadingDev(true);
+    try {
+      const [items, offs, c, cr, ci] = await Promise.all([
+        sb("rubric_items?select=*&order=sort_order"),
+        sb("training_signoffs?select=*"),
+        sb("perfect_day_certs?select=*&order=created_at.desc"),
+        sb("perfect_day_cert_results?select=*"),
+        sb("checkins?select=*&order=scheduled_date"),
+      ]);
+      setRubricItems(items || []);
+      setSignoffs(offs || []);
+      setCerts(c || []);
+      setCertResults(cr || []);
+      setCheckins(ci || []);
+    } catch(e) { showToast("Error loading dev data: " + e.message, false); }
+    setLoadingDev(false);
+  }
+
+  async function seedRubricItems() {
+    setSeeding(true);
+    try {
+      await sb("rubric_items?on_conflict=id", { method:"POST", prefer:"resolution=merge-duplicates,return=minimal", body:JSON.stringify(RUBRIC_ITEMS_SEED) });
+      showToast("✅ 55 rubric items seeded!");
+      await loadDevData();
+    } catch(e) { showToast("Error seeding: " + e.message, false); }
+    setSeeding(false);
+  }
+
+  async function toggleSignoff(techId, itemId) {
+    if (!trainerSel) { showToast("Select a trainer first", false); return; }
+    const existing = signoffs.find(s => s.tech_id === techId && s.rubric_item_id === itemId);
+    const newVal = !(existing?.signed_off);
+    try {
+      await sb("training_signoffs?on_conflict=tech_id,rubric_item_id", {
+        method:"POST", prefer:"resolution=merge-duplicates,return=minimal",
+        body:JSON.stringify({ tech_id:techId, rubric_item_id:itemId, trainer_id:trainerSel, signed_off:newVal, signed_off_at: newVal ? new Date().toISOString() : null }),
+      });
+      setSignoffs(prev => {
+        const filtered = prev.filter(s => !(s.tech_id===techId && s.rubric_item_id===itemId));
+        return [...filtered, { tech_id:techId, rubric_item_id:itemId, trainer_id:trainerSel, signed_off:newVal }];
+      });
+    } catch(e) { showToast("Error: " + e.message, false); }
+  }
+
+  async function advanceStage(tech) {
+    const order = ["classroom","field_training","cert_pending","cert_passed","active"];
+    const idx = order.indexOf(tech.onboarding_stage || "classroom");
+    if (idx < 0 || idx >= order.length - 1) return;
+    const next = order[idx + 1];
+    if (next === "cert_pending" && rubricItems) {
+      const done = signoffs.filter(s => s.tech_id === tech.id && s.signed_off).length;
+      if (done < rubricItems.length) {
+        showToast(`❌ All ${rubricItems.length} items must be signed off before cert`, false);
+        return;
+      }
+    }
+    try {
+      await sb(`techs?id=eq.${tech.id}`, { method:"PATCH", body:JSON.stringify({ onboarding_stage:next }), prefer:"return=minimal" });
+      await refreshAll();
+      showToast(`✅ ${tech.name} → ${STAGE_CONFIG[next]?.label || next}`);
+      await loadDevData();
+    } catch(e) { showToast("Error: " + e.message, false); }
+  }
+
+  async function submitCert() {
+    if (!certTechSel) { showToast("Select a tech", false); return; }
+    if (!certAdminBy) { showToast("Select administered by", false); return; }
+    if (!rubricItems || rubricItems.length === 0) { showToast("Rubric items not loaded", false); return; }
+    const missing = rubricItems.filter(i => !certScores[i.id]);
+    if (missing.length > 0) { showToast(`Score all items first (${missing.length} remaining)`, false); return; }
+    const failedItems = rubricItems.filter(i => certScores[i.id] === "fail");
+    const overall = failedItems.length === 0 ? "pass" : "fail";
+    const tech = techs.find(t => t.id === certTechSel);
+    const attemptNumber = certs.filter(c => c.tech_id === certTechSel).length + 1;
+    setSubmittingCert(true);
+    try {
+      const certRes = await sb("perfect_day_certs", { method:"POST", body:JSON.stringify({ tech_id:certTechSel, attempt_number:attemptNumber, administered_by:certAdminBy, test_date:certDate, overall_result:overall }) });
+      const certId = certRes?.[0]?.id;
+      if (!certId) throw new Error("No cert ID returned");
+      for (const item of rubricItems) {
+        await sb("perfect_day_cert_results", { method:"POST", body:JSON.stringify({ cert_id:certId, rubric_item_id:item.id, result:certScores[item.id] }) });
+      }
+      const certStatus = overall==="pass" ? "passed" : attemptNumber===1 ? "failed_retest_1" : attemptNumber===2 ? "failed_retest_2" : "hard_fail";
+      const patch = { cert_attempts:attemptNumber, cert_status:certStatus };
+      if (overall === "pass") patch.onboarding_stage = "cert_passed";
+      await sb(`techs?id=eq.${certTechSel}`, { method:"PATCH", body:JSON.stringify(patch), prefer:"return=minimal" });
+      setLastCertResult({ overall, failedItems, techName:tech?.name, attemptNumber });
+      showToast(overall==="pass" ? `✅ ${tech?.name} PASSED!` : `${tech?.name} did not pass — study sheet below`);
+      await refreshAll();
+      await loadDevData();
+      setCertScores({});
+    } catch(e) { showToast("Error: " + e.message, false); }
+    setSubmittingCert(false);
+  }
+
+  async function saveCheckin() {
+    if (!selectedCheckin) return;
+    setSavingCheckin(true);
+    try {
+      await sb(`checkins?id=eq.${selectedCheckin.id}`, { method:"PATCH", prefer:"return=minimal", body:JSON.stringify({ ...checkinForm, status:"completed", completed_date:new Date().toISOString().split("T")[0] }) });
+      showToast("✅ Check-in saved!");
+      setSelectedCheckin(null); setCheckinForm({});
+      await loadDevData();
+    } catch(e) { showToast("Error: " + e.message, false); }
+    setSavingCheckin(false);
+  }
+
+  if (loadingDev) return <div style={{ color:C.muted, padding:"20px" }}>Loading...</div>;
+
+  const byPhase = {}, phases = [];
+  if (rubricItems) {
+    for (const item of rubricItems) {
+      if (!byPhase[item.phase]) { byPhase[item.phase] = []; phases.push(item.phase); }
+      byPhase[item.phase].push(item);
+    }
+  }
+  const signoffMap = {};
+  for (const s of signoffs) {
+    if (!signoffMap[s.tech_id]) signoffMap[s.tech_id] = {};
+    signoffMap[s.tech_id][s.rubric_item_id] = s.signed_off;
+  }
+  const stageOrder = ["classroom","field_training","cert_pending","cert_passed","active"];
+  const activeTechs = techs.filter(t => t.is_active !== false);
+
+  return (
+    <div style={{ display:"flex", flexDirection:"column", gap:"16px" }}>
+      {rubricItems && rubricItems.length === 0 && (
+        <div style={{ background:`${C.gold}18`, border:`1px solid ${C.gold}`, borderRadius:"10px", padding:"14px 16px", display:"flex", alignItems:"center", justifyContent:"space-between", gap:"12px" }}>
+          <div style={{ fontSize:"13px", color:C.black }}>Rubric items not seeded yet.</div>
+          <button onClick={seedRubricItems} disabled={seeding} style={btnSm(C.gold)}>{seeding ? "Seeding..." : "Seed 55 Items"}</button>
+        </div>
+      )}
+
+      {/* Sub-view switcher */}
+      <div style={{ display:"flex", gap:"8px", flexWrap:"wrap" }}>
+        {[["signoff","📋 Training Sign-Off"],["cert","🏆 Perfect Day Cert"],["checkins","📅 Check-Ins"]].map(([id,label]) => (
+          <button key={id} onClick={() => setDevView(id)} style={{ ...btnSm(devView===id ? C.blue : C.cardLt), color:devView===id ? C.white : C.black, flex:1, minWidth:"120px", border:`1px solid ${devView===id ? C.blue : C.border}` }}>{label}</button>
+        ))}
+      </div>
+
+      {/* ── A. TRAINING SIGN-OFF ── */}
+      {devView==="signoff" && (
+        <div style={{ display:"flex", flexDirection:"column", gap:"12px" }}>
+          <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"12px 16px", display:"flex", alignItems:"center", gap:"12px" }}>
+            <span style={{ fontSize:"12px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", color:C.muted, whiteSpace:"nowrap" }}>SIGNING OFF AS:</span>
+            <select value={trainerSel} onChange={e=>setTrainerSel(e.target.value)} style={{...sel(trainerSel), flex:1}}>
+              <option value="">— Select Trainer —</option>
+              {activeTechs.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+            </select>
+          </div>
+          {activeTechs.map(tech => {
+            const sc = STAGE_CONFIG[tech.onboarding_stage || "classroom"] || STAGE_CONFIG.classroom;
+            const items = rubricItems || [];
+            const tSoffs = signoffMap[tech.id] || {};
+            const doneCount = items.filter(i => tSoffs[i.id]).length;
+            const isExp = expandedTech === tech.id;
+            const stageIdx = stageOrder.indexOf(tech.onboarding_stage || "classroom");
+            const canAdv = stageIdx >= 0 && stageIdx < stageOrder.indexOf("active");
+            return (
+              <div key={tech.id} style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", overflow:"hidden" }}>
+                <div onClick={() => setExpandedTech(isExp ? null : tech.id)} style={{ padding:"12px 16px", display:"flex", alignItems:"center", gap:"12px", cursor:"pointer", background:C.cardLt }}>
+                  <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"16px", color:C.black, flex:1 }}>{tech.name}</div>
+                  <Pill color={sc.color}>{sc.icon} {sc.label}</Pill>
+                  <div style={{ fontSize:"12px", color:C.muted }}>{doneCount}/{items.length}</div>
+                  <div style={{ fontSize:"13px", color:C.muted }}>{isExp ? "▲" : "▼"}</div>
+                </div>
+                {isExp && (
+                  <div style={{ padding:"12px 16px", display:"flex", flexDirection:"column", gap:"10px" }}>
+                    <div style={{ display:"flex", alignItems:"center", gap:"10px", padding:"8px", background:`${C.blue}08`, borderRadius:"8px" }}>
+                      <input type="checkbox" id={`cc_${tech.id}`} checked={!!tech.classroom_complete} onChange={e => sb(`techs?id=eq.${tech.id}`,{method:"PATCH",body:JSON.stringify({classroom_complete:e.target.checked}),prefer:"return=minimal"}).then(()=>refreshAll()).catch(e=>showToast("Error: "+e.message,false))} style={{ width:"16px", height:"16px", cursor:"pointer" }}/>
+                      <label htmlFor={`cc_${tech.id}`} style={{ fontSize:"13px", color:C.black, cursor:"pointer" }}>Classroom training complete</label>
+                    </div>
+                    <Bar pct={items.length ? Math.round((doneCount/items.length)*100) : 0} color={doneCount===items.length&&items.length>0 ? C.green : C.blue} h={6}/>
+                    {phases.map(phase => (
+                      <div key={phase}>
+                        <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"12px", color:C.blue, letterSpacing:"1px", marginBottom:"4px", marginTop:"8px" }}>{PHASE_LABELS[phase] || phase}</div>
+                        {byPhase[phase].map(item => (
+                          <div key={item.id} style={{ padding:"5px 0", borderBottom:`1px solid ${C.border}20` }}>
+                            <div style={{ display:"flex", alignItems:"flex-start", gap:"10px" }}>
+                              <input type="checkbox" checked={!!tSoffs[item.id]} onChange={() => toggleSignoff(tech.id, item.id)} style={{ width:"15px", height:"15px", marginTop:"2px", cursor:"pointer" }}/>
+                              <div style={{ flex:1 }}>
+                                <div style={{ fontSize:"12px", color:tSoffs[item.id] ? C.muted : C.black, textDecoration:tSoffs[item.id] ? "line-through" : "none" }}>
+                                  <span style={{ color:C.muted, marginRight:"4px" }}>#{item.sort_order}</span>{item.description}
+                                </div>
+                                {item.has_script && (<>
+                                  <button onClick={() => setExpandedScript(s => ({...s, [`${tech.id}_${item.id}`]: !s[`${tech.id}_${item.id}`]}))} style={{ background:"none", border:"none", color:C.blue, fontSize:"10px", cursor:"pointer", padding:"2px 0", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>
+                                    {expandedScript[`${tech.id}_${item.id}`] ? "▲ Hide" : "▼ Script"}
+                                  </button>
+                                  {expandedScript[`${tech.id}_${item.id}`] && (
+                                    <div style={{ background:C.blueXlt, border:`1px solid ${C.border}`, borderRadius:"6px", padding:"8px 10px", fontSize:"11px", color:C.black, marginTop:"4px", lineHeight:1.5 }}>{item.script_text}</div>
+                                  )}
+                                </>)}
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ))}
+                    <div style={{ display:"flex", gap:"8px", marginTop:"8px", flexWrap:"wrap" }}>
+                      {canAdv && <button onClick={() => advanceStage(tech)} style={btnSm(C.green)}>Advance → {STAGE_CONFIG[stageOrder[stageIdx+1]]?.label}</button>}
+                      <button onClick={() => sb(`techs?id=eq.${tech.id}`,{method:"PATCH",body:JSON.stringify({onboarding_stage:"hard_fail"}),prefer:"return=minimal"}).then(()=>{ refreshAll(); showToast(`${tech.name} → Hard Fail`); loadDevData(); }).catch(e=>showToast("Error: "+e.message,false))} style={btnSm(C.red)}>Mark Hard Fail</button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* ── B. PERFECT DAY CERT ── */}
+      {devView==="cert" && (
+        <div style={{ display:"flex", flexDirection:"column", gap:"12px" }}>
+          {lastCertResult && lastCertResult.overall==="fail" && (
+            <div style={{ background:"#ef444410", border:"2px solid #ef4444", borderRadius:"12px", padding:"16px" }}>
+              <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"16px", color:C.red, marginBottom:"8px" }}>
+                Study Sheet — {lastCertResult.techName} (Attempt {lastCertResult.attemptNumber})
+              </div>
+              <div style={{ fontSize:"12px", color:C.muted, marginBottom:"10px" }}>Review these before retesting:</div>
+              {lastCertResult.failedItems.map(item => (
+                <div key={item.id} style={{ padding:"8px 0", borderBottom:`1px solid ${C.border}40` }}>
+                  <div style={{ fontSize:"13px", color:C.black, fontWeight:"600" }}>#{item.sort_order} {item.description}</div>
+                  {item.has_script && item.script_text && (
+                    <div style={{ background:C.blueXlt, border:`1px solid ${C.border}`, borderRadius:"6px", padding:"8px 10px", fontSize:"11px", color:C.black, marginTop:"4px", lineHeight:1.5 }}>{item.script_text}</div>
+                  )}
+                </div>
+              ))}
+              <button onClick={() => setLastCertResult(null)} style={{ ...btnSm(C.border), color:C.black, marginTop:"10px" }}>Dismiss</button>
+            </div>
+          )}
+          <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"16px", display:"flex", flexDirection:"column", gap:"12px" }}>
+            <Label color={C.blue}>New Perfect Day Cert</Label>
+            <div style={{ display:"flex", gap:"10px", flexWrap:"wrap" }}>
+              <div style={{ flex:1, minWidth:"150px" }}>
+                <div style={{ fontSize:"11px", color:C.muted, marginBottom:"4px" }}>Tech</div>
+                <select value={certTechSel} onChange={e => { setCertTechSel(e.target.value); setCertScores({}); setLastCertResult(null); }} style={sel(certTechSel)}>
+                  <option value="">— Select Tech —</option>
+                  {activeTechs.map(t => {
+                    const att = certs.filter(c => c.tech_id === t.id).length;
+                    return <option key={t.id} value={t.id} disabled={att>=3}>{t.name}{att>=3 ? " (3 attempts — blocked)" : ""}</option>;
+                  })}
+                </select>
+              </div>
+              <div style={{ flex:1, minWidth:"150px" }}>
+                <div style={{ fontSize:"11px", color:C.muted, marginBottom:"4px" }}>Administered By</div>
+                <select value={certAdminBy} onChange={e => setCertAdminBy(e.target.value)} style={sel(certAdminBy)}>
+                  <option value="">— Select —</option>
+                  {activeTechs.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                </select>
+              </div>
+              <div style={{ flex:1, minWidth:"130px" }}>
+                <div style={{ fontSize:"11px", color:C.muted, marginBottom:"4px" }}>Test Date</div>
+                <input type="date" value={certDate} onChange={e => setCertDate(e.target.value)} style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"10px", borderRadius:"8px", fontSize:"13px", fontFamily:"'Barlow Condensed',sans-serif", width:"100%", boxSizing:"border-box" }}/>
+              </div>
+            </div>
+            {certTechSel && certs.filter(c=>c.tech_id===certTechSel).length>=3 ? (
+              <div style={{ background:"#ef444410", border:"1px solid #ef4444", borderRadius:"8px", padding:"12px", fontSize:"13px", color:C.red }}>
+                ⚠ 3 attempts used. Recommend a fit conversation instead of another retest.
+              </div>
+            ) : certTechSel && rubricItems && rubricItems.length > 0 && (
+              <>
+                <div style={{ fontSize:"11px", color:C.muted }}>Score each item — any ❌ = overall fail.</div>
+                {phases.map(phase => (
+                  <div key={phase}>
+                    <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"12px", color:C.blue, letterSpacing:"1px", marginBottom:"4px", marginTop:"8px" }}>{PHASE_LABELS[phase]||phase}</div>
+                    {byPhase[phase].map(item => (
+                      <div key={item.id} style={{ display:"flex", alignItems:"center", gap:"8px", padding:"5px 0", borderBottom:`1px solid ${C.border}20` }}>
+                        <div style={{ flex:1, fontSize:"12px", color:C.black }}><span style={{ color:C.muted, marginRight:"4px" }}>#{item.sort_order}</span>{item.description}</div>
+                        <button onClick={() => setCertScores(s => ({...s, [item.id]: s[item.id]==="pass" ? null : "pass"}))} style={{ padding:"4px 10px", borderRadius:"6px", border:"none", cursor:"pointer", background:certScores[item.id]==="pass" ? C.green : C.cardLt, color:certScores[item.id]==="pass" ? C.white : C.black, fontSize:"13px" }}>✅</button>
+                        <button onClick={() => setCertScores(s => ({...s, [item.id]: s[item.id]==="fail" ? null : "fail"}))} style={{ padding:"4px 10px", borderRadius:"6px", border:"none", cursor:"pointer", background:certScores[item.id]==="fail" ? C.red : C.cardLt, color:certScores[item.id]==="fail" ? C.white : C.black, fontSize:"13px" }}>❌</button>
+                      </div>
+                    ))}
+                  </div>
+                ))}
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginTop:"4px" }}>
+                  <div style={{ fontSize:"12px", color:C.muted }}>{Object.values(certScores).filter(Boolean).length}/{rubricItems.length} scored · {Object.values(certScores).filter(v=>v==="fail").length} fails</div>
+                  <button onClick={submitCert} disabled={submittingCert} style={btnSm(C.blue)}>{submittingCert ? "Submitting..." : "Submit Cert"}</button>
+                </div>
+              </>
+            )}
+          </div>
+          {certTechSel && certs.filter(c=>c.tech_id===certTechSel).length > 0 && (
+            <div style={{ display:"flex", flexDirection:"column", gap:"8px" }}>
+              <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", fontSize:"13px", color:C.muted, letterSpacing:"1px" }}>PAST ATTEMPTS</div>
+              {certs.filter(c=>c.tech_id===certTechSel).map(cert => (
+                <div key={cert.id} style={{ background:C.card, border:`1px solid ${cert.overall_result==="pass" ? C.green : C.red}60`, borderRadius:"10px", padding:"10px 14px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                  <div>
+                    <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"14px", color:C.black }}>Attempt #{cert.attempt_number} — {cert.test_date}</div>
+                    <div style={{ fontSize:"12px", color:cert.overall_result==="pass" ? C.green : C.red }}>{cert.overall_result==="pass" ? "✅ PASS" : "❌ FAIL"}</div>
+                  </div>
+                  <div style={{ fontSize:"11px", color:C.muted }}>{certResults.filter(r=>r.cert_id===cert.id&&r.result==="fail").length} fails</div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── C. CHECK-INS ── */}
+      {devView==="checkins" && (
+        <div style={{ display:"flex", flexDirection:"column", gap:"12px" }}>
+          {selectedCheckin && (
+            <div style={{ background:C.card, border:`2px solid ${C.blue}`, borderRadius:"12px", padding:"16px", display:"flex", flexDirection:"column", gap:"10px" }}>
+              <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"16px", color:C.black }}>
+                {techs.find(t=>t.id===selectedCheckin.tech_id)?.name} — {selectedCheckin.milestone.replace("_"," ")} ({selectedCheckin.scheduled_date})
+              </div>
+              {(() => {
+                const t = techs.find(x => x.id === selectedCheckin.tech_id);
+                if (!t) return null;
+                const td = t.start_date ? Math.floor((Date.now() - new Date(t.start_date+"T12:00:00Z")) / 86400000) : null;
+                const myRA = (rideAlongs||[]).filter(r=>r.tech_id===t.id).sort((a,b)=>b.date?.localeCompare(a.date)).slice(0,3);
+                const raAvg = myRA.length ? Math.round(myRA.reduce((s,r)=>{ const cl=r.checklist?JSON.parse(r.checklist):{}; const v=Object.values(cl); return s+(v.length?v.filter(x=>x==="✅").length/v.length*100:0); },0)/myRA.length) : null;
+                return (
+                  <div style={{ background:C.cardLt, borderRadius:"8px", padding:"10px 12px", fontSize:"12px", color:C.muted, display:"flex", gap:"16px", flexWrap:"wrap" }}>
+                    {td!==null && <span>Tenure: <strong style={{color:C.black}}>{td} days</strong></span>}
+                    {raAvg!==null && <span>Last 3 ride-along avg: <strong style={{color:C.black}}>{raAvg}%</strong></span>}
+                  </div>
+                );
+              })()}
+              <textarea placeholder="Audit notes (specific missed items discussed)..." value={checkinForm.audit_notes||""} onChange={e=>setCheckinForm(f=>({...f,audit_notes:e.target.value}))} style={{ ...inp, minHeight:"60px", resize:"vertical" }}/>
+              <input type="text" placeholder="Goal for next milestone..." value={checkinForm.goal_set||""} onChange={e=>setCheckinForm(f=>({...f,goal_set:e.target.value}))} style={inp}/>
+              <div style={{ display:"flex", alignItems:"center", gap:"10px" }}>
+                <input type="checkbox" id="happypay" checked={!!checkinForm.happy_with_pay} onChange={e=>setCheckinForm(f=>({...f,happy_with_pay:e.target.checked}))} style={{ width:"16px", height:"16px" }}/>
+                <label htmlFor="happypay" style={{ fontSize:"13px", color:C.black }}>Happy with pay</label>
+              </div>
+              <textarea placeholder="Pay notes..." value={checkinForm.pay_notes||""} onChange={e=>setCheckinForm(f=>({...f,pay_notes:e.target.value}))} style={{ ...inp, minHeight:"50px", resize:"vertical" }}/>
+              <textarea placeholder="Team feedback..." value={checkinForm.team_feedback||""} onChange={e=>setCheckinForm(f=>({...f,team_feedback:e.target.value}))} style={{ ...inp, minHeight:"50px", resize:"vertical" }}/>
+              <textarea placeholder="QA notes..." value={checkinForm.qa_notes||""} onChange={e=>setCheckinForm(f=>({...f,qa_notes:e.target.value}))} style={{ ...inp, minHeight:"50px", resize:"vertical" }}/>
+              <div style={{ display:"flex", gap:"8px" }}>
+                <button onClick={saveCheckin} disabled={savingCheckin} style={btnSm(C.green)}>{savingCheckin ? "Saving..." : "Mark Complete & Save"}</button>
+                <button onClick={() => { setSelectedCheckin(null); setCheckinForm({}); }} style={{ ...btnSm(C.cardLt), color:C.black, border:`1px solid ${C.border}` }}>Cancel</button>
+              </div>
+            </div>
+          )}
+          {activeTechs.map(tech => {
+            const tci = checkins.filter(c=>c.tech_id===tech.id).sort((a,b)=>a.scheduled_date.localeCompare(b.scheduled_date));
+            const today = new Date().toISOString().split("T")[0];
+            return (
+              <div key={tech.id} style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", overflow:"hidden" }}>
+                <div style={{ background:C.cardLt, padding:"10px 16px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"15px", color:C.black }}>
+                  {tech.name}
+                  {tech.start_date && <span style={{ fontSize:"11px", color:C.muted, fontWeight:"400", marginLeft:"8px" }}>started {tech.start_date}</span>}
+                </div>
+                {tci.length === 0 ? (
+                  <div style={{ padding:"12px 16px", fontSize:"12px", color:C.muted }}>No check-ins scheduled. Set a start date to auto-schedule.</div>
+                ) : (
+                  <div style={{ display:"flex", flexWrap:"wrap", gap:"8px", padding:"12px 16px" }}>
+                    {tci.map(ci => {
+                      const done = ci.status==="completed";
+                      const over = !done && ci.scheduled_date < today;
+                      const clr = done ? C.green : over ? C.red : C.blue;
+                      return (
+                        <button key={ci.id} onClick={() => { setSelectedCheckin(ci); setCheckinForm({ audit_notes:ci.audit_notes||"", goal_set:ci.goal_set||"", happy_with_pay:ci.happy_with_pay, pay_notes:ci.pay_notes||"", team_feedback:ci.team_feedback||"", qa_notes:ci.qa_notes||"" }); }} style={{ background:`${clr}15`, border:`2px solid ${clr}`, borderRadius:"8px", padding:"8px 12px", cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", gap:"2px", minWidth:"90px" }}>
+                          <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"13px", color:clr }}>{ci.milestone.replace("_"," ")}</div>
+                          <div style={{ fontSize:"10px", color:C.muted }}>{ci.scheduled_date}</div>
+                          <div style={{ fontSize:"11px", color:clr, fontWeight:"bold" }}>{done ? "✓ Done" : over ? "⚠ Overdue" : "Upcoming"}</div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── SPLIT JOBS ADMIN ─────────────────────────────────────────────────────────
 function SplitJobsAdmin({ techs, pendingSplits, refreshAll, showToast, saving, setSaving }) {
   const techById = Object.fromEntries(techs.map(t => [t.id, t]));
   const [splitInputs, setSplitInputs] = useState({});
+  const [upsellAttrib, setUpsellAttrib] = useState({});
+
+  // Pre-load any existing upsell attributions for these split jobs
+  useEffect(() => {
+    if (!pendingSplits.length) return;
+    const jobIds = [...new Set(pendingSplits.map(r => r.hcp_job_id))];
+    const inList = jobIds.map(id => `"${id}"`).join(",");
+    sb(`job_upsell_attribution?hcp_job_id=in.(${inList})&select=hcp_job_id,tech_id`)
+      .then(rows => {
+        const map = {};
+        for (const row of (rows || [])) map[row.hcp_job_id] = row.tech_id;
+        setUpsellAttrib(map);
+      })
+      .catch(() => {});
+  }, [pendingSplits]);
 
   // Group pending rows by hcp_job_id
   const grouped = {};
@@ -3059,11 +3667,13 @@ function SplitJobsAdmin({ techs, pendingSplits, refreshAll, showToast, saving, s
   }
   const splitJobs = Object.entries(grouped).map(([jobId, rows]) => ({
     jobId,
-    date:         rows[0]?.job_date,
-    totalRevenue: +(rows.reduce((s, r) => s + (r.revenue || 0), 0)).toFixed(2),
-    totalTips:    +(rows.reduce((s, r) => s + (r.tips    || 0), 0)).toFixed(2),
+    date:          rows[0]?.job_date,
+    customerName:  rows.find(r => r.customer_name)?.customer_name || null,
+    totalRevenue:  +(rows.reduce((s, r) => s + (r.revenue       || 0), 0)).toFixed(2),
+    totalTips:     +(rows.reduce((s, r) => s + (r.tips          || 0), 0)).toFixed(2),
+    totalUpsells:  +(rows.reduce((s, r) => s + (r.upsell_amount || 0), 0)).toFixed(2),
     rows,
-  }));
+  })).sort((a, b) => (b.date || "").localeCompare(a.date || ""));
 
   function getInput(jobId, techId, defaultPct) {
     return (splitInputs[jobId] || {})[techId] ?? String(defaultPct);
@@ -3086,6 +3696,7 @@ function SplitJobsAdmin({ techs, pendingSplits, refreshAll, showToast, saving, s
     }
     setSaving(true);
     try {
+      // 1. Write revenue split percentages
       for (const e of entries) {
         await sb(`job_splits?on_conflict=hcp_job_id,tech_id`, {
           method: "POST",
@@ -3093,8 +3704,26 @@ function SplitJobsAdmin({ techs, pendingSplits, refreshAll, showToast, saving, s
           body: JSON.stringify({ hcp_job_id: sj.jobId, tech_id: e.tech_id, percentage: e.pct }),
         });
       }
-      showToast(`✅ Split saved — re-run Repair Upsells for ${sj.date} to apply`);
-    } catch(err) { showToast("Error: " + err.message, false); }
+      // 2. Write upsell attribution if set
+      const selectedUpsellTechId = upsellAttrib[sj.jobId];
+      if (selectedUpsellTechId && sj.totalUpsells > 0) {
+        await sb(`job_upsell_attribution?on_conflict=hcp_job_id`, {
+          method: "POST",
+          prefer: "resolution=merge-duplicates,return=minimal",
+          body: JSON.stringify({ hcp_job_id: sj.jobId, tech_id: selectedUpsellTechId }),
+        });
+      }
+      // 3. Immediately recalculate by triggering repair for this job's date
+      showToast("⏳ Split saved — applying changes...");
+      const repairRes = await fetch("/.netlify/functions/hcp-upsell-repair", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ from: sj.date, to: sj.date }),
+      });
+      if (!repairRes.ok) throw new Error(`Repair failed (${repairRes.status})`);
+      await refreshAll();
+      showToast("✅ Split confirmed and applied!");
+    } catch(err) { showToast("⚠ " + err.message, false); }
     setSaving(false);
   }
 
@@ -3120,13 +3749,17 @@ function SplitJobsAdmin({ techs, pendingSplits, refreshAll, showToast, saving, s
             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
               <div>
                 <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"13px", color:C.muted, letterSpacing:"1px" }}>...{sj.jobId.slice(-12)}</div>
-                <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", fontSize:"15px", color:C.black, marginTop:"2px" }}>{sj.date}</div>
+                {sj.customerName && (
+                  <div style={{ fontWeight:"700", fontSize:"15px", color:C.black, marginTop:"1px" }}>{sj.customerName}</div>
+                )}
+                <div style={{ fontSize:"13px", color:C.muted, marginTop:"1px" }}>{sj.date}</div>
               </div>
               <div style={{ textAlign:"right" }}>
-                <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"15px", color:C.green }}>${sj.totalRevenue.toFixed(2)} rev</div>
-                {sj.totalTips > 0 && <div style={{ fontSize:"11px", color:C.muted }}>${sj.totalTips.toFixed(2)} tips</div>}
+                <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"16px", color:C.green }}>${(sj.totalRevenue + sj.totalTips).toFixed(2)}</div>
+                <div style={{ fontSize:"11px", color:C.muted }}>${sj.totalRevenue.toFixed(2)} rev{sj.totalTips > 0 ? ` + $${sj.totalTips.toFixed(2)} tip` : ""}</div>
               </div>
             </div>
+            <div style={{ fontSize:"11px", color:C.muted, fontWeight:"700", letterSpacing:"1px", fontFamily:"'Barlow Condensed',sans-serif", textTransform:"uppercase" }}>Revenue Split</div>
             {sj.rows.map((r, i) => {
               const tech = techById[r.tech_id];
               return (
@@ -3142,6 +3775,27 @@ function SplitJobsAdmin({ techs, pendingSplits, refreshAll, showToast, saving, s
                 </div>
               );
             })}
+            {sj.totalUpsells > 0 && (
+              <div style={{ borderTop:`1px solid ${C.border}`, paddingTop:"12px", display:"flex", flexDirection:"column", gap:"8px" }}>
+                <div style={{ fontSize:"11px", color:"#f59e0b", fontWeight:"700", letterSpacing:"1px", fontFamily:"'Barlow Condensed',sans-serif", textTransform:"uppercase" }}>
+                  Upsell Credit — ${(+sj.totalUpsells).toFixed(2)} total
+                </div>
+                <select
+                  value={upsellAttrib[sj.jobId] || ""}
+                  onChange={e => setUpsellAttrib(prev => ({...prev, [sj.jobId]: e.target.value}))}
+                  style={{ background:C.cardLt, border:`1px solid #f59e0b`, color:C.black, padding:"8px 10px", borderRadius:"8px", fontSize:"13px", width:"100%", fontFamily:"'Barlow',sans-serif" }}
+                >
+                  <option value="">— Who sold this upsell? —</option>
+                  {sj.rows.map(r => {
+                    const t = techById[r.tech_id];
+                    return <option key={r.tech_id} value={r.tech_id}>{t?.name || r.tech_id.slice(0,8)}</option>;
+                  })}
+                </select>
+                {!upsellAttrib[sj.jobId] && (
+                  <div style={{ fontSize:"11px", color:"#f59e0b" }}>⚠ Not set — will split by revenue % until confirmed</div>
+                )}
+              </div>
+            )}
             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
               <div style={{ fontSize:"12px", color: ok ? C.green : "#ef4444", fontWeight:"700" }}>
                 Total: {total.toFixed(1)}% {ok ? "✓" : "— must equal 100%"}
@@ -3150,7 +3804,7 @@ function SplitJobsAdmin({ techs, pendingSplits, refreshAll, showToast, saving, s
                 onClick={() => saveSplit(sj)}
                 disabled={saving || !ok}
                 style={{ background: saving||!ok ? "#333" : "#f59e0b", border:"none", color: saving||!ok ? "#666" : C.black, padding:"8px 20px", borderRadius:"10px", cursor: saving||!ok ? "not-allowed" : "pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"12px", letterSpacing:"1.5px", textTransform:"uppercase" }}
-              >Save Split</button>
+              >{saving ? "Applying..." : "Save & Apply"}</button>
             </div>
           </div>
         );
@@ -3207,12 +3861,12 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
     if (!addForm.name||!addForm.pin||addForm.pin.length!==4) return showToast("Name + 4-digit PIN required",false);
     if (techs.find(t=>t.pin===addForm.pin)) return showToast("PIN already in use",false);
     setSaving(true);
-    try { const avatar=addForm.avatar||addForm.name.split(" ").map(w=>w[0]).join("").toUpperCase().slice(0,2); await sb("techs",{method:"POST",body:JSON.stringify({name:addForm.name,pin:addForm.pin,avatar,badges:["day_one"],start_date:addForm.start_date||null,commission_rate:parseInt(addForm.commission_rate)||27})}); await refreshAll(); showToast(`✅ ${addForm.name} added!`); setAddForm({name:"",pin:"",avatar:"",start_date:"",commission_rate:27}); }
+    try { const avatar=addForm.avatar||addForm.name.split(" ").map(w=>w[0]).join("").toUpperCase().slice(0,2); const res=await sb("techs",{method:"POST",body:JSON.stringify({name:addForm.name,pin:addForm.pin,avatar,badges:["day_one"],start_date:addForm.start_date||null,commission_rate:parseInt(addForm.commission_rate)||27})}); if(res&&res[0]&&addForm.start_date)await scheduleCheckins(res[0].id,addForm.start_date).catch(()=>{}); await refreshAll(); showToast(`✅ ${addForm.name} added!`); setAddForm({name:"",pin:"",avatar:"",start_date:"",commission_rate:27}); }
     catch(e){ showToast("Error: "+e.message,false); }
     setSaving(false);
   }
   async function updateStartDate(techId,date) {
-    try { await sb(`techs?id=eq.${techId}`,{method:"PATCH",body:JSON.stringify({start_date:date||null}),prefer:"return=minimal"}); await refreshAll(); showToast("✅ Start date saved!"); }
+    try { await sb(`techs?id=eq.${techId}`,{method:"PATCH",body:JSON.stringify({start_date:date||null}),prefer:"return=minimal"}); if(date)await scheduleCheckins(techId,date).catch(()=>{}); await refreshAll(); showToast("✅ Start date saved!"); }
     catch(e){ showToast("Error: "+e.message,false); }
   }
   async function archiveTech(tech) {
@@ -3332,6 +3986,9 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
     { label:"HCP Sync", items:[
       ["splits","✂️", pendingSplits.length > 0 ? `Split Jobs (${new Set(pendingSplits.map(r=>r.hcp_job_id)).size})` : "Split Jobs"],
     ]},
+    { label:"Development", items:[
+      ["development","📋","Development"],
+    ]},
     { label:"Management", items:[
       ["add","➕","Add Tech"],
       ["manage","✏️","Manage"],
@@ -3350,8 +4007,32 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
       <Header left={<HamburgerBtn onClick={()=>setMenuOpen(true)}/>} title={adminTabLabel} right={<LogoutBtn onLogout={onLogout}/>}/>
       <div style={{ padding:"20px", maxWidth:"700px", margin:"0 auto" }}>
 
+        {pendingSplits.length > 0 && tab !== "splits" && (()=>{
+          const count = new Set(pendingSplits.map(r => r.hcp_job_id)).size;
+          return (
+            <div style={{ background:"rgba(245,158,11,0.1)", border:"1px solid #f59e0b", borderRadius:"10px", padding:"12px 16px", marginBottom:"16px", display:"flex", justifyContent:"space-between", alignItems:"center", gap:"12px" }}>
+              <div>
+                <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"14px", color:"#f59e0b", letterSpacing:"0.5px" }}>
+                  ⚠ {count} job{count !== 1 ? "s" : ""} need split confirmation
+                </div>
+                <div style={{ fontSize:"12px", color:C.muted, marginTop:"2px" }}>
+                  Revenue and upsell splits may be incorrect until reviewed.
+                </div>
+              </div>
+              <button
+                onClick={() => setTab("splits")}
+                style={{ background:"#f59e0b", border:"none", color:C.black, padding:"8px 18px", borderRadius:"8px", cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"12px", letterSpacing:"1.5px", textTransform:"uppercase", whiteSpace:"nowrap", flexShrink:0 }}
+              >Review Now</button>
+            </div>
+          );
+        })()}
+
         {tab==="splits"&&(
           <SplitJobsAdmin techs={techs} pendingSplits={pendingSplits} refreshAll={refreshAll} showToast={showToast} saving={saving} setSaving={setSaving}/>
+        )}
+
+        {tab==="development"&&(
+          <DevelopmentTab techs={techs} rideAlongs={rideAlongs||[]} refreshAll={refreshAll} showToast={showToast}/>
         )}
 
         {tab==="upsells"&&(
@@ -3716,7 +4397,7 @@ export default function App() {
         sb("callbacks?select=*&order=created_at.desc").catch(()=>[]),
         sb("jobs?select=*&order=job_date.desc").catch(()=>[]),
         sb("tech_hours?select=*").catch(()=>[]),
-        sb("jobs?split_confirmed=eq.false&select=hcp_job_id,tech_id,job_date,revenue,tips,upsell_amount&order=job_date.desc").catch(()=>[]),
+        sb("jobs?split_confirmed=eq.false&select=hcp_job_id,tech_id,job_date,revenue,tips,upsell_amount,customer_name&order=job_date.desc").catch(()=>[]),
       ]);
       setTechs(t||[]); setUpsells(u||[]); setSwitchovers(s||[]); setReviews(r||[]);
       setRideAlongs(ra||[]); setSchedules(sch||[]); setCallbacks(cb||[]); setJobs(jb||[]); setTechHours(th||[]);
@@ -3837,7 +4518,7 @@ alter table jobs add column if not exists tips numeric default 0;`}
   );
   if (user.type==="tech"&&currentTech) return (
     <TechDashboard tech={currentTech} techs={activeTechs} upsells={upsells} switchovers={switchovers}
-      reviews={reviews} callbacks={callbacks} quota={quota} jobs={jobs} techHours={techHours} onLogout={()=>setUser(null)}/>
+      reviews={reviews} callbacks={callbacks} quota={quota} jobs={jobs} techHours={techHours} rideAlongs={rideAlongs} onLogout={()=>setUser(null)}/>
   );
   return null;
 }

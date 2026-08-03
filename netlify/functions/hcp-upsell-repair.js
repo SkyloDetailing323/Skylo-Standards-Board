@@ -8,7 +8,7 @@
 // split_confirmed=false so the admin Split Jobs tab can flag them for Kyle.
 
 const TECH_MAP = require('./lib/techMap');
-const { fetchJobSplits, resolveSplits } = require('./lib/splitHelper');
+const { fetchJobSplits, resolveSplits, fetchUpsellAttributions } = require('./lib/splitHelper');
 
 function getWeekKey(dateStr) {
   const d = new Date(dateStr + "T12:00:00Z");
@@ -132,10 +132,11 @@ exports.handler = async (event) => {
     }).filter(Boolean);
     if (matchedEmployees.length === 0) continue;
     jobMeta[String(job.id)] = {
-      employees:   matchedEmployees,
-      schedStart:  job.schedule?.scheduled_start,
-      totalAmount: job.total_amount || 0,
-      tipAmount:   job.tip_amount   || 0,
+      employees:    matchedEmployees,
+      schedStart:   job.schedule?.scheduled_start,
+      totalAmount:  job.total_amount || 0,
+      tipAmount:    job.tip_amount   || 0,
+      customerName: [job.customer?.first_name, job.customer?.last_name].filter(Boolean).join(" ") || null,
     };
   }
 
@@ -186,11 +187,12 @@ exports.handler = async (event) => {
     console.log(`After fallback: ${invoicesMatched}/${Object.keys(jobMeta).length} matched`);
   }
 
-  // Fetch confirmed split percentages for multi-employee jobs
+  // Fetch confirmed split percentages and upsell attribution for multi-employee jobs
   const multiIds = Object.entries(jobMeta).filter(([, m]) => m.employees.length > 1).map(([id]) => id);
-  const splitMap = await fetchJobSplits(multiIds, sbFetch);
+  const splitMap        = await fetchJobSplits(multiIds, sbFetch);
+  const upsellAttribMap = await fetchUpsellAttributions(multiIds, sbFetch);
   if (multiIds.length > 0) {
-    console.log(`Split jobs: ${multiIds.length} found, ${Object.keys(splitMap).length} have confirmed splits`);
+    console.log(`Split jobs: ${multiIds.length} found, ${Object.keys(splitMap).length} confirmed revenue, ${Object.keys(upsellAttribMap).length} confirmed upsell`);
   }
 
   // Write all jobs + upsell records
@@ -213,10 +215,13 @@ exports.handler = async (event) => {
       const tech = techByName[split.skyloName];
       if (!tech) { console.log("Tech not in Supabase:", split.skyloName); continue; }
 
-      const revenue  = +(totalRev * split.pct).toFixed(2);
-      const tips     = +(totalTip * split.pct).toFixed(2);
-      const upsells  = +(totalUps * split.pct).toFixed(2);
-      const discount = +(totalDsc * split.pct).toFixed(2);
+      const revenue    = +(totalRev * split.pct).toFixed(2);
+      const tips       = +(totalTip * split.pct).toFixed(2);
+      const discount   = +(totalDsc * split.pct).toFixed(2);
+      // Upsell credit: if manually attributed, 100% to one tech; otherwise split by revenue %
+      const attribId   = upsellAttribMap[jobId];
+      const upsellPct  = attribId ? (attribId === tech.id ? 1.0 : 0) : split.pct;
+      const upsells    = +(totalUps * upsellPct).toFixed(2);
       const pctTag   = splits.length > 1
         ? ` (${Math.round(split.pct * 100)}%${split.confirmed ? "" : " UNCONFIRMED"})`
         : "";
@@ -230,6 +235,7 @@ exports.handler = async (event) => {
         upsell_amount:   upsells,
         week_key:        weekKey,
         split_confirmed: split.confirmed,
+        customer_name:   meta.customerName || null,
       });
 
       jobReport.push({
@@ -248,7 +254,7 @@ exports.handler = async (event) => {
       console.log(`JOB ${jobId} | ${split.skyloName}${pctTag} | ${jobDate} | rev=$${revenue.toFixed(2)} disc=$${discount.toFixed(2)} tip=$${tips.toFixed(2)} ups=$${upsells.toFixed(2)} | ${inv ? "INVOICE" : "NO INVOICE - fallback"}`);
 
       if (inv && upsells > 0) {
-        const note = inv.upsellItems.map(i => `${i.name} ($${(i.amount * split.pct).toFixed(2)})`).join(", ");
+        const note = inv.upsellItems.map(i => `${i.name} ($${(i.amount * upsellPct).toFixed(2)})`).join(", ");
         await sbFetch("upsells?on_conflict=hcp_job_id,tech_id", {
           method: "POST",
           prefer: "resolution=merge-duplicates,return=minimal",

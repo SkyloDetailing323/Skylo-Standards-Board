@@ -39,4 +39,17 @@ function resolveSplits(jobId, matchedEmployees, splitMap, techByName) {
   return matchedEmployees.map(e => ({ skyloName: e.skyloName, pct: p, confirmed: false }));
 }
 
-module.exports = { fetchJobSplits, resolveSplits };
+// Returns { [hcp_job_id]: tech_id } — the one tech who gets 100% upsell credit on a split job.
+// When absent, falls back to dividing upsells by the revenue split percentage.
+async function fetchUpsellAttributions(jobIds, sbFetch) {
+  if (!jobIds.length) return {};
+  const inList = jobIds.map(id => `"${id}"`).join(",");
+  const rows = await sbFetch(
+    `job_upsell_attribution?hcp_job_id=in.(${inList})&select=hcp_job_id,tech_id`
+  );
+  const map = {};
+  for (const row of (rows || [])) map[row.hcp_job_id] = row.tech_id;
+  return map;
+}
+
+module.exports = { fetchJobSplits, resolveSplits, fetchUpsellAttributions };

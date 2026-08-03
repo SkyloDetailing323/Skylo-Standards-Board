@@ -4,7 +4,7 @@
 // falling back to equal split with split_confirmed=false.
 
 const TECH_MAP = require('./lib/techMap');
-const { fetchJobSplits, resolveSplits } = require('./lib/splitHelper');
+const { fetchJobSplits, resolveSplits, fetchUpsellAttributions } = require('./lib/splitHelper');
 
 function getMT() {
   const mt = new Date(Date.now() - 6 * 60 * 60 * 1000);
@@ -106,10 +106,11 @@ exports.handler = async () => {
     }).filter(Boolean);
     if (matchedEmployees.length === 0) continue;
     jobMeta[String(job.id)] = {
-      employees:   matchedEmployees,
-      schedStart:  job.schedule?.scheduled_start,
-      tipFallback: job.tip_amount || 0,
-      totalAmount: job.total_amount || 0,
+      employees:    matchedEmployees,
+      schedStart:   job.schedule?.scheduled_start,
+      tipFallback:  job.tip_amount   || 0,
+      totalAmount:  job.total_amount || 0,
+      customerName: [job.customer?.first_name, job.customer?.last_name].filter(Boolean).join(" ") || null,
     };
   }
 
@@ -147,9 +148,10 @@ exports.handler = async () => {
     console.log(`After fallback: ${Object.keys(invoiceData).length}/${Object.keys(jobMeta).length} matched`);
   }
 
-  // Fetch confirmed splits for multi-employee jobs
+  // Fetch confirmed splits and upsell attribution for multi-employee jobs
   const multiIds = Object.entries(jobMeta).filter(([, m]) => m.employees.length > 1).map(([id]) => id);
-  const splitMap = await fetchJobSplits(multiIds, sbFetch);
+  const splitMap        = await fetchJobSplits(multiIds, sbFetch);
+  const upsellAttribMap = await fetchUpsellAttributions(multiIds, sbFetch);
 
   let synced = 0;
   for (const [jobId, meta] of Object.entries(jobMeta)) {
@@ -169,9 +171,12 @@ exports.handler = async () => {
       const tech = techByName[split.skyloName];
       if (!tech) { console.log("Tech not in Supabase:", split.skyloName); continue; }
 
-      const revenue = +(totalRev * split.pct).toFixed(2);
-      const tips    = +(totalTip * split.pct).toFixed(2);
-      const upsells = +(totalUps * split.pct).toFixed(2);
+      const revenue   = +(totalRev * split.pct).toFixed(2);
+      const tips      = +(totalTip * split.pct).toFixed(2);
+      // Upsell credit: if manually attributed, 100% to one tech; otherwise split by revenue %
+      const attribId  = upsellAttribMap[jobId];
+      const upsellPct = attribId ? (attribId === tech.id ? 1.0 : 0) : split.pct;
+      const upsells   = +(totalUps * upsellPct).toFixed(2);
 
       await sbFetch("jobs?on_conflict=hcp_job_id,tech_id", {
         method: "POST",
@@ -185,11 +190,12 @@ exports.handler = async () => {
           hours:           0,
           week_key:        weekKey,
           split_confirmed: split.confirmed,
+          customer_name:   meta.customerName || null,
         }),
       });
 
       if (upsells > 0 && inv) {
-        const note = inv.upsellItems.map(i => `${i.name} ($${(i.amount * split.pct).toFixed(2)})`).join(", ");
+        const note = inv.upsellItems.map(i => `${i.name} ($${(i.amount * upsellPct).toFixed(2)})`).join(", ");
         await sbFetch("upsells?on_conflict=hcp_job_id,tech_id", {
           method: "POST",
           prefer: "resolution=merge-duplicates,return=minimal",

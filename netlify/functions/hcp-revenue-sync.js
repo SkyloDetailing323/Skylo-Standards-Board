@@ -89,10 +89,11 @@ exports.handler = async (event) => {
     if (matchedEmployees.length === 0) continue;
     const schedStart = job.schedule?.scheduled_start;
     jobMeta[String(job.id)] = {
-      employees:   matchedEmployees,
-      jobDate:     schedStart ? schedStart.split("T")[0] : from,
-      totalAmount: job.total_amount || 0,
-      tipAmount:   job.tip_amount   || 0,
+      employees:    matchedEmployees,
+      jobDate:      schedStart ? schedStart.split("T")[0] : from,
+      totalAmount:  job.total_amount || 0,
+      tipAmount:    job.tip_amount   || 0,
+      customerName: [job.customer?.first_name, job.customer?.last_name].filter(Boolean).join(" ") || null,
     };
   }
 
@@ -135,6 +136,7 @@ exports.handler = async (event) => {
         revenue:         +(totalRev * split.pct).toFixed(2),
         tips:            +(totalTip * split.pct).toFixed(2),
         split_confirmed: split.confirmed,
+        customer_name:   meta.customerName || null,
       });
     }
   }
