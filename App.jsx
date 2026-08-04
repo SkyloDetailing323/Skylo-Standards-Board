@@ -2757,44 +2757,59 @@ function AdminReviewEntry({ techs, reviews, saving, setSaving, refreshAll, showT
 }
 
 // ─── RIDE-ALONG SYSTEM ────────────────────────────────────────────────────────
+// Covers only the LAST HOUR of a job — the window the ride-along observer is
+// actually present for. Items reference RUBRIC_ITEMS_SEED ids (rubric_items table)
+// by id rather than duplicating description/script text a second time.
 const CHECKLIST_SECTIONS = [
   {
-    id: "arrival",
-    title: "Arrival",
-    icon: "🚗",
-    items: [
-      { id:"uniform",  label:"Uniform clean and worn correctly?" },
-      { id:"ontime",   label:"Arrived on time or let client know they were late?" },
-      { id:"parked",   label:"Are they parked correctly and strategically?" },
-    ],
+    id: "interior_finish",
+    title: "Interior Finish",
+    icon: "🧽",
+    itemIds: ["item_21", "item_22", "item_23", "item_24", "item_25"],
   },
   {
-    id: "cleaning",
-    title: "Cleaning",
-    icon: "🧹",
-    items: [
-      { id:"tote",     label:"Tote organized and no missing items?" },
-      { id:"swift",    label:"Are they working swiftly?" },
-      { id:"tools",    label:"Are they using the right tools and chemicals for the corresponding cleaning process?" },
-      { id:"pics",     label:"Did they take after pics and do all checklists?" },
-    ],
-    notes: [
-      { id:"faults",   label:"How is their cleaning technique? Name any faults:" },
-      { id:"wins",     label:"What are they succeeding with?" },
-    ],
+    id: "exterior_finish",
+    title: "Exterior Finish",
+    icon: "✨",
+    itemIds: ["item_31", "item_32", "item_33", "item_34", "item_35"],
   },
   {
-    id: "customer",
-    title: "Customer Interaction",
+    id: "closeout",
+    title: "Client Walkthrough & Close",
     icon: "🤝",
-    items: [
-      { id:"knock",    label:"Did they knock on the door to try for an in-person walk through first?" },
-      { id:"video",    label:"If not, did they send a walk-through video of the interior and exterior?" },
-      { id:"payment",  label:"Did they have them pay on the phone right there or send the invoice before they left?" },
-      { id:"flyers",   label:"Did they hand out 3 flyers and a customer satisfaction card and attach pics to HCP?" },
+    itemIds: ["item_36", "item_37", "item_38", "item_39"],
+    notes: [
+      { id:"faults", label:"Technique/script delivery faults — name any:" },
+      { id:"wins",   label:"What are they succeeding with?" },
     ],
+  },
+  {
+    id: "job_closeout",
+    title: "Job Close-Out",
+    icon: "📦",
+    itemIds: ["item_43", "item_44", "item_45"],
+  },
+  {
+    id: "next_client",
+    title: "Next Client Update",
+    icon: "📱",
+    itemIds: ["item_46"],
   },
 ];
+
+// Score = ✅ ÷ (✅ + ❌), N/A excluded. _meta_score_pct's value is a number, not
+// "✅"/"❌", so it's naturally excluded from this filter — no special-casing needed.
+function scorePctFromChecklist(cl) {
+  const vals = Object.values(cl).filter(v => v === "✅" || v === "❌");
+  if (!vals.length) return null;
+  return Math.round(vals.filter(v => v === "✅").length / vals.length * 100);
+}
+function scoreColor(pct) {
+  if (pct == null) return C.muted;
+  if (pct >= 90) return C.green;
+  if (pct >= 75) return C.blue;
+  return C.red;
+}
 
 // Get all upcoming Thursdays
 function getThursdays(count = 12) {
@@ -2827,7 +2842,19 @@ function RideAlongTab({ techs, rideAlongs, schedules, onSave, onSaveSchedule, sa
   const [generalNotes, setGeneralNotes] = useState("");
   const [viewDetail, setViewDetail] = useState(null);
   const [scheduleMap, setScheduleMap] = useState({});
+  const [rubricItems, setRubricItems] = useState([]);
+  const [loadingRubric, setLoadingRubric] = useState(true);
+  const [expandedScript, setExpandedScript] = useState({});
   const thursdays = getThursdays(12);
+
+  useEffect(() => {
+    sb("rubric_items?select=*&order=sort_order")
+      .then(items => setRubricItems(items || []))
+      .catch(() => setRubricItems([]))
+      .finally(() => setLoadingRubric(false));
+  }, []);
+  const rubricMap = {};
+  rubricItems.forEach(r => { rubricMap[r.id] = r; });
 
   // Load existing schedule into map
   useEffect(() => {
@@ -2846,10 +2873,11 @@ function RideAlongTab({ techs, rideAlongs, schedules, onSave, onSaveSchedule, sa
 
   async function handleSaveRideAlong() {
     if (!selectedTech || !selectedDate) return;
+    const scorePct = scorePctFromChecklist(checklist);
     await onSave({
       tech_id: selectedTech,
       date: selectedDate,
-      checklist: JSON.stringify(checklist),
+      checklist: JSON.stringify({ ...checklist, _meta_score_pct: scorePct }),
       notes: JSON.stringify(notes),
       general_notes: generalNotes,
     });
@@ -2940,23 +2968,46 @@ function RideAlongTab({ techs, rideAlongs, schedules, onSave, onSaveSchedule, sa
             </div>
           </div>
 
-          {CHECKLIST_SECTIONS.map(section=>(
+          {loadingRubric&&(
+            <div style={{ background:C.cardLt, border:`1px solid ${C.border}`, borderRadius:"10px", padding:"14px", fontSize:"13px", color:C.muted }}>Loading checklist items...</div>
+          )}
+
+          {!loadingRubric&&CHECKLIST_SECTIONS.map(section=>(
             <div key={section.id} style={{ background:C.card, border:`1px solid ${C.border}`, borderLeft:`3px solid ${C.blue}`, borderRadius:"12px", padding:"16px 18px" }}>
               <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"18px", color:C.black, letterSpacing:"2px", marginBottom:"14px" }}>{section.icon} {section.title.toUpperCase()}</div>
               <div style={{ display:"flex", flexDirection:"column", gap:"10px" }}>
-                {section.items.map(item=>(
-                  <div key={item.id} style={{ display:"flex", alignItems:"flex-start", gap:"12px" }}>
-                    <div style={{ display:"flex", gap:"6px", flexShrink:0, marginTop:"2px" }}>
-                      {["✅","❌","N/A"].map(val=>(
-                        <button key={val} onClick={()=>setChecklist(c=>({...c,[section.id+"_"+item.id]:val}))}
-                          style={{ background:checklist[section.id+"_"+item.id]===val?( val==="✅"?`${C.green}33`:val==="❌"?"#ff444433":"#ffffff22"):C.cardLt, border:`1px solid ${checklist[section.id+"_"+item.id]===val?(val==="✅"?C.green:val==="❌"?C.red:C.muted):C.border}`, color:checklist[section.id+"_"+item.id]===val?(val==="✅"?C.green:val==="❌"?C.red:C.white):C.muted, padding:"3px 8px", borderRadius:"4px", cursor:"pointer", fontSize:"11px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", whiteSpace:"nowrap" }}>
-                          {val}
-                        </button>
-                      ))}
+                {section.itemIds.map(itemId=>{
+                  const item = rubricMap[itemId];
+                  if (!item) return null;
+                  const key = section.id+"_"+item.id;
+                  return (
+                    <div key={item.id} style={{ display:"flex", flexDirection:"column", gap:"2px" }}>
+                      <div style={{ display:"flex", alignItems:"flex-start", gap:"12px" }}>
+                        <div style={{ display:"flex", gap:"6px", flexShrink:0, marginTop:"2px" }}>
+                          {["✅","❌","N/A"].map(val=>(
+                            <button key={val} onClick={()=>setChecklist(c=>({...c,[key]:val}))}
+                              style={{ background:checklist[key]===val?( val==="✅"?`${C.green}33`:val==="❌"?"#ff444433":"#ffffff22"):C.cardLt, border:`1px solid ${checklist[key]===val?(val==="✅"?C.green:val==="❌"?C.red:C.muted):C.border}`, color:checklist[key]===val?(val==="✅"?C.green:val==="❌"?C.red:C.white):C.muted, padding:"3px 8px", borderRadius:"4px", cursor:"pointer", fontSize:"11px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", whiteSpace:"nowrap" }}>
+                              {val}
+                            </button>
+                          ))}
+                        </div>
+                        <div style={{ fontSize:"13px", color:C.black, lineHeight:"1.4", paddingTop:"2px" }}>{item.description}</div>
+                      </div>
+                      {item.has_script&&(
+                        <div style={{ marginLeft:"78px" }}>
+                          <button onClick={()=>setExpandedScript(s=>({...s,[item.id]:!s[item.id]}))} style={{ background:"none", border:"none", color:C.blue, fontSize:"11px", cursor:"pointer", padding:"2px 0", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>
+                            {expandedScript[item.id]?"▲ Hide Perfect Day script":"▼ View Perfect Day script"}
+                          </button>
+                          {expandedScript[item.id]&&(
+                            <div style={{ background:C.blueXlt, border:`1px solid ${C.border}`, borderRadius:"6px", padding:"8px 10px", fontSize:"12px", color:C.black, marginTop:"4px", lineHeight:1.5 }}>
+                              {item.script_text}
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
-                    <div style={{ fontSize:"13px", color:C.black, lineHeight:"1.4", paddingTop:"2px" }}>{item.label}</div>
-                  </div>
-                ))}
+                  );
+                })}
                 {section.notes?.map(note=>(
                   <div key={note.id} style={{ marginTop:"4px" }}>
                     <div style={{ fontSize:"12px", color:C.muted, marginBottom:"6px" }}>{note.label}</div>
@@ -2966,6 +3017,17 @@ function RideAlongTab({ techs, rideAlongs, schedules, onSave, onSaveSchedule, sa
               </div>
             </div>
           ))}
+
+          {/* Live score */}
+          {!loadingRubric&&(() => {
+            const livePct = scorePctFromChecklist(checklist);
+            return (
+              <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${scoreColor(livePct)}`, borderRadius:"12px", padding:"16px 18px", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+                <Label color={scoreColor(livePct)}>📊 Live Score</Label>
+                <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"28px", color:scoreColor(livePct) }}>{livePct==null?"—":`${livePct}%`}</div>
+              </div>
+            );
+          })()}
 
           {/* General notes */}
           <div style={{ background:C.card, border:`1px solid ${C.border}`, borderLeft:`3px solid ${C.gold}`, borderRadius:"12px", padding:"16px 18px" }}>
@@ -2991,6 +3053,7 @@ function RideAlongTab({ techs, rideAlongs, schedules, onSave, onSaveSchedule, sa
               const passed = Object.values(cl).filter(v=>v==="✅").length;
               const failed = Object.values(cl).filter(v=>v==="❌").length;
               const total = Object.values(cl).length;
+              const pct = typeof cl._meta_score_pct==="number" ? cl._meta_score_pct : scorePctFromChecklist(cl);
               return (
                 <div key={ra.id} onClick={()=>setViewDetail(ra)} style={{ background:C.cardLt, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"14px 16px", marginBottom:"8px", cursor:"pointer", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
                   <div>
@@ -2998,7 +3061,10 @@ function RideAlongTab({ techs, rideAlongs, schedules, onSave, onSaveSchedule, sa
                     <div style={{ fontSize:"12px", color:C.muted }}>{formatDate(ra.date)}</div>
                     {total>0&&<div style={{ fontSize:"11px", color:C.muted, marginTop:"3px" }}><span style={{ color:C.green }}>✅ {passed}</span> passed · <span style={{ color:C.red }}>❌ {failed}</span> failed</div>}
                   </div>
-                  <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", fontSize:"12px", color:C.blue, letterSpacing:"1px" }}>VIEW →</div>
+                  <div style={{ display:"flex", alignItems:"center", gap:"10px" }}>
+                    {pct!=null&&<Pill color={scoreColor(pct)}>{pct}%</Pill>}
+                    <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", fontSize:"12px", color:C.blue, letterSpacing:"1px" }}>VIEW →</div>
+                  </div>
                 </div>
               );
             })}
@@ -3014,21 +3080,41 @@ function RideAlongTab({ techs, rideAlongs, schedules, onSave, onSaveSchedule, sa
             const tech = techs.find(t=>t.id===viewDetail.tech_id);
             const cl = viewDetail.checklist ? JSON.parse(viewDetail.checklist) : {};
             const notes = viewDetail.notes ? JSON.parse(viewDetail.notes) : {};
+            const pct = typeof cl._meta_score_pct==="number" ? cl._meta_score_pct : scorePctFromChecklist(cl);
             return (
               <>
-                <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.purple}`, borderRadius:"12px", padding:"16px 18px" }}>
-                  <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"22px", color:C.black }}>{tech?.name}</div>
-                  <div style={{ fontSize:"13px", color:C.muted }}>{formatDate(viewDetail.date)}</div>
+                <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.purple}`, borderRadius:"12px", padding:"16px 18px", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+                  <div>
+                    <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"22px", color:C.black }}>{tech?.name}</div>
+                    <div style={{ fontSize:"13px", color:C.muted }}>{formatDate(viewDetail.date)}</div>
+                  </div>
+                  {pct!=null&&<Pill color={scoreColor(pct)}>{pct}% Score</Pill>}
                 </div>
                 {CHECKLIST_SECTIONS.map(section=>(
                   <div key={section.id} style={{ background:C.card, border:`1px solid ${C.border}`, borderLeft:`3px solid ${C.blue}`, borderRadius:"12px", padding:"16px 18px" }}>
                     <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"16px", color:C.black, letterSpacing:"2px", marginBottom:"12px" }}>{section.icon} {section.title.toUpperCase()}</div>
-                    {section.items.map(item=>{
+                    {section.itemIds.map(itemId=>{
+                      const item = rubricMap[itemId];
+                      if (!item) return null;
                       const val = cl[section.id+"_"+item.id];
                       return (
-                        <div key={item.id} style={{ display:"flex", alignItems:"center", gap:"10px", marginBottom:"8px" }}>
-                          <span style={{ fontSize:"14px", flexShrink:0 }}>{val||"—"}</span>
-                          <span style={{ fontSize:"13px", color:C.black }}>{item.label}</span>
+                        <div key={item.id} style={{ marginBottom:"8px" }}>
+                          <div style={{ display:"flex", alignItems:"center", gap:"10px" }}>
+                            <span style={{ fontSize:"14px", flexShrink:0 }}>{val||"—"}</span>
+                            <span style={{ fontSize:"13px", color:C.black }}>{item.description}</span>
+                          </div>
+                          {item.has_script&&(
+                            <div style={{ marginLeft:"24px" }}>
+                              <button onClick={()=>setExpandedScript(s=>({...s,[item.id]:!s[item.id]}))} style={{ background:"none", border:"none", color:C.blue, fontSize:"11px", cursor:"pointer", padding:"2px 0", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>
+                                {expandedScript[item.id]?"▲ Hide Perfect Day script":"▼ View Perfect Day script"}
+                              </button>
+                              {expandedScript[item.id]&&(
+                                <div style={{ background:C.blueXlt, border:`1px solid ${C.border}`, borderRadius:"6px", padding:"8px 10px", fontSize:"12px", color:C.black, marginTop:"4px", lineHeight:1.5 }}>
+                                  {item.script_text}
+                                </div>
+                              )}
+                            </div>
+                          )}
                         </div>
                       );
                     })}
@@ -3824,6 +3910,126 @@ function SplitJobsAdmin({ techs, pendingSplits, refreshAll, showToast, saving, s
   );
 }
 
+// ─── UPSELL AUDIT ─────────────────────────────────────────────────────────────
+// Surfaces upsells.note (the raw HCP line-item text) so totals can be cross-checked
+// against HCP's own "Additional Upgrades" report. Joins client-side against the
+// already-loaded `jobs` prop by hcp_job_id — no extra fetch needed.
+function UpsellAuditTab({ techs, upsells, jobs }) {
+  const monthStart = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-01`; })();
+  const today = new Date().toISOString().split("T")[0];
+  const [dateFrom, setDateFrom] = useState(monthStart);
+  const [dateTo, setDateTo] = useState(today);
+  const [techFilter, setTechFilter] = useState("");
+  const [sortKey, setSortKey] = useState("date");
+  const [sortDir, setSortDir] = useState("desc");
+
+  const techById = Object.fromEntries(techs.map(t => [t.id, t]));
+
+  const jobByHcpId = {};
+  jobs.forEach(j => { if (j.hcp_job_id && !jobByHcpId[j.hcp_job_id]) jobByHcpId[j.hcp_job_id] = j; });
+
+  const rows = upsells.map(u => {
+    const job = u.hcp_job_id ? jobByHcpId[u.hcp_job_id] : null;
+    const noteText = (u.note || "").trim();
+    return {
+      id: u.id,
+      techId: u.tech_id,
+      date: job?.job_date || u.week_key || null,
+      customerName: job?.customer_name || null,
+      amount: u.amount || 0,
+      note: noteText,
+      matched: !!job,
+      flagged: !job || !noteText,
+    };
+  });
+
+  const filtered = rows.filter(r => {
+    if (techFilter && r.techId !== techFilter) return false;
+    if (dateFrom && (!r.date || r.date < dateFrom)) return false;
+    if (dateTo && (!r.date || r.date > dateTo)) return false;
+    return true;
+  });
+
+  const sorted = [...filtered].sort((a, b) => {
+    let av, bv;
+    if (sortKey === "tech") { av = techById[a.techId]?.name || ""; bv = techById[b.techId]?.name || ""; }
+    else if (sortKey === "customer") { av = a.customerName || ""; bv = b.customerName || ""; }
+    else if (sortKey === "amount") { av = a.amount; bv = b.amount; }
+    else { av = a.date || ""; bv = b.date || ""; }
+    if (av < bv) return sortDir === "asc" ? -1 : 1;
+    if (av > bv) return sortDir === "asc" ? 1 : -1;
+    return 0;
+  });
+
+  const total = filtered.reduce((s, r) => s + r.amount, 0);
+  const flaggedCount = filtered.filter(r => r.flagged).length;
+
+  function toggleSort(key) {
+    if (sortKey === key) setSortDir(d => d === "asc" ? "desc" : "asc");
+    else { setSortKey(key); setSortDir("desc"); }
+  }
+
+  const sel = (val) => ({ background:C.cardLt, border:`1px solid ${C.border}`, color:val?C.black:C.muted, padding:"8px 12px", borderRadius:"8px", fontSize:"13px", fontFamily:"'Barlow',sans-serif", cursor:"pointer" });
+  const dateInp = { background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"8px 12px", borderRadius:"8px", fontSize:"13px", fontFamily:"'Barlow',sans-serif" };
+  const SORT_COLS = [ { key:"date", label:"Date" }, { key:"tech", label:"Tech" }, { key:"customer", label:"Customer" }, { key:"amount", label:"Amount" } ];
+
+  return (
+    <div style={{ display:"flex", flexDirection:"column", gap:"16px" }}>
+      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.orange}`, borderRadius:"12px", padding:"16px 18px", display:"flex", flexDirection:"column", gap:"12px" }}>
+        <Label color={C.orange}>🔍 Upsell Audit</Label>
+        <div style={{ fontSize:"12px", color:C.muted }}>Cross-check upsell line items against HCP's "Additional Upgrades" report. Rows with a red border have no matching job or no line-item text — check those first for discrepancies.</div>
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:"10px" }}>
+          <input type="date" value={dateFrom} onChange={e=>setDateFrom(e.target.value)} style={dateInp}/>
+          <input type="date" value={dateTo} onChange={e=>setDateTo(e.target.value)} style={dateInp}/>
+          <select value={techFilter} onChange={e=>setTechFilter(e.target.value)} style={sel(techFilter)}>
+            <option value="">— All Techs —</option>
+            {techs.map(t=><option key={t.id} value={t.id}>{t.name}</option>)}
+          </select>
+        </div>
+      </div>
+
+      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.green}`, borderRadius:"12px", padding:"16px 18px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+        <div>
+          <div style={{ fontSize:"10px", color:C.muted, letterSpacing:"2px", textTransform:"uppercase", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>Total Upsells — Active Filters</div>
+          <div style={{ fontSize:"11px", color:C.muted, marginTop:"2px" }}>{filtered.length} row{filtered.length===1?"":"s"}{flaggedCount>0?` · ${flaggedCount} flagged`:""}</div>
+        </div>
+        <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"28px", color:C.green }}>${total.toFixed(2)}</div>
+      </div>
+
+      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", overflow:"hidden" }}>
+        <div style={{ overflowX:"auto" }}>
+          <table style={{ width:"100%", borderCollapse:"collapse", fontSize:"12px", fontFamily:"'Barlow',sans-serif" }}>
+            <thead>
+              <tr style={{ background:C.cardLt }}>
+                {SORT_COLS.map(c=>(
+                  <th key={c.key} onClick={()=>toggleSort(c.key)} style={{ padding:"8px 12px", textAlign:"left", color:C.muted, fontWeight:"700", letterSpacing:"1px", fontFamily:"'Barlow Condensed',sans-serif", whiteSpace:"nowrap", borderBottom:`1px solid ${C.border}`, cursor:"pointer", userSelect:"none" }}>
+                    {c.label}{sortKey===c.key?(sortDir==="asc"?" ▲":" ▼"):""}
+                  </th>
+                ))}
+                <th style={{ padding:"8px 12px", textAlign:"left", color:C.muted, fontWeight:"700", letterSpacing:"1px", fontFamily:"'Barlow Condensed',sans-serif", borderBottom:`1px solid ${C.border}` }}>Line Items</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sorted.length===0&&(
+                <tr><td colSpan={5} style={{ padding:"20px", textAlign:"center", color:C.muted }}>No upsells in this range.</td></tr>
+              )}
+              {sorted.map((r,i)=>(
+                <tr key={r.id} style={{ background: r.flagged ? "#ef444414" : (i%2===0?C.cardLt:C.card) }}>
+                  <td style={{ padding:"8px 12px", color:C.muted, whiteSpace:"nowrap", borderBottom:`1px solid ${C.border}`, borderLeft:`3px solid ${r.flagged?"#ef4444":"transparent"}` }}>{r.date||"—"}</td>
+                  <td style={{ padding:"8px 12px", color:C.black, whiteSpace:"nowrap", borderBottom:`1px solid ${C.border}` }}>{techById[r.techId]?.name||"Unknown"}</td>
+                  <td style={{ padding:"8px 12px", color: r.customerName?C.black:"#ef4444", whiteSpace:"nowrap", borderBottom:`1px solid ${C.border}` }}>{r.customerName||(r.matched?"—":"No job match")}</td>
+                  <td style={{ padding:"8px 12px", color:C.green, fontWeight:"700", whiteSpace:"nowrap", borderBottom:`1px solid ${C.border}` }}>${r.amount.toFixed(2)}</td>
+                  <td style={{ padding:"8px 12px", color: r.note?C.black:"#ef4444", borderBottom:`1px solid ${C.border}` }}>{r.note||"⚠ No line-item note"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── ADMIN PANEL ──────────────────────────────────────────────────────────────
 function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlongs, schedules, quota, setQuota, jobs, techHours, pendingSplits=[], onLogout, refreshAll }) {
   const [tab, setTab] = useState("upsells");
@@ -3996,6 +4202,7 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
     ]},
     { label:"HCP Sync", items:[
       ["splits","✂️", pendingSplits.length > 0 ? `Split Jobs (${new Set(pendingSplits.map(r=>r.hcp_job_id)).size})` : "Split Jobs"],
+      ["upsellaudit","🔍","Upsell Audit"],
     ]},
     { label:"Development", items:[
       ["development","📋","Development"],
@@ -4040,6 +4247,10 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
 
         {tab==="splits"&&(
           <SplitJobsAdmin techs={techs} pendingSplits={pendingSplits} refreshAll={refreshAll} showToast={showToast} saving={saving} setSaving={setSaving}/>
+        )}
+
+        {tab==="upsellaudit"&&(
+          <UpsellAuditTab techs={techs} upsells={upsells} jobs={jobs}/>
         )}
 
         {tab==="development"&&(
