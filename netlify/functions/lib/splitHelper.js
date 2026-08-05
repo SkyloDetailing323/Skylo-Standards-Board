@@ -8,9 +8,15 @@
 async function fetchJobSplits(jobIds, sbFetch) {
   if (!jobIds.length) return {};
   const inList = jobIds.map(id => `"${id}"`).join(",");
-  const rows = await sbFetch(
-    `job_splits?hcp_job_id=in.(${inList})&select=hcp_job_id,tech_id,percentage`
-  );
+  let rows;
+  try {
+    rows = await sbFetch(
+      `job_splits?hcp_job_id=in.(${inList})&select=hcp_job_id,tech_id,percentage`
+    );
+  } catch (err) {
+    console.log(`fetchJobSplits failed for jobIds [${jobIds.join(", ")}]:`, err.message);
+    return {};
+  }
   const map = {};
   for (const row of (rows || [])) {
     if (!map[row.hcp_job_id]) map[row.hcp_job_id] = [];
@@ -44,9 +50,15 @@ function resolveSplits(jobId, matchedEmployees, splitMap, techByName) {
 async function fetchUpsellAttributions(jobIds, sbFetch) {
   if (!jobIds.length) return {};
   const inList = jobIds.map(id => `"${id}"`).join(",");
-  const rows = await sbFetch(
-    `job_upsell_attribution?hcp_job_id=in.(${inList})&select=hcp_job_id,tech_id`
-  );
+  let rows;
+  try {
+    rows = await sbFetch(
+      `job_upsell_attribution?hcp_job_id=in.(${inList})&select=hcp_job_id,tech_id`
+    );
+  } catch (err) {
+    console.log(`fetchUpsellAttributions failed for jobIds [${jobIds.join(", ")}]:`, err.message);
+    return {};
+  }
   const map = {};
   for (const row of (rows || [])) map[row.hcp_job_id] = row.tech_id;
   return map;

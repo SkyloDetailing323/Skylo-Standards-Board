@@ -37,7 +37,15 @@ async function sbFetch(path, options = {}) {
   if (res.status === 204) return null;
   const text = await res.text();
   if (!text) return null;
-  return JSON.parse(text);
+  const data = JSON.parse(text);
+  // PostgREST returns an error object (not an array) on failure — surface it as a
+  // thrown error instead of letting callers treat it as data (`rows || []` won't
+  // catch a truthy object, which used to crash downstream iteration).
+  const isPostgrestError = !res.ok || (data && typeof data === "object" && !Array.isArray(data) && (data.code || data.message));
+  if (isPostgrestError) {
+    throw new Error(`Supabase error on ${path} (HTTP ${res.status}): ${(data && (data.message || data.code)) || text}`);
+  }
+  return data;
 }
 
 async function hcpGet(path) {
