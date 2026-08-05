@@ -261,18 +261,22 @@ exports.handler = async (event) => {
 
       console.log(`JOB ${jobId} | ${split.skyloName}${pctTag} | ${jobDate} | rev=$${revenue.toFixed(2)} disc=$${discount.toFixed(2)} tip=$${tips.toFixed(2)} ups=$${upsells.toFixed(2)} | ${inv ? "INVOICE" : "NO INVOICE - fallback"}`);
 
-      if (inv && upsells > 0) {
-        const note = inv.upsellItems.map(i => `${i.name} ($${(i.amount * upsellPct).toFixed(2)})`).join(", ");
-        await sbFetch("upsells?on_conflict=hcp_job_id,tech_id", {
-          method: "POST",
-          prefer: "resolution=merge-duplicates,return=minimal",
-          body: JSON.stringify({ tech_id: tech.id, week_key: weekKey, amount: upsells, hcp_job_id: jobId, note }),
-        });
-        upsellsFound++;
-      } else if (inv) {
-        await sbFetch(`upsells?hcp_job_id=eq.${jobId}&tech_id=eq.${tech.id}`, {
-          method: "DELETE", prefer: "return=minimal",
-        });
+      try {
+        if (inv && upsells > 0) {
+          const note = inv.upsellItems.map(i => `${i.name} ($${(i.amount * upsellPct).toFixed(2)})`).join(", ");
+          await sbFetch("upsells?on_conflict=hcp_job_id,tech_id", {
+            method: "POST",
+            prefer: "resolution=merge-duplicates,return=minimal",
+            body: JSON.stringify({ tech_id: tech.id, week_key: weekKey, amount: upsells, hcp_job_id: jobId, note }),
+          });
+          upsellsFound++;
+        } else if (inv) {
+          await sbFetch(`upsells?hcp_job_id=eq.${jobId}&tech_id=eq.${tech.id}`, {
+            method: "DELETE", prefer: "return=minimal",
+          });
+        }
+      } catch (err) {
+        console.log(`Failed to write upsell for job ${jobId} tech ${tech.id}:`, err.message);
       }
     }
   }

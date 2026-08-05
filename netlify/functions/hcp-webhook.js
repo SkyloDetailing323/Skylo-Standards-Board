@@ -166,18 +166,22 @@ exports.handler = async (event) => {
       }),
     });
 
-    if (upsells > 0 && inv) {
-      const note = inv.upsellItems.map(i => `${i.name} ($${(i.amount * upsellPct).toFixed(2)})`).join(", ");
-      await sbFetch("upsells?on_conflict=hcp_job_id,tech_id", {
-        method: "POST",
-        prefer: "resolution=merge-duplicates,return=minimal",
-        body: JSON.stringify({ tech_id: tech.id, week_key: weekKey, amount: upsells, hcp_job_id: jobId, note }),
-      });
-      console.log(`Upsell recorded: ${split.skyloName} | ${note} | $${upsells}`);
-    } else if (inv) {
-      await sbFetch(`upsells?hcp_job_id=eq.${jobId}&tech_id=eq.${tech.id}`, {
-        method: "DELETE", prefer: "return=minimal",
-      });
+    try {
+      if (upsells > 0 && inv) {
+        const note = inv.upsellItems.map(i => `${i.name} ($${(i.amount * upsellPct).toFixed(2)})`).join(", ");
+        await sbFetch("upsells?on_conflict=hcp_job_id,tech_id", {
+          method: "POST",
+          prefer: "resolution=merge-duplicates,return=minimal",
+          body: JSON.stringify({ tech_id: tech.id, week_key: weekKey, amount: upsells, hcp_job_id: jobId, note }),
+        });
+        console.log(`Upsell recorded: ${split.skyloName} | ${note} | $${upsells}`);
+      } else if (inv) {
+        await sbFetch(`upsells?hcp_job_id=eq.${jobId}&tech_id=eq.${tech.id}`, {
+          method: "DELETE", prefer: "return=minimal",
+        });
+      }
+    } catch (err) {
+      console.log(`Failed to write upsell for job ${jobId} tech ${tech.id}:`, err.message);
     }
 
     const pctTag = splits.length > 1 ? ` (${Math.round(split.pct * 100)}%${split.confirmed ? "" : " unconfirmed"})` : "";
