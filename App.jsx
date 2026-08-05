@@ -3934,6 +3934,7 @@ function UpsellAuditTab({ techs, upsells, jobs }) {
     return {
       id: u.id,
       techId: u.tech_id,
+      hcpJobId: u.hcp_job_id || null,
       date: job?.job_date || u.week_key || null,
       customerName: job?.customer_name || null,
       amount: u.amount || 0,
@@ -3972,6 +3973,12 @@ function UpsellAuditTab({ techs, upsells, jobs }) {
   const sel = (val) => ({ background:C.cardLt, border:`1px solid ${C.border}`, color:val?C.black:C.muted, padding:"8px 12px", borderRadius:"8px", fontSize:"13px", fontFamily:"'Barlow',sans-serif", cursor:"pointer" });
   const dateInp = { background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"8px 12px", borderRadius:"8px", fontSize:"13px", fontFamily:"'Barlow',sans-serif" };
   const SORT_COLS = [ { key:"date", label:"Date" }, { key:"tech", label:"Tech" }, { key:"customer", label:"Customer" }, { key:"amount", label:"Amount" } ];
+  const thStyle = { padding:"8px 12px", textAlign:"left", color:C.muted, fontWeight:"700", letterSpacing:"1px", fontFamily:"'Barlow Condensed',sans-serif", whiteSpace:"nowrap", borderBottom:`1px solid ${C.border}` };
+  const sortableTh = (c) => (
+    <th key={c.key} onClick={()=>toggleSort(c.key)} style={{ ...thStyle, cursor:"pointer", userSelect:"none" }}>
+      {c.label}{sortKey===c.key?(sortDir==="asc"?" ▲":" ▼"):""}
+    </th>
+  );
 
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:"16px" }}>
@@ -4001,21 +4008,20 @@ function UpsellAuditTab({ techs, upsells, jobs }) {
           <table style={{ width:"100%", borderCollapse:"collapse", fontSize:"12px", fontFamily:"'Barlow',sans-serif" }}>
             <thead>
               <tr style={{ background:C.cardLt }}>
-                {SORT_COLS.map(c=>(
-                  <th key={c.key} onClick={()=>toggleSort(c.key)} style={{ padding:"8px 12px", textAlign:"left", color:C.muted, fontWeight:"700", letterSpacing:"1px", fontFamily:"'Barlow Condensed',sans-serif", whiteSpace:"nowrap", borderBottom:`1px solid ${C.border}`, cursor:"pointer", userSelect:"none" }}>
-                    {c.label}{sortKey===c.key?(sortDir==="asc"?" ▲":" ▼"):""}
-                  </th>
-                ))}
+                {sortableTh(SORT_COLS[0])}
+                <th style={thStyle}>Job ID</th>
+                {SORT_COLS.slice(1).map(sortableTh)}
                 <th style={{ padding:"8px 12px", textAlign:"left", color:C.muted, fontWeight:"700", letterSpacing:"1px", fontFamily:"'Barlow Condensed',sans-serif", borderBottom:`1px solid ${C.border}` }}>Line Items</th>
               </tr>
             </thead>
             <tbody>
               {sorted.length===0&&(
-                <tr><td colSpan={5} style={{ padding:"20px", textAlign:"center", color:C.muted }}>No upsells in this range.</td></tr>
+                <tr><td colSpan={6} style={{ padding:"20px", textAlign:"center", color:C.muted }}>No upsells in this range.</td></tr>
               )}
               {sorted.map((r,i)=>(
                 <tr key={r.id} style={{ background: r.flagged ? "#ef444414" : (i%2===0?C.cardLt:C.card) }}>
                   <td style={{ padding:"8px 12px", color:C.muted, whiteSpace:"nowrap", borderBottom:`1px solid ${C.border}`, borderLeft:`3px solid ${r.flagged?"#ef4444":"transparent"}` }}>{r.date||"—"}</td>
+                  <td style={{ padding:"8px 12px", color:C.muted, whiteSpace:"nowrap", borderBottom:`1px solid ${C.border}`, fontFamily:"'SF Mono',Consolas,monospace", fontSize:"10px", userSelect:"text", cursor:"text" }}>{r.hcpJobId||"—"}</td>
                   <td style={{ padding:"8px 12px", color:C.black, whiteSpace:"nowrap", borderBottom:`1px solid ${C.border}` }}>{techById[r.techId]?.name||"Unknown"}</td>
                   <td style={{ padding:"8px 12px", color: r.customerName?C.black:"#ef4444", whiteSpace:"nowrap", borderBottom:`1px solid ${C.border}` }}>{r.customerName||(r.matched?"—":"No job match")}</td>
                   <td style={{ padding:"8px 12px", color:C.green, fontWeight:"700", whiteSpace:"nowrap", borderBottom:`1px solid ${C.border}` }}>${r.amount.toFixed(2)}</td>
