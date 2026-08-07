@@ -10,6 +10,8 @@
 const TECH_MAP = require('./lib/techMap');
 const { fetchJobSplits, resolveSplits, fetchUpsellAttributions } = require('./lib/splitHelper');
 
+console.log("Connected to Supabase project:", new URL(process.env.SUPABASE_URL).hostname);
+
 function getWeekKey(dateStr) {
   const d = new Date(dateStr + "T12:00:00Z");
   const day = d.getUTCDay();
