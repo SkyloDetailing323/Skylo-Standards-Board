@@ -124,9 +124,15 @@ exports.handler = async (event) => {
   const end   = `${to}T23:59:59Z`;
   console.log(`Repair: ${from} → ${to}`);
 
-  // Fetch techs
-  const allTechs = await sbFetch("techs?select=id,name");
-  const techByName = Object.fromEntries((allTechs || []).map(t => [t.name, t]));
+  // Fetch techs — deterministic order, and prefer the active record if a
+  // duplicate name ever slips back in (instead of silently keeping whichever
+  // row Postgres happens to return last).
+  const allTechs = await sbFetch("techs?select=id,name,is_active&order=id");
+  const techByName = {};
+  for (const t of allTechs || []) {
+    const existing = techByName[t.name];
+    if (!existing || (t.is_active && !existing.is_active)) techByName[t.name] = t;
+  }
 
   // Fetch all completed jobs in range
   const allJobs = [];
