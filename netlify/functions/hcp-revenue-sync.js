@@ -63,9 +63,16 @@ exports.handler = async (event) => {
   const start = `${from}T00:00:00-06:00`;
   const end   = `${to}T23:59:59-06:00`;
 
-  const allTechs = await sbFetch("techs?select=id,name");
+  // Deterministic order, and prefer the active record if a duplicate name
+  // ever slips back in (instead of silently keeping whichever row Postgres
+  // happens to return last).
+  const allTechs = await sbFetch("techs?select=id,name,is_active&order=id");
   if (!allTechs) return { statusCode: 500, body: JSON.stringify({ ok: false, error: "Could not load techs" }) };
-  const techByName = Object.fromEntries(allTechs.map(t => [t.name, t]));
+  const techByName = {};
+  for (const t of allTechs) {
+    const existing = techByName[t.name];
+    if (!existing || (t.is_active && !existing.is_active)) techByName[t.name] = t;
+  }
 
   // Fetch all completed jobs in range
   const allJobs = [];

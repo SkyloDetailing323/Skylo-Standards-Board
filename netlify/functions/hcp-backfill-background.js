@@ -82,10 +82,16 @@ exports.handler = async (event) => {
 
   console.log(`Backfill (background): last ${days} days | ${start} → ${end}`);
 
-  // Fetch all techs once
-  const allTechs = await sbFetch("techs?select=id,name");
+  // Fetch all techs once — deterministic order, and prefer the active record
+  // if a duplicate name ever slips back in (instead of silently keeping
+  // whichever row Postgres happens to return last).
+  const allTechs = await sbFetch("techs?select=id,name,is_active&order=id");
   if (!allTechs) { console.error("Could not load techs"); return { statusCode: 500, body: "" }; }
-  const techByName = Object.fromEntries(allTechs.map(t => [t.name, t]));
+  const techByName = {};
+  for (const t of allTechs) {
+    const existing = techByName[t.name];
+    if (!existing || (t.is_active && !existing.is_active)) techByName[t.name] = t;
+  }
 
   let synced = 0, skipped = 0, page = 1;
   const pageSize = 100;
