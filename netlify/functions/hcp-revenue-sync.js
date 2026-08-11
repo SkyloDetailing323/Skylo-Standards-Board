@@ -1,10 +1,20 @@
 // netlify/functions/hcp-revenue-sync.js
 // Syncs revenue and tips for completed jobs in a date range (no upsell handling).
 // Split jobs: revenue/tips divided by confirmed split %, or equal split if unconfirmed.
-// POST { from: "YYYY-MM-DD", to: "YYYY-MM-DD" }
+// POST { from: "YYYY-MM-DD", to: "YYYY-MM-DD" } for an on-demand range (Repair
+// Revenue button). Scheduled (every 5 min) invocations send no from/to at all,
+// so those default to today — same as hcp-upsell-sync.js.
 
 const TECH_MAP = require('./lib/techMap');
 const { fetchJobSplits, resolveSplits } = require('./lib/splitHelper');
+
+function getMT() {
+  const mt = new Date(Date.now() - 6 * 60 * 60 * 1000);
+  const y = mt.getUTCFullYear();
+  const m = String(mt.getUTCMonth() + 1).padStart(2, "0");
+  const d = String(mt.getUTCDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
 
 const FETCH_TIMEOUT_MS = 10000;
 
@@ -74,7 +84,11 @@ exports.handler = async (event) => {
 
   let from, to;
   try { ({ from, to } = JSON.parse(event.body || "{}")); } catch {}
-  if (!from || !to) {
+  if (!from && !to) {
+    // No range given at all — this is the scheduled cron invocation (Netlify
+    // sends a body with no from/to), so default to today's jobs.
+    from = to = getMT();
+  } else if (!from || !to) {
     return { statusCode: 400, body: JSON.stringify({ error: "from and to required" }) };
   }
 
