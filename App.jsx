@@ -852,10 +852,54 @@ function TotalLeaderboard({ techs, upsells, switchovers, reviews, callbacks }) {
 }
 
 // ─── REPORTS TAB ─────────────────────────────────────────────────────────────
-function ReportsTab({ techs, jobs, upsells=[], techHours=[], techId=null, onSaveHours=null }) {
+function ReportsTab({ techs, jobs, upsells=[], techHours=[], techId=null, onSaveHours=null, refreshAll=async()=>{}, showToast=()=>{} }) {
   const [preset, setPreset] = useState("wtd");
   const [cStart, setCStart] = useState("");
   const [cEnd,   setCEnd]   = useState("");
+  const revTodayDefault = new Date(Date.now() - 6*3600000).toISOString().split("T")[0];
+  const [repairRevFrom, setRepairRevFrom] = useState("2026-06-01");
+  const [repairRevTo,   setRepairRevTo]   = useState(revTodayDefault);
+  const [repairRevResult, setRepairRevResult] = useState(null);
+  const [repairingRev, setRepairingRev] = useState(false);
+
+  async function repairRevenueFromHCP() {
+    setRepairingRev(true);
+    setRepairRevResult(null);
+    try {
+      // Split range into 7-day chunks so each call stays under the 26s Netlify timeout
+      const chunks = [];
+      let cur = new Date(repairRevFrom + "T12:00:00Z");
+      const rangeEnd = new Date(repairRevTo + "T12:00:00Z");
+      while (cur <= rangeEnd) {
+        const chunkFrom = cur.toISOString().split("T")[0];
+        const chunkEnd = new Date(cur);
+        chunkEnd.setUTCDate(chunkEnd.getUTCDate() + 6);
+        const chunkTo = chunkEnd > rangeEnd ? repairRevTo : chunkEnd.toISOString().split("T")[0];
+        chunks.push({ from: chunkFrom, to: chunkTo });
+        cur.setUTCDate(cur.getUTCDate() + 7);
+      }
+      let totalScanned = 0, totalMatched = 0, totalWritten = 0, allJobRows = [];
+      for (let i = 0; i < chunks.length; i++) {
+        const chunk = chunks[i];
+        showToast(`Scanning week ${i+1} of ${chunks.length}...`);
+        const res = await fetch("/.netlify/functions/hcp-revenue-sync", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(chunk),
+        });
+        const data = await res.json();
+        if (!data.ok) { showToast("Repair failed on week " + chunk.from, false); setRepairingRev(false); return; }
+        totalScanned += data.jobsScanned || 0;
+        totalMatched += data.invoicesMatched || 0;
+        totalWritten += data.jobsWritten || 0;
+        if (data.jobs) allJobRows.push(...data.jobs);
+      }
+      await refreshAll();
+      setRepairRevResult({ jobsScanned: totalScanned, invoicesMatched: totalMatched, jobsWritten: totalWritten, jobs: allJobRows });
+      showToast(`✅ Repaired revenue for ${totalWritten} row${totalWritten===1?"":"s"}`);
+    } catch(e) { showToast("Error: "+e.message, false); }
+    setRepairingRev(false);
+  }
   const PRESETS = [["wtd","WTD"],["last_week","Last Week"],["mtd","MTD"],["last_month","Last Month"],["ytd","YTD"],["custom","Custom"]];
   const { start, end } = getDateRangeBounds(preset, cStart, cEnd);
 
@@ -1007,6 +1051,57 @@ function ReportsTab({ techs, jobs, upsells=[], techHours=[], techId=null, onSave
             </div>
           )}
         </>
+      )}
+
+      {/* Repair Revenue — admin only */}
+      {onSaveHours && (
+        <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.orange}`, borderRadius:"12px", padding:"20px", display:"flex", flexDirection:"column", gap:"12px" }}>
+          <Label color={C.orange}>Repair Revenue from HCP</Label>
+          <div style={{ fontSize:"12px", color:C.muted }}>Re-scans completed jobs and their invoices across a custom date range and rewrites revenue + tips to the board. Use this to fix missing or wrong revenue.</div>
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"8px" }}>
+            {[["FROM", repairRevFrom, setRepairRevFrom], ["TO", repairRevTo, setRepairRevTo]].map(([lbl, val, set]) => (
+              <div key={lbl}>
+                <div style={{ fontSize:"10px", color:C.muted, letterSpacing:"2px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", marginBottom:"4px" }}>{lbl}</div>
+                <input type="date" value={val} onChange={e => set(e.target.value)} style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"8px 10px", borderRadius:"8px", fontSize:"13px", fontFamily:"'Barlow',sans-serif", width:"100%", boxSizing:"border-box" }}/>
+              </div>
+            ))}
+          </div>
+          <button onClick={repairRevenueFromHCP} disabled={repairingRev} style={{ background:repairingRev?"#333":C.orange, border:"none", color:C.white, padding:"13px", borderRadius:"12px", cursor:repairingRev?"not-allowed":"pointer", fontSize:"13px", fontWeight:"700", letterSpacing:"2px", fontFamily:"'Barlow Condensed',sans-serif", width:"100%", textTransform:"uppercase" }}>
+            {repairingRev ? "Scanning HCP — this may take ~20 sec..." : "Repair Revenue"}
+          </button>
+          {repairRevResult && (
+            <div style={{ display:"flex", flexDirection:"column", gap:"8px" }}>
+              <div style={{ background:C.cardLt, borderRadius:"8px", padding:"10px 14px", fontSize:"12px", color:C.muted }}>
+                Scanned <strong style={{color:C.black}}>{repairRevResult.jobsScanned}</strong> jobs · matched <strong style={{color:C.black}}>{repairRevResult.invoicesMatched}</strong> invoices · wrote <strong style={{color:C.orange}}>{repairRevResult.jobsWritten} row{repairRevResult.jobsWritten===1?"":"s"}</strong> to the board
+              </div>
+              {repairRevResult.jobs && repairRevResult.jobs.length > 0 && (
+                <div style={{ overflowX:"auto", maxHeight:"320px", overflowY:"auto", borderRadius:"8px", border:`1px solid ${C.border}` }}>
+                  <table style={{ width:"100%", borderCollapse:"collapse", fontSize:"11px", fontFamily:"'Barlow',sans-serif" }}>
+                    <thead>
+                      <tr style={{ background:C.card, position:"sticky", top:0 }}>
+                        {["Job ID","Tech","Date","Revenue","Tips","Invoice"].map(h => (
+                          <th key={h} style={{ padding:"6px 10px", textAlign:"left", color:C.muted, fontWeight:"700", letterSpacing:"1px", fontFamily:"'Barlow Condensed',sans-serif", whiteSpace:"nowrap", borderBottom:`1px solid ${C.border}` }}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {repairRevResult.jobs.map((row, i) => (
+                        <tr key={row.jobId+"|"+row.tech} style={{ background: i%2===0 ? C.cardLt : C.card }}>
+                          <td style={{ padding:"5px 10px", color:C.muted, whiteSpace:"nowrap" }}>{row.jobId}</td>
+                          <td style={{ padding:"5px 10px", color:C.black, whiteSpace:"nowrap" }}>{row.tech}</td>
+                          <td style={{ padding:"5px 10px", color:C.muted, whiteSpace:"nowrap" }}>{row.date}</td>
+                          <td style={{ padding:"5px 10px", color:C.green, fontWeight:"700", whiteSpace:"nowrap" }}>${row.revenue.toFixed(2)}</td>
+                          <td style={{ padding:"5px 10px", color: row.tips > 0 ? C.gold : C.muted, whiteSpace:"nowrap" }}>{row.tips > 0 ? `$${row.tips.toFixed(2)}` : "—"}</td>
+                          <td style={{ padding:"5px 10px", color: row.invoiceFound ? C.green : C.muted, whiteSpace:"nowrap" }}>{row.invoiceFound ? "✓" : "fallback"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
       )}
 
       {/* Manual Hours Entry — admin only */}
@@ -4562,7 +4657,7 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
         )}
 
         {tab==="reports"&&(
-          <ReportsTab techs={techs} jobs={jobs||[]} upsells={upsells||[]} techHours={techHours||[]} techId={null}
+          <ReportsTab techs={techs} jobs={jobs||[]} upsells={upsells||[]} techHours={techHours||[]} techId={null} refreshAll={refreshAll} showToast={showToast}
             onSaveHours={async(tech_id,week_key,hours)=>{
               setSaving(true);
               try {

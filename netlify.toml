@@ -8,6 +8,9 @@
 [functions."hcp-upsell-sync"]
   schedule = "*/5 * * * *"
 
+[functions."hcp-revenue-sync"]
+  schedule = "*/5 * * * *"
+
 [functions."hcp-backfill"]
   timeout = 26
 

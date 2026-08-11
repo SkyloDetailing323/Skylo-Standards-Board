@@ -118,12 +118,16 @@ exports.handler = async (event) => {
 
   // Per-job invoice fetch, then write one row per tech per job
   const batch = [];
+  const jobReport = [];
+  let invoicesMatched = 0;
   for (const [jobId, meta] of Object.entries(jobMeta)) {
-    const invData  = await hcpGet(`jobs/${jobId}/invoices`);
-    const invoices = invData?.invoices || [];
+    const invData     = await hcpGet(`jobs/${jobId}/invoices`);
+    const invoices    = invData?.invoices || [];
+    const invoiceFound = invoices.length > 0;
+    if (invoiceFound) invoicesMatched++;
 
     let totalRev, totalTip;
-    if (invoices.length > 0) {
+    if (invoiceFound) {
       const inv            = invoices[0];
       const lineItemsCents = (inv.items || []).reduce((s, item) => s + (item.amount || 0), 0);
       const discountCents  = (inv.discounts || []).reduce((s, d) => s + Math.abs(d.amount || 0), 0);
@@ -142,17 +146,19 @@ exports.handler = async (event) => {
     for (const split of splits) {
       const tech = techByName[split.skyloName];
       if (!tech) continue;
+      const revenue = +(totalRev * split.pct).toFixed(2);
+      const tips    = +(totalTip * split.pct).toFixed(2);
       batch.push({
         hcp_job_id:      jobId,
         tech_id:         tech.id,
         job_date:        meta.jobDate,
         week_key:        getWeekKey(meta.jobDate),
         hours:           0,
-        revenue:         +(totalRev * split.pct).toFixed(2),
-        tips:            +(totalTip * split.pct).toFixed(2),
+        revenue, tips,
         split_confirmed: split.confirmed,
         customer_name:   meta.customerName || null,
       });
+      jobReport.push({ jobId, tech: split.skyloName, date: meta.jobDate, revenue, tips, invoiceFound });
     }
   }
 
@@ -168,6 +174,13 @@ exports.handler = async (event) => {
   return {
     statusCode: 200,
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ok: true, jobsSynced: batch.length }),
+    body: JSON.stringify({
+      ok: true,
+      jobsSynced: batch.length,
+      jobsScanned: allJobs.length,
+      invoicesMatched,
+      jobsWritten: batch.length,
+      jobs: jobReport,
+    }),
   };
 };

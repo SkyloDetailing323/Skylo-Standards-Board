@@ -16,6 +16,7 @@ module.exports = {
   "Kade Andrew":       "Kade Andrew",
   "Kyle Reiff":        "Kyle Rieff",
   "Landon White":      "Landon White",
+  "Logan Mannikko":    "Logan Mannikko",
   "Mason Dixon":       "Mason Dixon",
   "Matthew Durkovich": "Matthew Durkovich",
   "Max Hancock":       "Max Hancock",
