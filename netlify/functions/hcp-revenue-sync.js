@@ -6,6 +6,18 @@
 const TECH_MAP = require('./lib/techMap');
 const { fetchJobSplits, resolveSplits } = require('./lib/splitHelper');
 
+const FETCH_TIMEOUT_MS = 10000;
+
+async function fetchWithTimeout(url, options = {}) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 function getWeekKey(dateStr) {
   const d = new Date(dateStr + "T12:00:00Z");
   const day = d.getUTCDay();
@@ -15,7 +27,7 @@ function getWeekKey(dateStr) {
 }
 
 async function sbFetch(path, options = {}) {
-  const res = await fetch(`${process.env.SUPABASE_URL}/rest/v1/${path}`, {
+  const res = await fetchWithTimeout(`${process.env.SUPABASE_URL}/rest/v1/${path}`, {
     method: options.method || "GET",
     body: options.body,
     headers: {
@@ -40,9 +52,15 @@ async function sbFetch(path, options = {}) {
 }
 
 async function hcpGet(path) {
-  const res = await fetch(`https://api.housecallpro.com/${path}`, {
-    headers: { "Authorization": `Token ${process.env.HCP_API_KEY}`, "Content-Type": "application/json" },
-  });
+  let res;
+  try {
+    res = await fetchWithTimeout(`https://api.housecallpro.com/${path}`, {
+      headers: { "Authorization": `Token ${process.env.HCP_API_KEY}`, "Content-Type": "application/json" },
+    });
+  } catch (err) {
+    console.error("HCP fetch failed", path, err.message);
+    return null;
+  }
   if (!res.ok) { console.error("HCP error", res.status, path); return null; }
   const text = await res.text();
   if (!text) return null;

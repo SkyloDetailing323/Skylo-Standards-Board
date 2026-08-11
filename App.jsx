@@ -887,8 +887,15 @@ function ReportsTab({ techs, jobs, upsells=[], techHours=[], techId=null, onSave
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(chunk),
         });
-        const data = await res.json();
-        if (!data.ok) { showToast("Repair failed on week " + chunk.from, false); setRepairingRev(false); return; }
+        const text = await res.text();
+        let data = null;
+        try { data = text ? JSON.parse(text) : null; } catch {}
+        if (!res.ok || !data || !data.ok) {
+          const detail = data?.error || (text ? text.slice(0,200) : `HTTP ${res.status} — empty response (likely timed out)`);
+          showToast(`Repair failed on week ${chunk.from}: ${detail}`, false);
+          setRepairingRev(false);
+          return;
+        }
         totalScanned += data.jobsScanned || 0;
         totalMatched += data.invoicesMatched || 0;
         totalWritten += data.jobsWritten || 0;
