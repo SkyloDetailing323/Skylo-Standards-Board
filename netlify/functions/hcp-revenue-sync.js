@@ -151,7 +151,11 @@ exports.handler = async () => {
       const discountCents  = (inv.discounts || []).reduce((s, d) => s + Math.abs(d.amount || 0), 0);
       const serviceCents   = Math.max(0, lineItemsCents - discountCents);
       totalRev             = serviceCents / 100;
-      const payments       = inv.payments || [];
+      // Only count payments that actually succeeded — a failed attempt followed
+      // by a successful retry both appear in inv.payments, and summing both
+      // double-counts that amount, which the derived-tip fallback below then
+      // misreads as a tip equal to the job's full revenue.
+      const payments       = (inv.payments || []).filter(p => p.status === "succeeded");
       const tipFromPay     = payments.reduce((s, p) => s + (p.tip_amount || 0), 0);
       const paidCents      = payments.reduce((s, p) => s + (p.amount || 0), 0);
       totalTip = (tipFromPay > 0 ? tipFromPay : Math.max(0, paidCents - serviceCents)) / 100;

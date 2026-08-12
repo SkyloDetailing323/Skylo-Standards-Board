@@ -861,6 +861,24 @@ function ReportsTab({ techs, jobs, upsells=[], techHours=[], techId=null, onSave
   const [repairRevTo,   setRepairRevTo]   = useState(revTodayDefault);
   const [repairRevResult, setRepairRevResult] = useState(null);
   const [repairingRev, setRepairingRev] = useState(false);
+  const [revExpanded, setRevExpanded] = useState(false);
+
+  function exportRevenueCSV() {
+    const rows = repairRevResult?.jobs || [];
+    if (rows.length === 0) return;
+    const header = ["Job ID","Tech","Date","Revenue","Tips","Invoice"];
+    const csvRows = rows.map(r => [r.jobId, r.tech, r.date, r.revenue.toFixed(2), r.tips.toFixed(2), r.invoiceFound ? "Found" : "Fallback"]);
+    const csv = [header, ...csvRows].map(row => row.map(cell => `"${String(cell).replace(/"/g,'""')}"`).join(",")).join("\r\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `revenue-repair_${repairRevFrom}_to_${repairRevTo}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
 
   async function repairRevenueFromHCP() {
     setRepairingRev(true);
@@ -1081,11 +1099,23 @@ function ReportsTab({ techs, jobs, upsells=[], techHours=[], techId=null, onSave
           </button>
           {repairRevResult && (
             <div style={{ display:"flex", flexDirection:"column", gap:"8px" }}>
-              <div style={{ background:C.cardLt, borderRadius:"8px", padding:"10px 14px", fontSize:"12px", color:C.muted }}>
-                Scanned <strong style={{color:C.black}}>{repairRevResult.jobsScanned}</strong> jobs · matched <strong style={{color:C.black}}>{repairRevResult.invoicesMatched}</strong> invoices · wrote <strong style={{color:C.orange}}>{repairRevResult.jobsWritten} row{repairRevResult.jobsWritten===1?"":"s"}</strong> to the board
+              <div style={{ background:C.cardLt, borderRadius:"8px", padding:"10px 14px", fontSize:"12px", color:C.muted, display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:"8px" }}>
+                <span>
+                  Scanned <strong style={{color:C.black}}>{repairRevResult.jobsScanned}</strong> jobs · matched <strong style={{color:C.black}}>{repairRevResult.invoicesMatched}</strong> invoices · wrote <strong style={{color:C.orange}}>{repairRevResult.jobsWritten} row{repairRevResult.jobsWritten===1?"":"s"}</strong> to the board
+                </span>
+                {repairRevResult.jobs && repairRevResult.jobs.length > 0 && (
+                  <div style={{ display:"flex", gap:"6px" }}>
+                    <button onClick={()=>setRevExpanded(v=>!v)} style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"5px 10px", borderRadius:"4px", cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", fontSize:"11px", letterSpacing:"1px" }}>
+                      {revExpanded ? "COLLAPSE" : "VIEW FULL REPORT"}
+                    </button>
+                    <button onClick={exportRevenueCSV} style={{ background:C.green, border:"none", color:C.black, padding:"5px 10px", borderRadius:"4px", cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", fontSize:"11px", letterSpacing:"1px" }}>
+                      EXPORT CSV
+                    </button>
+                  </div>
+                )}
               </div>
               {repairRevResult.jobs && repairRevResult.jobs.length > 0 && (
-                <div style={{ overflowX:"auto", maxHeight:"320px", overflowY:"auto", borderRadius:"8px", border:`1px solid ${C.border}` }}>
+                <div style={{ overflowX:"auto", maxHeight: revExpanded ? "none" : "320px", overflowY:"auto", borderRadius:"8px", border:`1px solid ${C.border}` }}>
                   <table style={{ width:"100%", borderCollapse:"collapse", fontSize:"11px", fontFamily:"'Barlow',sans-serif" }}>
                     <thead>
                       <tr style={{ background:C.card, position:"sticky", top:0 }}>
