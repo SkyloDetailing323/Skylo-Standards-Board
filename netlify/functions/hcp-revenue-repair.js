@@ -145,11 +145,10 @@ exports.handler = async (event) => {
       console.log("REPORT_ENDPOINT_TEST", path, "ERROR", e.message);
     }
   }
-  const dumpJobs = allJobs.slice(0, 3);
-  for (const job of dumpJobs) {
-    console.log("RAW_JOB_FULL", job.id, JSON.stringify(job));
-    const invData = await hcpGet(`jobs/${job.id}/invoices`);
-    console.log("RAW_INVOICE_FULL", job.id, JSON.stringify(invData));
+  const targetIds = ["job_7d36d51350ac4348bc68b544231abad9", "job_9e5f3ec3e7744c579e46d3660203623e", "job_dd028f2224894a52936d7d889457ac2e"];
+  for (const id of targetIds) {
+    const invData = await hcpGet(`jobs/${id}/invoices`);
+    console.log("RAW_INVOICE_FULL", id, JSON.stringify(invData));
   }
 
   // Fetch confirmed splits for multi-employee jobs
