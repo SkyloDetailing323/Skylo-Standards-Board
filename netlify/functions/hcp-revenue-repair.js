@@ -1,23 +1,13 @@
-// netlify/functions/hcp-revenue-sync.js
-// Scheduled every 5 min. Syncs revenue and tips for today's completed HCP jobs
-// (no upsell handling). Split jobs: revenue/tips divided by confirmed split %,
-// or equal split if unconfirmed.
-//
-// Scheduled-only — Netlify blocks direct HTTP invocation of any function that
-// has a `schedule` configured, so this never accepts a custom date range. For
-// on-demand repairs over an arbitrary range, see hcp-revenue-repair.js (same
-// split as hcp-upsell-sync.js vs hcp-upsell-repair.js).
+// netlify/functions/hcp-revenue-repair.js
+// On-demand revenue+tips repair for a date range (Reports tab "Repair Revenue"
+// button). No schedule — Netlify blocks direct HTTP invocation of any function
+// that has a `schedule` configured, so this on-demand path has to live in its
+// own file, separate from the scheduled hcp-revenue-sync.js (same split as
+// hcp-upsell-repair.js vs hcp-upsell-sync.js).
+// POST { from: "YYYY-MM-DD", to: "YYYY-MM-DD" }
 
 const TECH_MAP = require('./lib/techMap');
 const { fetchJobSplits, resolveSplits } = require('./lib/splitHelper');
-
-function getMT() {
-  const mt = new Date(Date.now() - 6 * 60 * 60 * 1000);
-  const y = mt.getUTCFullYear();
-  const m = String(mt.getUTCMonth() + 1).padStart(2, "0");
-  const d = String(mt.getUTCDate()).padStart(2, "0");
-  return `${y}-${m}-${d}`;
-}
 
 const FETCH_TIMEOUT_MS = 10000;
 
@@ -80,10 +70,19 @@ async function hcpGet(path) {
   return JSON.parse(text);
 }
 
-exports.handler = async () => {
-  const todayStr = getMT();
-  const start = `${todayStr}T00:00:00-06:00`;
-  const end   = `${todayStr}T23:59:59-06:00`;
+exports.handler = async (event) => {
+  if (event.httpMethod !== "POST") {
+    return { statusCode: 405, body: JSON.stringify({ error: "POST only" }) };
+  }
+
+  let from, to;
+  try { ({ from, to } = JSON.parse(event.body || "{}")); } catch {}
+  if (!from || !to) {
+    return { statusCode: 400, body: JSON.stringify({ error: "from and to required" }) };
+  }
+
+  const start = `${from}T00:00:00-06:00`;
+  const end   = `${to}T23:59:59-06:00`;
 
   // Deterministic order, and prefer the active record if a duplicate name
   // ever slips back in (instead of silently keeping whichever row Postgres
@@ -96,7 +95,7 @@ exports.handler = async () => {
     if (!existing || (t.is_active && !existing.is_active)) techByName[t.name] = t;
   }
 
-  // Fetch today's completed jobs
+  // Fetch all completed jobs in range
   const allJobs = [];
   let page = 1;
   while (true) {
@@ -127,7 +126,7 @@ exports.handler = async () => {
     const schedStart = job.schedule?.scheduled_start;
     jobMeta[String(job.id)] = {
       employees:    matchedEmployees,
-      jobDate:      schedStart ? schedStart.split("T")[0] : todayStr,
+      jobDate:      schedStart ? schedStart.split("T")[0] : from,
       totalAmount:  job.total_amount || 0,
       tipAmount:    job.tip_amount   || 0,
       customerName: [job.customer?.first_name, job.customer?.last_name].filter(Boolean).join(" ") || null,
@@ -140,12 +139,16 @@ exports.handler = async () => {
 
   // Per-job invoice fetch, then write one row per tech per job
   const batch = [];
+  const jobReport = [];
+  let invoicesMatched = 0;
   for (const [jobId, meta] of Object.entries(jobMeta)) {
-    const invData  = await hcpGet(`jobs/${jobId}/invoices`);
-    const invoices = invData?.invoices || [];
+    const invData     = await hcpGet(`jobs/${jobId}/invoices`);
+    const invoices    = invData?.invoices || [];
+    const invoiceFound = invoices.length > 0;
+    if (invoiceFound) invoicesMatched++;
 
     let totalRev, totalTip;
-    if (invoices.length > 0) {
+    if (invoiceFound) {
       const inv            = invoices[0];
       const lineItemsCents = (inv.items || []).reduce((s, item) => s + (item.amount || 0), 0);
       const discountCents  = (inv.discounts || []).reduce((s, d) => s + Math.abs(d.amount || 0), 0);
@@ -164,17 +167,19 @@ exports.handler = async () => {
     for (const split of splits) {
       const tech = techByName[split.skyloName];
       if (!tech) continue;
+      const revenue = +(totalRev * split.pct).toFixed(2);
+      const tips    = +(totalTip * split.pct).toFixed(2);
       batch.push({
         hcp_job_id:      jobId,
         tech_id:         tech.id,
         job_date:        meta.jobDate,
         week_key:        getWeekKey(meta.jobDate),
         hours:           0,
-        revenue:         +(totalRev * split.pct).toFixed(2),
-        tips:            +(totalTip * split.pct).toFixed(2),
+        revenue, tips,
         split_confirmed: split.confirmed,
         customer_name:   meta.customerName || null,
       });
+      jobReport.push({ jobId, tech: split.skyloName, date: meta.jobDate, revenue, tips, invoiceFound });
     }
   }
 
@@ -186,10 +191,17 @@ exports.handler = async () => {
     });
   }
 
-  console.log(`Revenue sync: ${batch.length} rows written for ${todayStr}`);
+  console.log(`Revenue repair: ${batch.length} rows written for ${from} → ${to}`);
   return {
     statusCode: 200,
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ok: true, jobsSynced: batch.length }),
+    body: JSON.stringify({
+      ok: true,
+      jobsSynced: batch.length,
+      jobsScanned: allJobs.length,
+      invoicesMatched,
+      jobsWritten: batch.length,
+      jobs: jobReport,
+    }),
   };
 };

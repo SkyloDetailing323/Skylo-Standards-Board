@@ -17,5 +17,8 @@
 [functions."hcp-upsell-repair"]
   timeout = 26
 
+[functions."hcp-revenue-repair"]
+  timeout = 26
+
 [functions."hcp-backfill-background"]
   # Background function — runs up to 15 min, no timeout issues

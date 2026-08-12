@@ -882,7 +882,8 @@ function ReportsTab({ techs, jobs, upsells=[], techHours=[], techId=null, onSave
       for (let i = 0; i < chunks.length; i++) {
         const chunk = chunks[i];
         showToast(`Scanning week ${i+1} of ${chunks.length}...`);
-        const res = await fetch("/.netlify/functions/hcp-revenue-sync", {
+        const endpoint = "/.netlify/functions/hcp-revenue-repair";
+        const res = await fetch(endpoint, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(chunk),
@@ -891,7 +892,9 @@ function ReportsTab({ techs, jobs, upsells=[], techHours=[], techId=null, onSave
         let data = null;
         try { data = text ? JSON.parse(text) : null; } catch {}
         if (!res.ok || !data || !data.ok) {
-          const detail = data?.error || (text ? text.slice(0,200) : `HTTP ${res.status} — empty response (likely timed out)`);
+          // Report the real status instead of guessing a cause — an empty body
+          // could mean a timeout, a platform block, or something else entirely.
+          const detail = data?.error || (text ? text.slice(0,200) : `HTTP ${res.status}${res.statusText ? " "+res.statusText : ""} from ${endpoint} (empty response body)`);
           showToast(`Repair failed on week ${chunk.from}: ${detail}`, false);
           setRepairingRev(false);
           return;
