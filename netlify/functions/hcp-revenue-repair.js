@@ -158,6 +158,9 @@ exports.handler = async (event) => {
       const tipFromPay     = payments.reduce((s, p) => s + (p.tip_amount || 0), 0);
       const paidCents      = payments.reduce((s, p) => s + (p.amount || 0), 0);
       totalTip = (tipFromPay > 0 ? tipFromPay : Math.max(0, paidCents - serviceCents)) / 100;
+      if (meta.employees.length > 1) {
+        console.log("TIP_DEBUG", jobId, JSON.stringify({ serviceCents, discountCents, tipFromPay, paidCents, payments, items: inv.items, discounts: inv.discounts }));
+      }
     } else {
       totalRev = Math.max(0, (meta.totalAmount - meta.tipAmount)) / 100;
       totalTip = meta.tipAmount / 100;
