@@ -38,7 +38,14 @@ function resolveSplits(jobId, matchedEmployees, splitMap, techByName) {
       const r    = tech ? rows.find(x => x.tech_id === tech.id) : null;
       return r ? { skyloName: e.skyloName, pct: r.pct, confirmed: true } : null;
     }).filter(Boolean);
-    if (result.length > 0) return result;
+    // Only trust job_splits if it has a row for EVERY currently-assigned
+    // employee. A partial set (e.g. one tech's write failed, or an employee
+    // was added/swapped on the job after the split was saved) used to
+    // silently drop whoever was missing a row from the whole batch — their
+    // jobs row then never got rewritten, leaving split_confirmed stuck at
+    // whatever it was before, forever. Falling back to equal-split for
+    // everyone keeps it correctly marked unconfirmed instead.
+    if (result.length === matchedEmployees.length) return result;
   }
   // Equal-split fallback
   const p = 1 / matchedEmployees.length;
