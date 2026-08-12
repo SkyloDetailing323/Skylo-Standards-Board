@@ -21,6 +21,7 @@ module.exports = {
   "Matthew Durkovich": "Matthew Durkovich",
   "Max Hancock":       "Max Hancock",
   "Milos Lewit":       "Milos Lewit",
+  "Morgan Ellison":    "Morgan Ellison",
   "Myles Madarieta":   "Myles Madarieta",
   "Riley Lyon":        "Riley Lyon",
   "Riley Wooden":      "Riley Wooden",
