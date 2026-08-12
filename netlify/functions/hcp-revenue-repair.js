@@ -133,6 +133,25 @@ exports.handler = async (event) => {
     };
   }
 
+  // TEMP DIAGNOSTIC: dump full raw job + invoice objects, and probe for a
+  // reports/analytics endpoint, before deciding on a real tip-source fix.
+  for (const path of ["reports", "reports/revenue", "reports/employee_revenue", "company_reports", "analytics/revenue", "employees/reports", "payroll_reports", "jobs/reports"]) {
+    try {
+      const r = await fetchWithTimeout(`https://api.housecallpro.com/${path}`, {
+        headers: { "Authorization": `Token ${process.env.HCP_API_KEY}`, "Content-Type": "application/json" },
+      });
+      console.log("REPORT_ENDPOINT_TEST", path, r.status);
+    } catch (e) {
+      console.log("REPORT_ENDPOINT_TEST", path, "ERROR", e.message);
+    }
+  }
+  const dumpJobs = allJobs.slice(0, 3);
+  for (const job of dumpJobs) {
+    console.log("RAW_JOB_FULL", job.id, JSON.stringify(job));
+    const invData = await hcpGet(`jobs/${job.id}/invoices`);
+    console.log("RAW_INVOICE_FULL", job.id, JSON.stringify(invData));
+  }
+
   // Fetch confirmed splits for multi-employee jobs
   const multiIds = Object.entries(jobMeta).filter(([, m]) => m.employees.length > 1).map(([id]) => id);
   const splitMap = await fetchJobSplits(multiIds, sbFetch);
