@@ -161,15 +161,6 @@ exports.handler = async (event) => {
     };
   }
 
-  // TEMP DIAGNOSTIC: find the real tip field on the two Sean Bair candidate jobs
-  const tipTargetIds = ["job_c239836cb97142cebaad595dc5ba4eae", "job_6f7ec285ab4f400e808df67fdaacb757"];
-  for (const id of tipTargetIds) {
-    const jobData = await hcpGet(`jobs/${id}`);
-    console.log("RAW_JOB_FULL", id, JSON.stringify(jobData));
-    const invData = await hcpGet(`jobs/${id}/invoices`);
-    console.log("RAW_INVOICE_FULL", id, JSON.stringify(invData));
-  }
-
   // Fetch confirmed splits for multi-employee jobs
   const multiIds = Object.entries(jobMeta).filter(([, m]) => m.employees.length > 1).map(([id]) => id);
   const splitMap = await fetchJobSplits(multiIds, sbFetch);
@@ -191,14 +182,18 @@ exports.handler = async (event) => {
       const discountCents  = (inv.discounts || []).reduce((s, d) => s + Math.abs(d.amount || 0), 0);
       const serviceCents   = Math.max(0, lineItemsCents - discountCents);
       totalRev             = serviceCents / 100;
-      // Only count payments that actually succeeded — a failed attempt followed
-      // by a successful retry both appear in inv.payments, and summing both
-      // double-counts that amount, which the derived-tip fallback below then
-      // misreads as a tip equal to the job's full revenue.
-      const payments       = (inv.payments || []).filter(p => p.status === "succeeded");
-      const tipFromPay     = payments.reduce((s, p) => s + (p.tip_amount || 0), 0);
-      const paidCents      = payments.reduce((s, p) => s + (p.amount || 0), 0);
-      totalTip = (tipFromPay > 0 ? tipFromPay : Math.max(0, paidCents - serviceCents)) / 100;
+      // Real tip source, confirmed against a known $60 tip (HCP invoice
+      // #5449, Sean Bair / Mason Dixon): the tip is nowhere in the invoice
+      // or payment objects — payment.amount exactly equals invoice.amount,
+      // no gratuity field anywhere. But job.total_amount runs higher than
+      // the invoice's line-item total by exactly the tip. This business
+      // applies discounts as negative line items (not the invoice's
+      // discounts[] array, which is always empty), and total_amount only
+      // ever reflects positive items + tip — it ignores discount items
+      // entirely. Validated against 3 real jobs: the known $60-tip job, a
+      // $0-tip job with a discount line item, and a plain $0-tip job.
+      const grossPositiveItemsCents = (inv.items || []).reduce((s, item) => s + Math.max(0, item.amount || 0), 0);
+      totalTip = Math.max(0, (meta.totalAmount || 0) - grossPositiveItemsCents) / 100;
     } else {
       totalRev = Math.max(0, (meta.totalAmount - meta.tipAmount)) / 100;
       totalTip = meta.tipAmount / 100;
