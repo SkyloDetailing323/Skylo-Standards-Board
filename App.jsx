@@ -48,15 +48,15 @@ const REVIEW_PTS = 5;
 const REVIEW_BONUS_PTS = 20; // bonus at 10+ reviews in a month
 const CALLBACK_PTS = -300; // deducted per callback — nearly a full week of work
 
-// ─── QUOTA CONFIG (Kyle sets these in admin) ──────────────────────────────────
+// ─── QUOTA CONFIG (set by whoever holds Head of Operations) ────────────────────
 const DEFAULT_QUOTA = {
   upsells: 175,      // $ per month — mid between $150 floor and $200 avg
   reviews: 6,        // count per month — mid between 5 floor and 7 avg
   switchovers: 2,    // count per month — floor for now, team is still developing
 };
-// Kyle's bonus: triggered when X% of techs hit all 3 quotas in the month
-const KYLE_BONUS_THRESHOLD = 0.75; // 75% of techs must hit quota
-const KYLE_BONUS_PCT = 0.05;       // 5% of total team upsell revenue that month
+// Operations bonus: triggered when X% of active techs hit all 3 quotas in the month
+const OPS_BONUS_THRESHOLD = 0.75; // 75% of active techs must hit quota
+const OPS_BONUS_PCT = 0.05;       // 5% of total team upsell revenue that month
 
 const LOGO_SRC = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 160 45'%3E%3Ctext x='80' y='34' font-family='Arial Black,sans-serif' font-size='30' font-weight='900' font-style='italic' fill='%232b9cf0' text-anchor='middle'%3ESkylo%3C/text%3E%3C/svg%3E";
 
@@ -1742,15 +1742,15 @@ function QuotaSettings({ quota, onSave, saving }) {
         </button>
       </div>
       <div style={{ background:`${C.blue}10`, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"16px 18px" }}>
-        <Label color={C.blue}>💡 Kyle's Bonus Rule</Label>
-        <div style={{ fontSize:"13px", color:C.black, marginBottom:"6px" }}>When <strong>{Math.round(KYLE_BONUS_THRESHOLD*100)}% or more of techs hit all 3 quotas</strong> in a month, Kyle earns <strong style={{ color:C.green }}>5% of the total team upsell revenue</strong> for that month.</div>
-        <div style={{ fontSize:"12px", color:C.muted }}>The more the team upsells, the more Kyle earns — no cap. He's incentivized to coach everyone to their max, not just hit a threshold.</div>
+        <Label color={C.blue}>💡 Operations Bonus Rule</Label>
+        <div style={{ fontSize:"13px", color:C.black, marginBottom:"6px" }}>When <strong>{Math.round(OPS_BONUS_THRESHOLD*100)}% or more of active techs hit all 3 quotas</strong> in a month, Will earns <strong style={{ color:C.green }}>5% of the total team upsell revenue</strong> for that month.</div>
+        <div style={{ fontSize:"12px", color:C.muted }}>The more the team upsells, the more Will earns — no cap. He's incentivized to coach everyone to their max, not just hit a threshold.</div>
       </div>
     </div>
   );
 }
 
-function KyleBonusTab({ techs, upsells, switchovers, reviews, quota }) {
+function OperationsProgressTab({ techs, upsells, switchovers, reviews, quota, callbacks=[], jobs=[], techHours=[], rideAlongs=[] }) {
   const mk = getMonthKey();
   const q = quota || DEFAULT_QUOTA;
 
@@ -1773,43 +1773,139 @@ function KyleBonusTab({ techs, upsells, switchovers, reviews, quota }) {
   const hittingCount  = techStats.filter(t=>t.allHit).length;
   const totalTechs    = activeTechs.length;
   const hitRate       = totalTechs > 0 ? hittingCount / totalTechs : 0;
-  const kyleBonusHit  = hitRate >= KYLE_BONUS_THRESHOLD;
+  const bonusHit      = hitRate >= OPS_BONUS_THRESHOLD;
   const pctDisplay    = Math.round(hitRate * 100);
-  const neededForBonus = Math.ceil(KYLE_BONUS_THRESHOLD * totalTechs);
+  const neededForBonus = Math.ceil(OPS_BONUS_THRESHOLD * totalTechs);
 
   // Total team upsell revenue this month
   const now2 = new Date(); const y2 = now2.getFullYear(); const mo2 = String(now2.getMonth()+1).padStart(2,"0");
   const monthTeamUpsells = upsells.filter(u=>u.week_key?.startsWith(`${y2}-${mo2}`)).reduce((s,u)=>s+u.amount,0);
-  const kyleBonusAmt = Math.round(monthTeamUpsells * KYLE_BONUS_PCT * 100) / 100;
+  const bonusAmt = Math.round(monthTeamUpsells * OPS_BONUS_PCT * 100) / 100;
+
+  function mtWeekKeyFromDate(dateStr) {
+    const d = new Date(dateStr + "T12:00:00Z");
+    const day = d.getUTCDay();
+    const back = day === 0 ? 6 : day - 1;
+    d.setUTCDate(d.getUTCDate() - back);
+    return d.toISOString().split("T")[0];
+  }
+
+  // KPI 1 — ride-alongs completed this week. A row in ride_alongs IS the
+  // completion record (no separate status field) — confirmed no "completed"
+  // boolean exists anywhere in the schema.
+  const RIDE_ALONG_WEEKLY_TARGET = 4;
+  const thisWeekKey = getWeekKey();
+  const rideAlongsThisWeek = rideAlongs.filter(r => r.date && mtWeekKeyFromDate(r.date) === thisWeekKey).length;
+  const rideAlongHit = rideAlongsThisWeek >= RIDE_ALONG_WEEKLY_TARGET;
+
+  // KPI 2 — check-in completion + on-time rate. checkins isn't in the global
+  // loadAll() state (same as DevelopmentTab, which fetches it locally too),
+  // so this tab fetches its own copy. NOTE: milestones are week 1/2/4/6/12 in
+  // the actual schema, not week 1/2/4/8/12 — there's no "week_8" anywhere.
+  // "Tote/truck audits" are NOT a separate tracked entity — confirmed no such
+  // table/field exists; only these tech check-ins are real data.
+  const [checkins, setCheckins] = useState([]);
+  const [checkinsLoaded, setCheckinsLoaded] = useState(false);
+  useEffect(() => {
+    sb("checkins?select=*").then(rows => { setCheckins(rows||[]); setCheckinsLoaded(true); }).catch(()=>setCheckinsLoaded(true));
+  }, []);
+  const todayStr = new Date().toISOString().split("T")[0];
+  const dueCheckins = checkins.filter(c => c.scheduled_date && c.scheduled_date <= todayStr);
+  const completedCheckins = dueCheckins.filter(c => c.status === "completed");
+  const onTimeCheckins = completedCheckins.filter(c => c.completed_date && c.completed_date <= c.scheduled_date);
+  const checkinCompletionRate = dueCheckins.length > 0 ? (completedCheckins.length / dueCheckins.length) * 100 : null;
+  const checkinOnTimeRate = completedCheckins.length > 0 ? (onTimeCheckins.length / completedCheckins.length) * 100 : null;
+
+  // KPI 3 — audit calibration accuracy. No supervisor re-audit/spot-check
+  // data source exists anywhere in the codebase — this is a manual-entry
+  // number stored in the settings table, same pattern as the quota JSON blob,
+  // until a real calibration data source gets built.
+  const [calibration, setCalibration] = useState(null);
+  const [calibrationInput, setCalibrationInput] = useState("");
+  const [calibrationSaving, setCalibrationSaving] = useState(false);
+  useEffect(() => {
+    sb("settings?key=eq.calibration_accuracy&select=*").then(rows => {
+      if (rows && rows[0]) { try { const v = JSON.parse(rows[0].value); setCalibration(v); setCalibrationInput(String(v.pct)); } catch {} }
+    }).catch(()=>{});
+  }, []);
+  async function saveCalibration() {
+    const pct = parseFloat(calibrationInput);
+    if (isNaN(pct)) return;
+    setCalibrationSaving(true);
+    try {
+      const value = JSON.stringify({ pct, updatedAt: new Date().toISOString().split("T")[0] });
+      const existing = await sb("settings?key=eq.calibration_accuracy&select=id").catch(()=>[]);
+      if (existing && existing.length > 0) await sb(`settings?id=eq.${existing[0].id}`, { method:"PATCH", body: JSON.stringify({ value }), prefer:"return=minimal" });
+      else await sb("settings", { method:"POST", body: JSON.stringify({ key:"calibration_accuracy", value }) });
+      setCalibration({ pct, updatedAt: new Date().toISOString().split("T")[0] });
+    } catch {}
+    setCalibrationSaving(false);
+  }
+
+  // KPIs 5-8 — team-wide rates for the current month, reusing the same
+  // revenue/hours/upsell computations ReportsTab already does at team level.
+  const monthJobs = jobs.filter(j => j.job_date && j.job_date.startsWith(`${y2}-${mo2}`));
+  const monthTeamRevenue = monthJobs.reduce((s,j)=>s+(j.revenue||0),0);
+  const teamUpsellRate = monthTeamRevenue > 0 ? (monthTeamUpsells / monthTeamRevenue) * 100 : 0;
+
+  const monthTeamReviews = reviews.filter(r => r.month_key === mk).reduce((s,r)=>s+(r.count||0),0);
+  const reviewQuotaTarget = q.reviews * totalTechs;
+  const teamReviewRate = reviewQuotaTarget > 0 ? (monthTeamReviews / reviewQuotaTarget) * 100 : 0;
+
+  const monthTeamSwitchovers = switchovers.filter(s => s.week_key?.startsWith(`${y2}-${mo2}`)).length;
+
+  const monthTeamHours = techHours.filter(h => h.week_key?.startsWith(`${y2}-${mo2}`)).reduce((s,h)=>s+(h.hours||0),0);
+  const teamRevPerHr = monthTeamHours > 0 ? monthTeamRevenue / monthTeamHours : 0;
+
+  // Callback rate has no job-level linkage (callbacks only carry tech_id +
+  // reason + created_at), so this is jobs-in-period vs callbacks-in-period,
+  // not a true per-job attribution — the best available with real data.
+  const monthCallbacks = callbacks.filter(c => c.created_at && c.created_at.startsWith(`${y2}-${mo2}`)).length;
+  const callbackRate = monthJobs.length > 0 ? (monthCallbacks / monthJobs.length) * 100 : 0;
+
+  // 8-week trend — no charting library exists in this app (package.json has
+  // only react/react-dom), so this is a lightweight CSS bar trend rather than
+  // pulling in a new dependency.
+  const last8WeekKeys = [];
+  { const base = new Date(); for (let i=7;i>=0;i--) { const wd=new Date(base); wd.setDate(base.getDate()-i*7); last8WeekKeys.push(mtWeekKeyFromDate(wd.toISOString().split("T")[0])); } }
+  const trendWeeks = [...new Set(last8WeekKeys)].map(wk => {
+    const wkJobs = jobs.filter(j=>j.week_key===wk);
+    const wkRev  = wkJobs.reduce((s,j)=>s+(j.revenue||0),0);
+    const wkHrs  = techHours.filter(h=>h.week_key===wk).reduce((s,h)=>s+(h.hours||0),0);
+    const wkCallbacks = callbacks.filter(c => c.created_at && mtWeekKeyFromDate(c.created_at.split("T")[0]) === wk).length;
+    return { wk, revPerHr: wkHrs>0?wkRev/wkHrs:0, callbackRate: wkJobs.length>0?(wkCallbacks/wkJobs.length)*100:0 };
+  });
+  const maxRevPerHr = Math.max(1, ...trendWeeks.map(w=>w.revPerHr));
+  const maxCallbackRate = Math.max(1, ...trendWeeks.map(w=>w.callbackRate));
 
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:"16px" }}>
-      {/* Kyle's bonus status */}
-      <div style={{ background:kyleBonusHit?`${C.green}15`:C.white, border:`2px solid ${kyleBonusHit?C.green:C.border}`, borderTop:`3px solid ${kyleBonusHit?C.green:C.blue}`, borderRadius:"12px", padding:"20px", boxShadow:"0 2px 8px rgba(43,156,240,0.08)" }}>
-        <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontStyle:"italic", fontSize:"13px", color:kyleBonusHit?C.green:C.muted, letterSpacing:"2px", textTransform:"uppercase", marginBottom:"6px" }}>
-          {kyleBonusHit ? "🎉 BONUS UNLOCKED" : "⏳ BONUS IN PROGRESS"}
+      {/* Will's bonus status */}
+      <div style={{ background:bonusHit?`${C.green}15`:C.white, border:`2px solid ${bonusHit?C.green:C.border}`, borderTop:`3px solid ${bonusHit?C.green:C.blue}`, borderRadius:"12px", padding:"20px", boxShadow:"0 2px 8px rgba(43,156,240,0.08)" }}>
+        <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontStyle:"italic", fontSize:"13px", color:bonusHit?C.green:C.muted, letterSpacing:"2px", textTransform:"uppercase", marginBottom:"6px" }}>
+          {bonusHit ? "🎉 BONUS UNLOCKED" : "⏳ BONUS IN PROGRESS"}
         </div>
-        <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontStyle:"italic", fontSize:"36px", color:kyleBonusHit?C.green:C.black, lineHeight:1, marginBottom:"4px" }}>
-          {kyleBonusHit ? `$${kyleBonusAmt.toFixed(2)} EARNED` : `$${kyleBonusAmt.toFixed(2)} PROJECTED`}
+        <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontStyle:"italic", fontSize:"36px", color:bonusHit?C.green:C.black, lineHeight:1, marginBottom:"4px" }}>
+          {bonusHit ? `$${bonusAmt.toFixed(2)} EARNED` : `$${bonusAmt.toFixed(2)} PROJECTED`}
         </div>
         <div style={{ fontSize:"12px", color:C.muted, marginBottom:"4px" }}>
           5% of ${monthTeamUpsells.toLocaleString()} team upsells this month
         </div>
         <div style={{ fontSize:"13px", color:C.muted, marginBottom:"16px" }}>
-          {kyleBonusHit
-            ? `${hittingCount} of ${totalTechs} techs hit all quotas — great coaching, Kyle.`
+          {bonusHit
+            ? `${hittingCount} of ${totalTechs} techs hit all quotas — great coaching, Will.`
             : `${hittingCount} of ${totalTechs} techs on quota. Need ${neededForBonus - hittingCount} more to unlock.`}
         </div>
         <div style={{ marginBottom:"8px" }}>
           <div style={{ display:"flex", justifyContent:"space-between", marginBottom:"4px" }}>
             <span style={{ fontSize:"11px", color:C.muted, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>TEAM QUOTA RATE</span>
-            <span style={{ fontSize:"11px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", color:kyleBonusHit?C.green:C.black }}>{pctDisplay}% <span style={{ color:C.muted }}>/</span> {Math.round(KYLE_BONUS_THRESHOLD*100)}% needed</span>
+            <span style={{ fontSize:"11px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", color:bonusHit?C.green:C.black }}>{pctDisplay}% <span style={{ color:C.muted }}>/</span> {Math.round(OPS_BONUS_THRESHOLD*100)}% needed</span>
           </div>
           <div style={{ background:C.border, borderRadius:"6px", height:"10px", overflow:"hidden" }}>
-            <div style={{ width:`${Math.min(pctDisplay,100)}%`, height:"100%", background:kyleBonusHit?C.green:C.blue, borderRadius:"6px" }}/>
+            <div style={{ width:`${Math.min(pctDisplay,100)}%`, height:"100%", background:bonusHit?C.green:C.blue, borderRadius:"6px" }}/>
           </div>
           <div style={{ display:"flex", justifyContent:"flex-end", marginTop:"3px" }}>
-            <div style={{ width:`${KYLE_BONUS_THRESHOLD*100}%`, borderRight:`2px dashed ${C.muted}`, height:"6px", marginTop:"-3px" }}/>
+            <div style={{ width:`${OPS_BONUS_THRESHOLD*100}%`, borderRight:`2px dashed ${C.muted}`, height:"6px", marginTop:"-3px" }}/>
           </div>
         </div>
         <div style={{ background:C.cardLt, border:`1px solid ${C.border}`, borderRadius:"8px", padding:"10px 12px", marginTop:"12px" }}>
@@ -1818,15 +1914,15 @@ function KyleBonusTab({ techs, upsells, switchovers, reviews, quota }) {
             <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", color:C.black }}>${monthTeamUpsells.toLocaleString()}</span>
           </div>
           <div style={{ display:"flex", justifyContent:"space-between", fontSize:"12px", color:C.muted, marginBottom:"4px" }}>
-            <span>Kyle's rate</span>
-            <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", color:C.black }}>{Math.round(KYLE_BONUS_PCT*100)}%</span>
+            <span>Will's rate</span>
+            <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", color:C.black }}>{Math.round(OPS_BONUS_PCT*100)}%</span>
           </div>
           <div style={{ display:"flex", justifyContent:"space-between", fontSize:"13px", borderTop:`1px solid ${C.border}`, paddingTop:"6px", marginTop:"4px" }}>
-            <span style={{ fontWeight:"700", color:C.black }}>Kyle's bonus</span>
-            <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"16px", color:kyleBonusHit?C.green:C.muted }}>${kyleBonusAmt.toFixed(2)} {!kyleBonusHit&&"(locked)"}</span>
+            <span style={{ fontWeight:"700", color:C.black }}>Will's bonus</span>
+            <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"16px", color:bonusHit?C.green:C.muted }}>${bonusAmt.toFixed(2)} {!bonusHit&&"(locked)"}</span>
           </div>
         </div>
-        <div style={{ fontSize:"11px", color:C.muted, marginTop:"10px" }}>Month: {formatMonthLabel(mk)} · Unlocks when {Math.round(KYLE_BONUS_THRESHOLD*100)}% of techs hit all 3 quotas</div>
+        <div style={{ fontSize:"11px", color:C.muted, marginTop:"10px" }}>Month: {formatMonthLabel(mk)} · Unlocks when {Math.round(OPS_BONUS_THRESHOLD*100)}% of active techs hit all 3 quotas</div>
       </div>
 
       {/* Per-tech quota breakdown */}
@@ -1869,6 +1965,113 @@ function KyleBonusTab({ techs, upsells, switchovers, reviews, quota }) {
               </div>
             </div>
           ))}
+        </div>
+      </div>
+
+      {/* KPI 1: Ride-Alongs This Week */}
+      <div style={{ background:C.white, border:`1px solid ${C.border}`, borderTop:`3px solid ${rideAlongHit?C.green:C.orange}`, borderRadius:"12px", padding:"18px", boxShadow:"0 2px 8px rgba(43,156,240,0.08)" }}>
+        <Label color={rideAlongHit?C.green:C.orange}>🚗 Ride-Alongs This Week</Label>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+          <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"32px", color:rideAlongHit?C.green:C.black }}>{rideAlongsThisWeek} <span style={{ fontSize:"16px", color:C.muted }}>/ {RIDE_ALONG_WEEKLY_TARGET} target</span></div>
+          <div style={{ fontSize:"24px" }}>{rideAlongHit?"✅":"⚠️"}</div>
+        </div>
+        <div style={{ fontSize:"11px", color:C.muted, marginTop:"4px" }}>Week of {formatWeekLabel(thisWeekKey)}</div>
+      </div>
+
+      {/* KPI 2: Check-In Completion & On-Time Rate */}
+      <div style={{ background:C.white, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.blue}`, borderRadius:"12px", padding:"18px", boxShadow:"0 2px 8px rgba(43,156,240,0.08)" }}>
+        <Label color={C.blue}>📋 Check-In Completion Rate</Label>
+        <div style={{ fontSize:"11px", color:C.muted, marginBottom:"10px" }}>Week 1/2/4/6/12 tech check-ins (the actual milestones tracked — there's no week 8). Tote/truck audits aren't a separate tracked data source yet.</div>
+        {!checkinsLoaded ? (
+          <div style={{ fontSize:"12px", color:C.muted }}>Loading…</div>
+        ) : dueCheckins.length===0 ? (
+          <div style={{ fontSize:"12px", color:C.muted }}>No check-ins due yet.</div>
+        ) : (
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"10px" }}>
+            <div style={{ background:C.cardLt, borderRadius:"8px", padding:"10px", textAlign:"center" }}>
+              <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"22px", color:C.black }}>{checkinCompletionRate.toFixed(0)}%</div>
+              <div style={{ fontSize:"9px", color:C.muted, textTransform:"uppercase", letterSpacing:"1px" }}>Completed ({completedCheckins.length}/{dueCheckins.length} due)</div>
+            </div>
+            <div style={{ background:C.cardLt, borderRadius:"8px", padding:"10px", textAlign:"center" }}>
+              <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"22px", color:C.black }}>{checkinOnTimeRate===null?"—":checkinOnTimeRate.toFixed(0)+"%"}</div>
+              <div style={{ fontSize:"9px", color:C.muted, textTransform:"uppercase", letterSpacing:"1px" }}>On-Time ({onTimeCheckins.length}/{completedCheckins.length} completed)</div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* KPI 3: Audit Calibration Accuracy — manual entry, no automated source exists */}
+      <div style={{ background:C.white, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.purple}`, borderRadius:"12px", padding:"18px", boxShadow:"0 2px 8px rgba(43,156,240,0.08)" }}>
+        <Label color={C.purple}>🎯 Audit Calibration Accuracy</Label>
+        <div style={{ fontSize:"11px", color:C.muted, marginBottom:"10px" }}>Manual entry — no supervisor re-audit/spot-check data source exists yet. Enter the latest calibration % here until that's built.</div>
+        <div style={{ display:"flex", gap:"8px", alignItems:"center" }}>
+          <input type="number" min="0" max="100" value={calibrationInput} onChange={e=>setCalibrationInput(e.target.value)}
+            style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"8px 10px", borderRadius:"8px", fontSize:"14px", width:"100px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}/>
+          <span style={{ fontSize:"12px", color:C.muted }}>%</span>
+          <button onClick={saveCalibration} disabled={calibrationSaving} style={{ background:calibrationSaving?"#333":C.purple, border:"none", color:C.white, padding:"8px 16px", borderRadius:"8px", cursor:calibrationSaving?"not-allowed":"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", fontSize:"12px" }}>
+            {calibrationSaving?"Saving...":"Save"}
+          </button>
+        </div>
+        {calibration && <div style={{ fontSize:"11px", color:C.muted, marginTop:"8px" }}>Last recorded: {calibration.pct}% on {calibration.updatedAt}</div>}
+      </div>
+
+      {/* KPI 4: Team Churn Rate — flagged as not computable, no fabricated number */}
+      <div style={{ background:"#fff8e6", border:"1px solid #f59e0b44", borderTop:"3px solid #f59e0b", borderRadius:"12px", padding:"18px" }}>
+        <Label color="#f59e0b">📉 Team Churn Rate — Not Available Yet</Label>
+        <div style={{ fontSize:"12px", color:C.black }}>Archiving a tech only flips a status flag today — there's no timestamp recorded for when someone actually left, and hire date isn't reliably filled in for every tech. A trustworthy churn rate needs both before this can show a real number.</div>
+      </div>
+
+      {/* KPIs 5-7: Team Upsell Rate / Review Rate / Switchover Total */}
+      <div style={{ background:C.white, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.green}`, borderRadius:"12px", padding:"18px", boxShadow:"0 2px 8px rgba(43,156,240,0.08)" }}>
+        <Label color={C.green}>📈 Team Rates — {formatMonthLabel(mk)}</Label>
+        <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:"10px" }}>
+          <div style={{ background:C.cardLt, borderRadius:"8px", padding:"10px", textAlign:"center" }}>
+            <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"20px", color:C.green }}>{teamUpsellRate.toFixed(1)}%</div>
+            <div style={{ fontSize:"9px", color:C.muted, textTransform:"uppercase", letterSpacing:"1px" }}>Upsell Rate</div>
+          </div>
+          <div style={{ background:C.cardLt, borderRadius:"8px", padding:"10px", textAlign:"center" }}>
+            <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"20px", color:C.gold }}>{teamReviewRate.toFixed(0)}%</div>
+            <div style={{ fontSize:"9px", color:C.muted, textTransform:"uppercase", letterSpacing:"1px" }}>Review Rate ({monthTeamReviews}/{reviewQuotaTarget})</div>
+          </div>
+          <div style={{ background:C.cardLt, borderRadius:"8px", padding:"10px", textAlign:"center" }}>
+            <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"20px", color:C.blue }}>{monthTeamSwitchovers}</div>
+            <div style={{ fontSize:"9px", color:C.muted, textTransform:"uppercase", letterSpacing:"1px" }}>Switchovers</div>
+          </div>
+        </div>
+      </div>
+
+      {/* KPI 8: Team Rev/Hr + Callback Rate, with an 8-week trend */}
+      <div style={{ background:C.white, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.blue}`, borderRadius:"12px", padding:"18px", boxShadow:"0 2px 8px rgba(43,156,240,0.08)" }}>
+        <Label color={C.blue}>📊 Rev/Hr & Callback Rate — Last 8 Weeks</Label>
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"16px", marginTop:"8px", marginBottom:"14px" }}>
+          <div style={{ textAlign:"center" }}>
+            <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"20px", color:C.black }}>${teamRevPerHr.toFixed(2)}/hr</div>
+            <div style={{ fontSize:"9px", color:C.muted, textTransform:"uppercase" }}>This Month</div>
+          </div>
+          <div style={{ textAlign:"center" }}>
+            <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"20px", color:C.black }}>{callbackRate.toFixed(1)}%</div>
+            <div style={{ fontSize:"9px", color:C.muted, textTransform:"uppercase" }}>Callback Rate ({monthCallbacks}/{monthJobs.length} jobs)</div>
+          </div>
+        </div>
+        <div style={{ fontSize:"10px", color:C.muted, marginBottom:"8px" }}>No job-level link exists on callbacks (only tech_id/reason/date), so this is callbacks-in-period ÷ jobs-in-period, not true per-job attribution.</div>
+        <div style={{ display:"flex", flexDirection:"column", gap:"6px" }}>
+          {trendWeeks.map(w=>(
+            <div key={w.wk} style={{ display:"grid", gridTemplateColumns:"70px 1fr 1fr", gap:"8px", alignItems:"center" }}>
+              <div style={{ fontSize:"10px", color:C.muted }}>{formatWeekLabel(w.wk)}</div>
+              <div style={{ background:C.border, borderRadius:"4px", height:"14px", position:"relative", overflow:"hidden" }}>
+                <div style={{ width:`${(w.revPerHr/maxRevPerHr)*100}%`, height:"100%", background:C.blue, borderRadius:"4px" }}/>
+                <div style={{ position:"absolute", top:0, left:"4px", fontSize:"9px", color:C.black, lineHeight:"14px" }}>${w.revPerHr.toFixed(0)}/hr</div>
+              </div>
+              <div style={{ background:C.border, borderRadius:"4px", height:"14px", position:"relative", overflow:"hidden" }}>
+                <div style={{ width:`${(w.callbackRate/maxCallbackRate)*100}%`, height:"100%", background:"#ef4444", borderRadius:"4px" }}/>
+                <div style={{ position:"absolute", top:0, left:"4px", fontSize:"9px", color:C.black, lineHeight:"14px" }}>{w.callbackRate.toFixed(0)}%</div>
+              </div>
+            </div>
+          ))}
+        </div>
+        <div style={{ display:"flex", gap:"16px", marginTop:"8px" }}>
+          <div style={{ fontSize:"9px", color:C.muted }}>🔵 Rev/hr</div>
+          <div style={{ fontSize:"9px", color:C.muted }}>🔴 Callback rate</div>
         </div>
       </div>
     </div>
@@ -4343,7 +4546,7 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
       ["reports","📊","Reports"],
       ["leaderboard","🏆","Leaderboard"],
       ["payroll","💵","Payroll"],
-      ["kyle","👑","Kyle Bonus"],
+      ["operations","📈","Operations Progress"],
     ]},
     { label:"Team Activity", items:[
       ["upsells","💰","Upsells"],
@@ -4699,8 +4902,8 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
             <JourneyBoard techs={activeTechs} upsells={upsells} switchovers={switchovers} reviews={reviews} quota={quota} callbacks={callbacks||[]}/>
           </div>
         )}
-        {tab==="kyle"&&(
-          <KyleBonusTab techs={techs} upsells={upsells} switchovers={switchovers} reviews={reviews} quota={quota}/>
+        {tab==="operations"&&(
+          <OperationsProgressTab techs={techs} upsells={upsells} switchovers={switchovers} reviews={reviews} quota={quota} callbacks={callbacks||[]} jobs={jobs||[]} techHours={techHours||[]} rideAlongs={rideAlongs||[]}/>
         )}
         {tab==="quota"&&(
           <QuotaSettings quota={quota} onSave={saveQuota} saving={saving}/>
