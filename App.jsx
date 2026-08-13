@@ -431,6 +431,13 @@ function Label({ children, color=C.blue }) {
   );
 }
 
+// Marker for archived (is_active=false) techs in historical views — reports,
+// payroll, audit history — where their past data must stay visible, just
+// clearly labeled so it's not mistaken for a current active tech.
+function ArchivedTag() {
+  return <span style={{ fontSize:"10px", color:C.muted, fontWeight:"600", fontStyle:"italic", marginLeft:"5px" }}>(Archived)</span>;
+}
+
 function Pill({ children, color=C.blue }) {
   return (
     <span style={{ display:"inline-block", background:`${color}22`, border:`1px solid ${color}55`, color, borderRadius:"3px", padding:"2px 8px", fontSize:"10px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", letterSpacing:"1px", textTransform:"uppercase" }}>
@@ -1040,7 +1047,7 @@ function ReportsTab({ techs, jobs, upsells=[], techHours=[], techId=null, onSave
                 {techRows.map((t,i)=>(
                   <div key={t.id} style={{ background:C.cardLt, border:`1px solid ${C.border}`, borderRadius:"10px", padding:"12px 14px" }}>
                     <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:"8px" }}>
-                      <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontStyle:"italic", fontSize:"16px", color:C.black }}>{medal(i)} {t.name}</div>
+                      <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontStyle:"italic", fontSize:"16px", color:C.black }}>{medal(i)} {t.name}{t.is_active===false&&<ArchivedTag/>}</div>
                       <div style={{ textAlign:"right" }}>
                         <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"22px", color:C.green, lineHeight:1 }}>${Math.round(t.rev).toLocaleString()}</div>
                         <div style={{ fontSize:"9px", color:C.muted, letterSpacing:"1px", textTransform:"uppercase", marginBottom:"2px" }}>serviced</div>
@@ -1314,7 +1321,7 @@ function PayrollTab({ techs, jobs }) {
           {rows.map(r=>(
             <div key={r.id} style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"16px 18px" }}>
               <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:"12px" }}>
-                <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontStyle:"italic", fontSize:"20px", color:C.black }}>{r.name}</div>
+                <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontStyle:"italic", fontSize:"20px", color:C.black }}>{r.name}{r.is_active===false&&<ArchivedTag/>}</div>
                 <div style={{ textAlign:"right" }}>
                   <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"28px", color:C.green, lineHeight:1 }}>${r.total.toFixed(2)}</div>
                   <div style={{ fontSize:"10px", color:C.muted, letterSpacing:"1px" }}>TOTAL PAY</div>
@@ -1747,7 +1754,11 @@ function KyleBonusTab({ techs, upsells, switchovers, reviews, quota }) {
   const mk = getMonthKey();
   const q = quota || DEFAULT_QUOTA;
 
-  const techStats = techs.map(t => {
+  // Archived techs shouldn't count toward the quota-hit denominator or appear
+  // in the breakdown below — they're not working, so including them made the
+  // team's hit rate look worse than it actually is among current techs.
+  const activeTechs = techs.filter(t => t.is_active !== false);
+  const techStats = activeTechs.map(t => {
     const now = new Date(); const y = now.getFullYear(); const m = String(now.getMonth()+1).padStart(2,"0");
     const monthUpsellAmt   = upsells.filter(u=>u.tech_id===t.id && u.week_key?.startsWith(`${y}-${m}`)).reduce((s,u)=>s+u.amount,0);
     const monthReviewCount = reviews.filter(r=>r.tech_id===t.id && r.month_key===mk).reduce((s,r)=>s+r.count,0);
@@ -1760,7 +1771,7 @@ function KyleBonusTab({ techs, upsells, switchovers, reviews, quota }) {
   });
 
   const hittingCount  = techStats.filter(t=>t.allHit).length;
-  const totalTechs    = techs.length;
+  const totalTechs    = activeTechs.length;
   const hitRate       = totalTechs > 0 ? hittingCount / totalTechs : 0;
   const kyleBonusHit  = hitRate >= KYLE_BONUS_THRESHOLD;
   const pctDisplay    = Math.round(hitRate * 100);
@@ -4157,7 +4168,7 @@ function UpsellAuditTab({ techs, upsells, jobs }) {
                 <tr key={r.id} style={{ background: r.flagged ? "#ef444414" : (i%2===0?C.cardLt:C.card) }}>
                   <td style={{ padding:"8px 12px", color:C.muted, whiteSpace:"nowrap", borderBottom:`1px solid ${C.border}`, borderLeft:`3px solid ${r.flagged?"#ef4444":"transparent"}` }}>{r.date||"—"}</td>
                   <td style={{ padding:"8px 12px", color:C.muted, whiteSpace:"nowrap", borderBottom:`1px solid ${C.border}`, fontFamily:"'SF Mono',Consolas,monospace", fontSize:"10px", userSelect:"text", cursor:"text" }}>{r.hcpJobId||"—"}</td>
-                  <td style={{ padding:"8px 12px", color:C.black, whiteSpace:"nowrap", borderBottom:`1px solid ${C.border}` }}>{techById[r.techId]?.name||"Unknown"}</td>
+                  <td style={{ padding:"8px 12px", color:C.black, whiteSpace:"nowrap", borderBottom:`1px solid ${C.border}` }}>{techById[r.techId]?.name||"Unknown"}{techById[r.techId]?.is_active===false&&<ArchivedTag/>}</td>
                   <td style={{ padding:"8px 12px", color: r.customerName?C.black:"#ef4444", whiteSpace:"nowrap", borderBottom:`1px solid ${C.border}` }}>{r.customerName||(r.matched?"—":"No job match")}</td>
                   <td style={{ padding:"8px 12px", color:C.green, fontWeight:"700", whiteSpace:"nowrap", borderBottom:`1px solid ${C.border}` }}>${r.amount.toFixed(2)}</td>
                   <td style={{ padding:"8px 12px", color: r.note?C.black:"#ef4444", borderBottom:`1px solid ${C.border}` }}>{r.note||"⚠ No line-item note"}</td>
@@ -4173,6 +4184,11 @@ function UpsellAuditTab({ techs, upsells, jobs }) {
 
 // ─── ADMIN PANEL ──────────────────────────────────────────────────────────────
 function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlongs, schedules, quota, setQuota, jobs, techHours, pendingSplits=[], onLogout, refreshAll }) {
+  // Live-standings views (Leaderboard, Journey Map) should only show active
+  // techs, matching what the tech-facing app already does — archived techs
+  // stay fully visible in Reports/Payroll/Upsell Audit where historical
+  // accuracy matters instead.
+  const activeTechs = techs.filter(t => t.is_active !== false);
   const [tab, setTab] = useState("upsells");
   const [menuOpen, setMenuOpen] = useState(false);
   const [awardForm, setAwardForm] = useState({techId:"",badgeId:""});
@@ -4680,7 +4696,7 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
         {tab==="journey"&&(
           <div>
             <div style={{ fontSize:"13px", color:C.muted, marginBottom:"16px" }}>Tap any card to expand full breakdown.</div>
-            <JourneyBoard techs={techs} upsells={upsells} switchovers={switchovers} reviews={reviews} quota={quota} callbacks={callbacks||[]}/>
+            <JourneyBoard techs={activeTechs} upsells={upsells} switchovers={switchovers} reviews={reviews} quota={quota} callbacks={callbacks||[]}/>
           </div>
         )}
         {tab==="kyle"&&(
@@ -4710,7 +4726,7 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
           />
         )}
         {tab==="leaderboard"&&(
-          <Leaderboard techs={techs} jobs={jobs||[]} upsells={upsells} reviews={reviews} callbacks={callbacks||[]} switchovers={switchovers}/>
+          <Leaderboard techs={activeTechs} jobs={jobs||[]} upsells={upsells} reviews={reviews} callbacks={callbacks||[]} switchovers={switchovers}/>
         )}
         {tab==="payroll"&&(
           <PayrollTab techs={techs} jobs={jobs||[]} upsells={upsells}/>
