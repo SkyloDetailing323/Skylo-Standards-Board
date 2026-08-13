@@ -133,16 +133,22 @@ exports.handler = async (event) => {
     };
   }
 
-  // TEMP DIAGNOSTIC: compare scheduled_start vs completed_at for Josh Halufuka's jobs
-  const targetIds = ["job_996d275418c04130a899c77b7cf8d597","job_0356a78e2ad441d2a9b92d24a5e2ba3c","job_2be1538df89040ca971f0752dae6ee7e","job_fb986f39ffe14b10bc77cbbd6f21b95c","job_1ae790a499004d22838ec2c42174533c","job_189aa3db20e94fa2a70bde2eede72da8","job_3b9159a6942943859e760b925ab32b50"];
-  for (const id of targetIds) {
-    const job = allJobs.find(j => j.id === id);
-    if (job) {
-      console.log("DATE_DEBUG", id, JSON.stringify({ scheduled_start: job.schedule?.scheduled_start, completed_at: job.work_timestamps?.completed_at, work_status: job.work_status }));
-    } else {
-      console.log("DATE_DEBUG", id, "NOT_IN_RANGE_RESULT");
-    }
-  }
+  // TEMP DIAGNOSTIC: does HCP's /jobs endpoint actually support filtering by
+  // completed_at, or does it silently ignore an unrecognized param?
+  console.log("SCHEDULED_FILTER_COUNT", allJobs.length, JSON.stringify(allJobs.map(j => j.id)));
+  const completedTestQs = [
+    `work_status[]=completed`,
+    `completed_at_min=${encodeURIComponent(start)}`,
+    `completed_at_max=${encodeURIComponent(end)}`,
+    `page=1`,
+    `page_size=100`,
+  ].join("&");
+  const completedTestData = await hcpGet(`jobs?${completedTestQs}`);
+  console.log("COMPLETED_FILTER_RESULT", JSON.stringify({
+    total_items: completedTestData?.total_items,
+    returned: (completedTestData?.jobs || []).length,
+    ids: (completedTestData?.jobs || []).map(j => j.id),
+  }));
 
   // Fetch confirmed splits for multi-employee jobs
   const multiIds = Object.entries(jobMeta).filter(([, m]) => m.employees.length > 1).map(([id]) => id);
