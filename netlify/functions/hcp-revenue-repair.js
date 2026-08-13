@@ -88,7 +88,7 @@ exports.handler = async (event) => {
   // scheduled date by several days (rescheduling, delayed close-out), we
   // fetch a padded window by scheduled_start and then bucket + filter by each
   // job's real completion date ourselves.
-  const PAD_DAYS = 14;
+  const PAD_DAYS = 5;
   function addDays(dateStr, days) {
     const d = new Date(dateStr + "T12:00:00Z");
     d.setUTCDate(d.getUTCDate() + days);
