@@ -81,8 +81,31 @@ exports.handler = async (event) => {
     return { statusCode: 400, body: JSON.stringify({ error: "from and to required" }) };
   }
 
-  const start = `${from}T00:00:00-06:00`;
-  const end   = `${to}T23:59:59-06:00`;
+  // HCP's /jobs endpoint has no completed_at_min/max filter — confirmed live:
+  // passing one is silently ignored and returns every completed job ever
+  // (total_items in the thousands). The only server-side date filter it
+  // supports is scheduled_start. Since actual completion can lag the
+  // scheduled date by several days (rescheduling, delayed close-out), we
+  // fetch a padded window by scheduled_start and then bucket + filter by each
+  // job's real completion date ourselves.
+  const PAD_DAYS = 14;
+  function addDays(dateStr, days) {
+    const d = new Date(dateStr + "T12:00:00Z");
+    d.setUTCDate(d.getUTCDate() + days);
+    return d.toISOString().split("T")[0];
+  }
+  const fetchFrom = addDays(from, -PAD_DAYS);
+  const fetchTo   = addDays(to, PAD_DAYS);
+  const start = `${fetchFrom}T00:00:00-06:00`;
+  const end   = `${fetchTo}T23:59:59-06:00`;
+
+  // Mountain Time calendar date for a UTC timestamp — same fixed -6h
+  // convention used everywhere else in this codebase (e.g. getMT() in the
+  // sync functions), so a job completed just after midnight UTC still lands
+  // on the correct MT day.
+  function toMTDateStr(isoTimestamp) {
+    return new Date(new Date(isoTimestamp).getTime() - 6 * 60 * 60 * 1000).toISOString().split("T")[0];
+  }
 
   // Deterministic order, and prefer the active record if a duplicate name
   // ever slips back in (instead of silently keeping whichever row Postgres
@@ -95,7 +118,7 @@ exports.handler = async (event) => {
     if (!existing || (t.is_active && !existing.is_active)) techByName[t.name] = t;
   }
 
-  // Fetch all completed jobs in range
+  // Fetch all completed jobs in the padded scheduled-date window
   const allJobs = [];
   let page = 1;
   while (true) {
@@ -114,7 +137,9 @@ exports.handler = async (event) => {
     page++;
   }
 
-  // Build job meta — store ALL matched employees
+  // Build job meta — store ALL matched employees. Bucket by actual completion
+  // date (not scheduled date), then drop anything that lands outside the
+  // originally-requested range — it was only fetched because of the padding.
   const jobMeta = {};
   for (const job of allJobs) {
     const matchedEmployees = (job.assigned_employees || []).map(e => {
@@ -123,32 +148,18 @@ exports.handler = async (event) => {
       return skyloName ? { skyloName } : null;
     }).filter(Boolean);
     if (matchedEmployees.length === 0) continue;
-    const schedStart = job.schedule?.scheduled_start;
+    const completedAt = job.work_timestamps?.completed_at;
+    const schedStart   = job.schedule?.scheduled_start;
+    const jobDate = completedAt ? toMTDateStr(completedAt) : (schedStart ? schedStart.split("T")[0] : from);
+    if (jobDate < from || jobDate > to) continue;
     jobMeta[String(job.id)] = {
       employees:    matchedEmployees,
-      jobDate:      schedStart ? schedStart.split("T")[0] : from,
+      jobDate,
       totalAmount:  job.total_amount || 0,
       tipAmount:    job.tip_amount   || 0,
       customerName: [job.customer?.first_name, job.customer?.last_name].filter(Boolean).join(" ") || null,
     };
   }
-
-  // TEMP DIAGNOSTIC: does HCP's /jobs endpoint actually support filtering by
-  // completed_at, or does it silently ignore an unrecognized param?
-  console.log("SCHEDULED_FILTER_COUNT", allJobs.length, JSON.stringify(allJobs.map(j => j.id)));
-  const completedTestQs = [
-    `work_status[]=completed`,
-    `completed_at_min=${encodeURIComponent(start)}`,
-    `completed_at_max=${encodeURIComponent(end)}`,
-    `page=1`,
-    `page_size=100`,
-  ].join("&");
-  const completedTestData = await hcpGet(`jobs?${completedTestQs}`);
-  console.log("COMPLETED_FILTER_RESULT", JSON.stringify({
-    total_items: completedTestData?.total_items,
-    returned: (completedTestData?.jobs || []).length,
-    ids: (completedTestData?.jobs || []).map(j => j.id),
-  }));
 
   // Fetch confirmed splits for multi-employee jobs
   const multiIds = Object.entries(jobMeta).filter(([, m]) => m.employees.length > 1).map(([id]) => id);
@@ -219,7 +230,7 @@ exports.handler = async (event) => {
     body: JSON.stringify({
       ok: true,
       jobsSynced: batch.length,
-      jobsScanned: allJobs.length,
+      jobsScanned: Object.keys(jobMeta).length,
       invoicesMatched,
       jobsWritten: batch.length,
       jobs: jobReport,

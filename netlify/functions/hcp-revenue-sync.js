@@ -82,8 +82,32 @@ async function hcpGet(path) {
 
 exports.handler = async () => {
   const todayStr = getMT();
-  const start = `${todayStr}T00:00:00-06:00`;
-  const end   = `${todayStr}T23:59:59-06:00`;
+
+  // HCP's /jobs endpoint has no completed_at_min/max filter — confirmed live:
+  // passing one is silently ignored and returns every completed job ever
+  // (total_items in the thousands). The only server-side date filter it
+  // supports is scheduled_start. Since actual completion can lag the
+  // scheduled date by several days (rescheduling, delayed close-out), we
+  // fetch a padded window by scheduled_start and then bucket + filter by each
+  // job's real completion date ourselves — matching hcp-revenue-repair.js so
+  // the two can't drift out of sync with each other.
+  const PAD_DAYS = 14;
+  function addDays(dateStr, days) {
+    const d = new Date(dateStr + "T12:00:00Z");
+    d.setUTCDate(d.getUTCDate() + days);
+    return d.toISOString().split("T")[0];
+  }
+  const fetchFrom = addDays(todayStr, -PAD_DAYS);
+  const fetchTo   = addDays(todayStr, PAD_DAYS);
+  const start = `${fetchFrom}T00:00:00-06:00`;
+  const end   = `${fetchTo}T23:59:59-06:00`;
+
+  // Mountain Time calendar date for a UTC timestamp — same fixed -6h
+  // convention as getMT() above, so a job completed just after midnight UTC
+  // still lands on the correct MT day.
+  function toMTDateStr(isoTimestamp) {
+    return new Date(new Date(isoTimestamp).getTime() - 6 * 60 * 60 * 1000).toISOString().split("T")[0];
+  }
 
   // Deterministic order, and prefer the active record if a duplicate name
   // ever slips back in (instead of silently keeping whichever row Postgres
@@ -96,7 +120,7 @@ exports.handler = async () => {
     if (!existing || (t.is_active && !existing.is_active)) techByName[t.name] = t;
   }
 
-  // Fetch today's completed jobs
+  // Fetch all completed jobs in the padded scheduled-date window
   const allJobs = [];
   let page = 1;
   while (true) {
@@ -115,7 +139,9 @@ exports.handler = async () => {
     page++;
   }
 
-  // Build job meta — store ALL matched employees
+  // Build job meta — store ALL matched employees. Bucket by actual completion
+  // date (not scheduled date), then keep only jobs that actually completed
+  // today — everything else was only fetched because of the padding.
   const jobMeta = {};
   for (const job of allJobs) {
     const matchedEmployees = (job.assigned_employees || []).map(e => {
@@ -124,10 +150,13 @@ exports.handler = async () => {
       return skyloName ? { skyloName } : null;
     }).filter(Boolean);
     if (matchedEmployees.length === 0) continue;
-    const schedStart = job.schedule?.scheduled_start;
+    const completedAt = job.work_timestamps?.completed_at;
+    const schedStart   = job.schedule?.scheduled_start;
+    const jobDate = completedAt ? toMTDateStr(completedAt) : (schedStart ? schedStart.split("T")[0] : todayStr);
+    if (jobDate !== todayStr) continue;
     jobMeta[String(job.id)] = {
       employees:    matchedEmployees,
-      jobDate:      schedStart ? schedStart.split("T")[0] : todayStr,
+      jobDate,
       totalAmount:  job.total_amount || 0,
       tipAmount:    job.tip_amount   || 0,
       customerName: [job.customer?.first_name, job.customer?.last_name].filter(Boolean).join(" ") || null,
