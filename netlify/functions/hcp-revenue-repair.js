@@ -133,6 +133,17 @@ exports.handler = async (event) => {
     };
   }
 
+  // TEMP DIAGNOSTIC: compare scheduled_start vs completed_at for Josh Halufuka's jobs
+  const targetIds = ["job_996d275418c04130a899c77b7cf8d597","job_0356a78e2ad441d2a9b92d24a5e2ba3c","job_2be1538df89040ca971f0752dae6ee7e","job_fb986f39ffe14b10bc77cbbd6f21b95c","job_1ae790a499004d22838ec2c42174533c","job_189aa3db20e94fa2a70bde2eede72da8","job_3b9159a6942943859e760b925ab32b50"];
+  for (const id of targetIds) {
+    const job = allJobs.find(j => j.id === id);
+    if (job) {
+      console.log("DATE_DEBUG", id, JSON.stringify({ scheduled_start: job.schedule?.scheduled_start, completed_at: job.work_timestamps?.completed_at, work_status: job.work_status }));
+    } else {
+      console.log("DATE_DEBUG", id, "NOT_IN_RANGE_RESULT");
+    }
+  }
+
   // Fetch confirmed splits for multi-employee jobs
   const multiIds = Object.entries(jobMeta).filter(([, m]) => m.employees.length > 1).map(([id]) => id);
   const splitMap = await fetchJobSplits(multiIds, sbFetch);
