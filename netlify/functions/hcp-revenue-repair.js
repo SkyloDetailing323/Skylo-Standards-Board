@@ -161,6 +161,15 @@ exports.handler = async (event) => {
     };
   }
 
+  // TEMP DIAGNOSTIC: find the real tip field on the two Sean Bair candidate jobs
+  const tipTargetIds = ["job_c239836cb97142cebaad595dc5ba4eae", "job_6f7ec285ab4f400e808df67fdaacb757"];
+  for (const id of tipTargetIds) {
+    const jobData = await hcpGet(`jobs/${id}`);
+    console.log("RAW_JOB_FULL", id, JSON.stringify(jobData));
+    const invData = await hcpGet(`jobs/${id}/invoices`);
+    console.log("RAW_INVOICE_FULL", id, JSON.stringify(invData));
+  }
+
   // Fetch confirmed splits for multi-employee jobs
   const multiIds = Object.entries(jobMeta).filter(([, m]) => m.employees.length > 1).map(([id]) => id);
   const splitMap = await fetchJobSplits(multiIds, sbFetch);
