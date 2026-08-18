@@ -2799,13 +2799,7 @@ function DeleteTab({ techs, upsells, switchovers, reviews, saving, setSaving, re
 }
 
 // ─── ADMIN UPSELL ENTRY (with date picker) ────────────────────────────────────
-function AdminUpsellEntry({ techs, upsells, saving, setSaving, refreshAll, showToast, allTimeUp }) {
-  const wk = getWeekKey();
-  const [targetWeek, setTargetWeek] = useState(wk);
-  const [form, setForm] = useState({});
-  const [useCustomDate, setUseCustomDate] = useState(false);
-  const [customDate, setCustomDate] = useState("");
-  const [pullResult, setPullResult] = useState(null);
+function AdminUpsellEntry({ techs, refreshAll, showToast, allTimeUp }) {
   const todayDefault = new Date(Date.now() - 6*3600000).toISOString().split("T")[0];
   const [repairFrom, setRepairFrom] = useState("2026-06-01");
   const [repairTo,   setRepairTo]   = useState(todayDefault);
@@ -2828,52 +2822,6 @@ function AdminUpsellEntry({ techs, upsells, saving, setSaving, refreshAll, showT
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
-  }
-
-  // Get week key (Monday) from any date string
-  function weekKeyFromDate(dateStr) {
-    const d = new Date(dateStr + "T12:00:00Z");
-    const day = d.getUTCDay();
-    const daysBack = day === 0 ? 6 : day - 1;
-    const start = new Date(d);
-    start.setUTCDate(d.getUTCDate() - daysBack);
-    return `${start.getUTCFullYear()}-${String(start.getUTCMonth()+1).padStart(2,"0")}-${String(start.getUTCDate()).padStart(2,"0")}`;
-  }
-
-  const activeWeek = useCustomDate && customDate ? weekKeyFromDate(customDate) : targetWeek;
-  const weekData = {};
-  upsells.filter(u=>u.week_key===activeWeek).forEach(u=>{weekData[u.tech_id]=(weekData[u.tech_id]||0)+u.amount;});
-
-  // Always show the last 8 Mondays so weeks appear even when empty
-  const recentMondays = [];
-  const today = new Date(Date.now() - 6*3600000);
-  const todayDay = today.getUTCDay();
-  const thisMon = new Date(today);
-  thisMon.setUTCDate(today.getUTCDate() - (todayDay === 0 ? 6 : todayDay - 1));
-  for (let i = 0; i < 8; i++) {
-    const d = new Date(thisMon);
-    d.setUTCDate(thisMon.getUTCDate() - i * 7);
-    recentMondays.push(`${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,"0")}-${String(d.getUTCDate()).padStart(2,"0")}`);
-  }
-  const byWeek = {};
-  upsells.forEach(u=>{ byWeek[u.week_key]=(byWeek[u.week_key]||0)+1; });
-  const existingWeeks = [...new Set([...recentMondays, ...Object.keys(byWeek)])].sort((a,b)=>b.localeCompare(a));
-
-  async function handleSave() {
-    setSaving(true);
-    try {
-      for (const t of techs) {
-        const val = parseFloat(form[t.id]);
-        if (isNaN(val)||val<=0) continue;
-        const existing = await sb(`upsells?tech_id=eq.${t.id}&week_key=eq.${activeWeek}&select=id`);
-        if (existing&&existing.length>0) await sb(`upsells?id=eq.${existing[0].id}`,{method:"PATCH",body:JSON.stringify({amount:val}),prefer:"return=minimal"});
-        else await sb("upsells",{method:"POST",body:JSON.stringify({tech_id:t.id,week_key:activeWeek,amount:val})});
-      }
-      await refreshAll();
-      showToast("✅ Upsells saved for " + formatWeekLabel(activeWeek) + "!");
-      setForm({});
-    } catch(e){ showToast("Error: "+e.message,false); }
-    setSaving(false);
   }
 
   async function repairFromHCP() {
@@ -2915,80 +2863,8 @@ function AdminUpsellEntry({ techs, upsells, saving, setSaving, refreshAll, showT
     setRepairing(false);
   }
 
-  async function pullFromHCP() {
-    setSaving(true);
-    setPullResult(null);
-    try {
-      // from = Monday of selected week, to = Sunday of that week (or today if current week)
-      const from = activeWeek;
-      const toDate = new Date(activeWeek + "T12:00:00Z");
-      toDate.setUTCDate(toDate.getUTCDate() + 6);
-      const todayStr = new Date(Date.now() - 6*3600000).toISOString().split("T")[0];
-      const to = toDate.toISOString().split("T")[0] > todayStr ? todayStr : toDate.toISOString().split("T")[0];
-      const res = await fetch("/.netlify/functions/hcp-upsell-repair", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ from, to }),
-      });
-      const data = await res.json();
-      if (data.ok) {
-        await refreshAll();
-        setPullResult(data);
-        showToast(`✅ Found ${data.upsellsFound} upsell${data.upsellsFound===1?"":"s"} from HCP`);
-      } else {
-        showToast("Pull failed — check logs", false);
-      }
-    } catch(e){ showToast("Error: "+e.message, false); }
-    setSaving(false);
-  }
-
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:"16px" }}>
-      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.green}`, borderRadius:"12px", padding:"20px", display:"flex", flexDirection:"column", gap:"14px" }}>
-        <Label color={C.green}>Log Upsells</Label>
-        <div style={{ fontSize:"12px", color:C.muted }}>$2 = 1 point · You can log current or any past week</div>
-
-        {/* Week selector */}
-        <div style={{ display:"flex", flexDirection:"column", gap:"8px" }}>
-          <div style={{ display:"flex", gap:"8px" }}>
-            <button onClick={()=>{ setUseCustomDate(false); setTargetWeek(wk); }} style={{ background:!useCustomDate&&targetWeek===wk?C.green:C.cardLt, border:`1px solid ${!useCustomDate&&targetWeek===wk?C.green:C.border}`, color:!useCustomDate&&targetWeek===wk?C.black:C.muted, padding:"8px 14px", borderRadius:"4px", cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", fontSize:"12px", letterSpacing:"1px" }}>THIS WEEK</button>
-            <button onClick={()=>setUseCustomDate(true)} style={{ background:useCustomDate?C.blue:C.cardLt, border:`1px solid ${useCustomDate?C.blue:C.border}`, color:useCustomDate?C.white:C.muted, padding:"8px 14px", borderRadius:"4px", cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", fontSize:"12px", letterSpacing:"1px" }}>PICK A DATE</button>
-            {existingWeeks.length>0&&<button onClick={()=>{ setUseCustomDate(false); }} style={{ background:!useCustomDate&&targetWeek!==wk?C.purple:C.cardLt, border:`1px solid ${!useCustomDate&&targetWeek!==wk?C.purple:C.border}`, color:!useCustomDate&&targetWeek!==wk?C.white:C.muted, padding:"8px 14px", borderRadius:"4px", cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", fontSize:"12px", letterSpacing:"1px" }}>PAST WEEK</button>}
-          </div>
-          {useCustomDate&&(
-            <div>
-              <div style={{ fontSize:"11px", color:C.muted, marginBottom:"5px" }}>Pick any date — we'll find the week it belongs to</div>
-              <input type="date" value={customDate} onChange={e=>setCustomDate(e.target.value)} style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"8px 12px", borderRadius:"12px", fontSize:"14px", fontFamily:"'Barlow',sans-serif", width:"100%", boxSizing:"border-box" }}/>
-              {customDate&&<div style={{ fontSize:"11px", color:C.blue, marginTop:"4px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>Week: {formatWeekLabel(activeWeek)}</div>}
-            </div>
-          )}
-          {!useCustomDate&&existingWeeks.length>0&&(
-            <select value={targetWeek} onChange={e=>setTargetWeek(e.target.value)} style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"8px 12px", borderRadius:"12px", fontSize:"14px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", width:"100%", cursor:"pointer" }}>
-              <option value={wk}>{formatWeekLabel(wk)} — Current</option>
-              {existingWeeks.filter(w=>w!==wk).map(w=><option key={w} value={w}>{formatWeekLabel(w)}</option>)}
-              <option value="new">+ Enter a different past week</option>
-            </select>
-          )}
-        </div>
-
-        <div style={{ background:C.cardLt, borderRadius:"4px", padding:"8px 12px", fontSize:"12px", color:C.blue, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>
-          Logging for: {formatWeekLabel(activeWeek)}{activeWeek===wk?" (Current Week)":""}
-        </div>
-
-        {[...techs].sort((a,b)=>(weekData[b.id]||0)-(weekData[a.id]||0)).map(t=>(
-          <div key={t.id} style={{ display:"flex", alignItems:"center", gap:"12px" }}>
-            <div style={{ width:"150px" }}>
-              <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", fontSize:"15px", color:C.black }}>{t.name}</div>
-              <div style={{ fontSize:"11px", color:C.muted }}>logged: ${(weekData[t.id]||0).toLocaleString()}</div>
-            </div>
-            <div style={{ display:"flex", alignItems:"center", gap:"6px", flex:1 }}>
-              <span style={{ color:C.green, fontSize:"16px", fontWeight:"800" }}>$</span>
-              <input type="number" placeholder={weekData[t.id]||"0"} value={form[t.id]||""} onChange={e=>setForm(f=>({...f,[t.id]:e.target.value}))} style={{ background:C.card, border:`1px solid ${C.border}`, color:C.black, padding:"8px 10px", borderRadius:"12px", fontSize:"14px", fontFamily:"'Barlow Condensed',sans-serif", width:"100%", fontWeight:"700" }}/>
-            </div>
-          </div>
-        ))}
-        <button onClick={handleSave} disabled={saving} style={{ background:saving?"#333":C.green, border:"none", color:saving?"#666":C.black, padding:"13px", borderRadius:"12px", cursor:saving?"not-allowed":"pointer", fontSize:"13px", fontWeight:"700", letterSpacing:"2px", fontFamily:"'Barlow Condensed',sans-serif", width:"100%", textTransform:"uppercase" }}>{saving?"Saving...":"Save Upsells"}</button>
-      </div>
       {/* ── Repair / Backfill ── */}
       <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.orange}`, borderRadius:"12px", padding:"20px", display:"flex", flexDirection:"column", gap:"12px" }}>
         <Label color={C.orange}>Repair Upsells from HCP</Label>
@@ -4442,7 +4318,6 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
   const [menuOpen, setMenuOpen] = useState(false);
   const [awardForm, setAwardForm] = useState({techId:"",badgeId:""});
   const [addForm, setAddForm] = useState({name:"",pin:"",avatar:"",start_date:"",commission_rate:27});
-  const [upsellForm, setUpsellForm] = useState({});
   const [swForm, setSwForm] = useState({techId:"",planId:""});
   const [reviewForm, setReviewForm] = useState({});
   const [cbForm, setCbForm] = useState({techId:"",reason:""});
@@ -4509,14 +4384,6 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
       await sb(`techs?id=eq.${tech.id}`,{method:"PATCH",body:JSON.stringify({is_active:true}),prefer:"return=minimal"});
       await refreshAll();
       showToast(`✅ ${tech.name} reactivated`);
-    } catch(e){ showToast("Error: "+e.message,false); }
-    setSaving(false);
-  }
-  async function saveUpsells() {
-    const wk=getWeekKey(); setSaving(true);
-    try {
-      for (const t of techs) { const val=parseFloat(upsellForm[t.id]); if(isNaN(val)||val<=0)continue; const existing=await sb(`upsells?tech_id=eq.${t.id}&week_key=eq.${wk}&select=id`); if(existing&&existing.length>0)await sb(`upsells?id=eq.${existing[0].id}`,{method:"PATCH",body:JSON.stringify({amount:val}),prefer:"return=minimal"}); else await sb("upsells",{method:"POST",body:JSON.stringify({tech_id:t.id,week_key:wk,amount:val})}); }
-      await refreshAll(); showToast("✅ Upsells saved!"); setUpsellForm({});
     } catch(e){ showToast("Error: "+e.message,false); }
     setSaving(false);
   }
@@ -4664,7 +4531,7 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
         )}
 
         {tab==="upsells"&&(
-          <AdminUpsellEntry techs={techs} upsells={upsells} saving={saving} setSaving={setSaving} refreshAll={refreshAll} showToast={showToast} allTimeUp={allTimeUp}/>
+          <AdminUpsellEntry techs={techs} refreshAll={refreshAll} showToast={showToast} allTimeUp={allTimeUp}/>
         )}
 
         {tab==="reviews"&&(
