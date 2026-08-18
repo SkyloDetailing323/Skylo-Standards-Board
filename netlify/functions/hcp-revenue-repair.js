@@ -171,6 +171,10 @@ exports.handler = async (event) => {
   console.log("DIAG_INVOICE_DIRECT", JSON.stringify(invoiceRaw));
   const paymentsRaw = await hcpGet(`invoices/${DIAG_INVOICE_ID}/payments`);
   console.log("DIAG_PAYMENTS", JSON.stringify(paymentsRaw));
+  const nestedInvoiceRaw = await hcpGet(`jobs/${DIAG_JOB_ID}/invoices/${DIAG_INVOICE_ID}`);
+  console.log("DIAG_NESTED_INVOICE", JSON.stringify(nestedInvoiceRaw));
+  const nestedPaymentsRaw = await hcpGet(`jobs/${DIAG_JOB_ID}/invoices/${DIAG_INVOICE_ID}/payments`);
+  console.log("DIAG_NESTED_PAYMENTS", JSON.stringify(nestedPaymentsRaw));
 
   // Fetch confirmed splits for multi-employee jobs
   const multiIds = Object.entries(jobMeta).filter(([, m]) => m.employees.length > 1).map(([id]) => id);
