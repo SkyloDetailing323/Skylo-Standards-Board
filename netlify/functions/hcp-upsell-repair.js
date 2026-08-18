@@ -198,11 +198,6 @@ exports.handler = async (event) => {
       if (!jobIds.has(jid) || invoiceData[jid]) continue;
       invoiceData[jid] = parseInvoice(inv);
       invoicesMatched++;
-      // TEMP DIAGNOSTIC: sample raw item names to see what's actually on
-      // these invoices vs. the "additional upgrade" prefix we match on.
-      if (invoicesMatched <= 8) {
-        console.log("DIAG_ITEM_NAMES", jid, JSON.stringify((inv.items || []).map(i => ({ name: i.name, amount: i.amount }))));
-      }
     }
     if (invoices.length < 100) break;
     if (invoicesMatched >= jobIds.size) break;
