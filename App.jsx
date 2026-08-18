@@ -2811,6 +2811,24 @@ function AdminUpsellEntry({ techs, upsells, saving, setSaving, refreshAll, showT
   const [repairTo,   setRepairTo]   = useState(todayDefault);
   const [repairResult, setRepairResult] = useState(null);
   const [repairing, setRepairing] = useState(false);
+  const [upsExpanded, setUpsExpanded] = useState(false);
+
+  function exportUpsellsCSV() {
+    const rows = repairResult?.jobs || [];
+    if (rows.length === 0) return;
+    const header = ["Job ID","Tech","Date","Revenue","Discount","Upsell Amount","Invoice Found"];
+    const csvRows = rows.map(r => [r.jobId, r.tech, r.date, r.revenue.toFixed(2), r.discount.toFixed(2), r.upsells.toFixed(2), r.invoiceFound ? "Found" : "Fallback"]);
+    const csv = [header, ...csvRows].map(row => row.map(cell => `"${String(cell).replace(/"/g,'""')}"`).join(",")).join("\r\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `upsell-repair_${repairFrom}_to_${repairTo}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
 
   // Get week key (Monday) from any date string
   function weekKeyFromDate(dateStr) {
@@ -2988,11 +3006,23 @@ function AdminUpsellEntry({ techs, upsells, saving, setSaving, refreshAll, showT
         </button>
         {repairResult && (
           <div style={{ display:"flex", flexDirection:"column", gap:"8px" }}>
-            <div style={{ background:C.cardLt, borderRadius:"8px", padding:"10px 14px", fontSize:"12px", color:C.muted }}>
-              Scanned <strong style={{color:C.black}}>{repairResult.jobsScanned}</strong> jobs · matched <strong style={{color:C.black}}>{repairResult.invoicesMatched}</strong> invoices · wrote <strong style={{color:C.orange}}>{repairResult.upsellsFound} upsell{repairResult.upsellsFound===1?"":"s"}</strong> to the board
+            <div style={{ background:C.cardLt, borderRadius:"8px", padding:"10px 14px", fontSize:"12px", color:C.muted, display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:"8px" }}>
+              <span>
+                Scanned <strong style={{color:C.black}}>{repairResult.jobsScanned}</strong> jobs · matched <strong style={{color:C.black}}>{repairResult.invoicesMatched}</strong> invoices · wrote <strong style={{color:C.orange}}>{repairResult.upsellsFound} upsell{repairResult.upsellsFound===1?"":"s"}</strong> to the board
+              </span>
+              {repairResult.jobs && repairResult.jobs.length > 0 && (
+                <div style={{ display:"flex", gap:"6px" }}>
+                  <button onClick={()=>setUpsExpanded(v=>!v)} style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"5px 10px", borderRadius:"4px", cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", fontSize:"11px", letterSpacing:"1px" }}>
+                    {upsExpanded ? "COLLAPSE" : "VIEW FULL REPORT"}
+                  </button>
+                  <button onClick={exportUpsellsCSV} style={{ background:C.green, border:"none", color:C.black, padding:"5px 10px", borderRadius:"4px", cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", fontSize:"11px", letterSpacing:"1px" }}>
+                    EXPORT CSV
+                  </button>
+                </div>
+              )}
             </div>
             {repairResult.jobs && repairResult.jobs.length > 0 && (
-              <div style={{ overflowX:"auto", maxHeight:"320px", overflowY:"auto", borderRadius:"8px", border:`1px solid ${C.border}` }}>
+              <div style={{ overflowX:"auto", maxHeight: upsExpanded ? "none" : "320px", overflowY:"auto", borderRadius:"8px", border:`1px solid ${C.border}` }}>
                 <table style={{ width:"100%", borderCollapse:"collapse", fontSize:"11px", fontFamily:"'Barlow',sans-serif" }}>
                   <thead>
                     <tr style={{ background:C.card, position:"sticky", top:0 }}>
