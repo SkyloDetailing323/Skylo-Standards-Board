@@ -4086,10 +4086,17 @@ function DevelopmentTab({ techs, rideAlongs, refreshAll, showToast }) {
 }
 
 // ─── SPLIT JOBS ADMIN ─────────────────────────────────────────────────────────
-function SplitJobsAdmin({ techs, pendingSplits, refreshAll, showToast, saving, setSaving }) {
+function SplitJobsAdmin({ techs, pendingSplits, refreshAll, showToast }) {
   const techById = Object.fromEntries(techs.map(t => [t.id, t]));
   const [splitInputs, setSplitInputs] = useState({});
   const [upsellAttrib, setUpsellAttrib] = useState({});
+  // Row-scoped save state — which single jobId is currently saving, not a
+  // shared boolean, so one row's in-flight save doesn't disable/relabel
+  // every other row's button.
+  const [savingJobId, setSavingJobId] = useState(null);
+  // Jobs saved successfully this session, hidden immediately rather than
+  // waiting on the next refreshAll()/split_confirmed filter to catch up.
+  const [dismissedJobIds, setDismissedJobIds] = useState(new Set());
 
   // Pre-load any existing upsell attributions for these split jobs
   useEffect(() => {
@@ -4140,7 +4147,7 @@ function SplitJobsAdmin({ techs, pendingSplits, refreshAll, showToast, saving, s
       showToast(`Percentages must add up to 100 (got ${total.toFixed(1)}%)`, false);
       return;
     }
-    setSaving(true);
+    setSavingJobId(sj.jobId);
     try {
       // 1. Write revenue split percentages
       for (const e of entries) {
@@ -4167,10 +4174,13 @@ function SplitJobsAdmin({ techs, pendingSplits, refreshAll, showToast, saving, s
         body: JSON.stringify({ from: sj.date, to: sj.date }),
       });
       if (!repairRes.ok) throw new Error(`Repair failed (${repairRes.status})`);
+      // Hide this row immediately — don't wait on refreshAll()'s
+      // split_confirmed filter to catch up before it disappears.
+      setDismissedJobIds(prev => new Set(prev).add(sj.jobId));
       await refreshAll();
       showToast("✅ Split confirmed and applied!");
     } catch(err) { showToast("⚠ " + err.message, false); }
-    setSaving(false);
+    setSavingJobId(null);
   }
 
   return (
@@ -4180,11 +4190,11 @@ function SplitJobsAdmin({ techs, pendingSplits, refreshAll, showToast, saving, s
         using <strong style={{color:"#f59e0b"}}>equal split</strong> as a placeholder. Enter the correct percentages below,
         hit <strong style={{color:C.black}}>Save Split</strong>, then re-run <strong style={{color:C.black}}>Repair Upsells</strong> for that date to apply.
       </div>
-      {splitJobs.length === 0 ? (
+      {splitJobs.filter(sj => !dismissedJobIds.has(sj.jobId)).length === 0 ? (
         <div style={{ background:C.card, borderRadius:"12px", padding:"30px", textAlign:"center", color:C.muted, fontSize:"13px" }}>
           ✅ No unconfirmed split jobs — all good!
         </div>
-      ) : splitJobs.map(sj => {
+      ) : splitJobs.filter(sj => !dismissedJobIds.has(sj.jobId)).map(sj => {
         const n = sj.rows.length;
         const defPct = Math.round(100 / n);
         const vals = sj.rows.map(r => parseFloat(getInput(sj.jobId, r.tech_id, defPct) || "0"));
@@ -4246,11 +4256,17 @@ function SplitJobsAdmin({ techs, pendingSplits, refreshAll, showToast, saving, s
               <div style={{ fontSize:"12px", color: ok ? C.green : "#ef4444", fontWeight:"700" }}>
                 Total: {total.toFixed(1)}% {ok ? "✓" : "— must equal 100%"}
               </div>
-              <button
-                onClick={() => saveSplit(sj)}
-                disabled={saving || !ok}
-                style={{ background: saving||!ok ? "#333" : "#f59e0b", border:"none", color: saving||!ok ? "#666" : C.black, padding:"8px 20px", borderRadius:"10px", cursor: saving||!ok ? "not-allowed" : "pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"12px", letterSpacing:"1.5px", textTransform:"uppercase" }}
-              >{saving ? "Applying..." : "Save & Apply"}</button>
+              {(() => {
+                const rowSaving = savingJobId === sj.jobId;
+                const rowDisabled = rowSaving || !ok;
+                return (
+                  <button
+                    onClick={() => saveSplit(sj)}
+                    disabled={rowDisabled}
+                    style={{ background: rowDisabled ? "#333" : "#f59e0b", border:"none", color: rowDisabled ? "#666" : C.black, padding:"8px 20px", borderRadius:"10px", cursor: rowDisabled ? "not-allowed" : "pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"12px", letterSpacing:"1.5px", textTransform:"uppercase" }}
+                  >{rowSaving ? "Applying..." : "Save & Apply"}</button>
+                );
+              })()}
             </div>
           </div>
         );
@@ -4606,7 +4622,7 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
         })()}
 
         {tab==="splits"&&(
-          <SplitJobsAdmin techs={techs} pendingSplits={pendingSplits} refreshAll={refreshAll} showToast={showToast} saving={saving} setSaving={setSaving}/>
+          <SplitJobsAdmin techs={techs} pendingSplits={pendingSplits} refreshAll={refreshAll} showToast={showToast}/>
         )}
 
         {tab==="upsellaudit"&&(
