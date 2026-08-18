@@ -124,9 +124,31 @@ exports.handler = async (event) => {
     return { statusCode: 400, body: JSON.stringify({ error: "from and to dates required (YYYY-MM-DD)" }) };
   }
 
-  const start = `${from}T00:00:00Z`;
-  const end   = `${to}T23:59:59Z`;
   console.log(`Repair: ${from} → ${to}`);
+
+  // HCP's /jobs endpoint has no completed_at_min/max filter — confirmed live
+  // (passing one is silently ignored and returns every completed job ever).
+  // The only server-side date filter it supports is scheduled_start. Since
+  // actual completion can lag the scheduled date by several days
+  // (rescheduling, delayed close-out), we fetch a padded window by
+  // scheduled_start and then bucket + filter by each job's real completion
+  // date ourselves — same fix already proven in hcp-revenue-repair.js.
+  const PAD_DAYS = 5;
+  function addDays(dateStr, days) {
+    const d = new Date(dateStr + "T12:00:00Z");
+    d.setUTCDate(d.getUTCDate() + days);
+    return d.toISOString().split("T")[0];
+  }
+  const fetchFrom = addDays(from, -PAD_DAYS);
+  const fetchTo   = addDays(to, PAD_DAYS);
+  const start = `${fetchFrom}T00:00:00Z`;
+  const end   = `${fetchTo}T23:59:59Z`;
+
+  // Mountain Time calendar date for a UTC timestamp — same fixed -6h
+  // convention used everywhere else in this codebase.
+  function toMTDateStr(isoTimestamp) {
+    return new Date(new Date(isoTimestamp).getTime() - 6 * 60 * 60 * 1000).toISOString().split("T")[0];
+  }
 
   // Fetch techs — deterministic order, and prefer the active record if a
   // duplicate name ever slips back in (instead of silently keeping whichever
@@ -138,14 +160,14 @@ exports.handler = async (event) => {
     if (!existing || (t.is_active && !existing.is_active)) techByName[t.name] = t;
   }
 
-  // Fetch all completed jobs in range
+  // Fetch all completed jobs in the padded scheduled-date window
   const allJobs = [];
   let page = 1;
   while (true) {
     const qs = [
       `work_status[]=completed`,
-      `scheduled_start_min=${encodeURIComponent(`${from}T00:00:00-06:00`)}`,
-      `scheduled_start_max=${encodeURIComponent(`${to}T23:59:59-06:00`)}`,
+      `scheduled_start_min=${encodeURIComponent(`${fetchFrom}T00:00:00-06:00`)}`,
+      `scheduled_start_max=${encodeURIComponent(`${fetchTo}T23:59:59-06:00`)}`,
       `page=${page}`,
       `page_size=100`,
     ].join("&");
@@ -158,7 +180,10 @@ exports.handler = async (event) => {
   }
   console.log(`Found ${allJobs.length} completed jobs in range`);
 
-  // Build job meta — store ALL matched employees to support split jobs
+  // Build job meta — store ALL matched employees to support split jobs.
+  // Bucket by actual completion date (not scheduled date), then drop
+  // anything that lands outside the originally-requested range — it was
+  // only fetched because of the padding.
   const jobMeta = {};
   for (const job of allJobs) {
     const matchedEmployees = (job.assigned_employees || []).map(e => {
@@ -167,9 +192,13 @@ exports.handler = async (event) => {
       return skyloName ? { skyloName } : null;
     }).filter(Boolean);
     if (matchedEmployees.length === 0) continue;
+    const completedAt = job.work_timestamps?.completed_at;
+    const schedStart   = job.schedule?.scheduled_start;
+    const jobDate = completedAt ? toMTDateStr(completedAt) : (schedStart ? schedStart.split("T")[0] : from);
+    if (jobDate < from || jobDate > to) continue;
     jobMeta[String(job.id)] = {
       employees:    matchedEmployees,
-      schedStart:   job.schedule?.scheduled_start,
+      jobDate,
       totalAmount:  job.total_amount || 0,
       tipAmount:    job.tip_amount   || 0,
       customerName: [job.customer?.first_name, job.customer?.last_name].filter(Boolean).join(" ") || null,
@@ -237,7 +266,7 @@ exports.handler = async (event) => {
   const jobReport = [];
 
   for (const [jobId, meta] of Object.entries(jobMeta)) {
-    const jobDate  = meta.schedStart ? meta.schedStart.split("T")[0] : from;
+    const jobDate  = meta.jobDate;
     const weekKey  = getWeekKey(jobDate);
     const inv      = invoiceData[jobId];
     const totalRev = inv ? inv.revenue     : Math.max(0, (meta.totalAmount - meta.tipAmount)) / 100;
@@ -322,6 +351,6 @@ exports.handler = async (event) => {
   return {
     statusCode: 200,
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ok: true, upsellsFound, jobsScanned: allJobs.length, invoicesMatched, jobsWritten: jobBatch.length, jobs: jobReport }),
+    body: JSON.stringify({ ok: true, upsellsFound, jobsScanned: Object.keys(jobMeta).length, invoicesMatched, jobsWritten: jobBatch.length, jobs: jobReport }),
   };
 };

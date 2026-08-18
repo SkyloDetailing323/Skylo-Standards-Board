@@ -127,8 +127,16 @@ exports.handler = async (event) => {
     if (!existing || (t.is_active && !existing.is_active)) techByName[t.name] = t;
   }
 
-  const schedStart = job.schedule?.scheduled_start || job.schedule?.start;
-  const jobDate    = schedStart ? schedStart.split("T")[0] : new Date().toISOString().split("T")[0];
+  // Bucket by actual completion date, not scheduled date — same fix already
+  // proven in hcp-revenue-repair.js/hcp-revenue-sync.js. Falls back to
+  // scheduled date only if completion data is genuinely missing from the
+  // webhook payload.
+  function toMTDateStr(isoTimestamp) {
+    return new Date(new Date(isoTimestamp).getTime() - 6 * 60 * 60 * 1000).toISOString().split("T")[0];
+  }
+  const completedAt = job.work_timestamps?.completed_at;
+  const schedStart  = job.schedule?.scheduled_start || job.schedule?.start;
+  const jobDate    = completedAt ? toMTDateStr(completedAt) : (schedStart ? schedStart.split("T")[0] : new Date().toISOString().split("T")[0]);
   const customerName = [job.customer?.first_name, job.customer?.last_name].filter(Boolean).join(" ") || null;
   const weekKey    = getWeekKey(jobDate);
 

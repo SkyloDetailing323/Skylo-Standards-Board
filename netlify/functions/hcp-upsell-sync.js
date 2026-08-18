@@ -90,11 +90,33 @@ function parseInvoice(inv) {
 
 exports.handler = async () => {
   const { str: todayStr } = getMT();
-  const start = `${todayStr}T00:00:00-06:00`;
-  const end   = `${todayStr}T23:59:59-06:00`;
   console.log(`Syncing ${todayStr}`);
 
-  // Fetch today's completed jobs
+  // HCP's /jobs endpoint has no completed_at_min/max filter — confirmed live
+  // (passing one is silently ignored and returns every completed job ever).
+  // The only server-side date filter it supports is scheduled_start. Since
+  // actual completion can lag the scheduled date by several days
+  // (rescheduling, delayed close-out), we fetch a padded window by
+  // scheduled_start and then bucket + filter by each job's real completion
+  // date ourselves — same fix already proven in hcp-revenue-sync.js.
+  const PAD_DAYS = 5;
+  function addDays(dateStr, days) {
+    const d = new Date(dateStr + "T12:00:00Z");
+    d.setUTCDate(d.getUTCDate() + days);
+    return d.toISOString().split("T")[0];
+  }
+  const fetchFrom = addDays(todayStr, -PAD_DAYS);
+  const fetchTo   = addDays(todayStr, PAD_DAYS);
+  const start = `${fetchFrom}T00:00:00-06:00`;
+  const end   = `${fetchTo}T23:59:59-06:00`;
+
+  // Mountain Time calendar date for a UTC timestamp — same fixed -6h
+  // convention as getMT() above.
+  function toMTDateStr(isoTimestamp) {
+    return new Date(new Date(isoTimestamp).getTime() - 6 * 60 * 60 * 1000).toISOString().split("T")[0];
+  }
+
+  // Fetch all completed jobs in the padded scheduled-date window
   const allJobs = [];
   let page = 1;
   while (true) {
@@ -108,7 +130,9 @@ exports.handler = async () => {
   }
   console.log(`${allJobs.length} completed jobs`);
 
-  // Build job meta — store ALL matched employees
+  // Build job meta — store ALL matched employees. Bucket by actual completion
+  // date (not scheduled date), then keep only jobs that actually completed
+  // today — everything else was only fetched because of the padding.
   const jobMeta = {};
   for (const job of allJobs) {
     const matchedEmployees = (job.assigned_employees || []).map(e => {
@@ -117,9 +141,13 @@ exports.handler = async () => {
       return skyloName ? { skyloName } : null;
     }).filter(Boolean);
     if (matchedEmployees.length === 0) continue;
+    const completedAt = job.work_timestamps?.completed_at;
+    const schedStart   = job.schedule?.scheduled_start;
+    const jobDate = completedAt ? toMTDateStr(completedAt) : (schedStart ? schedStart.split("T")[0] : todayStr);
+    if (jobDate !== todayStr) continue;
     jobMeta[String(job.id)] = {
       employees:    matchedEmployees,
-      schedStart:   job.schedule?.scheduled_start,
+      jobDate,
       tipFallback:  job.tip_amount   || 0,
       totalAmount:  job.total_amount || 0,
       customerName: [job.customer?.first_name, job.customer?.last_name].filter(Boolean).join(" ") || null,
@@ -173,7 +201,7 @@ exports.handler = async () => {
 
   let synced = 0;
   for (const [jobId, meta] of Object.entries(jobMeta)) {
-    const jobDate  = meta.schedStart ? meta.schedStart.split("T")[0] : todayStr;
+    const jobDate  = meta.jobDate;
     const weekKey  = getWeekKey(jobDate);
     const inv      = invoiceData[jobId];
 

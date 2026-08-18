@@ -77,10 +77,33 @@ exports.handler = async (event) => {
   startDate.setDate(now.getDate() - days);
 
   const fmt = d => d.toISOString().split("T")[0];
-  const start = fmt(startDate) + "T00:00:00-06:00";
-  const end   = fmt(now)       + "T23:59:59-06:00";
+  const rangeFrom = fmt(startDate);
+  const rangeTo   = fmt(now);
 
-  console.log(`Backfill (background): last ${days} days | ${start} → ${end}`);
+  // HCP's /jobs endpoint has no completed_at_min/max filter — the only
+  // server-side date filter it supports is scheduled_start. Since actual
+  // completion can lag the scheduled date by several days, we fetch a
+  // padded window by scheduled_start and then bucket + filter by each job's
+  // real completion date ourselves — same fix already proven in
+  // hcp-revenue-repair.js.
+  const PAD_DAYS = 5;
+  function addDays(dateStr, days) {
+    const d = new Date(dateStr + "T12:00:00Z");
+    d.setUTCDate(d.getUTCDate() + days);
+    return d.toISOString().split("T")[0];
+  }
+  const fetchFrom = addDays(rangeFrom, -PAD_DAYS);
+  const fetchTo   = addDays(rangeTo, PAD_DAYS);
+  const start = fetchFrom + "T00:00:00-06:00";
+  const end   = fetchTo   + "T23:59:59-06:00";
+
+  // Mountain Time calendar date for a UTC timestamp — same fixed -6h
+  // convention used everywhere else in this codebase.
+  function toMTDateStr(isoTimestamp) {
+    return new Date(new Date(isoTimestamp).getTime() - 6 * 60 * 60 * 1000).toISOString().split("T")[0];
+  }
+
+  console.log(`Backfill (background): last ${days} days | ${rangeFrom} → ${rangeTo}`);
 
   // Fetch all techs once — deterministic order, and prefer the active record
   // if a duplicate name ever slips back in (instead of silently keeping
@@ -147,7 +170,13 @@ exports.handler = async (event) => {
         hours = Math.round(((new Date(schedEnd) - new Date(schedStart)) / 3600000) * 100) / 100;
       }
 
-      const jobDate = schedStart ? schedStart.split("T")[0] : fmt(now);
+      // Bucket by actual completion date, not scheduled date — same fix
+      // already proven in hcp-revenue-repair.js. Drop anything that lands
+      // outside the originally-requested range; it was only fetched because
+      // of the padding above.
+      const completedAt = job.work_timestamps?.completed_at;
+      const jobDate = completedAt ? toMTDateStr(completedAt) : (schedStart ? schedStart.split("T")[0] : rangeTo);
+      if (jobDate < rangeFrom || jobDate > rangeTo) { skipped++; continue; }
       batch.push({
         hcp_job_id: jobId,
         tech_id:    tech.id,
