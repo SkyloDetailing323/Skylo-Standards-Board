@@ -193,7 +193,7 @@ exports.handler = async (event) => {
     }
 
     if (batch.length > 0) {
-      await sbFetch("jobs?on_conflict=hcp_job_id", {
+      await sbFetch("jobs?on_conflict=hcp_job_id,tech_id", {
         method: "POST",
         prefer: "resolution=merge-duplicates,return=minimal",
         body: JSON.stringify(batch),
