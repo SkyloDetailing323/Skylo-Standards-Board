@@ -161,21 +161,6 @@ exports.handler = async (event) => {
     };
   }
 
-  // TEMP DIAGNOSTIC: dump raw HCP responses for job #5449 (Sean Bair /
-  // Mason Dixon, confirmed real $60 tip) to find the actual tip field.
-  const DIAG_JOB_ID = "job_6f7ec285ab4f400e808df67fdaacb757";
-  const DIAG_INVOICE_ID = "invoice_e357fc852c6a4f58b1356caed07dcc2b";
-  const jobRaw = await hcpGet(`jobs/${DIAG_JOB_ID}`);
-  console.log("DIAG_JOB", JSON.stringify(jobRaw));
-  const invoiceRaw = await hcpGet(`invoices/${DIAG_INVOICE_ID}`);
-  console.log("DIAG_INVOICE_DIRECT", JSON.stringify(invoiceRaw));
-  const paymentsRaw = await hcpGet(`invoices/${DIAG_INVOICE_ID}/payments`);
-  console.log("DIAG_PAYMENTS", JSON.stringify(paymentsRaw));
-  const nestedInvoiceRaw = await hcpGet(`jobs/${DIAG_JOB_ID}/invoices/${DIAG_INVOICE_ID}`);
-  console.log("DIAG_NESTED_INVOICE", JSON.stringify(nestedInvoiceRaw));
-  const nestedPaymentsRaw = await hcpGet(`jobs/${DIAG_JOB_ID}/invoices/${DIAG_INVOICE_ID}/payments`);
-  console.log("DIAG_NESTED_PAYMENTS", JSON.stringify(nestedPaymentsRaw));
-
   // Fetch confirmed splits for multi-employee jobs
   const multiIds = Object.entries(jobMeta).filter(([, m]) => m.employees.length > 1).map(([id]) => id);
   const splitMap = await fetchJobSplits(multiIds, sbFetch);
