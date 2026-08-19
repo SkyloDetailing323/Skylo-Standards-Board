@@ -100,6 +100,20 @@ exports.handler = async (event) => {
   const jobId  = String(job.id);
   const status = job.work_status || "";
 
+  // Cancellation ("pro canceled" / "user canceled") is the only backward
+  // transition worth reacting to — a job that was written as revenue while
+  // complete, then canceled afterward, must have that row removed or it
+  // stays as phantom revenue forever (nothing else ever revisits old rows).
+  // Any other non-complete status (scheduled, in progress) means the job
+  // just hasn't gotten there yet — leave existing rows untouched, since a
+  // tech forgetting to mark a job done doesn't mean the revenue isn't real.
+  if (status.includes("cancel")) {
+    console.log(`Job ${jobId} status "${status}" — removing any existing revenue/upsell rows`);
+    await sbFetch(`jobs?hcp_job_id=eq.${jobId}`, { method: "DELETE", prefer: "return=minimal" });
+    await sbFetch(`upsells?hcp_job_id=eq.${jobId}`, { method: "DELETE", prefer: "return=minimal" });
+    return { statusCode: 200, body: "ok" };
+  }
+
   if (!status.includes("complete")) {
     console.log(`Job ${jobId} status "${status}" — skipping`);
     return { statusCode: 200, body: "ok" };
