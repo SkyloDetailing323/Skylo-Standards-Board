@@ -649,6 +649,37 @@ function SwitchoverLeaderboard({ techs, switchovers, currentId }) {
   switchovers.forEach(s=>{ allCount[s.tech_id]=(allCount[s.tech_id]||0)+1; allPts[s.tech_id]=(allPts[s.tech_id]||0)+(PLAN_MAP[s.plan_id]?.pts||0); });
   const ranked = [...techs].map(t=>{ const e=wkData[t.id]||[]; return {...t,count:e.length,pts:e.reduce((s,x)=>s+(PLAN_MAP[x.plan]?.pts||0),0),allCount:allCount[t.id]||0,allPts:allPts[t.id]||0,entries:e}; }).sort((a,b)=>rankBy==="count"?b.count-a.count:b.pts-a.pts);
   const top=ranked[0]?.[rankBy==="count"?"count":"pts"]||1;
+
+  // Custom date range — entries are only logged with a week_key (Monday of
+  // the week), not an exact day, so range filtering matches by week overlap:
+  // any switchover whose week starts on/after the Monday of "From" and
+  // on/before "To".
+  const [rangeFrom, setRangeFrom] = useState("");
+  const [rangeTo, setRangeTo] = useState("");
+  function mondayOf(dateStr) {
+    const d = new Date(dateStr + "T12:00:00Z");
+    const day = d.getUTCDay();
+    const back = day === 0 ? 6 : day - 1;
+    d.setUTCDate(d.getUTCDate() - back);
+    return d.toISOString().split("T")[0];
+  }
+  const rangeActive = !!(rangeFrom && rangeTo);
+  let rangeRanked = [];
+  if (rangeActive) {
+    const fromWk = mondayOf(rangeFrom);
+    const inRange = switchovers.filter(s => s.week_key >= fromWk && s.week_key <= rangeTo);
+    const byTech = {};
+    inRange.forEach(s => {
+      if (!byTech[s.tech_id]) byTech[s.tech_id] = { total: 0, byPlan: {} };
+      byTech[s.tech_id].total++;
+      byTech[s.tech_id].byPlan[s.plan_id] = (byTech[s.tech_id].byPlan[s.plan_id] || 0) + 1;
+    });
+    rangeRanked = techs
+      .map(t => ({ ...t, total: byTech[t.id]?.total || 0, byPlan: byTech[t.id]?.byPlan || {} }))
+      .filter(t => t.total > 0)
+      .sort((a, b) => b.total - a.total);
+  }
+
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:"24px" }}>
       <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", overflow:"hidden" }}>
@@ -657,7 +688,7 @@ function SwitchoverLeaderboard({ techs, switchovers, currentId }) {
           {[...techs].sort((a,b)=>(allPts[b.id]||0)-(allPts[a.id]||0)).map((t,i)=>(
             <div key={t.id} style={{ display:"flex", justifyContent:"space-between" }}>
               <span style={{ fontSize:"13px", color:t.id===currentId?C.blue:C.black }}>{medal(i)} {t.name}{t.id===currentId?" — YOU":""}</span>
-              <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"13px", color:C.black }}>{allCount[t.id]||0} converts · {(allPts[t.id]||0).toLocaleString()} pts</span>
+              <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"13px", color:C.black }}>{allCount[t.id]||0} switchovers · {(allPts[t.id]||0).toLocaleString()} pts</span>
             </div>
           ))}
         </div>
@@ -681,7 +712,7 @@ function SwitchoverLeaderboard({ techs, switchovers, currentId }) {
                   <div style={{ width:"38px", height:"38px", borderRadius:"50%", background:`${C.blue}22`, border:`1px solid ${C.blue}44`, display:"flex", alignItems:"center", justifyContent:"center", fontFamily:"'Barlow Condensed',sans-serif", fontSize:"12px", fontWeight:"800", color:C.blue, flexShrink:0 }}>{t.avatar}</div>
                   <div style={{ flex:1 }}>
                     <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"16px", color:C.black }}>{t.name}{isMe&&<span style={{ color:C.blue, fontSize:"11px", marginLeft:"6px" }}>YOU</span>}</div>
-                    <div style={{ fontSize:"11px", color:C.muted }}>All-time: {t.allCount} converts · {t.allPts.toLocaleString()} pts</div>
+                    <div style={{ fontSize:"11px", color:C.muted }}>All-time: {t.allCount} switchovers · {t.allPts.toLocaleString()} pts</div>
                   </div>
                   <div style={{ textAlign:"right" }}>
                     <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"24px", color:t.count>0?C.white:C.border }}>{t.count}</div>
@@ -699,6 +730,47 @@ function SwitchoverLeaderboard({ techs, switchovers, currentId }) {
           })}
         </div>
       </div>
+
+      {/* Custom Date Range */}
+      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.purple}`, borderRadius:"12px", padding:"16px 18px", display:"flex", flexDirection:"column", gap:"12px" }}>
+        <Label color={C.purple}>📅 Custom Date Range</Label>
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"8px" }}>
+          {[["FROM", rangeFrom, setRangeFrom], ["TO", rangeTo, setRangeTo]].map(([lbl, val, set]) => (
+            <div key={lbl}>
+              <div style={{ fontSize:"10px", color:C.muted, letterSpacing:"2px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", marginBottom:"4px" }}>{lbl}</div>
+              <input type="date" value={val} onChange={e => set(e.target.value)} style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"8px 10px", borderRadius:"8px", fontSize:"13px", fontFamily:"'Barlow',sans-serif", width:"100%", boxSizing:"border-box" }}/>
+            </div>
+          ))}
+        </div>
+        {rangeActive && (
+          <div style={{ fontSize:"11px", color:C.muted }}>
+            Switchovers are logged by week, not exact day — this matches any switchover in a week overlapping {rangeFrom} → {rangeTo}.
+          </div>
+        )}
+      </div>
+
+      {rangeActive && (
+        <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.purple}`, borderRadius:"12px", overflow:"hidden" }}>
+          <div style={{ padding:"14px 18px", borderBottom:`1px solid ${C.border}`, background:C.cardLt }}>
+            <Label color={C.purple}>🔄 Switchovers · {rangeFrom} → {rangeTo}</Label>
+          </div>
+          <div style={{ padding:"14px 18px", display:"flex", flexDirection:"column", gap:"10px" }}>
+            {rangeRanked.length===0 && <div style={{ fontSize:"13px", color:C.muted, textAlign:"center", padding:"12px" }}>No switchovers logged in this range.</div>}
+            {rangeRanked.map((t,i)=>(
+              <div key={t.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:"12px" }}>
+                <span style={{ fontSize:"13px", color:t.id===currentId?C.blue:C.black }}>{medal(i)} {t.name}{t.id===currentId?" — YOU":""}</span>
+                <div style={{ textAlign:"right" }}>
+                  <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"14px", color:C.black }}>{t.total} switchover{t.total!==1?"s":""}</div>
+                  <div style={{ fontSize:"11px", color:C.muted }}>
+                    {Object.entries(t.byPlan).sort((a,b)=>b[1]-a[1]).map(([planId,count])=>`${count} ${PLAN_MAP[planId]?.label||planId}`).join(", ")}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"14px 18px" }}>
         <Label color={C.purple}>Plan Values</Label>
         <div style={{ display:"flex", flexWrap:"wrap", gap:"6px" }}>
@@ -842,7 +914,7 @@ function TotalLeaderboard({ techs, upsells, switchovers, reviews, callbacks }) {
               {[
                 {l:"Badges",    v:t.badgePts,               c:C.purple},
                 {l:"Upsells",   v:`$${Math.round(t.upsellAmt).toLocaleString()}`, c:C.green},
-                {l:"Converts",  v:t.switchPts,              c:C.blue},
+                {l:"Switchovers",  v:t.switchPts,              c:C.blue},
                 {l:"Reviews",   v:t.reviewPts,              c:C.gold},
               ].map(item=>(
                 <div key={item.l} style={{ background:C.cardLt, borderRadius:"4px", padding:"8px", textAlign:"center" }}>
@@ -1596,7 +1668,7 @@ function JourneyCard({ tech, rank, total, onClick, expanded, upsells, quota }) {
           {[
             {l:"Badges",   v:tech.badges?.length||0,        c:C.purple},
             {l:"Upsells",  v:`$${Math.round(tech.upsellAmt).toLocaleString()}`, c:C.green},
-            {l:"Converts", v:tech.totalSwitches,        c:C.blue},
+            {l:"Switchovers", v:tech.totalSwitches,        c:C.blue},
             {l:"Reviews",  v:tech.totalReviews,         c:C.gold},
           ].map(s=>(
             <div key={s.l} style={{ background:C.cardLt, borderRadius:"8px", padding:"8px 4px", textAlign:"center" }}>
@@ -1721,7 +1793,7 @@ function QuotaSettings({ quota, onSave, saving }) {
         {[
           { key:"upsells",     label:"Upsell Target",      icon:"💰", suffix:"$ / month",  desc:"Minimum upsell revenue expected per tech" },
           { key:"reviews",     label:"Review Target",       icon:"⭐", suffix:"reviews / month", desc:"Minimum Google reviews expected" },
-          { key:"switchovers", label:"Switchover Target",   icon:"🔄", suffix:"converts / month", desc:"Minimum service plan conversions expected" },
+          { key:"switchovers", label:"Switchover Target",   icon:"🔄", suffix:"switchovers / month", desc:"Minimum service plan conversions expected" },
         ].map(f=>(
           <div key={f.key}>
             <div style={{ display:"flex", justifyContent:"space-between", marginBottom:"6px" }}>
@@ -1955,7 +2027,7 @@ function OperationsProgressTab({ techs, upsells, switchovers, reviews, quota, ca
                 {[
                   { label:"Upsells",    val:`$${t.monthUpsellAmt}`,  target:`$${q.upsells}`,  hit:t.upHit,  color:C.green },
                   { label:"Reviews",    val:t.monthReviewCount,       target:q.reviews,         hit:t.revHit, color:C.gold  },
-                  { label:"Converts",   val:t.monthSwitchCount,       target:q.switchovers,     hit:t.swHit,  color:C.blue  },
+                  { label:"Switchovers",   val:t.monthSwitchCount,       target:q.switchovers,     hit:t.swHit,  color:C.blue  },
                 ].map(col=>(
                   <div key={col.label} style={{ background:col.hit?`${col.color}15`:C.white, border:`1px solid ${col.hit?col.color:C.border}`, borderRadius:"6px", padding:"6px 8px", textAlign:"center" }}>
                     <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"15px", color:col.hit?col.color:C.black }}>{col.val}{col.hit?" ✓":""}</div>
@@ -2186,7 +2258,7 @@ function TeamLeadPanel({ tech, techs, upsells, switchovers, reviews, callbacks, 
                   {[
                     { label:"Upsells",  val:`$${m.monthUpsellAmt}`, target:`$${q.upsells}`,  hit:m.upHit,  color:C.green },
                     { label:"Reviews",  val:m.monthReviewCount,      target:q.reviews,         hit:m.revHit, color:C.gold  },
-                    { label:"Converts", val:m.monthSwitchCount,      target:q.switchovers,     hit:m.swHit,  color:C.blue  },
+                    { label:"Switchovers", val:m.monthSwitchCount,      target:q.switchovers,     hit:m.swHit,  color:C.blue  },
                   ].map(col=>(
                     <div key={col.label} style={{ background:col.hit?`${col.color}15`:C.white, border:`1px solid ${col.hit?col.color:C.border}`, borderRadius:"6px", padding:"6px 8px", textAlign:"center" }}>
                       <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"14px", color:col.hit?col.color:C.black }}>{col.val}{col.hit?" ✓":""}</div>
@@ -2403,7 +2475,7 @@ function TechDashboard({ tech, techs, upsells, switchovers, reviews, callbacks, 
     ]},
     { label:"My Stats", items:[
       ["upsells","💰","Upsells"],
-      ["switchovers","🔄","Converts"],
+      ["switchovers","🔄","Switchovers"],
       ["reviews","⭐","Reviews"],
       ...(tech.is_lead?[["myteam","👥","My Team"]]:[]),
     ]},
@@ -2623,7 +2695,7 @@ function TechDashboard({ tech, techs, upsells, switchovers, reviews, callbacks, 
                 {[
                   {l:"🏅 Badges",    v:tt.badgePts,   c:C.purple},
                   {l:"💰 Upsells",   v:tt.upsellPts,  c:C.green},
-                  {l:"🔄 Converts",  v:tt.switchPts,  c:C.blue},
+                  {l:"🔄 Switchovers",  v:tt.switchPts,  c:C.blue},
                   {l:"⭐ Reviews",   v:tt.reviewPts,  c:C.gold},
                   ...(tt.callbackCount>0?[{l:`📞 Callbacks (${tt.callbackCount})`, v:tt.callbackPts, c:"#ef4444"}]:[]),
                   ...(tech.is_lead?(()=>{ const {overridePts,overridePct,allTeamHit,partialHit}=calcTeamOverride(tech,techs,upsells,switchovers,reviews,callbacks||[],q); const active=allTeamHit||partialHit; return [{l:`👥 Team Override (${active?Math.round(overridePct*100)+"% unlocked":"locked"})`,v:active?`+${overridePts}`:"—",c:active?C.gold:C.muted}]; })():[]),
@@ -2725,7 +2797,7 @@ function DeleteTab({ techs, upsells, switchovers, reviews, saving, setSaving, re
 
       {/* Section picker */}
       <div style={{ display:"flex", gap:"8px" }}>
-        {[["upsells","💰 Upsells"],["switchovers","🔄 Converts"],["reviews","⭐ Reviews"]].map(([id,label])=>(
+        {[["upsells","💰 Upsells"],["switchovers","🔄 Switchovers"],["reviews","⭐ Reviews"]].map(([id,label])=>(
           <button key={id} onClick={()=>setSection(id)} style={{ background:section===id?C.red:C.card, border:`1px solid ${section===id?C.red:C.border}`, color:section===id?C.white:C.muted, padding:"8px 14px", borderRadius:"4px", cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", fontSize:"11px", letterSpacing:"1px" }}>{label}</button>
         ))}
       </div>
@@ -4464,7 +4536,7 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
     { label:"Team Activity", items:[
       ["upsells","💰","Upsells"],
       ["reviews","⭐","Reviews"],
-      ["switchovers","🔄","Converts"],
+      ["switchovers","🔄","Switchovers"],
       ["callbacks","📞","Callbacks"],
       ["ridealong","🚗","Ride-Alongs"],
     ]},
