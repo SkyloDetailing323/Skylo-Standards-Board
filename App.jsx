@@ -541,6 +541,26 @@ function UpsellLeaderboard({ techs, upsells, currentId }) {
   const top = ranked[0]?.amt||1;
   const weekTotal = ranked.reduce((s,t)=>s+t.amt,0);
 
+  // Date range — same WTD/Last Week/MTD/Last Month/YTD/Custom control as
+  // Revenue's Time Period panel (getDateRangeBounds). Upsells are logged with
+  // a week_key (Monday of the week) rather than an exact day, so range
+  // filtering matches by week overlap, same limitation as Switchovers, until
+  // a full historical Repair Upsells run backfills day-level job_date data.
+  const RANGE_PRESETS = [["wtd","WTD"],["last_week","Last Week"],["mtd","MTD"],["last_month","Last Month"],["ytd","YTD"],["custom","Custom"]];
+  const [rangePreset, setRangePreset] = useState("wtd");
+  const [cStart, setCStart] = useState("");
+  const [cEnd, setCEnd] = useState("");
+  const { start: rangeStart, end: rangeEnd } = getDateRangeBounds(rangePreset, cStart, cEnd);
+  function mondayOf(dateStr) {
+    const d = new Date(dateStr + "T12:00:00Z");
+    const day = d.getUTCDay();
+    const back = day === 0 ? 6 : day - 1;
+    d.setUTCDate(d.getUTCDate() - back);
+    return d.toISOString().split("T")[0];
+  }
+  const rangeFromWk = mondayOf(rangeStart);
+  const rangeInRange = upsells.filter(u => u.week_key >= rangeFromWk && u.week_key <= rangeEnd);
+
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:"20px" }}>
 
@@ -633,6 +653,29 @@ function UpsellLeaderboard({ techs, upsells, currentId }) {
           })}
         </div>
       </div>
+
+      {/* Date Range */}
+      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.green}`, borderRadius:"12px", padding:"16px 18px", display:"flex", flexDirection:"column", gap:"12px" }}>
+        <Label color={C.green}>📅 Date Range</Label>
+        <div style={{ display:"flex", gap:"6px", flexWrap:"wrap" }}>
+          {RANGE_PRESETS.map(([id,label])=>(
+            <button key={id} onClick={()=>setRangePreset(id)} style={{ background:rangePreset===id?C.green:C.cardLt, border:`1px solid ${rangePreset===id?C.green:C.border}`, color:rangePreset===id?C.white:C.muted, padding:"6px 14px", borderRadius:"4px", cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", fontSize:"11px", letterSpacing:"1px" }}>{label}</button>
+          ))}
+        </div>
+        {rangePreset==="custom"&&(
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"8px" }}>
+            {[["FROM", cStart, setCStart], ["TO", cEnd, setCEnd]].map(([lbl, val, set]) => (
+              <div key={lbl}>
+                <div style={{ fontSize:"10px", color:C.muted, letterSpacing:"2px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", marginBottom:"4px" }}>{lbl}</div>
+                <input type="date" value={val} onChange={e => set(e.target.value)} style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"8px 10px", borderRadius:"8px", fontSize:"13px", fontFamily:"'Barlow',sans-serif", width:"100%", boxSizing:"border-box" }}/>
+              </div>
+            ))}
+          </div>
+        )}
+        <div style={{ fontSize:"11px", color:C.green, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>
+          {rangeStart} → {rangeEnd} · matched by week (upsells are logged by week, not exact day) · ${rangeInRange.reduce((s,u)=>s+(u.amount||0),0).toLocaleString()} · {rangeInRange.length} entr{rangeInRange.length!==1?"ies":"y"}
+        </div>
+      </div>
     </div>
   );
 }
@@ -650,12 +693,16 @@ function SwitchoverLeaderboard({ techs, switchovers, currentId }) {
   const ranked = [...techs].map(t=>{ const e=wkData[t.id]||[]; return {...t,count:e.length,pts:e.reduce((s,x)=>s+(PLAN_MAP[x.plan]?.pts||0),0),allCount:allCount[t.id]||0,allPts:allPts[t.id]||0,entries:e}; }).sort((a,b)=>rankBy==="count"?b.count-a.count:b.pts-a.pts);
   const top=ranked[0]?.[rankBy==="count"?"count":"pts"]||1;
 
-  // Custom date range — entries are only logged with a week_key (Monday of
-  // the week), not an exact day, so range filtering matches by week overlap:
-  // any switchover whose week starts on/after the Monday of "From" and
-  // on/before "To".
-  const [rangeFrom, setRangeFrom] = useState("");
-  const [rangeTo, setRangeTo] = useState("");
+  // Date range — same WTD/Last Week/MTD/Last Month/YTD/Custom control as
+  // Revenue's Time Period panel (getDateRangeBounds). Entries are only
+  // logged with a week_key (Monday of the week), not an exact day, so range
+  // filtering matches by week overlap: any switchover whose week starts
+  // on/after the Monday of the range start and on/before the range end.
+  const RANGE_PRESETS = [["wtd","WTD"],["last_week","Last Week"],["mtd","MTD"],["last_month","Last Month"],["ytd","YTD"],["custom","Custom"]];
+  const [rangePreset, setRangePreset] = useState("wtd");
+  const [cStart, setCStart] = useState("");
+  const [cEnd, setCEnd] = useState("");
+  const { start: rangeStart, end: rangeEnd } = getDateRangeBounds(rangePreset, cStart, cEnd);
   function mondayOf(dateStr) {
     const d = new Date(dateStr + "T12:00:00Z");
     const day = d.getUTCDay();
@@ -663,22 +710,18 @@ function SwitchoverLeaderboard({ techs, switchovers, currentId }) {
     d.setUTCDate(d.getUTCDate() - back);
     return d.toISOString().split("T")[0];
   }
-  const rangeActive = !!(rangeFrom && rangeTo);
-  let rangeRanked = [];
-  if (rangeActive) {
-    const fromWk = mondayOf(rangeFrom);
-    const inRange = switchovers.filter(s => s.week_key >= fromWk && s.week_key <= rangeTo);
-    const byTech = {};
-    inRange.forEach(s => {
-      if (!byTech[s.tech_id]) byTech[s.tech_id] = { total: 0, byPlan: {} };
-      byTech[s.tech_id].total++;
-      byTech[s.tech_id].byPlan[s.plan_id] = (byTech[s.tech_id].byPlan[s.plan_id] || 0) + 1;
-    });
-    rangeRanked = techs
-      .map(t => ({ ...t, total: byTech[t.id]?.total || 0, byPlan: byTech[t.id]?.byPlan || {} }))
-      .filter(t => t.total > 0)
-      .sort((a, b) => b.total - a.total);
-  }
+  const rangeFromWk = mondayOf(rangeStart);
+  const rangeInRange = switchovers.filter(s => s.week_key >= rangeFromWk && s.week_key <= rangeEnd);
+  const rangeByTech = {};
+  rangeInRange.forEach(s => {
+    if (!rangeByTech[s.tech_id]) rangeByTech[s.tech_id] = { total: 0, byPlan: {} };
+    rangeByTech[s.tech_id].total++;
+    rangeByTech[s.tech_id].byPlan[s.plan_id] = (rangeByTech[s.tech_id].byPlan[s.plan_id] || 0) + 1;
+  });
+  const rangeRanked = techs
+    .map(t => ({ ...t, total: rangeByTech[t.id]?.total || 0, byPlan: rangeByTech[t.id]?.byPlan || {} }))
+    .filter(t => t.total > 0)
+    .sort((a, b) => b.total - a.total);
 
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:"24px" }}>
@@ -731,45 +774,48 @@ function SwitchoverLeaderboard({ techs, switchovers, currentId }) {
         </div>
       </div>
 
-      {/* Custom Date Range */}
+      {/* Date Range */}
       <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.purple}`, borderRadius:"12px", padding:"16px 18px", display:"flex", flexDirection:"column", gap:"12px" }}>
-        <Label color={C.purple}>📅 Custom Date Range</Label>
-        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"8px" }}>
-          {[["FROM", rangeFrom, setRangeFrom], ["TO", rangeTo, setRangeTo]].map(([lbl, val, set]) => (
-            <div key={lbl}>
-              <div style={{ fontSize:"10px", color:C.muted, letterSpacing:"2px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", marginBottom:"4px" }}>{lbl}</div>
-              <input type="date" value={val} onChange={e => set(e.target.value)} style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"8px 10px", borderRadius:"8px", fontSize:"13px", fontFamily:"'Barlow',sans-serif", width:"100%", boxSizing:"border-box" }}/>
-            </div>
+        <Label color={C.purple}>📅 Date Range</Label>
+        <div style={{ display:"flex", gap:"6px", flexWrap:"wrap" }}>
+          {RANGE_PRESETS.map(([id,label])=>(
+            <button key={id} onClick={()=>setRangePreset(id)} style={{ background:rangePreset===id?C.purple:C.cardLt, border:`1px solid ${rangePreset===id?C.purple:C.border}`, color:rangePreset===id?C.white:C.muted, padding:"6px 14px", borderRadius:"4px", cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", fontSize:"11px", letterSpacing:"1px" }}>{label}</button>
           ))}
         </div>
-        {rangeActive && (
-          <div style={{ fontSize:"11px", color:C.muted }}>
-            Switchovers are logged by week, not exact day — this matches any switchover in a week overlapping {rangeFrom} → {rangeTo}.
-          </div>
-        )}
-      </div>
-
-      {rangeActive && (
-        <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.purple}`, borderRadius:"12px", overflow:"hidden" }}>
-          <div style={{ padding:"14px 18px", borderBottom:`1px solid ${C.border}`, background:C.cardLt }}>
-            <Label color={C.purple}>🔄 Switchovers · {rangeFrom} → {rangeTo}</Label>
-          </div>
-          <div style={{ padding:"14px 18px", display:"flex", flexDirection:"column", gap:"10px" }}>
-            {rangeRanked.length===0 && <div style={{ fontSize:"13px", color:C.muted, textAlign:"center", padding:"12px" }}>No switchovers logged in this range.</div>}
-            {rangeRanked.map((t,i)=>(
-              <div key={t.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:"12px" }}>
-                <span style={{ fontSize:"13px", color:t.id===currentId?C.blue:C.black }}>{medal(i)} {t.name}{t.id===currentId?" — YOU":""}</span>
-                <div style={{ textAlign:"right" }}>
-                  <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"14px", color:C.black }}>{t.total} switchover{t.total!==1?"s":""}</div>
-                  <div style={{ fontSize:"11px", color:C.muted }}>
-                    {Object.entries(t.byPlan).sort((a,b)=>b[1]-a[1]).map(([planId,count])=>`${count} ${PLAN_MAP[planId]?.label||planId}`).join(", ")}
-                  </div>
-                </div>
+        {rangePreset==="custom"&&(
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"8px" }}>
+            {[["FROM", cStart, setCStart], ["TO", cEnd, setCEnd]].map(([lbl, val, set]) => (
+              <div key={lbl}>
+                <div style={{ fontSize:"10px", color:C.muted, letterSpacing:"2px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", marginBottom:"4px" }}>{lbl}</div>
+                <input type="date" value={val} onChange={e => set(e.target.value)} style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"8px 10px", borderRadius:"8px", fontSize:"13px", fontFamily:"'Barlow',sans-serif", width:"100%", boxSizing:"border-box" }}/>
               </div>
             ))}
           </div>
+        )}
+        <div style={{ fontSize:"11px", color:C.purple, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>
+          {rangeStart} → {rangeEnd} · matched by week (switchovers are logged by week, not exact day)
         </div>
-      )}
+      </div>
+
+      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.purple}`, borderRadius:"12px", overflow:"hidden" }}>
+        <div style={{ padding:"14px 18px", borderBottom:`1px solid ${C.border}`, background:C.cardLt }}>
+          <Label color={C.purple}>🔄 Switchovers · {rangeStart} → {rangeEnd}</Label>
+        </div>
+        <div style={{ padding:"14px 18px", display:"flex", flexDirection:"column", gap:"10px" }}>
+          {rangeRanked.length===0 && <div style={{ fontSize:"13px", color:C.muted, textAlign:"center", padding:"12px" }}>No switchovers logged in this range.</div>}
+          {rangeRanked.map((t,i)=>(
+            <div key={t.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:"12px" }}>
+              <span style={{ fontSize:"13px", color:t.id===currentId?C.blue:C.black }}>{medal(i)} {t.name}{t.id===currentId?" — YOU":""}</span>
+              <div style={{ textAlign:"right" }}>
+                <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"14px", color:C.black }}>{t.total} switchover{t.total!==1?"s":""}</div>
+                <div style={{ fontSize:"11px", color:C.muted }}>
+                  {Object.entries(t.byPlan).sort((a,b)=>b[1]-a[1]).map(([planId,count])=>`${count} ${PLAN_MAP[planId]?.label||planId}`).join(", ")}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
 
       <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"14px 18px" }}>
         <Label color={C.purple}>Plan Values</Label>
