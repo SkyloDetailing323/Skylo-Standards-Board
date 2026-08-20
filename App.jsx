@@ -831,21 +831,31 @@ function SwitchoverLeaderboard({ techs, switchovers, currentId }) {
 
       <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.purple}`, borderRadius:"12px", overflow:"hidden" }}>
         <div style={{ padding:"14px 18px", borderBottom:`1px solid ${C.border}`, background:C.cardLt }}>
-          <Label color={C.purple}>🔄 Switchovers · {rangeStart} → {rangeEnd}</Label>
+          <Label color={C.purple}>🔄 Switchovers by Plan Type · {rangeStart} → {rangeEnd}</Label>
         </div>
-        <div style={{ padding:"14px 18px", display:"flex", flexDirection:"column", gap:"10px" }}>
-          {rangeRanked.length===0 && <div style={{ fontSize:"13px", color:C.muted, textAlign:"center", padding:"12px" }}>No switchovers logged in this range.</div>}
-          {rangeRanked.map((t,i)=>(
-            <div key={t.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:"12px" }}>
-              <span style={{ fontSize:"13px", color:t.id===currentId?C.blue:C.black }}>{medal(i)} {t.name}{t.id===currentId?" — YOU":""}</span>
-              <div style={{ textAlign:"right" }}>
-                <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"14px", color:C.black }}>{t.total} switchover{t.total!==1?"s":""}</div>
-                <div style={{ fontSize:"11px", color:C.muted }}>
-                  {Object.entries(t.byPlan).sort((a,b)=>b[1]-a[1]).map(([planId,count])=>`${count} ${PLAN_MAP[planId]?.label||planId}`).join(", ")}
-                </div>
-              </div>
-            </div>
-          ))}
+        <div style={{ overflowX:"auto" }}>
+          <table style={{ width:"100%", borderCollapse:"collapse", fontSize:"13px" }}>
+            <thead>
+              <tr>
+                <th style={{ padding:"8px 18px", textAlign:"left", color:C.muted, fontWeight:"700", letterSpacing:"1px", fontFamily:"'Barlow Condensed',sans-serif", fontSize:"11px", borderBottom:`1px solid ${C.border}`, whiteSpace:"nowrap" }}>TECH</th>
+                <th style={{ padding:"8px 18px", textAlign:"left", color:C.muted, fontWeight:"700", letterSpacing:"1px", fontFamily:"'Barlow Condensed',sans-serif", fontSize:"11px", borderBottom:`1px solid ${C.border}` }}>BREAKDOWN</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rangeRanked.length===0 && (
+                <tr><td colSpan={2} style={{ padding:"16px 18px", color:C.muted, textAlign:"center" }}>No switchovers logged in this range.</td></tr>
+              )}
+              {rangeRanked.map((t,i)=>{
+                const breakdown = Object.entries(t.byPlan).sort((a,b)=>b[1]-a[1]).map(([planId,count])=>`${count} ${PLAN_MAP[planId]?.label||planId}`).join(", ");
+                return (
+                  <tr key={t.id} style={{ borderBottom:`1px solid ${C.border}` }}>
+                    <td style={{ padding:"10px 18px", color:t.id===currentId?C.blue:C.black, fontWeight:"700", fontFamily:"'Barlow Condensed',sans-serif", whiteSpace:"nowrap" }}>{medal(i)} {t.name}{t.id===currentId?" — YOU":""}</td>
+                    <td style={{ padding:"10px 18px", color:C.black }}>{breakdown} <span style={{ color:C.muted, fontSize:"11px" }}>({t.total} total)</span></td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
       </div>
 
