@@ -162,6 +162,14 @@ function formatMonthLabel(key) {
 function fmtShortDate(str) {
   return new Date(str+"T12:00:00").toLocaleDateString("en-US",{month:"short",day:"numeric"});
 }
+function formatLastEntered(isoTimestamp) {
+  if (!isoTimestamp) return null;
+  return new Date(isoTimestamp).toLocaleString("en-US", { month:"short", day:"numeric", year:"numeric", hour:"numeric", minute:"2-digit" });
+}
+function mostRecentTimestamp(rows) {
+  if (!rows || rows.length === 0) return null;
+  return rows.reduce((latest, r) => (!latest || (r.created_at||"") > latest) ? (r.created_at||latest) : latest, null);
+}
 function getPayPeriods() {
   const anchor = new Date(PP_ANCHOR_END+"T12:00:00");
   const today = new Date(Date.now()-6*60*60*1000).toISOString().split("T")[0];
@@ -3136,6 +3144,12 @@ function AdminReviewEntry({ techs, reviews, saving, setSaving, refreshAll, showT
       <Label color={C.gold}>Log 5-Star Reviews</Label>
       <div style={{ fontSize:"12px", color:C.muted }}>+{REVIEW_PTS} pts each · +{REVIEW_BONUS_PTS} bonus at 10+ · Log current or any past month</div>
 
+      <div style={{ background:C.cardLt, borderRadius:"8px", padding:"8px 12px", fontSize:"12px", color:C.muted }}>
+        {formatLastEntered(mostRecentTimestamp(reviews)) ? (
+          <>Last entered: <strong style={{ color:C.black }}>{formatLastEntered(mostRecentTimestamp(reviews))}</strong> — everything before that is already logged.</>
+        ) : "No reviews logged yet."}
+      </div>
+
       <div>
         <div style={{ fontSize:"11px", color:C.muted, marginBottom:"6px" }}>Select month</div>
         <select value={targetMonth} onChange={e=>{ setTargetMonth(e.target.value); setForm({}); }} style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"8px 12px", borderRadius:"12px", fontSize:"14px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", width:"100%", cursor:"pointer" }}>
@@ -4700,6 +4714,11 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
         {tab==="switchovers"&&(
           <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"20px", display:"flex", flexDirection:"column", gap:"12px" }}>
             <Label color={C.purple}>Log a Switchover · {formatWeekLabel(wk)}</Label>
+            <div style={{ background:C.cardLt, borderRadius:"8px", padding:"8px 12px", fontSize:"12px", color:C.muted }}>
+              {formatLastEntered(mostRecentTimestamp(switchovers)) ? (
+                <>Last entered: <strong style={{ color:C.black }}>{formatLastEntered(mostRecentTimestamp(switchovers))}</strong> — everything before that is already logged.</>
+              ) : "No switchovers logged yet."}
+            </div>
             <select value={swForm.techId} onChange={e=>setSwForm(f=>({...f,techId:e.target.value}))} style={sel(swForm.techId)}>
               <option value="">— Select Tech —</option>
               {techs.filter(t=>t.is_active!==false).map(t=><option key={t.id} value={t.id}>{t.name}</option>)}
