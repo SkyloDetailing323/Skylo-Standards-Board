@@ -676,6 +676,38 @@ function UpsellLeaderboard({ techs, upsells, currentId }) {
           {rangeStart} → {rangeEnd} · matched by week (upsells are logged by week, not exact day) · ${rangeInRange.reduce((s,u)=>s+(u.amount||0),0).toLocaleString()} · {rangeInRange.length} entr{rangeInRange.length!==1?"ies":"y"}
         </div>
       </div>
+
+      {(() => {
+        const rangeByTech = {};
+        rangeInRange.forEach(u => { rangeByTech[u.tech_id] = (rangeByTech[u.tech_id] || 0) + (u.amount || 0); });
+        const rangeRanked = techs
+          .map(t => ({ ...t, amt: rangeByTech[t.id] || 0 }))
+          .filter(t => t.amt > 0)
+          .sort((a, b) => b.amt - a.amt);
+        const rangeTop = rangeRanked[0]?.amt || 1;
+        return (
+          <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.green}`, borderRadius:"12px", overflow:"hidden" }}>
+            <div style={{ padding:"14px 18px", borderBottom:`1px solid ${C.border}`, background:C.cardLt }}>
+              <Label color={C.green}>💰 Upsells · {rangeStart} → {rangeEnd}</Label>
+            </div>
+            <div style={{ padding:"14px 18px", display:"flex", flexDirection:"column", gap:"8px" }}>
+              {rangeRanked.length===0 && <div style={{ fontSize:"13px", color:C.muted, textAlign:"center", padding:"12px" }}>No upsells logged in this range.</div>}
+              {rangeRanked.map((t,i)=>{
+                const pct = Math.round((t.amt/rangeTop)*100);
+                return (
+                  <div key={t.id}>
+                    <div style={{ display:"flex", justifyContent:"space-between", marginBottom:"5px" }}>
+                      <span style={{ fontSize:"13px", color:t.id===currentId?C.blue:C.black }}>{medal(i)} {t.name}{t.id===currentId?" — YOU":""}</span>
+                      <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"14px", color:C.black }}>${t.amt.toLocaleString()}</span>
+                    </div>
+                    <Bar pct={pct} color={C.green}/>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
