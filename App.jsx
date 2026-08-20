@@ -20,6 +20,23 @@ async function sb(path, opts = {}) {
   return text ? JSON.parse(text) : null;
 }
 
+// Supabase/PostgREST caps a single request at 1000 rows regardless of any
+// `limit` in the query string — tables that grow past that (like `jobs`)
+// silently lose their oldest rows unless paginated explicitly.
+async function sbAll(path, pageSize = 1000) {
+  let all = [];
+  let offset = 0;
+  while (true) {
+    const sep = path.includes("?") ? "&" : "?";
+    const page = await sb(`${path}${sep}limit=${pageSize}&offset=${offset}`);
+    if (!page || page.length === 0) break;
+    all = all.concat(page);
+    if (page.length < pageSize) break;
+    offset += pageSize;
+  }
+  return all;
+}
+
 // ─── DESIGN TOKENS ────────────────────────────────────────────────────────────
 const C = {
   blue:    "#2b9cf0",
@@ -534,7 +551,7 @@ function BadgeGrid({ earned }) {
 
 
 // ─── UPSELL LEADERBOARD ───────────────────────────────────────────────────────
-function UpsellLeaderboard({ techs, upsells, currentId }) {
+function UpsellLeaderboard({ techs, upsells, jobs=[], currentId }) {
   const wk = getWeekKey();
   const byWeek = {};
   upsells.forEach(u=>{ if(!byWeek[u.week_key])byWeek[u.week_key]={}; byWeek[u.week_key][u.tech_id]=(byWeek[u.week_key][u.tech_id]||0)+u.amount; });
@@ -550,24 +567,25 @@ function UpsellLeaderboard({ techs, upsells, currentId }) {
   const weekTotal = ranked.reduce((s,t)=>s+t.amt,0);
 
   // Date range — same WTD/Last Week/MTD/Last Month/YTD/Custom control as
-  // Revenue's Time Period panel (getDateRangeBounds). Upsells are logged with
-  // a week_key (Monday of the week) rather than an exact day, so range
-  // filtering matches by week overlap, same limitation as Switchovers, until
-  // a full historical Repair Upsells run backfills day-level job_date data.
+  // Revenue's Time Period panel (getDateRangeBounds). Filters by each entry's
+  // real completion date (jobs.job_date, joined via hcp_job_id), not
+  // week_key, now that Repair Upsells has been run across full history and
+  // populates jobs.upsell_amount with day-level data for ~95% of entries.
+  // The remaining entries (manually entered, no hcp_job_id) have no exact
+  // date to match against, so they're excluded from range filtering rather
+  // than approximated by week — surfaced separately below so nothing is
+  // silently dropped.
   const RANGE_PRESETS = [["wtd","WTD"],["last_week","Last Week"],["mtd","MTD"],["last_month","Last Month"],["ytd","YTD"],["custom","Custom"]];
   const [rangePreset, setRangePreset] = useState("wtd");
   const [cStart, setCStart] = useState("");
   const [cEnd, setCEnd] = useState("");
   const { start: rangeStart, end: rangeEnd } = getDateRangeBounds(rangePreset, cStart, cEnd);
-  function mondayOf(dateStr) {
-    const d = new Date(dateStr + "T12:00:00Z");
-    const day = d.getUTCDay();
-    const back = day === 0 ? 6 : day - 1;
-    d.setUTCDate(d.getUTCDate() - back);
-    return d.toISOString().split("T")[0];
-  }
-  const rangeFromWk = mondayOf(rangeStart);
-  const rangeInRange = upsells.filter(u => u.week_key >= rangeFromWk && u.week_key <= rangeEnd);
+  const jobDateByHcpId = {};
+  jobs.forEach(j => { if (j.hcp_job_id && !jobDateByHcpId[j.hcp_job_id]) jobDateByHcpId[j.hcp_job_id] = j.job_date; });
+  const upsellsWithDate = upsells.map(u => ({ ...u, resolvedDate: u.hcp_job_id ? (jobDateByHcpId[u.hcp_job_id] || null) : null }));
+  const rangeInRange = upsellsWithDate.filter(u => u.resolvedDate && u.resolvedDate >= rangeStart && u.resolvedDate <= rangeEnd);
+  const noDateEntries = upsellsWithDate.filter(u => !u.resolvedDate);
+  const noDateTotal = noDateEntries.reduce((s,u)=>s+(u.amount||0),0);
 
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:"20px" }}>
@@ -681,8 +699,13 @@ function UpsellLeaderboard({ techs, upsells, currentId }) {
           </div>
         )}
         <div style={{ fontSize:"11px", color:C.green, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>
-          {rangeStart} → {rangeEnd} · matched by week (upsells are logged by week, not exact day) · ${rangeInRange.reduce((s,u)=>s+(u.amount||0),0).toLocaleString()} · {rangeInRange.length} entr{rangeInRange.length!==1?"ies":"y"}
+          {rangeStart} → {rangeEnd} · matched by exact completion date · ${rangeInRange.reduce((s,u)=>s+(u.amount||0),0).toLocaleString()} · {rangeInRange.length} entr{rangeInRange.length!==1?"ies":"y"}
         </div>
+        {noDateEntries.length>0&&(
+          <div style={{ fontSize:"11px", color:C.muted }}>
+            ⚠ {noDateEntries.length} entr{noDateEntries.length!==1?"ies":"y"} totaling ${noDateTotal.toLocaleString()} {noDateEntries.length!==1?"have":"has"} no matched completion date (manually entered, not tied to an HCP job) — excluded from every range above, not just this one.
+          </div>
+        )}
       </div>
 
       {(() => {
@@ -2824,7 +2847,7 @@ function TechDashboard({ tech, techs, upsells, switchovers, reviews, callbacks, 
         {tab==="reports"&&<ReportsTab techs={techs} jobs={jobs||[]} upsells={upsells||[]} techHours={techHours||[]} techId={tech.id}/>}
         {tab==="leaderboard"&&<Leaderboard techs={techs} jobs={jobs||[]} upsells={upsells} reviews={reviews} callbacks={callbacks||[]} switchovers={switchovers}/>}
         {tab==="badges"&&<BadgeGrid earned={tech.badges}/>}
-        {tab==="upsells"&&<UpsellLeaderboard techs={techs} upsells={upsells} currentId={tech.id}/>}
+        {tab==="upsells"&&<UpsellLeaderboard techs={techs} upsells={upsells} jobs={jobs||[]} currentId={tech.id}/>}
         {tab==="switchovers"&&<SwitchoverLeaderboard techs={techs} switchovers={switchovers} currentId={tech.id}/>}
         {tab==="reviews"&&<ReviewLeaderboard techs={techs} reviews={reviews} currentId={tech.id}/>}
         {tab==="total"&&<TotalLeaderboard techs={techs} upsells={upsells} switchovers={switchovers} reviews={reviews} callbacks={callbacks||[]}/>}
@@ -5089,7 +5112,7 @@ export default function App() {
         sb("ride_along_schedule?select=*").catch(()=>[]),
         sb("settings?key=eq.quota&select=*").catch(()=>[]),
         sb("callbacks?select=*&order=created_at.desc").catch(()=>[]),
-        sb("jobs?select=*&order=job_date.desc").catch(()=>[]),
+        sbAll("jobs?select=*&order=job_date.desc,id.asc").catch(()=>[]),
         sb("tech_hours?select=*").catch(()=>[]),
         sb("jobs?split_confirmed=eq.false&select=hcp_job_id,tech_id,job_date,revenue,tips,upsell_amount,customer_name&order=job_date.desc").catch(()=>[]),
       ]);
