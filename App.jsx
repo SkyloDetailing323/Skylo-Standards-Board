@@ -2990,7 +2990,7 @@ function DeleteTab({ techs, upsells, switchovers, reviews, saving, setSaving, re
 }
 
 // ─── ADMIN UPSELL ENTRY (with date picker) ────────────────────────────────────
-function AdminUpsellEntry({ techs, refreshAll, showToast, allTimeUp }) {
+function AdminUpsellEntry({ techs, refreshAll, showToast, upsells, jobs=[] }) {
   const todayDefault = new Date(Date.now() - 6*3600000).toISOString().split("T")[0];
   const [repairFrom, setRepairFrom] = useState("2026-06-01");
   const [repairTo,   setRepairTo]   = useState(todayDefault);
@@ -3119,15 +3119,40 @@ function AdminUpsellEntry({ techs, refreshAll, showToast, allTimeUp }) {
         )}
       </div>
 
-      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"16px 18px" }}>
-        <Label color={C.green}>All-Time Totals</Label>
-        {[...techs].sort((a,b)=>(allTimeUp[b.id]||0)-(allTimeUp[a.id]||0)).map((t,i)=>(
-          <div key={t.id} style={{ display:"flex", justifyContent:"space-between", marginBottom:"8px" }}>
-            <span style={{ fontSize:"13px", color:C.black }}>{medal(i)} {t.name}</span>
-            <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", color:C.green }}>${(allTimeUp[t.id]||0).toLocaleString()} · {Math.round((allTimeUp[t.id]||0)*UPSELL_PTS_PER_DOLLAR)} pts</span>
+      {(() => {
+        // Same range the Repair Upsells button above uses — changing FROM/TO
+        // updates this board too, instead of a separate hardcoded all-time sum.
+        // Filters by each entry's real completion date (jobs.job_date, joined
+        // via hcp_job_id), same exact-date approach as the tech-facing Upsells
+        // tab. Manually-entered rows with no hcp_job_id have no date to match
+        // against and are excluded, surfaced via the warning below rather than
+        // silently dropped.
+        const jobDateByHcpId = {};
+        jobs.forEach(j => { if (j.hcp_job_id && !jobDateByHcpId[j.hcp_job_id]) jobDateByHcpId[j.hcp_job_id] = j.job_date; });
+        const upsellsWithDate = (upsells||[]).map(u => ({ ...u, resolvedDate: u.hcp_job_id ? (jobDateByHcpId[u.hcp_job_id] || null) : null }));
+        const rangeInRange = upsellsWithDate.filter(u => u.resolvedDate && u.resolvedDate >= repairFrom && u.resolvedDate <= repairTo);
+        const noDateEntries = upsellsWithDate.filter(u => !u.resolvedDate);
+        const noDateTotal = noDateEntries.reduce((s,u)=>s+(u.amount||0),0);
+        const rangeByTech = {};
+        rangeInRange.forEach(u => { rangeByTech[u.tech_id] = (rangeByTech[u.tech_id]||0) + (u.amount||0); });
+        const rangeRanked = [...techs].map(t=>({...t, amt: rangeByTech[t.id]||0})).sort((a,b)=>b.amt-a.amt);
+        return (
+          <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"16px 18px" }}>
+            <Label color={C.green}>Upsell Totals · {repairFrom} → {repairTo}</Label>
+            {noDateEntries.length>0&&(
+              <div style={{ background:C.cardLt, borderRadius:"8px", padding:"8px 12px", fontSize:"11px", color:C.muted, marginBottom:"10px" }}>
+                ⚠ {noDateEntries.length} entr{noDateEntries.length!==1?"ies":"y"} totaling ${noDateTotal.toLocaleString()} {noDateEntries.length!==1?"have":"has"} no matched completion date (manually entered, not tied to an HCP job) — excluded from this range.
+              </div>
+            )}
+            {rangeRanked.map((t,i)=>(
+              <div key={t.id} style={{ display:"flex", justifyContent:"space-between", marginBottom:"8px" }}>
+                <span style={{ fontSize:"13px", color:C.black }}>{medal(i)} {t.name}</span>
+                <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", color:C.green }}>${t.amt.toLocaleString()} · {Math.round(t.amt*UPSELL_PTS_PER_DOLLAR)} pts</span>
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
+        );
+      })()}
     </div>
   );
 }
@@ -4516,6 +4541,9 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
   const [awardForm, setAwardForm] = useState({techId:"",badgeId:""});
   const [addForm, setAddForm] = useState({name:"",pin:"",avatar:"",start_date:"",commission_rate:27});
   const [swForm, setSwForm] = useState({techId:"",planId:""});
+  const [swRangePreset, setSwRangePreset] = useState("wtd");
+  const [swCStart, setSwCStart] = useState("");
+  const [swCEnd, setSwCEnd] = useState("");
   const [reviewForm, setReviewForm] = useState({});
   const [cbForm, setCbForm] = useState({techId:"",reason:""});
   const [toast, setToast] = useState(null);
@@ -4645,7 +4673,6 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
   const wk=getWeekKey(), mk=getMonthKey();
   const wkUp={}; upsells.filter(u=>u.week_key===wk).forEach(u=>{wkUp[u.tech_id]=u.amount;});
   const mkRev={}; reviews.filter(r=>r.month_key===mk).forEach(r=>{mkRev[r.tech_id]=r.count;});
-  const allTimeUp={}; upsells.forEach(u=>{allTimeUp[u.tech_id]=(allTimeUp[u.tech_id]||0)+u.amount;});
 
   const inp={ background:C.white, border:`1px solid ${C.border}`, color:C.black, padding:"10px 14px", borderRadius:"8px", fontSize:"14px", fontFamily:"'Barlow',sans-serif", width:"100%", boxSizing:"border-box" };
   const sel=(val)=>({...inp, color:val?C.black:C.muted});
@@ -4728,7 +4755,7 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
         )}
 
         {tab==="upsells"&&(
-          <AdminUpsellEntry techs={techs} refreshAll={refreshAll} showToast={showToast} allTimeUp={allTimeUp}/>
+          <AdminUpsellEntry techs={techs} refreshAll={refreshAll} showToast={showToast} upsells={upsells} jobs={jobs||[]}/>
         )}
 
         {tab==="reviews"&&(
@@ -4753,6 +4780,84 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
             <button onClick={logSwitchover} disabled={saving} style={btn(C.purple)}>{saving?"Saving...":"Log Switchover"}</button>
           </div>
         )}
+        {tab==="switchovers"&&(() => {
+          const RANGE_PRESETS = [["wtd","WTD"],["last_week","Last Week"],["mtd","MTD"],["last_month","Last Month"],["ytd","YTD"],["custom","Custom"]];
+          const { start: swStart, end: swEnd } = getDateRangeBounds(swRangePreset, swCStart, swCEnd);
+          function mondayOf(dateStr) {
+            const d = new Date(dateStr + "T12:00:00Z");
+            const day = d.getUTCDay();
+            const back = day === 0 ? 6 : day - 1;
+            d.setUTCDate(d.getUTCDate() - back);
+            return d.toISOString().split("T")[0];
+          }
+          const swFromWk = mondayOf(swStart);
+          const swInRange = switchovers.filter(s => s.week_key >= swFromWk && s.week_key <= swEnd);
+          const swByTech = {};
+          swInRange.forEach(s => {
+            if (!swByTech[s.tech_id]) swByTech[s.tech_id] = { total: 0, byPlan: {} };
+            swByTech[s.tech_id].total++;
+            swByTech[s.tech_id].byPlan[s.plan_id] = (swByTech[s.tech_id].byPlan[s.plan_id] || 0) + 1;
+          });
+          const swRanked = techs
+            .map(t => ({ ...t, total: swByTech[t.id]?.total || 0, byPlan: swByTech[t.id]?.byPlan || {} }))
+            .filter(t => t.total > 0)
+            .sort((a, b) => b.total - a.total);
+          return (
+            <>
+              <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.purple}`, borderRadius:"12px", padding:"16px 18px", display:"flex", flexDirection:"column", gap:"12px", marginTop:"16px" }}>
+                <Label color={C.purple}>📅 Date Range</Label>
+                <div style={{ display:"flex", gap:"6px", flexWrap:"wrap" }}>
+                  {RANGE_PRESETS.map(([id,label])=>(
+                    <button key={id} onClick={()=>setSwRangePreset(id)} style={{ background:swRangePreset===id?C.purple:C.cardLt, border:`1px solid ${swRangePreset===id?C.purple:C.border}`, color:swRangePreset===id?C.white:C.muted, padding:"6px 14px", borderRadius:"4px", cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", fontSize:"11px", letterSpacing:"1px" }}>{label}</button>
+                  ))}
+                </div>
+                {swRangePreset==="custom"&&(
+                  <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"8px" }}>
+                    {[["FROM", swCStart, setSwCStart], ["TO", swCEnd, setSwCEnd]].map(([lbl, val, set]) => (
+                      <div key={lbl}>
+                        <div style={{ fontSize:"10px", color:C.muted, letterSpacing:"2px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", marginBottom:"4px" }}>{lbl}</div>
+                        <input type="date" value={val} onChange={e => set(e.target.value)} style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"8px 10px", borderRadius:"8px", fontSize:"13px", fontFamily:"'Barlow',sans-serif", width:"100%", boxSizing:"border-box" }}/>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <div style={{ fontSize:"11px", color:C.purple, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>
+                  {swStart} → {swEnd} · matched by week (switchovers are logged by week, not exact day)
+                </div>
+              </div>
+
+              <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.purple}`, borderRadius:"12px", overflow:"hidden", marginTop:"16px" }}>
+                <div style={{ padding:"14px 18px", borderBottom:`1px solid ${C.border}`, background:C.cardLt }}>
+                  <Label color={C.purple}>🔄 Switchovers by Plan Type · {swStart} → {swEnd}</Label>
+                </div>
+                <div style={{ overflowX:"auto" }}>
+                  <table style={{ width:"100%", borderCollapse:"collapse", fontSize:"13px" }}>
+                    <thead>
+                      <tr>
+                        <th style={{ padding:"8px 18px", textAlign:"left", color:C.muted, fontWeight:"700", letterSpacing:"1px", fontFamily:"'Barlow Condensed',sans-serif", fontSize:"11px", borderBottom:`1px solid ${C.border}`, whiteSpace:"nowrap" }}>TECH</th>
+                        <th style={{ padding:"8px 18px", textAlign:"left", color:C.muted, fontWeight:"700", letterSpacing:"1px", fontFamily:"'Barlow Condensed',sans-serif", fontSize:"11px", borderBottom:`1px solid ${C.border}` }}>BREAKDOWN</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {swRanked.length===0 && (
+                        <tr><td colSpan={2} style={{ padding:"16px 18px", color:C.muted, textAlign:"center" }}>No switchovers logged in this range.</td></tr>
+                      )}
+                      {swRanked.map((t,i)=>{
+                        const breakdown = Object.entries(t.byPlan).sort((a,b)=>b[1]-a[1]).map(([planId,count])=>`${count} ${PLAN_MAP[planId]?.label||planId}`).join(", ");
+                        return (
+                          <tr key={t.id} style={{ borderBottom:`1px solid ${C.border}` }}>
+                            <td style={{ padding:"10px 18px", color:C.black, fontWeight:"700", fontFamily:"'Barlow Condensed',sans-serif", whiteSpace:"nowrap" }}>{medal(i)} {t.name}</td>
+                            <td style={{ padding:"10px 18px", color:C.black }}>{breakdown} <span style={{ color:C.muted, fontSize:"11px" }}>({t.total} total)</span></td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </>
+          );
+        })()}
 
         {tab==="callbacks"&&(
           <div style={{ display:"flex", flexDirection:"column", gap:"16px" }}>
