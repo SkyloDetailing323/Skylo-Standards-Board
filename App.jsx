@@ -221,6 +221,8 @@ function getDateRangeBounds(preset, customStart="", customEnd="") {
   const pad = n => String(n).padStart(2,"0");
   const fmt = d => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
   const today = fmt(now);
+  if (preset==="today")     return { start:today, end:today };
+  if (preset==="yesterday") { const y = new Date(now); y.setDate(now.getDate()-1); const ys = fmt(y); return { start:ys, end:ys }; }
   if (preset==="custom") return { start:customStart||today, end:customEnd||today };
   if (preset==="wtd")    return { start:getWeekKey(), end:today };
   if (preset==="last_week") {
@@ -240,6 +242,36 @@ function getDateRangeBounds(preset, customStart="", customEnd="") {
   }
   if (preset==="ytd") return { start:`${now.getFullYear()}-01-01`, end:today };
   return { start:today, end:today };
+}
+
+// ─── SHARED DATE RANGE PICKER ─────────────────────────────────────────────────
+// Single implementation for every tab that offers a date-range filter (Reports,
+// Upsells, Switchovers, Reviews — admin and tech-facing). Previously each tab
+// had its own copy-pasted preset row with small styling drift between them;
+// this is the one place to change if a preset is ever added/renamed.
+const DATE_RANGE_PRESETS = [["today","Today"],["yesterday","Yesterday"],["wtd","WTD"],["last_week","Last Week"],["mtd","MTD"],["last_month","Last Month"],["ytd","YTD"],["custom","Custom"]];
+function DateRangePicker({ label="📊 Time Period", color=C.blue, preset, setPreset, customStart, setCustomStart, customEnd, setCustomEnd, children }) {
+  return (
+    <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${color}`, borderRadius:"12px", padding:"16px 18px" }}>
+      <Label color={color}>{label}</Label>
+      <div style={{ display:"flex", gap:"6px", flexWrap:"wrap" }}>
+        {DATE_RANGE_PRESETS.map(([id,lbl])=>(
+          <button key={id} onClick={()=>setPreset(id)} style={{ background:preset===id?color:C.cardLt, border:`1px solid ${preset===id?color:C.border}`, color:preset===id?C.white:C.muted, padding:"6px 14px", borderRadius:"4px", cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", fontSize:"11px", letterSpacing:"1px" }}>{lbl}</button>
+        ))}
+      </div>
+      {preset==="custom"&&(
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"8px", marginTop:"12px" }}>
+          {[["From",customStart,setCustomStart],["To",customEnd,setCustomEnd]].map(([lbl,val,set])=>(
+            <div key={lbl}>
+              <div style={{ fontSize:"10px", color:C.muted, marginBottom:"4px" }}>{lbl}</div>
+              <input type="date" value={val} onChange={e=>set(e.target.value)} style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"8px", borderRadius:"8px", fontSize:"13px", fontFamily:"'Barlow',sans-serif", width:"100%", boxSizing:"border-box" }}/>
+            </div>
+          ))}
+        </div>
+      )}
+      {children}
+    </div>
+  );
 }
 const TEAM_LEAD_OVERRIDE_PCT_PARTIAL = 0.05; // 5% if lead + 2/3 of team hits quota
 const TEAM_LEAD_OVERRIDE_PCT_FULL    = 0.10; // 10% if lead + ALL of team hits quota
@@ -575,7 +607,6 @@ function UpsellLeaderboard({ techs, upsells, jobs=[], currentId }) {
   // date to match against, so they're excluded from range filtering rather
   // than approximated by week — surfaced separately below so nothing is
   // silently dropped.
-  const RANGE_PRESETS = [["wtd","WTD"],["last_week","Last Week"],["mtd","MTD"],["last_month","Last Month"],["ytd","YTD"],["custom","Custom"]];
   const [rangePreset, setRangePreset] = useState("wtd");
   const [cStart, setCStart] = useState("");
   const [cEnd, setCEnd] = useState("");
@@ -681,32 +712,16 @@ function UpsellLeaderboard({ techs, upsells, jobs=[], currentId }) {
       </div>
 
       {/* Date Range */}
-      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.green}`, borderRadius:"12px", padding:"16px 18px", display:"flex", flexDirection:"column", gap:"12px" }}>
-        <Label color={C.green}>📅 Date Range</Label>
-        <div style={{ display:"flex", gap:"6px", flexWrap:"wrap" }}>
-          {RANGE_PRESETS.map(([id,label])=>(
-            <button key={id} onClick={()=>setRangePreset(id)} style={{ background:rangePreset===id?C.green:C.cardLt, border:`1px solid ${rangePreset===id?C.green:C.border}`, color:rangePreset===id?C.white:C.muted, padding:"6px 14px", borderRadius:"4px", cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", fontSize:"11px", letterSpacing:"1px" }}>{label}</button>
-          ))}
-        </div>
-        {rangePreset==="custom"&&(
-          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"8px" }}>
-            {[["FROM", cStart, setCStart], ["TO", cEnd, setCEnd]].map(([lbl, val, set]) => (
-              <div key={lbl}>
-                <div style={{ fontSize:"10px", color:C.muted, letterSpacing:"2px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", marginBottom:"4px" }}>{lbl}</div>
-                <input type="date" value={val} onChange={e => set(e.target.value)} style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"8px 10px", borderRadius:"8px", fontSize:"13px", fontFamily:"'Barlow',sans-serif", width:"100%", boxSizing:"border-box" }}/>
-              </div>
-            ))}
-          </div>
-        )}
-        <div style={{ fontSize:"11px", color:C.green, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>
+      <DateRangePicker label="📅 Date Range" color={C.green} preset={rangePreset} setPreset={setRangePreset} customStart={cStart} setCustomStart={setCStart} customEnd={cEnd} setCustomEnd={setCEnd}>
+        <div style={{ fontSize:"11px", color:C.green, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", marginTop:"8px" }}>
           {rangeStart} → {rangeEnd} · matched by exact completion date · ${rangeInRange.reduce((s,u)=>s+(u.amount||0),0).toLocaleString()} · {rangeInRange.length} entr{rangeInRange.length!==1?"ies":"y"}
         </div>
         {noDateEntries.length>0&&(
-          <div style={{ fontSize:"11px", color:C.muted }}>
+          <div style={{ fontSize:"11px", color:C.muted, marginTop:"6px" }}>
             ⚠ {noDateEntries.length} entr{noDateEntries.length!==1?"ies":"y"} totaling ${noDateTotal.toLocaleString()} {noDateEntries.length!==1?"have":"has"} no matched completion date (manually entered, not tied to an HCP job) — excluded from every range above, not just this one.
           </div>
         )}
-      </div>
+      </DateRangePicker>
 
       {(() => {
         const rangeByTech = {};
@@ -761,7 +776,6 @@ function SwitchoverLeaderboard({ techs, switchovers, currentId }) {
   // logged with a week_key (Monday of the week), not an exact day, so range
   // filtering matches by week overlap: any switchover whose week starts
   // on/after the Monday of the range start and on/before the range end.
-  const RANGE_PRESETS = [["wtd","WTD"],["last_week","Last Week"],["mtd","MTD"],["last_month","Last Month"],["ytd","YTD"],["custom","Custom"]];
   const [rangePreset, setRangePreset] = useState("wtd");
   const [cStart, setCStart] = useState("");
   const [cEnd, setCEnd] = useState("");
@@ -838,27 +852,11 @@ function SwitchoverLeaderboard({ techs, switchovers, currentId }) {
       </div>
 
       {/* Date Range */}
-      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.purple}`, borderRadius:"12px", padding:"16px 18px", display:"flex", flexDirection:"column", gap:"12px" }}>
-        <Label color={C.purple}>📅 Date Range</Label>
-        <div style={{ display:"flex", gap:"6px", flexWrap:"wrap" }}>
-          {RANGE_PRESETS.map(([id,label])=>(
-            <button key={id} onClick={()=>setRangePreset(id)} style={{ background:rangePreset===id?C.purple:C.cardLt, border:`1px solid ${rangePreset===id?C.purple:C.border}`, color:rangePreset===id?C.white:C.muted, padding:"6px 14px", borderRadius:"4px", cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", fontSize:"11px", letterSpacing:"1px" }}>{label}</button>
-          ))}
-        </div>
-        {rangePreset==="custom"&&(
-          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"8px" }}>
-            {[["FROM", cStart, setCStart], ["TO", cEnd, setCEnd]].map(([lbl, val, set]) => (
-              <div key={lbl}>
-                <div style={{ fontSize:"10px", color:C.muted, letterSpacing:"2px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", marginBottom:"4px" }}>{lbl}</div>
-                <input type="date" value={val} onChange={e => set(e.target.value)} style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"8px 10px", borderRadius:"8px", fontSize:"13px", fontFamily:"'Barlow',sans-serif", width:"100%", boxSizing:"border-box" }}/>
-              </div>
-            ))}
-          </div>
-        )}
-        <div style={{ fontSize:"11px", color:C.purple, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>
+      <DateRangePicker label="📅 Date Range" color={C.purple} preset={rangePreset} setPreset={setRangePreset} customStart={cStart} setCustomStart={setCStart} customEnd={cEnd} setCustomEnd={setCEnd}>
+        <div style={{ fontSize:"11px", color:C.purple, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", marginTop:"8px" }}>
           {rangeStart} → {rangeEnd} · matched by week (switchovers are logged by week, not exact day)
         </div>
-      </div>
+      </DateRangePicker>
 
       <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.purple}`, borderRadius:"12px", overflow:"hidden" }}>
         <div style={{ padding:"14px 18px", borderBottom:`1px solid ${C.border}`, background:C.cardLt }}>
@@ -1126,7 +1124,6 @@ function ReportsTab({ techs, jobs, upsells=[], techHours=[], techId=null, onSave
     } catch(e) { showToast("Error: "+e.message, false); }
     setRepairingRev(false);
   }
-  const PRESETS = [["wtd","WTD"],["last_week","Last Week"],["mtd","MTD"],["last_month","Last Month"],["ytd","YTD"],["custom","Custom"]];
   const { start, end } = getDateRangeBounds(preset, cStart, cEnd);
 
   const inRange = jobs.filter(j => {
@@ -1181,27 +1178,11 @@ function ReportsTab({ techs, jobs, upsells=[], techHours=[], techId=null, onSave
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:"16px" }}>
       {/* Period selector */}
-      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.blue}`, borderRadius:"12px", padding:"16px 18px" }}>
-        <Label color={C.blue}>📊 Time Period</Label>
-        <div style={{ display:"flex", gap:"6px", flexWrap:"wrap" }}>
-          {PRESETS.map(([id,label])=>(
-            <button key={id} onClick={()=>setPreset(id)} style={{ background:preset===id?C.blue:C.cardLt, border:`1px solid ${preset===id?C.blue:C.border}`, color:preset===id?C.white:C.muted, padding:"6px 14px", borderRadius:"4px", cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", fontSize:"11px", letterSpacing:"1px" }}>{label}</button>
-          ))}
-        </div>
-        {preset==="custom"&&(
-          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"8px", marginTop:"12px" }}>
-            {[["From",cStart,setCStart],["To",cEnd,setCEnd]].map(([lbl,val,set])=>(
-              <div key={lbl}>
-                <div style={{ fontSize:"10px", color:C.muted, marginBottom:"4px" }}>{lbl}</div>
-                <input type="date" value={val} onChange={e=>set(e.target.value)} style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"8px", borderRadius:"8px", fontSize:"13px", fontFamily:"'Barlow',sans-serif", width:"100%", boxSizing:"border-box" }}/>
-              </div>
-            ))}
-          </div>
-        )}
+      <DateRangePicker label="📊 Time Period" color={C.blue} preset={preset} setPreset={setPreset} customStart={cStart} setCustomStart={setCStart} customEnd={cEnd} setCustomEnd={setCEnd}>
         <div style={{ marginTop:"8px", fontSize:"11px", color:C.blue, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>
             {start} → {end} · {inRange.length} job{inRange.length!==1?"s":""}
           </div>
-      </div>
+      </DateRangePicker>
 
       {inRange.length===0?(
         <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"32px", textAlign:"center", color:C.muted, fontSize:"13px" }}>
@@ -2995,8 +2976,13 @@ function DeleteTab({ techs, upsells, switchovers, reviews, saving, setSaving, re
 // ─── ADMIN UPSELL ENTRY (with date picker) ────────────────────────────────────
 function AdminUpsellEntry({ techs, refreshAll, showToast, upsells, jobs=[] }) {
   const todayDefault = new Date(Date.now() - 6*3600000).toISOString().split("T")[0];
-  const [repairFrom, setRepairFrom] = useState("2026-06-01");
-  const [repairTo,   setRepairTo]   = useState(todayDefault);
+  // Defaults to "custom" pre-filled with the old hardcoded range so existing
+  // behavior is unchanged for anyone who doesn't touch the picker -- they
+  // also now get Today/WTD/MTD/etc. shortcuts on top.
+  const [repairPreset, setRepairPreset] = useState("custom");
+  const [repairCStart, setRepairCStart] = useState("2026-06-01");
+  const [repairCEnd,   setRepairCEnd]   = useState(todayDefault);
+  const { start: repairFrom, end: repairTo } = getDateRangeBounds(repairPreset, repairCStart, repairCEnd);
   const [repairResult, setRepairResult] = useState(null);
   const [repairing, setRepairing] = useState(false);
   const [upsExpanded, setUpsExpanded] = useState(false);
@@ -3063,14 +3049,11 @@ function AdminUpsellEntry({ techs, refreshAll, showToast, upsells, jobs=[] }) {
       <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.orange}`, borderRadius:"12px", padding:"20px", display:"flex", flexDirection:"column", gap:"12px" }}>
         <Label color={C.orange}>Repair Upsells from HCP</Label>
         <div style={{ fontSize:"12px", color:C.muted }}>Scans every "Additional Upgrades" line item across a custom date range and writes the real amounts to the board. Use this to fix missing or wrong upsells.</div>
-        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"8px" }}>
-          {[["FROM", repairFrom, setRepairFrom], ["TO", repairTo, setRepairTo]].map(([lbl, val, set]) => (
-            <div key={lbl}>
-              <div style={{ fontSize:"10px", color:C.muted, letterSpacing:"2px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", marginBottom:"4px" }}>{lbl}</div>
-              <input type="date" value={val} onChange={e => set(e.target.value)} style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"8px 10px", borderRadius:"8px", fontSize:"13px", fontFamily:"'Barlow',sans-serif", width:"100%", boxSizing:"border-box" }}/>
-            </div>
-          ))}
-        </div>
+        <DateRangePicker label="📅 Date Range" color={C.orange} preset={repairPreset} setPreset={setRepairPreset} customStart={repairCStart} setCustomStart={setRepairCStart} customEnd={repairCEnd} setCustomEnd={setRepairCEnd}>
+          <div style={{ fontSize:"11px", color:C.orange, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", marginTop:"8px" }}>
+            {repairFrom} → {repairTo}
+          </div>
+        </DateRangePicker>
         <button onClick={repairFromHCP} disabled={repairing} style={{ background:repairing?"#333":C.orange, border:"none", color:C.white, padding:"13px", borderRadius:"12px", cursor:repairing?"not-allowed":"pointer", fontSize:"13px", fontWeight:"700", letterSpacing:"2px", fontFamily:"'Barlow Condensed',sans-serif", width:"100%", textTransform:"uppercase" }}>
           {repairing ? "Scanning HCP — this may take ~20 sec..." : "Repair Upsells"}
         </button>
@@ -3165,6 +3148,9 @@ function AdminReviewEntry({ techs, reviews, saving, setSaving, refreshAll, showT
   const mk = getMonthKey();
   const [targetMonth, setTargetMonth] = useState(mk);
   const [form, setForm] = useState({});
+  const [rangePreset, setRangePreset] = useState("wtd");
+  const [cStart, setCStart] = useState("");
+  const [cEnd, setCEnd] = useState("");
 
   const byMonth = {};
   reviews.forEach(r=>{ byMonth[r.month_key]=(byMonth[r.month_key]||0)+1; });
@@ -3190,7 +3176,22 @@ function AdminReviewEntry({ techs, reviews, saving, setSaving, refreshAll, showT
     setSaving(false);
   }
 
+  // Date range — same picker as Reports/Upsells/Switchovers. Reviews are only
+  // logged with a month_key ("YYYY-MM"), not an exact day, so range filtering
+  // matches by month overlap: any review in a month overlapping the range.
+  const { start: rangeStart, end: rangeEnd } = getDateRangeBounds(rangePreset, cStart, cEnd);
+  const rangeStartMonth = rangeStart.slice(0, 7);
+  const rangeEndMonth   = rangeEnd.slice(0, 7);
+  const rangeInRange = reviews.filter(r => r.month_key >= rangeStartMonth && r.month_key <= rangeEndMonth);
+  const rangeByTech = {};
+  rangeInRange.forEach(r => { rangeByTech[r.tech_id] = (rangeByTech[r.tech_id]||0) + (r.count||0); });
+  const rangeRanked = techs
+    .map(t => ({ ...t, count: rangeByTech[t.id] || 0 }))
+    .filter(t => t.count > 0)
+    .sort((a, b) => b.count - a.count);
+
   return (
+    <div style={{ display:"flex", flexDirection:"column", gap:"16px" }}>
     <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.gold}`, borderRadius:"12px", padding:"20px", display:"flex", flexDirection:"column", gap:"14px" }}>
       <Label color={C.gold}>Log 5-Star Reviews</Label>
       <div style={{ fontSize:"12px", color:C.muted }}>+{REVIEW_PTS} pts each · +{REVIEW_BONUS_PTS} bonus at 10+ · Log current or any past month</div>
@@ -3232,6 +3233,28 @@ function AdminReviewEntry({ techs, reviews, saving, setSaving, refreshAll, showT
         </div>
       ))}
       <button onClick={handleSave} disabled={saving} style={{ background:saving?"#333":C.gold, border:"none", color:saving?"#666":C.black, padding:"13px", borderRadius:"12px", cursor:saving?"not-allowed":"pointer", fontSize:"13px", fontWeight:"700", letterSpacing:"2px", fontFamily:"'Barlow Condensed',sans-serif", width:"100%", textTransform:"uppercase" }}>{saving?"Saving...":"Save Reviews"}</button>
+    </div>
+
+    <DateRangePicker label="📅 Date Range" color={C.gold} preset={rangePreset} setPreset={setRangePreset} customStart={cStart} setCustomStart={setCStart} customEnd={cEnd} setCustomEnd={setCEnd}>
+      <div style={{ fontSize:"11px", color:C.gold, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", marginTop:"8px" }}>
+        {rangeStart} → {rangeEnd} · matched by month (reviews are logged by month, not exact day)
+      </div>
+    </DateRangePicker>
+
+    <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.gold}`, borderRadius:"12px", overflow:"hidden" }}>
+      <div style={{ padding:"14px 18px", borderBottom:`1px solid ${C.border}`, background:C.cardLt }}>
+        <Label color={C.gold}>⭐ Review Totals · {rangeStart} → {rangeEnd}</Label>
+      </div>
+      <div style={{ padding:"14px 18px", display:"flex", flexDirection:"column", gap:"8px" }}>
+        {rangeRanked.length===0 && <div style={{ fontSize:"13px", color:C.muted, textAlign:"center", padding:"12px" }}>No reviews logged in this range.</div>}
+        {rangeRanked.map((t,i)=>(
+          <div key={t.id} style={{ display:"flex", justifyContent:"space-between" }}>
+            <span style={{ fontSize:"13px", color:C.black }}>{medal(i)} {t.name}</span>
+            <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"13px", color:C.black }}>{t.count} ⭐</span>
+          </div>
+        ))}
+      </div>
+    </div>
     </div>
   );
 }
@@ -4788,7 +4811,6 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
           </div>
         )}
         {tab==="switchovers"&&(() => {
-          const RANGE_PRESETS = [["wtd","WTD"],["last_week","Last Week"],["mtd","MTD"],["last_month","Last Month"],["ytd","YTD"],["custom","Custom"]];
           const { start: swStart, end: swEnd } = getDateRangeBounds(swRangePreset, swCStart, swCEnd);
           function mondayOf(dateStr) {
             const d = new Date(dateStr + "T12:00:00Z");
@@ -4811,26 +4833,12 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
             .sort((a, b) => b.total - a.total);
           return (
             <>
-              <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.purple}`, borderRadius:"12px", padding:"16px 18px", display:"flex", flexDirection:"column", gap:"12px", marginTop:"16px" }}>
-                <Label color={C.purple}>📅 Date Range</Label>
-                <div style={{ display:"flex", gap:"6px", flexWrap:"wrap" }}>
-                  {RANGE_PRESETS.map(([id,label])=>(
-                    <button key={id} onClick={()=>setSwRangePreset(id)} style={{ background:swRangePreset===id?C.purple:C.cardLt, border:`1px solid ${swRangePreset===id?C.purple:C.border}`, color:swRangePreset===id?C.white:C.muted, padding:"6px 14px", borderRadius:"4px", cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", fontSize:"11px", letterSpacing:"1px" }}>{label}</button>
-                  ))}
-                </div>
-                {swRangePreset==="custom"&&(
-                  <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"8px" }}>
-                    {[["FROM", swCStart, setSwCStart], ["TO", swCEnd, setSwCEnd]].map(([lbl, val, set]) => (
-                      <div key={lbl}>
-                        <div style={{ fontSize:"10px", color:C.muted, letterSpacing:"2px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", marginBottom:"4px" }}>{lbl}</div>
-                        <input type="date" value={val} onChange={e => set(e.target.value)} style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"8px 10px", borderRadius:"8px", fontSize:"13px", fontFamily:"'Barlow',sans-serif", width:"100%", boxSizing:"border-box" }}/>
-                      </div>
-                    ))}
+              <div style={{ marginTop:"16px" }}>
+                <DateRangePicker label="📅 Date Range" color={C.purple} preset={swRangePreset} setPreset={setSwRangePreset} customStart={swCStart} setCustomStart={setSwCStart} customEnd={swCEnd} setCustomEnd={setSwCEnd}>
+                  <div style={{ fontSize:"11px", color:C.purple, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", marginTop:"8px" }}>
+                    {swStart} → {swEnd} · matched by week (switchovers are logged by week, not exact day)
                   </div>
-                )}
-                <div style={{ fontSize:"11px", color:C.purple, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>
-                  {swStart} → {swEnd} · matched by week (switchovers are logged by week, not exact day)
-                </div>
+                </DateRangePicker>
               </div>
 
               <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.purple}`, borderRadius:"12px", overflow:"hidden", marginTop:"16px" }}>
