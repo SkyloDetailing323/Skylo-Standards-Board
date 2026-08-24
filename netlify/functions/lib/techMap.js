@@ -9,6 +9,7 @@ module.exports = {
   "Ethan Hamilton":    "Ethan Hamilton",
   "Ethan Hansen":      "Ethan Hansen",
   "Garrett Glauser":   "Garrett Glauser",
+  "Jack Watson":       "Jack Watson",
   "Jackson Payne":     "Jackson Payne",
   "Jackson Vaughn":    "Jackson Vaughn",
   "JaMuar Hill":       "Jamuar Hill",
