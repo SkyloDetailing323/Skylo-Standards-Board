@@ -5,6 +5,7 @@ module.exports = {
   "Brian Wheelus":     "Brian Wheelus",
   "Britton Dookhran":  "Britton Dookhran",
   "Caleb McDaniel":    "Caleb McDaniel",
+  "Casey Brown":       "Casey Brown",
   "Cole Burtenshaw":   "Cole Burtenshaw",
   "Ethan Hamilton":    "Ethan Hamilton",
   "Ethan Hansen":      "Ethan Hansen",
@@ -29,6 +30,7 @@ module.exports = {
   "Riley Wooden":      "Riley Wooden",
   "Tom Lorenc":        "Tom Lorenc",
   "Trevor Prince":     "Trevor Prince",
+  "Truxton Mcspadden": "Truxton Mcspadden",
   "Will Faulkner":     "Will Faulkner",
   "Zak Lundblade":     "Zak Lundblade",
 };

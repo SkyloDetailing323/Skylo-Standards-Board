@@ -1948,7 +1948,10 @@ function OperationsProgressTab({ techs, upsells, switchovers, reviews, quota, ca
   // Archived techs shouldn't count toward the quota-hit denominator or appear
   // in the breakdown below — they're not working, so including them made the
   // team's hit rate look worse than it actually is among current techs.
-  const activeTechs = techs.filter(t => t.is_active !== false);
+  // Owner/admin accounts (title:"owner", e.g. Truxton/Casey) are tracked for
+  // revenue completeness elsewhere but were never meant to count toward the
+  // tech bonus-threshold quota -- they'd quietly inflate the denominator.
+  const activeTechs = techs.filter(t => t.is_active !== false && t.title !== "owner");
   const techStats = activeTechs.map(t => {
     const now = new Date(); const y = now.getFullYear(); const m = String(now.getMonth()+1).padStart(2,"0");
     const monthUpsellAmt   = upsells.filter(u=>u.tech_id===t.id && u.week_key?.startsWith(`${y}-${m}`)).reduce((s,u)=>s+u.amount,0);
@@ -4534,8 +4537,12 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
   // Live-standings views (Leaderboard, Journey Map) should only show active
   // techs, matching what the tech-facing app already does — archived techs
   // stay fully visible in Reports/Payroll/Upsell Audit where historical
-  // accuracy matters instead.
-  const activeTechs = techs.filter(t => t.is_active !== false);
+  // accuracy matters instead. Same reasoning excludes owner/admin accounts
+  // (title:"owner") from these standings views -- they're tracked for
+  // revenue completeness (Reports/Repair Revenue/Upsell Totals all still use
+  // the raw `techs` prop, unaffected by this filter) but shouldn't appear in
+  // gamified rankings.
+  const activeTechs = techs.filter(t => t.is_active !== false && t.title !== "owner");
   const [tab, setTab] = useState("upsells");
   const [menuOpen, setMenuOpen] = useState(false);
   const [awardForm, setAwardForm] = useState({techId:"",badgeId:""});
@@ -5243,7 +5250,12 @@ export default function App() {
     if (tech) { setUser({type:"tech",techId:tech.id}); return true; }
     return false;
   }
-  const activeTechs = (techs || []).filter(t => t.is_active !== false);
+  // Feeds TechDashboard's entire `techs` prop -- excluding owner/admin
+  // accounts (title:"owner") here means every gamification view a tech sees
+  // (Leaderboard, Total Score, Switchovers, Upsells, Reviews, Journey Map,
+  // Rewards, Team Rank denominator) never counts them, without needing a
+  // separate filter in each of those components.
+  const activeTechs = (techs || []).filter(t => t.is_active !== false && t.title !== "owner");
   const currentTech = user?.type==="tech" ? techs?.find(t=>t.id===user.techId) : null;
 
   if (loading) return (
