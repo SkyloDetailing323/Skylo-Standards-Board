@@ -8,6 +8,7 @@ module.exports = {
   "Cole Burtenshaw":   "Cole Burtenshaw",
   "Ethan Hamilton":    "Ethan Hamilton",
   "Ethan Hansen":      "Ethan Hansen",
+  "Garrett Glauser":   "Garrett Glauser",
   "Jackson Payne":     "Jackson Payne",
   "Jackson Vaughn":    "Jackson Vaughn",
   "JaMuar Hill":       "Jamuar Hill",
