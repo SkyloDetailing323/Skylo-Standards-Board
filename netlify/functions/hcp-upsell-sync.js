@@ -1,6 +1,6 @@
 // netlify/functions/hcp-upsell-sync.js
-// Scheduled every 5 min. Fetches today's completed HCP jobs and syncs revenue, tips, upsells.
-// Split jobs: revenue/tips/upsells divided by confirmed split % (job_splits table),
+// Scheduled every 5 min. Fetches today's completed HCP jobs and syncs revenue, upsells.
+// Split jobs: revenue/upsells divided by confirmed split % (job_splits table),
 // falling back to equal split with split_confirmed=false.
 
 const TECH_MAP = require('./lib/techMap');
@@ -64,16 +64,8 @@ function parseInvoice(inv) {
   const serviceCents   = Math.max(0, lineItemsCents - discountCents);
   const revenue        = serviceCents / 100;
 
-  // Only count payments that actually succeeded — a failed attempt followed
-  // by a successful retry both appear in inv.payments, and summing both
-  // double-counts that amount, which the derived-tip fallback below then
-  // misreads as a tip.
-  const payments        = (inv.payments || []).filter(p => p.status === "succeeded");
-  const tipFromPayments = payments.reduce((s, p) => s + (p.tip_amount || 0), 0);
-  const paidCents       = payments.reduce((s, p) => s + (p.amount || 0), 0);
-  const derivedTip      = Math.max(0, paidCents - serviceCents);
-  const tipCents        = tipFromPayments > 0 ? tipFromPayments : derivedTip;
-  const tips            = tipCents / 100;
+  // Tips are no longer computed here — manual entry (tip_entries table) is
+  // the only source now. Revenue/upsell math above is unchanged.
 
   let upsellCents = 0;
   const upsellItems = [];
@@ -85,7 +77,7 @@ function parseInvoice(inv) {
     }
   }
 
-  return { revenue, tips, upsellTotal: upsellCents / 100, upsellItems };
+  return { revenue, upsellTotal: upsellCents / 100, upsellItems };
 }
 
 exports.handler = async () => {
@@ -148,7 +140,6 @@ exports.handler = async () => {
     jobMeta[String(job.id)] = {
       employees:    matchedEmployees,
       jobDate,
-      tipFallback:  job.tip_amount   || 0,
       totalAmount:  job.total_amount || 0,
       customerName: [job.customer?.first_name, job.customer?.last_name].filter(Boolean).join(" ") || null,
     };
@@ -207,9 +198,6 @@ exports.handler = async () => {
 
     const totalRev    = inv ? inv.revenue : 0;
     const totalUps    = inv ? inv.upsellTotal : 0;
-    const invTipCents = inv ? Math.round((inv.tips || 0) * 100) : 0;
-    const jobTipCents = meta.tipFallback || 0;
-    const totalTip    = (jobTipCents > 0 ? jobTipCents : invTipCents) / 100;
 
     const splits = resolveSplits(jobId, meta.employees, splitMap, techByName);
 
@@ -218,7 +206,6 @@ exports.handler = async () => {
       if (!tech) { console.log("Tech not in Supabase:", split.skyloName); continue; }
 
       const revenue   = +(totalRev * split.pct).toFixed(2);
-      const tips      = +(totalTip * split.pct).toFixed(2);
       // Upsell credit: if manually attributed, 100% to one tech; otherwise split by revenue %
       const attribId  = upsellAttribMap[jobId];
       const upsellPct = attribId ? (attribId === tech.id ? 1.0 : 0) : split.pct;
@@ -231,7 +218,7 @@ exports.handler = async () => {
           hcp_job_id:      jobId,
           tech_id:         tech.id,
           job_date:        jobDate,
-          revenue, tips,
+          revenue,
           upsell_amount:   upsells,
           hours:           0,
           week_key:        weekKey,
@@ -255,7 +242,7 @@ exports.handler = async () => {
       }
 
       const pctTag = splits.length > 1 ? ` (${Math.round(split.pct * 100)}%${split.confirmed ? "" : " unconfirmed"})` : "";
-      console.log(`Synced: ${split.skyloName}${pctTag} | rev=$${revenue} tips=$${tips} ups=$${upsells} hrs=0`);
+      console.log(`Synced: ${split.skyloName}${pctTag} | rev=$${revenue} ups=$${upsells} hrs=0`);
       synced++;
     }
   }

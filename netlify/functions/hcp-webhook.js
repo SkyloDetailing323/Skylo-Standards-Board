@@ -1,6 +1,6 @@
 // netlify/functions/hcp-webhook.js
 // Receives real-time job updates pushed from HCP whenever a job is saved/completed.
-// Split jobs: for multi-employee jobs, writes one row per tech with split revenue/tips/upsells.
+// Split jobs: for multi-employee jobs, writes one row per tech with split revenue/upsells.
 // Split %s come from the job_splits Supabase table; equal split fallback with split_confirmed=false.
 
 const TECH_MAP = require('./lib/techMap');
@@ -56,15 +56,9 @@ function parseInvoice(inv) {
   const serviceCents   = Math.max(0, lineItemsCents - discountCents);
   const revenue        = serviceCents / 100;
 
-  // Only count payments that actually succeeded — a failed attempt followed
-  // by a successful retry both appear in inv.payments, and summing both
-  // double-counts that amount, which the derived-tip fallback below then
-  // misreads as a tip.
-  const payments        = (inv.payments || []).filter(p => p.status === "succeeded");
-  const tipFromPayments = payments.reduce((s, p) => s + (p.tip_amount || 0), 0);
-  const paidCents       = payments.reduce((s, p) => s + (p.amount || 0), 0);
-  const derivedTip      = Math.max(0, paidCents - serviceCents);
-  const tips            = (tipFromPayments > 0 ? tipFromPayments : derivedTip) / 100;
+  // Tips are no longer computed here — HCP doesn't reliably surface them on
+  // the invoice/payment objects (confirmed), and the derived-formula fallback
+  // was unreliable too. Tips are manual-entry only now (tip_entries table).
 
   let upsellCents = 0;
   const upsellItems = [];
@@ -76,7 +70,7 @@ function parseInvoice(inv) {
     }
   }
 
-  return { revenue, tips, upsellTotal: upsellCents / 100, upsellItems };
+  return { revenue, upsellTotal: upsellCents / 100, upsellItems };
 }
 
 exports.handler = async (event) => {
@@ -154,14 +148,16 @@ exports.handler = async (event) => {
   const customerName = [job.customer?.first_name, job.customer?.last_name].filter(Boolean).join(" ") || null;
   const weekKey    = getWeekKey(jobDate);
 
-  // Fetch invoice for accurate revenue, tips, upsells
+  // Fetch invoice for accurate revenue, upsells
   const invData  = await hcpGet(`jobs/${jobId}/invoices`);
   const invoices = invData?.invoices || [];
   const inv      = invoices.length > 0 ? parseInvoice(invoices[0]) : null;
 
+  // job.tip_amount is kept here only because the no-invoice revenue fallback
+  // is "total collected minus tip" -- tips themselves are never written below,
+  // manual entry (tip_entries table) is the only source now.
   const tipFallbackCents = job.tip_amount || 0;
   const totalRev = inv ? inv.revenue     : Math.max(0, ((job.total_amount || 0) - tipFallbackCents)) / 100;
-  const totalTip = inv ? inv.tips        : tipFallbackCents / 100;
   const totalUps = inv ? inv.upsellTotal : 0;
 
   // Fetch confirmed splits and upsell attribution for this job if multi-employee
@@ -177,7 +173,6 @@ exports.handler = async (event) => {
     }
 
     const revenue   = +(totalRev * split.pct).toFixed(2);
-    const tips      = +(totalTip * split.pct).toFixed(2);
     // Upsell credit: if manually attributed, 100% to one tech; otherwise split by revenue %
     const attribId  = upsellAttribMap[jobId];
     const upsellPct = attribId ? (attribId === tech.id ? 1.0 : 0) : split.pct;
@@ -190,7 +185,7 @@ exports.handler = async (event) => {
         hcp_job_id:      jobId,
         tech_id:         tech.id,
         job_date:        jobDate,
-        revenue, tips,
+        revenue,
         upsell_amount:   upsells,
         hours:           0,
         week_key:        weekKey,
@@ -218,7 +213,7 @@ exports.handler = async (event) => {
     }
 
     const pctTag = splits.length > 1 ? ` (${Math.round(split.pct * 100)}%${split.confirmed ? "" : " unconfirmed"})` : "";
-    console.log(`Webhook processed: ${split.skyloName}${pctTag} | $${revenue} rev | $${tips} tips | $${upsells} ups`);
+    console.log(`Webhook processed: ${split.skyloName}${pctTag} | $${revenue} rev | $${upsells} ups`);
   }
 
   return { statusCode: 200, body: "ok" };

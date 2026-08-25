@@ -1,5 +1,5 @@
 // netlify/functions/hcp-revenue-repair.js
-// On-demand revenue+tips repair for a date range (Reports tab "Repair Revenue"
+// On-demand revenue repair for a date range (Reports tab "Repair Revenue"
 // button). No schedule — Netlify blocks direct HTTP invocation of any function
 // that has a `schedule` configured, so this on-demand path has to live in its
 // own file, separate from the scheduled hcp-revenue-sync.js (same split as
@@ -175,28 +175,19 @@ exports.handler = async (event) => {
     const invoiceFound = invoices.length > 0;
     if (invoiceFound) invoicesMatched++;
 
-    let totalRev, totalTip;
+    // Tips are no longer computed/written here — manual entry (tip_entries
+    // table) is the only source now. meta.tipAmount (job.tip_amount) is kept
+    // only for the no-invoice revenue fallback below ("total collected minus
+    // tip"); revenue math is otherwise unchanged from before.
+    let totalRev;
     if (invoiceFound) {
       const inv            = invoices[0];
       const lineItemsCents = (inv.items || []).reduce((s, item) => s + (item.amount || 0), 0);
       const discountCents  = (inv.discounts || []).reduce((s, d) => s + Math.abs(d.amount || 0), 0);
       const serviceCents   = Math.max(0, lineItemsCents - discountCents);
       totalRev             = serviceCents / 100;
-      // Real tip source, confirmed against a known $60 tip (HCP invoice
-      // #5449, Sean Bair / Mason Dixon): the tip is nowhere in the invoice
-      // or payment objects — payment.amount exactly equals invoice.amount,
-      // no gratuity field anywhere. But job.total_amount runs higher than
-      // the invoice's line-item total by exactly the tip. This business
-      // applies discounts as negative line items (not the invoice's
-      // discounts[] array, which is always empty), and total_amount only
-      // ever reflects positive items + tip — it ignores discount items
-      // entirely. Validated against 3 real jobs: the known $60-tip job, a
-      // $0-tip job with a discount line item, and a plain $0-tip job.
-      const grossPositiveItemsCents = (inv.items || []).reduce((s, item) => s + Math.max(0, item.amount || 0), 0);
-      totalTip = Math.max(0, (meta.totalAmount || 0) - grossPositiveItemsCents) / 100;
     } else {
       totalRev = Math.max(0, (meta.totalAmount - meta.tipAmount)) / 100;
-      totalTip = meta.tipAmount / 100;
     }
 
     const splits = resolveSplits(jobId, meta.employees, splitMap, techByName);
@@ -204,18 +195,17 @@ exports.handler = async (event) => {
       const tech = techByName[split.skyloName];
       if (!tech) continue;
       const revenue = +(totalRev * split.pct).toFixed(2);
-      const tips    = +(totalTip * split.pct).toFixed(2);
       batch.push({
         hcp_job_id:      jobId,
         tech_id:         tech.id,
         job_date:        meta.jobDate,
         week_key:        getWeekKey(meta.jobDate),
         hours:           0,
-        revenue, tips,
+        revenue,
         split_confirmed: split.confirmed,
         customer_name:   meta.customerName || null,
       });
-      jobReport.push({ jobId, tech: split.skyloName, date: meta.jobDate, revenue, tips, invoiceFound });
+      jobReport.push({ jobId, tech: split.skyloName, date: meta.jobDate, revenue, invoiceFound });
     }
   }
 

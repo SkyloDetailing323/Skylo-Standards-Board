@@ -253,6 +253,14 @@ function dayHoursTotal(entries, techId, workDate, nowMs = Date.now()) {
 function rangeHoursTotal(entries, techId, start, end, nowMs = Date.now()) {
   return entries.filter(e => e.tech_id === techId && e.work_date >= start && e.work_date <= end).reduce((s,e) => s + sessionHours(e, nowMs), 0);
 }
+// tip_entries totals -- manual entry only, day-exact (unlike the old
+// jobs.tips column this replaces, which was week_key/job_date-derived).
+function tipsRangeTotal(tipEntries, techId, start, end) {
+  return tipEntries.filter(t => t.tech_id === techId && t.work_date >= start && t.work_date <= end).reduce((s,t) => s+(t.amount||0), 0);
+}
+function tipsDayTotal(tipEntries, techId, workDate) {
+  return tipEntries.filter(t => t.tech_id === techId && t.work_date === workDate).reduce((s,t) => s+(t.amount||0), 0);
+}
 function formatMTTime(iso) {
   const d = new Date(new Date(iso).getTime() - 6*60*60*1000);
   let h = d.getUTCHours(); const m = String(d.getUTCMinutes()).padStart(2,"0");
@@ -1105,7 +1113,7 @@ function TotalLeaderboard({ techs, upsells, switchovers, reviews, callbacks }) {
 }
 
 // ─── REPORTS TAB ─────────────────────────────────────────────────────────────
-function ReportsTab({ techs, jobs, upsells=[], timeEntries=[], techId=null, refreshAll=async()=>{}, showToast=()=>{} }) {
+function ReportsTab({ techs, jobs, upsells=[], timeEntries=[], tipEntries=[], techId=null, refreshAll=async()=>{}, showToast=()=>{} }) {
   const [preset, setPreset] = useState("wtd");
   const [cStart, setCStart] = useState("");
   const [cEnd,   setCEnd]   = useState("");
@@ -1119,8 +1127,8 @@ function ReportsTab({ techs, jobs, upsells=[], timeEntries=[], techId=null, refr
   function exportRevenueCSV() {
     const rows = repairRevResult?.jobs || [];
     if (rows.length === 0) return;
-    const header = ["Job ID","Tech","Date","Revenue","Tips","Invoice"];
-    const csvRows = rows.map(r => [r.jobId, r.tech, r.date, r.revenue.toFixed(2), r.tips.toFixed(2), r.invoiceFound ? "Found" : "Fallback"]);
+    const header = ["Job ID","Tech","Date","Revenue","Invoice"];
+    const csvRows = rows.map(r => [r.jobId, r.tech, r.date, r.revenue.toFixed(2), r.invoiceFound ? "Found" : "Fallback"]);
     const csv = [header, ...csvRows].map(row => row.map(cell => `"${String(cell).replace(/"/g,'""')}"`).join(",")).join("\r\n");
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
@@ -1208,7 +1216,9 @@ function ReportsTab({ techs, jobs, upsells=[], timeEntries=[], techId=null, refr
   const totalUpsells = Object.values(upsellByTech).reduce((a,b)=>a+b,0);
 
   const totalRevenue   = inRange.reduce((s,j) => s+(j.revenue||0), 0);
-  const totalTips      = inRange.reduce((s,j) => s+(j.tips||0), 0);
+  const totalTips      = techId
+    ? tipsRangeTotal(tipEntries, techId, start, end)
+    : tipEntries.filter(t => t.work_date >= start && t.work_date <= end).reduce((s,t) => s+(t.amount||0), 0);
   const totalHours     = techId
     ? rangeHoursTotal(timeEntries, techId, start, end)
     : timeEntries.filter(e => e.work_date >= start && e.work_date <= end).reduce((s,e) => s+sessionHours(e), 0);
@@ -1224,10 +1234,12 @@ function ReportsTab({ techs, jobs, upsells=[], timeEntries=[], techId=null, refr
     const rev  = tj.reduce((s,j)=>s+(j.revenue||0),0);
     const hrs  = rangeHoursTotal(timeEntries, t.id, start, end);
     const ups  = upsellByTech[t.id] || 0;
-    const tips = tj.reduce((s,j)=>s+(j.tips||0),0);
+    const tips = tipsRangeTotal(tipEntries, t.id, start, end);
     const wkBreakdown = allWkKeys.map(wk=>{
       const wj=tj.filter(j=>j.week_key===wk);
-      return { wk, rev:wj.reduce((s,j)=>s+(j.revenue||0),0), tips:wj.reduce((s,j)=>s+(j.tips||0),0), count:wj.length };
+      const wkEndDate = new Date(wk+"T12:00:00Z"); wkEndDate.setUTCDate(wkEndDate.getUTCDate()+6);
+      const wkEndStr = wkEndDate.toISOString().split("T")[0];
+      return { wk, rev:wj.reduce((s,j)=>s+(j.revenue||0),0), tips:tipsRangeTotal(tipEntries, t.id, wk, wkEndStr), count:wj.length };
     }).filter(w=>w.rev>0);
     return { ...t, rev, hrs, ups, tips, revPerHr:hrs>0?rev/hrs:0, upsellPct:rev>0?(ups/rev)*100:0, wkBreakdown };
   }).filter(t=>t.rev>0||t.hrs>0).sort((a,b)=>b.rev-a.rev);
@@ -1323,7 +1335,7 @@ function ReportsTab({ techs, jobs, upsells=[], timeEntries=[], techId=null, refr
       {techId===null && (
         <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.orange}`, borderRadius:"12px", padding:"20px", display:"flex", flexDirection:"column", gap:"12px" }}>
           <Label color={C.orange}>Repair Revenue from HCP</Label>
-          <div style={{ fontSize:"12px", color:C.muted }}>Re-scans completed jobs and their invoices across a custom date range and rewrites revenue + tips to the board. Use this to fix missing or wrong revenue.</div>
+          <div style={{ fontSize:"12px", color:C.muted }}>Re-scans completed jobs and their invoices across a custom date range and rewrites revenue to the board. Use this to fix missing or wrong revenue.</div>
           <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"8px" }}>
             {[["FROM", repairRevFrom, setRepairRevFrom], ["TO", repairRevTo, setRepairRevTo]].map(([lbl, val, set]) => (
               <div key={lbl}>
@@ -1357,7 +1369,7 @@ function ReportsTab({ techs, jobs, upsells=[], timeEntries=[], techId=null, refr
                   <table style={{ width:"100%", borderCollapse:"collapse", fontSize:"11px", fontFamily:"'Barlow',sans-serif" }}>
                     <thead>
                       <tr style={{ background:C.card, position:"sticky", top:0 }}>
-                        {["Job ID","Tech","Date","Revenue","Tips","Invoice"].map(h => (
+                        {["Job ID","Tech","Date","Revenue","Invoice"].map(h => (
                           <th key={h} style={{ padding:"6px 10px", textAlign:"left", color:C.muted, fontWeight:"700", letterSpacing:"1px", fontFamily:"'Barlow Condensed',sans-serif", whiteSpace:"nowrap", borderBottom:`1px solid ${C.border}` }}>{h}</th>
                         ))}
                       </tr>
@@ -1369,7 +1381,6 @@ function ReportsTab({ techs, jobs, upsells=[], timeEntries=[], techId=null, refr
                           <td style={{ padding:"5px 10px", color:C.black, whiteSpace:"nowrap" }}>{row.tech}</td>
                           <td style={{ padding:"5px 10px", color:C.muted, whiteSpace:"nowrap" }}>{row.date}</td>
                           <td style={{ padding:"5px 10px", color:C.green, fontWeight:"700", whiteSpace:"nowrap" }}>${row.revenue.toFixed(2)}</td>
-                          <td style={{ padding:"5px 10px", color: row.tips > 0 ? C.gold : C.muted, whiteSpace:"nowrap" }}>{row.tips > 0 ? `$${row.tips.toFixed(2)}` : "—"}</td>
                           <td style={{ padding:"5px 10px", color: row.invoiceFound ? C.green : C.muted, whiteSpace:"nowrap" }}>{row.invoiceFound ? "✓" : "fallback"}</td>
                         </tr>
                       ))}
@@ -1387,7 +1398,7 @@ function ReportsTab({ techs, jobs, upsells=[], timeEntries=[], techId=null, refr
 }
 
 // ─── PAYROLL TAB ──────────────────────────────────────────────────────────────
-function PayrollTab({ techs, jobs }) {
+function PayrollTab({ techs, jobs, tipEntries=[] }) {
   const allPeriods = getPayPeriods();
   const activePeriods = allPeriods.filter(p=>jobs.some(j=>j.job_date>=p.start&&j.job_date<=p.end)||p.key===currentPPKey());
   const [selKey, setSelKey] = useState(currentPPKey());
@@ -1400,13 +1411,16 @@ function PayrollTab({ techs, jobs }) {
   const rows = techs.map(t=>{
     const tj      = periodJobs.filter(j=>j.tech_id===t.id);
     const revenue = tj.reduce((s,j)=>s+(j.revenue||0),0);
-    const tips    = tj.reduce((s,j)=>s+(j.tips||0),0);
+    const tips    = tipsRangeTotal(tipEntries, t.id, period.start, period.end);
     const rate    = t.commission_rate||27;
     const commission = revenue*(rate/100);
     const total   = commission+tips;
     const weeks   = wkKeys.map(wk=>{
       const wj=tj.filter(j=>j.week_key===wk);
-      return { wk, rev:wj.reduce((s,j)=>s+(j.revenue||0),0), tips:wj.reduce((s,j)=>s+(j.tips||0),0), count:wj.length };
+      const wkEndDate = new Date(wk+"T12:00:00Z"); wkEndDate.setUTCDate(wkEndDate.getUTCDate()+6);
+      const wkEndStr = wkEndDate.toISOString().split("T")[0];
+      const wkTips = tipsRangeTotal(tipEntries, t.id, wk, wkEndStr);
+      return { wk, rev:wj.reduce((s,j)=>s+(j.revenue||0),0), tips:wkTips, count:wj.length };
     }).filter(w=>w.rev>0||w.tips>0);
     return { ...t, revenue, tips, rate, commission, total, weeks };
   }).filter(r=>r.revenue>0||r.tips>0).sort((a,b)=>b.total-a.total);
@@ -2690,7 +2704,7 @@ function TimeSheetTab({ tech, timeEntries, refreshAll, showToast, nowTick }) {
 }
 
 // ─── TECH DASHBOARD ───────────────────────────────────────────────────────────
-function TechDashboard({ tech, techs, upsells, switchovers, reviews, callbacks, quota, jobs, timeEntries=[], refreshAll=async()=>{}, rideAlongs=[], onLogout }) {
+function TechDashboard({ tech, techs, upsells, switchovers, reviews, callbacks, quota, jobs, timeEntries=[], tipEntries=[], refreshAll=async()=>{}, rideAlongs=[], onLogout }) {
   const q = quota || DEFAULT_QUOTA;
   const [tab, setTab] = useState("overview");
   const [menuOpen, setMenuOpen] = useState(false);
@@ -2880,7 +2894,8 @@ function TechDashboard({ tech, techs, upsells, switchovers, reviews, callbacks, 
             {(()=>{
               const wkJobs    = (jobs||[]).filter(j=>j.tech_id===tech.id&&j.week_key===wk);
               const wkRevenue = wkJobs.reduce((s,j)=>s+(j.revenue||0),0);
-              const wkTips    = wkJobs.reduce((s,j)=>s+(j.tips||0),0);
+              const wkEndDate = new Date(wk+"T12:00:00Z"); wkEndDate.setUTCDate(wkEndDate.getUTCDate()+6);
+              const wkTips    = tipsRangeTotal(tipEntries, tech.id, wk, wkEndDate.toISOString().split("T")[0]);
               if (wkRevenue===0&&wkTips===0) return null;
               const rate       = tech.commission_rate||27;
               const commission = wkRevenue*(rate/100);
@@ -2992,7 +3007,7 @@ function TechDashboard({ tech, techs, upsells, switchovers, reviews, callbacks, 
           </div>
         )}
         {tab==="timesheet"&&<TimeSheetTab tech={tech} timeEntries={timeEntries} refreshAll={refreshAll} showToast={showToast} nowTick={nowTick}/>}
-        {tab==="reports"&&<ReportsTab techs={techs} jobs={jobs||[]} upsells={upsells||[]} timeEntries={timeEntries} techId={tech.id}/>}
+        {tab==="reports"&&<ReportsTab techs={techs} jobs={jobs||[]} upsells={upsells||[]} timeEntries={timeEntries} tipEntries={tipEntries} techId={tech.id}/>}
         {tab==="leaderboard"&&<Leaderboard techs={techs} jobs={jobs||[]} upsells={upsells} reviews={reviews} callbacks={callbacks||[]} switchovers={switchovers} timeEntries={timeEntries}/>}
         {tab==="badges"&&<BadgeGrid earned={tech.badges}/>}
         {tab==="upsells"&&<UpsellLeaderboard techs={techs} upsells={upsells} jobs={jobs||[]} currentId={tech.id}/>}
@@ -3381,7 +3396,7 @@ function AdminUpsellEntry({ techs, refreshAll, showToast, upsells, jobs=[] }) {
                 <table style={{ width:"100%", borderCollapse:"collapse", fontSize:"11px", fontFamily:"'Barlow',sans-serif" }}>
                   <thead>
                     <tr style={{ background:C.card, position:"sticky", top:0 }}>
-                      {["Job ID","Tech","Date","Revenue","Discount","Tip","Upsells","Invoice"].map(h => (
+                      {["Job ID","Tech","Date","Revenue","Discount","Upsells","Invoice"].map(h => (
                         <th key={h} style={{ padding:"6px 10px", textAlign:"left", color:C.muted, fontWeight:"700", letterSpacing:"1px", fontFamily:"'Barlow Condensed',sans-serif", whiteSpace:"nowrap", borderBottom:`1px solid ${C.border}` }}>{h}</th>
                       ))}
                     </tr>
@@ -3394,7 +3409,6 @@ function AdminUpsellEntry({ techs, refreshAll, showToast, upsells, jobs=[] }) {
                         <td style={{ padding:"5px 10px", color:C.muted, whiteSpace:"nowrap" }}>{row.date}</td>
                         <td style={{ padding:"5px 10px", color:C.green, fontWeight:"700", whiteSpace:"nowrap" }}>${row.revenue.toFixed(2)}</td>
                         <td style={{ padding:"5px 10px", color: row.discount > 0 ? C.orange : C.muted, whiteSpace:"nowrap" }}>{row.discount > 0 ? `-$${row.discount.toFixed(2)}` : "—"}</td>
-                        <td style={{ padding:"5px 10px", color: row.tip > 0 ? C.green : C.muted, whiteSpace:"nowrap" }}>{row.tip > 0 ? `$${row.tip.toFixed(2)}` : "—"}</td>
                         <td style={{ padding:"5px 10px", color: row.upsells > 0 ? C.orange : C.muted, fontWeight: row.upsells > 0 ? "700" : "400", whiteSpace:"nowrap" }}>{row.upsells > 0 ? `$${row.upsells.toFixed(2)}` : "—"}</td>
                         <td style={{ padding:"5px 10px", color: row.invoiceFound ? C.green : C.muted, whiteSpace:"nowrap" }}>{row.invoiceFound ? "✓" : "fallback"}</td>
                       </tr>
@@ -3557,6 +3571,90 @@ function AdminReviewEntry({ techs, reviews, saving, setSaving, refreshAll, showT
         ))}
       </div>
     </div>
+    </div>
+  );
+}
+
+// ─── ADMIN TIP ENTRY ───────────────────────────────────────────────────────────
+// Manual entry only — HCP doesn't reliably surface tip data (confirmed: not on
+// the invoice, payment, or job objects in any usable way), and the various
+// automatic fallbacks that used to run were themselves the source of
+// consistently wrong tip numbers. This form is now the only way tips enter
+// the system, for both manual use and a future Cowork automation filling the
+// same form.
+function AdminTipEntry({ techs, tipEntries, refreshAll, showToast }) {
+  const todayDefault = new Date(Date.now() - 6*3600000).toISOString().split("T")[0];
+  const [form, setForm] = useState({ techId:"", date:todayDefault, amount:"" });
+  const [saving, setSaving] = useState(false);
+
+  async function logTip() {
+    const amt = parseFloat(form.amount);
+    if (!form.techId) return showToast("Select a tech", false);
+    if (!form.date) return showToast("Select a date", false);
+    if (isNaN(amt) || amt <= 0) return showToast("Enter a valid tip amount", false);
+    setSaving(true);
+    try {
+      await sb("tip_entries", { method:"POST", body:JSON.stringify({ tech_id:form.techId, work_date:form.date, amount:amt }) });
+      await refreshAll();
+      showToast(`✅ Logged $${amt.toFixed(2)} tip`);
+      setForm(f => ({ ...f, amount:"" }));
+    } catch(e) { showToast("Error: "+e.message, false); }
+    setSaving(false);
+  }
+
+  async function deleteTip(id) {
+    if (!window.confirm("Delete this tip entry?")) return;
+    setSaving(true);
+    try {
+      await sb(`tip_entries?id=eq.${id}`, { method:"DELETE", prefer:"return=minimal" });
+      await refreshAll();
+      showToast("Tip entry deleted");
+    } catch(e) { showToast("Error: "+e.message, false); }
+    setSaving(false);
+  }
+
+  const recent = [...tipEntries].sort((a,b)=>(b.created_at||"").localeCompare(a.created_at||"")).slice(0,25);
+  const techById = Object.fromEntries(techs.map(t=>[t.id,t]));
+  const selStyle = (val) => ({ background:C.cardLt, border:`1px solid ${C.border}`, color:val?C.black:C.muted, padding:"10px 14px", borderRadius:"12px", fontSize:"14px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", width:"100%", boxSizing:"border-box", cursor:"pointer" });
+
+  return (
+    <div style={{ display:"flex", flexDirection:"column", gap:"16px" }}>
+      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.gold}`, borderRadius:"12px", padding:"20px", display:"flex", flexDirection:"column", gap:"12px" }}>
+        <Label color={C.gold}>Log a Tip</Label>
+        <div style={{ fontSize:"12px", color:C.muted }}>Manual entry only — this is the source of truth for tip totals everywhere in the app (Reports, Payroll, etc.).</div>
+        <select value={form.techId} onChange={e=>setForm(f=>({...f,techId:e.target.value}))} style={selStyle(form.techId)}>
+          <option value="">— Select Tech —</option>
+          {techs.filter(t=>t.is_active!==false).map(t=><option key={t.id} value={t.id}>{t.name}</option>)}
+        </select>
+        <div>
+          <div style={{ fontSize:"10px", color:C.muted, letterSpacing:"2px", textTransform:"uppercase", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", marginBottom:"6px" }}>Date</div>
+          <input type="date" value={form.date} onChange={e=>setForm(f=>({...f,date:e.target.value}))} style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"10px 14px", borderRadius:"12px", fontSize:"14px", fontFamily:"'Barlow',sans-serif", width:"100%", boxSizing:"border-box" }}/>
+        </div>
+        <div>
+          <div style={{ fontSize:"10px", color:C.muted, letterSpacing:"2px", textTransform:"uppercase", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", marginBottom:"6px" }}>Amount</div>
+          <div style={{ display:"flex", alignItems:"center", gap:"10px" }}>
+            <span style={{ color:C.gold, fontSize:"16px" }}>$</span>
+            <input type="number" min="0" step="0.01" placeholder="e.g. 20.00" value={form.amount} onChange={e=>setForm(f=>({...f,amount:e.target.value}))} style={{ flex:1, background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"10px 14px", borderRadius:"12px", fontSize:"16px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", boxSizing:"border-box" }}/>
+          </div>
+        </div>
+        <button onClick={logTip} disabled={saving} style={{ background:saving?"#333":C.gold, border:"none", color:C.black, padding:"13px", borderRadius:"12px", cursor:saving?"not-allowed":"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"13px", letterSpacing:"2px", textTransform:"uppercase" }}>{saving?"Saving...":"Log Tip"}</button>
+      </div>
+
+      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", overflow:"hidden" }}>
+        <div style={{ padding:"14px 18px", borderBottom:`1px solid ${C.border}` }}><Label color={C.gold}>Recent Tips</Label></div>
+        <div style={{ padding:"14px 18px", display:"flex", flexDirection:"column", gap:"8px" }}>
+          {recent.length===0 && <div style={{ fontSize:"13px", color:C.muted, textAlign:"center", padding:"12px" }}>No tips logged yet.</div>}
+          {recent.map(t=>(
+            <div key={t.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"6px 0", borderBottom:`1px solid ${C.border}` }}>
+              <span style={{ fontSize:"13px", color:C.black }}>{techById[t.tech_id]?.name||"Unknown"} · {fmtShortDate(t.work_date)}</span>
+              <div style={{ display:"flex", alignItems:"center", gap:"10px" }}>
+                <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"13px", color:C.gold }}>${t.amount.toFixed(2)}</span>
+                <button onClick={()=>deleteTip(t.id)} style={{ background:"none", border:"1px solid #ef4444", color:"#ef4444", padding:"3px 8px", borderRadius:"4px", cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", fontSize:"10px" }}>DELETE</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }
@@ -4858,7 +4956,7 @@ function UpsellAuditTab({ techs, upsells, jobs }) {
 }
 
 // ─── ADMIN PANEL ──────────────────────────────────────────────────────────────
-function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlongs, schedules, quota, setQuota, jobs, timeEntries=[], pendingSplits=[], onLogout, refreshAll }) {
+function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlongs, schedules, quota, setQuota, jobs, timeEntries=[], tipEntries=[], pendingSplits=[], onLogout, refreshAll }) {
   // Live-standings views (Leaderboard, Journey Map) should only show active
   // techs, matching what the tech-facing app already does — archived techs
   // stay fully visible in Reports/Payroll/Upsell Audit where historical
@@ -5022,6 +5120,7 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
       ["reviews","⭐","Reviews"],
       ["switchovers","🔄","Switchovers"],
       ["timesheet","🕒","Time Sheet"],
+      ["tips","💵","Log Tips"],
       ["callbacks","📞","Callbacks"],
       ["ridealong","🚗","Ride-Alongs"],
     ]},
@@ -5179,6 +5278,10 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
 
         {tab==="timesheet"&&(
           <AdminTimeSheetTab techs={techs} timeEntries={timeEntries} refreshAll={refreshAll} showToast={showToast}/>
+        )}
+
+        {tab==="tips"&&(
+          <AdminTipEntry techs={techs} tipEntries={tipEntries} refreshAll={refreshAll} showToast={showToast}/>
         )}
 
         {tab==="callbacks"&&(
@@ -5458,13 +5561,13 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
         )}
 
         {tab==="reports"&&(
-          <ReportsTab techs={techs} jobs={jobs||[]} upsells={upsells||[]} timeEntries={timeEntries} techId={null} refreshAll={refreshAll} showToast={showToast}/>
+          <ReportsTab techs={techs} jobs={jobs||[]} upsells={upsells||[]} timeEntries={timeEntries} tipEntries={tipEntries} techId={null} refreshAll={refreshAll} showToast={showToast}/>
         )}
         {tab==="leaderboard"&&(
           <Leaderboard techs={activeTechs} jobs={jobs||[]} upsells={upsells} reviews={reviews} callbacks={callbacks||[]} switchovers={switchovers} timeEntries={timeEntries}/>
         )}
         {tab==="payroll"&&(
-          <PayrollTab techs={techs} jobs={jobs||[]} upsells={upsells}/>
+          <PayrollTab techs={techs} jobs={jobs||[]} upsells={upsells} tipEntries={tipEntries}/>
         )}
 
         {tab==="ridealong"&&(
@@ -5511,6 +5614,7 @@ export default function App() {
   const [schedules, setSchedules] = useState([]);
   const [jobs, setJobs] = useState([]);
   const [timeEntries, setTimeEntries] = useState([]);
+  const [tipEntries, setTipEntries] = useState([]);
   const [pendingSplits, setPendingSplits] = useState([]);
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -5520,7 +5624,7 @@ export default function App() {
 
   const loadAll = useCallback(async () => {
     try {
-      const [t,u,s,r,ra,sch,settings,cb,jb,te,ps] = await Promise.all([
+      const [t,u,s,r,ra,sch,settings,cb,jb,te,tp,ps] = await Promise.all([
         sb("techs?select=*&order=name"),
         sb("upsells?select=*"),
         sb("switchovers?select=*"),
@@ -5531,10 +5635,11 @@ export default function App() {
         sb("callbacks?select=*&order=created_at.desc").catch(()=>[]),
         sbAll("jobs?select=*&order=job_date.desc,id.asc").catch(()=>[]),
         sbAll("time_entries?select=*&order=work_date.desc,id.asc").catch(()=>[]),
+        sbAll("tip_entries?select=*&order=work_date.desc,id.asc").catch(()=>[]),
         sb("jobs?split_confirmed=eq.false&select=hcp_job_id,tech_id,job_date,revenue,tips,upsell_amount,customer_name&order=job_date.desc").catch(()=>[]),
       ]);
       setTechs(t||[]); setUpsells(u||[]); setSwitchovers(s||[]); setReviews(r||[]);
-      setRideAlongs(ra||[]); setSchedules(sch||[]); setCallbacks(cb||[]); setJobs(jb||[]); setTimeEntries(te||[]);
+      setRideAlongs(ra||[]); setSchedules(sch||[]); setCallbacks(cb||[]); setJobs(jb||[]); setTimeEntries(te||[]); setTipEntries(tp||[]);
       setPendingSplits(ps||[]);
       if (settings&&settings.length>0) {
         try { setQuota(JSON.parse(settings[0].value)); } catch {}
@@ -5653,11 +5758,11 @@ alter table jobs add column if not exists tips numeric default 0;`}
     <AdminPanel techs={techs} setTechs={setTechs} upsells={upsells} setUpsells={setUpsells}
       switchovers={switchovers} setSwitchovers={setSwitchovers} reviews={reviews} setReviews={setReviews}
       callbacks={callbacks} rideAlongs={rideAlongs} schedules={schedules} quota={quota} setQuota={setQuota}
-      jobs={jobs} timeEntries={timeEntries} pendingSplits={pendingSplits} onLogout={()=>setUser(null)} refreshAll={loadAll}/>
+      jobs={jobs} timeEntries={timeEntries} tipEntries={tipEntries} pendingSplits={pendingSplits} onLogout={()=>setUser(null)} refreshAll={loadAll}/>
   );
   if (user.type==="tech"&&currentTech) return (
     <TechDashboard tech={currentTech} techs={activeTechs} upsells={upsells} switchovers={switchovers}
-      reviews={reviews} callbacks={callbacks} quota={quota} jobs={jobs} timeEntries={timeEntries} refreshAll={loadAll} rideAlongs={rideAlongs} onLogout={()=>setUser(null)}/>
+      reviews={reviews} callbacks={callbacks} quota={quota} jobs={jobs} timeEntries={timeEntries} tipEntries={tipEntries} refreshAll={loadAll} rideAlongs={rideAlongs} onLogout={()=>setUser(null)}/>
   );
   return null;
 }

@@ -2,7 +2,7 @@
 // On-demand repair for a date range.
 // POST { from: "YYYY-MM-DD", to: "YYYY-MM-DD" }
 //
-// Split jobs: when a job has multiple assigned employees, revenue/tips/upsells
+// Split jobs: when a job has multiple assigned employees, revenue/upsells
 // are divided by their confirmed percentage (from job_splits table).
 // Falls back to equal split if no confirmed split exists, and marks those rows
 // split_confirmed=false so the admin Split Jobs tab can flag them for Kyle.
@@ -82,16 +82,8 @@ function parseInvoice(inv) {
   const revenue        = serviceCents / 100;
   const discount       = discountCents / 100;
 
-  // Only count payments that actually succeeded — a failed attempt followed
-  // by a successful retry both appear in inv.payments, and summing both
-  // double-counts that amount, which the derived-tip fallback below then
-  // misreads as a tip.
-  const payments        = (inv.payments || []).filter(p => p.status === "succeeded");
-  const tipFromPayments = payments.reduce((s, p) => s + (p.tip_amount || 0), 0);
-  const paidCents       = payments.reduce((s, p) => s + (p.amount || 0), 0);
-  const derivedTip      = Math.max(0, paidCents - serviceCents);
-  const tipCents        = tipFromPayments > 0 ? tipFromPayments : derivedTip;
-  const tips            = tipCents / 100;
+  // Tips are no longer computed here — manual entry (tip_entries table) is
+  // the only source now. Revenue/discount/upsell math above is unchanged.
 
   let upsellCents = 0;
   const upsellItems = [];
@@ -103,7 +95,7 @@ function parseInvoice(inv) {
     }
   }
 
-  return { revenue, discount, tips, upsellTotal: upsellCents / 100, upsellItems };
+  return { revenue, discount, upsellTotal: upsellCents / 100, upsellItems };
 }
 
 exports.handler = async (event) => {
@@ -269,8 +261,9 @@ exports.handler = async (event) => {
     const jobDate  = meta.jobDate;
     const weekKey  = getWeekKey(jobDate);
     const inv      = invoiceData[jobId];
+    // meta.tipAmount (job.tip_amount) is kept only for this revenue fallback
+    // ("total collected minus tip") -- tips are never written below.
     const totalRev = inv ? inv.revenue     : Math.max(0, (meta.totalAmount - meta.tipAmount)) / 100;
-    const totalTip = inv ? inv.tips        : meta.tipAmount / 100;
     const totalUps = inv ? inv.upsellTotal : 0;
     const totalDsc = inv ? inv.discount    : 0;
 
@@ -281,7 +274,6 @@ exports.handler = async (event) => {
       if (!tech) { console.log("Tech not in Supabase:", split.skyloName); continue; }
 
       const revenue    = +(totalRev * split.pct).toFixed(2);
-      const tips       = +(totalTip * split.pct).toFixed(2);
       const discount   = +(totalDsc * split.pct).toFixed(2);
       // Upsell credit: if manually attributed, 100% to one tech; otherwise split by revenue %
       const attribId   = upsellAttribMap[jobId];
@@ -295,7 +287,7 @@ exports.handler = async (event) => {
         hcp_job_id:      jobId,
         tech_id:         tech.id,
         job_date:        jobDate,
-        revenue, tips,
+        revenue,
         hours:           0,
         upsell_amount:   upsells,
         week_key:        weekKey,
@@ -309,14 +301,13 @@ exports.handler = async (event) => {
         date:           jobDate,
         revenue,
         discount,
-        tip:            tips,
         upsells,
         invoiceFound:   !!inv,
         splitPct:       Math.round(split.pct * 100),
         splitConfirmed: split.confirmed,
       });
 
-      console.log(`JOB ${jobId} | ${split.skyloName}${pctTag} | ${jobDate} | rev=$${revenue.toFixed(2)} disc=$${discount.toFixed(2)} tip=$${tips.toFixed(2)} ups=$${upsells.toFixed(2)} | ${inv ? "INVOICE" : "NO INVOICE - fallback"}`);
+      console.log(`JOB ${jobId} | ${split.skyloName}${pctTag} | ${jobDate} | rev=$${revenue.toFixed(2)} disc=$${discount.toFixed(2)} ups=$${upsells.toFixed(2)} | ${inv ? "INVOICE" : "NO INVOICE - fallback"}`);
 
       try {
         if (inv && upsells > 0) {

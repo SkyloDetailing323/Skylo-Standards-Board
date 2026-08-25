@@ -1,7 +1,8 @@
 // netlify/functions/hcp-backfill-background.js
 // Background version of backfill — no timeout limit (up to 15 min).
 // Trigger via POST to /.netlify/functions/hcp-backfill-background
-// Uses job.tip_amount (not invoice) to split tips from service revenue.
+// Uses job.tip_amount (not invoice) to net service revenue out of total
+// collected -- tips themselves are manual-entry only (tip_entries table).
 // HCP returns monetary values in CENTS — divide by 100 for dollars.
 
 const TECH_MAP = {
@@ -158,9 +159,11 @@ exports.handler = async (event) => {
       const tech = techByName[skyloName];
       if (!tech) { skipped++; continue; }
 
-      // revenue = total collected minus tip (handles subscription discounts automatically)
+      // revenue = total collected minus tip (handles subscription discounts
+      // automatically). tipAmount is kept only for this subtraction — tips
+      // are never written below, manual entry (tip_entries table) is the
+      // only source now.
       const tipAmount = job.tip_amount || 0;
-      const tips    = tipAmount / 100;
       const revenue = Math.max(0, ((job.total_amount || 0) - tipAmount)) / 100;
 
       const schedStart = job.schedule?.scheduled_start;
@@ -183,7 +186,6 @@ exports.handler = async (event) => {
         job_date:   jobDate,
         revenue,
         hours,
-        tips,
         week_key:   getWeekKey(jobDate),
         // upsell_amount intentionally omitted — don't overwrite existing upsell data
       });
