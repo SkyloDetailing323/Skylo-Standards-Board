@@ -215,6 +215,63 @@ function formatTenure(startDate) {
   return mos > 0 ? `${yrs}yr ${mos}mo` : `${yrs}yr`;
 }
 
+// ─── TIME TRACKING HELPERS ────────────────────────────────────────────────────
+// Fixed -6h convention, matching every other UTC->MT conversion in this app
+// (toMTDateStr in the sync/repair functions) -- not DST-aware, intentionally
+// consistent with the rest of the codebase rather than more "correct."
+function mtDateStr(ms) {
+  return new Date(ms - 6*60*60*1000).toISOString().split("T")[0];
+}
+// End-of-day boundary (next MT midnight) for a given MT calendar date, as a
+// UTC ISO timestamp -- MT midnight = UTC 06:00 under the fixed -6h offset.
+function mtDayEndUTC(workDate) {
+  const d = new Date(workDate + "T00:00:00Z");
+  d.setUTCDate(d.getUTCDate() + 1);
+  d.setUTCHours(6, 0, 0, 0);
+  return d.toISOString();
+}
+// Hours for one session. An open session (no clock_out) on a past work_date
+// is capped at that day's midnight instead of growing unbounded; an open
+// session on today is "elapsed so far" -- which IS the live running total,
+// no separate code path needed. nowMs defaults to Date.now() but call sites
+// that tick a live display pass a fresh value each render.
+function sessionHours(entry, nowMs = Date.now()) {
+  const inMs = new Date(entry.clock_in).getTime();
+  let outMs;
+  if (entry.clock_out) {
+    outMs = new Date(entry.clock_out).getTime();
+  } else if (entry.work_date < mtDateStr(nowMs)) {
+    outMs = new Date(mtDayEndUTC(entry.work_date)).getTime();
+  } else {
+    outMs = nowMs;
+  }
+  return Math.max(0, (outMs - inMs) / 3600000);
+}
+function dayHoursTotal(entries, techId, workDate, nowMs = Date.now()) {
+  return entries.filter(e => e.tech_id === techId && e.work_date === workDate).reduce((s,e) => s + sessionHours(e, nowMs), 0);
+}
+function rangeHoursTotal(entries, techId, start, end, nowMs = Date.now()) {
+  return entries.filter(e => e.tech_id === techId && e.work_date >= start && e.work_date <= end).reduce((s,e) => s + sessionHours(e, nowMs), 0);
+}
+function formatMTTime(iso) {
+  const d = new Date(new Date(iso).getTime() - 6*60*60*1000);
+  let h = d.getUTCHours(); const m = String(d.getUTCMinutes()).padStart(2,"0");
+  const ampm = h>=12 ? "PM" : "AM"; h = h%12; if (h===0) h=12;
+  return `${h}:${m} ${ampm}`;
+}
+// HH:MM (24h, MT) -> UTC ISO timestamp on the given MT calendar date.
+function mtTimeToIso(dateStr, hhmm) {
+  const [h,m] = hhmm.split(":").map(Number);
+  const d = new Date(dateStr + "T00:00:00Z");
+  d.setUTCHours(h + 6, m, 0, 0);
+  return d.toISOString();
+}
+// UTC ISO timestamp -> "HH:MM" (24h, MT) for pre-filling a <input type="time">.
+function isoToMtTimeInput(iso) {
+  const d = new Date(new Date(iso).getTime() - 6*60*60*1000);
+  return `${String(d.getUTCHours()).padStart(2,"0")}:${String(d.getUTCMinutes()).padStart(2,"0")}`;
+}
+
 // ─── DATE RANGE HELPER ────────────────────────────────────────────────────────
 function getDateRangeBounds(preset, customStart="", customEnd="") {
   const now = new Date();
@@ -1048,7 +1105,7 @@ function TotalLeaderboard({ techs, upsells, switchovers, reviews, callbacks }) {
 }
 
 // ─── REPORTS TAB ─────────────────────────────────────────────────────────────
-function ReportsTab({ techs, jobs, upsells=[], techHours=[], techId=null, onSaveHours=null, refreshAll=async()=>{}, showToast=()=>{} }) {
+function ReportsTab({ techs, jobs, upsells=[], timeEntries=[], techId=null, refreshAll=async()=>{}, showToast=()=>{} }) {
   const [preset, setPreset] = useState("wtd");
   const [cStart, setCStart] = useState("");
   const [cEnd,   setCEnd]   = useState("");
@@ -1152,7 +1209,9 @@ function ReportsTab({ techs, jobs, upsells=[], techHours=[], techId=null, onSave
 
   const totalRevenue   = inRange.reduce((s,j) => s+(j.revenue||0), 0);
   const totalTips      = inRange.reduce((s,j) => s+(j.tips||0), 0);
-  const totalHours     = (techHours||[]).filter(h => h.week_key >= startWk && h.week_key <= endWk && (!techId || h.tech_id === techId)).reduce((s,h) => s+(h.hours||0), 0);
+  const totalHours     = techId
+    ? rangeHoursTotal(timeEntries, techId, start, end)
+    : timeEntries.filter(e => e.work_date >= start && e.work_date <= end).reduce((s,e) => s+sessionHours(e), 0);
   const commMap        = Object.fromEntries(techs.map(t => [t.id, (t.commission_rate||27)/100]));
   const totalLabor     = inRange.reduce((s,j) => s+(j.revenue||0)*(commMap[j.tech_id]||0.27), 0);
   const revPerHr       = totalHours > 0 ? totalRevenue/totalHours : 0;
@@ -1163,7 +1222,7 @@ function ReportsTab({ techs, jobs, upsells=[], techHours=[], techId=null, onSave
   const techRows = techId ? [] : techs.map(t => {
     const tj = inRange.filter(j=>j.tech_id===t.id);
     const rev  = tj.reduce((s,j)=>s+(j.revenue||0),0);
-    const hrs  = (techHours||[]).filter(h=>h.tech_id===t.id&&h.week_key>=startWk&&h.week_key<=endWk).reduce((s,h)=>s+(h.hours||0),0);
+    const hrs  = rangeHoursTotal(timeEntries, t.id, start, end);
     const ups  = upsellByTech[t.id] || 0;
     const tips = tj.reduce((s,j)=>s+(j.tips||0),0);
     const wkBreakdown = allWkKeys.map(wk=>{
@@ -1261,7 +1320,7 @@ function ReportsTab({ techs, jobs, upsells=[], techHours=[], techId=null, onSave
       )}
 
       {/* Repair Revenue — admin only */}
-      {onSaveHours && (
+      {techId===null && (
         <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.orange}`, borderRadius:"12px", padding:"20px", display:"flex", flexDirection:"column", gap:"12px" }}>
           <Label color={C.orange}>Repair Revenue from HCP</Label>
           <div style={{ fontSize:"12px", color:C.muted }}>Re-scans completed jobs and their invoices across a custom date range and rewrites revenue + tips to the board. Use this to fix missing or wrong revenue.</div>
@@ -1323,98 +1382,6 @@ function ReportsTab({ techs, jobs, upsells=[], techHours=[], techId=null, onSave
         </div>
       )}
 
-      {/* Manual Hours Entry — admin only */}
-      {onSaveHours && (
-        <ManualHoursEntry techs={techs} techHours={techHours} onSaveHours={onSaveHours}/>
-      )}
-    </div>
-  );
-}
-
-// ─── MANUAL HOURS ENTRY ───────────────────────────────────────────────────────
-function ManualHoursEntry({ techs, techHours, onSaveHours }) {
-  const wk = getWeekKey();
-  const [selectedWeek, setSelectedWeek] = useState(wk);
-  const [selectedTechId, setSelectedTechId] = useState(techs[0]?.id||"");
-  const [hoursInput, setHoursInput] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [toast, setToast] = useState(null);
-
-  function weekFromDate(dateStr) {
-    const d = new Date(dateStr + "T12:00:00Z");
-    const day = d.getUTCDay();
-    const back = day === 0 ? 6 : day - 1;
-    d.setUTCDate(d.getUTCDate() - back);
-    return d.toISOString().split("T")[0];
-  }
-
-  // Pre-fill hours when tech or week changes
-  useEffect(()=>{
-    const existing = (techHours||[]).find(h=>h.tech_id===selectedTechId&&h.week_key===selectedWeek);
-    setHoursInput(existing ? String(existing.hours) : "");
-  }, [selectedTechId, selectedWeek, techHours.length]);
-
-  async function save() {
-    const hrs = parseFloat(hoursInput);
-    if (isNaN(hrs)||hrs<0||!selectedTechId) return;
-    setSaving(true);
-    await onSaveHours(selectedTechId, selectedWeek, hrs);
-    setToast("✅ Saved!");
-    setTimeout(()=>setToast(null),2500);
-    setSaving(false);
-  }
-
-  const selectedTech = techs.find(t=>t.id===selectedTechId);
-  const existing = (techHours||[]).find(h=>h.tech_id===selectedTechId&&h.week_key===selectedWeek);
-
-  return (
-    <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.blue}`, borderRadius:"12px", overflow:"hidden" }}>
-      <div style={{ padding:"14px 18px", borderBottom:`1px solid ${C.border}`, background:C.cardLt }}>
-        <Label color={C.blue}>⏱ Manual Hours Entry</Label>
-        <div style={{ fontSize:"12px", color:C.muted }}>Clock-in/out totals from HCP — select a tech and week, enter their hours.</div>
-      </div>
-      <div style={{ padding:"14px 18px", display:"flex", flexDirection:"column", gap:"14px" }}>
-
-        {/* Tech dropdown */}
-        <div>
-          <div style={{ fontSize:"10px", color:C.muted, letterSpacing:"2px", textTransform:"uppercase", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", marginBottom:"6px" }}>Technician</div>
-          <select value={selectedTechId} onChange={e=>setSelectedTechId(e.target.value)}
-            style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"10px 14px", borderRadius:"12px", fontSize:"14px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", width:"100%", cursor:"pointer" }}>
-            {techs.map(t=><option key={t.id} value={t.id}>{t.name}</option>)}
-          </select>
-        </div>
-
-        {/* Week picker */}
-        <div>
-          <div style={{ fontSize:"10px", color:C.muted, letterSpacing:"2px", textTransform:"uppercase", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", marginBottom:"6px" }}>Week</div>
-          <input type="date" defaultValue={wk}
-            onChange={e=>{ if(e.target.value) setSelectedWeek(weekFromDate(e.target.value)); }}
-            style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"8px 12px", borderRadius:"8px", fontSize:"13px", fontFamily:"'Barlow',sans-serif", width:"100%" }}
-          />
-          <div style={{ marginTop:"4px", fontSize:"12px", color:C.blue, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>{formatWeekLabel(selectedWeek)}</div>
-        </div>
-
-        {/* Hours input */}
-        <div>
-          <div style={{ fontSize:"10px", color:C.muted, letterSpacing:"2px", textTransform:"uppercase", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", marginBottom:"6px" }}>
-            Hours {existing ? <span style={{ color:C.blue }}>— currently {existing.hours}h saved</span> : ""}
-          </div>
-          <div style={{ display:"flex", gap:"10px", alignItems:"center" }}>
-            <input type="number" min="0" step="0.5" placeholder="e.g. 42.5"
-              value={hoursInput}
-              onChange={e=>setHoursInput(e.target.value)}
-              style={{ flex:1, background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"12px 14px", borderRadius:"12px", fontSize:"18px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900" }}
-            />
-            <span style={{ fontSize:"16px", color:C.muted, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>hrs</span>
-          </div>
-        </div>
-
-        <button onClick={save} disabled={saving||!hoursInput||isNaN(parseFloat(hoursInput))}
-          style={{ background:saving?C.border:C.blue, border:"none", color:C.white, padding:"13px", borderRadius:"12px", cursor:saving?"not-allowed":"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"13px", letterSpacing:"2px", textTransform:"uppercase" }}>
-          {saving?"SAVING…":`💾 SAVE — ${selectedTech?.name||""} · ${formatWeekLabel(selectedWeek)}`}
-        </button>
-        {toast&&<div style={{ fontSize:"13px", color:C.green, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", textAlign:"center" }}>{toast}</div>}
-      </div>
     </div>
   );
 }
@@ -1540,7 +1507,7 @@ function PayrollTab({ techs, jobs }) {
 }
 
 // ─── LEADERBOARD ─────────────────────────────────────────────────────────────
-function Leaderboard({ techs, jobs, upsells, reviews, callbacks, switchovers }) {
+function Leaderboard({ techs, jobs, upsells, reviews, callbacks, switchovers, timeEntries=[] }) {
   const METRICS = [
     { id:"revenue",  label:"Revenue",    icon:"💰" },
     { id:"upsells",  label:"Upsells",    icon:"📈" },
@@ -1554,7 +1521,8 @@ function Leaderboard({ techs, jobs, upsells, reviews, callbacks, switchovers }) 
   const rows = techs.map(t => {
     const tj      = jobs.filter(j=>j.tech_id===t.id&&j.week_key===wk);
     const revenue = tj.reduce((s,j)=>s+(j.revenue||0),0);
-    const hours   = tj.reduce((s,j)=>s+(j.hours||0),0);
+    const wkEnd   = new Date(wk+"T12:00:00Z"); wkEnd.setUTCDate(wkEnd.getUTCDate()+6);
+    const hours   = rangeHoursTotal(timeEntries, t.id, wk, wkEnd.toISOString().split("T")[0]);
     const wkUps   = upsells.filter(u=>u.tech_id===t.id&&u.week_key===wk).reduce((s,u)=>s+u.amount,0);
     const mk      = getMonthKey();
     const mRevs   = reviews.filter(r=>r.tech_id===t.id&&r.month_key===mk).reduce((s,r)=>s+r.count,0);
@@ -1922,7 +1890,7 @@ function QuotaSettings({ quota, onSave, saving }) {
   );
 }
 
-function OperationsProgressTab({ techs, upsells, switchovers, reviews, quota, callbacks=[], jobs=[], techHours=[], rideAlongs=[] }) {
+function OperationsProgressTab({ techs, upsells, switchovers, reviews, quota, callbacks=[], jobs=[], timeEntries=[], rideAlongs=[] }) {
   const mk = getMonthKey();
   const q = quota || DEFAULT_QUOTA;
 
@@ -2029,7 +1997,12 @@ function OperationsProgressTab({ techs, upsells, switchovers, reviews, quota, ca
 
   const monthTeamSwitchovers = switchovers.filter(s => s.week_key?.startsWith(`${y2}-${mo2}`)).length;
 
-  const monthTeamHours = techHours.filter(h => h.week_key?.startsWith(`${y2}-${mo2}`)).reduce((s,h)=>s+(h.hours||0),0);
+  // KPI #8 — Rev/Hr. Real clock in/out data (time_entries), not the old
+  // manually-typed weekly tech_hours numbers. Scoped to the same active,
+  // non-owner tech population as the bonus threshold above -- Truxton/Casey
+  // occasionally clocking a job in shouldn't skew the team's Rev/Hr either.
+  const activeTechIds = new Set(activeTechs.map(t=>t.id));
+  const monthTeamHours = timeEntries.filter(e => activeTechIds.has(e.tech_id) && e.work_date.startsWith(`${y2}-${mo2}`)).reduce((s,e)=>s+sessionHours(e),0);
   const teamRevPerHr = monthTeamHours > 0 ? monthTeamRevenue / monthTeamHours : 0;
 
   // Callback rate has no job-level linkage (callbacks only carry tech_id +
@@ -2046,7 +2019,8 @@ function OperationsProgressTab({ techs, upsells, switchovers, reviews, quota, ca
   const trendWeeks = [...new Set(last8WeekKeys)].map(wk => {
     const wkJobs = jobs.filter(j=>j.week_key===wk);
     const wkRev  = wkJobs.reduce((s,j)=>s+(j.revenue||0),0);
-    const wkHrs  = techHours.filter(h=>h.week_key===wk).reduce((s,h)=>s+(h.hours||0),0);
+    const wkEnd  = new Date(wk+"T12:00:00Z"); wkEnd.setUTCDate(wkEnd.getUTCDate()+6);
+    const wkHrs  = timeEntries.filter(e=>activeTechIds.has(e.tech_id) && e.work_date>=wk && e.work_date<=wkEnd.toISOString().split("T")[0]).reduce((s,e)=>s+sessionHours(e),0);
     const wkCallbacks = callbacks.filter(c => c.created_at && mtWeekKeyFromDate(c.created_at.split("T")[0]) === wk).length;
     return { wk, revPerHr: wkHrs>0?wkRev/wkHrs:0, callbackRate: wkJobs.length>0?(wkCallbacks/wkJobs.length)*100:0 };
   });
@@ -2534,11 +2508,198 @@ function IncentiveBoard({ techs, upsells, switchovers, reviews, callbacks, curre
   );
 }
 
+// ─── TIME SHEET (tech-facing) ─────────────────────────────────────────────────
+function TimeSheetTab({ tech, timeEntries, refreshAll, showToast, nowTick }) {
+  const myEntries = timeEntries.filter(e => e.tech_id === tech.id);
+  const today = mtDateStr(nowTick);
+  const openEntry = myEntries.find(e => !e.clock_out);
+  const isClockedInToday = !!openEntry && openEntry.work_date === today;
+  const [saving, setSaving] = useState(false);
+  const [editDate, setEditDate] = useState(today);
+  const [editingId, setEditingId] = useState(null);
+  const [editForm, setEditForm] = useState({ in:"", out:"" });
+
+  // Lazy auto-close: any of THIS tech's own sessions still open from a past
+  // date get closed at that day's midnight the moment they load this tab.
+  // Nothing else depends on this having already run -- sessionHours() caps a
+  // past-date open session at midnight regardless -- this just persists the
+  // auto_closed flag so it's visible next time they check.
+  useEffect(() => {
+    const stale = myEntries.filter(e => !e.clock_out && e.work_date < today);
+    if (stale.length === 0) return;
+    (async () => {
+      for (const e of stale) {
+        await sb(`time_entries?id=eq.${e.id}`, { method:"PATCH", body:JSON.stringify({ clock_out: mtDayEndUTC(e.work_date), auto_closed:true }), prefer:"return=minimal" }).catch(()=>{});
+      }
+      await refreshAll();
+    })();
+    // eslint-disable-next-line
+  }, [myEntries.map(e=>e.id+(e.clock_out||"")).join(","), today]);
+
+  async function clockIn() {
+    setSaving(true);
+    try {
+      await sb("time_entries", { method:"POST", body:JSON.stringify({ tech_id:tech.id, work_date:today, clock_in:new Date().toISOString() }) });
+      await refreshAll();
+      showToast("✅ Clocked in!");
+    } catch(e) { showToast("Error: "+e.message, false); }
+    setSaving(false);
+  }
+  async function clockOut() {
+    if (!openEntry) return;
+    setSaving(true);
+    try {
+      await sb(`time_entries?id=eq.${openEntry.id}`, { method:"PATCH", body:JSON.stringify({ clock_out:new Date().toISOString() }), prefer:"return=minimal" });
+      await refreshAll();
+      showToast("✅ Clocked out!");
+    } catch(e) { showToast("Error: "+e.message, false); }
+    setSaving(false);
+  }
+
+  const todayTotal = dayHoursTotal(myEntries, tech.id, today, nowTick);
+  const autoClosedDays = [...new Set(myEntries.filter(e=>e.auto_closed).map(e=>e.work_date))].sort((a,b)=>b.localeCompare(a));
+
+  const recentDays = Array.from({length:14}, (_,i) => {
+    const d = new Date(today+"T12:00:00Z"); d.setUTCDate(d.getUTCDate()-i);
+    return d.toISOString().split("T")[0];
+  });
+
+  const editEntries = myEntries.filter(e => e.work_date === editDate).sort((a,b)=>a.clock_in.localeCompare(b.clock_in));
+
+  function startEdit(e) {
+    setEditingId(e.id);
+    setEditForm({ in: isoToMtTimeInput(e.clock_in), out: e.clock_out ? isoToMtTimeInput(e.clock_out) : "" });
+  }
+  async function saveEdit() {
+    if (!editForm.in) return showToast("Clock-in time required", false);
+    setSaving(true);
+    try {
+      const body = { clock_in: mtTimeToIso(editDate, editForm.in), clock_out: editForm.out ? mtTimeToIso(editDate, editForm.out) : null, auto_closed:false };
+      await sb(`time_entries?id=eq.${editingId}`, { method:"PATCH", body:JSON.stringify(body), prefer:"return=minimal" });
+      await refreshAll();
+      setEditingId(null);
+      showToast("✅ Session updated");
+    } catch(e) { showToast("Error: "+e.message, false); }
+    setSaving(false);
+  }
+  async function addSession() {
+    setSaving(true);
+    try {
+      const res = await sb("time_entries", { method:"POST", body:JSON.stringify({ tech_id:tech.id, work_date:editDate, clock_in:mtTimeToIso(editDate,"08:00"), clock_out:mtTimeToIso(editDate,"16:00") }) });
+      await refreshAll();
+      if (res && res[0]) startEdit(res[0]);
+      showToast("✅ Session added — adjust the times below");
+    } catch(e) { showToast("Error: "+e.message, false); }
+    setSaving(false);
+  }
+  async function deleteSession(id) {
+    if (!window.confirm("Delete this session?")) return;
+    setSaving(true);
+    try {
+      await sb(`time_entries?id=eq.${id}`, { method:"DELETE", prefer:"return=minimal" });
+      await refreshAll();
+      setEditingId(null);
+      showToast("Session deleted");
+    } catch(e) { showToast("Error: "+e.message, false); }
+    setSaving(false);
+  }
+
+  return (
+    <div style={{ display:"flex", flexDirection:"column", gap:"16px" }}>
+      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.blue}`, borderRadius:"12px", padding:"16px 18px" }}>
+        <Label color={C.blue}>🕒 Time Sheet</Label>
+        <div style={{ fontSize:"12px", color:C.muted, marginTop:"6px" }}>Clock in when you walk in the door for the day, and clock out when you arrive back for the day! This entry does not effect your pay in any way shape or form so please enter the correct time</div>
+      </div>
+
+      {autoClosedDays.length>0&&(
+        <div style={{ background:`${C.gold}18`, border:`1px solid ${C.gold}`, borderRadius:"10px", padding:"12px 16px", fontSize:"12px", color:C.black }}>
+          ⚠ {autoClosedDays.length} day{autoClosedDays.length!==1?"s":""} auto-closed at midnight because a clock-out was missed ({autoClosedDays.slice(0,3).map(fmtShortDate).join(", ")}{autoClosedDays.length>3?"...":""}) — fix it below with Edit Time if it's wrong.
+        </div>
+      )}
+
+      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"20px", display:"flex", flexDirection:"column", gap:"14px" }}>
+        <div style={{ display:"flex", gap:"12px" }}>
+          <button onClick={clockIn} disabled={saving||isClockedInToday} style={{ flex:1, background:isClockedInToday?C.border:C.green, border:"none", color:C.white, padding:"16px", borderRadius:"12px", cursor:(saving||isClockedInToday)?"not-allowed":"pointer", fontSize:"14px", fontWeight:"900", letterSpacing:"1px", fontFamily:"'Barlow Condensed',sans-serif", textTransform:"uppercase" }}>Clock In</button>
+          <button onClick={clockOut} disabled={saving||!isClockedInToday} style={{ flex:1, background:!isClockedInToday?C.border:"#ef4444", border:"none", color:C.white, padding:"16px", borderRadius:"12px", cursor:(saving||!isClockedInToday)?"not-allowed":"pointer", fontSize:"14px", fontWeight:"900", letterSpacing:"1px", fontFamily:"'Barlow Condensed',sans-serif", textTransform:"uppercase" }}>Clock Out</button>
+        </div>
+        <div style={{ textAlign:"center" }}>
+          <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"32px", color:C.blue }}>{todayTotal.toFixed(2)}h</div>
+          <div style={{ fontSize:"11px", color:C.muted, letterSpacing:"1px" }}>{isClockedInToday ? "CLOCKED IN — LIVE TOTAL FOR TODAY" : "TOTAL FOR TODAY"}</div>
+        </div>
+      </div>
+
+      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", overflow:"hidden" }}>
+        <div style={{ padding:"14px 18px", borderBottom:`1px solid ${C.border}` }}><Label color={C.blue}>Recent Days</Label></div>
+        <div style={{ padding:"14px 18px", display:"flex", flexDirection:"column", gap:"6px" }}>
+          {recentDays.map(d => {
+            const total = dayHoursTotal(myEntries, tech.id, d, nowTick);
+            const isAutoClosed = myEntries.some(e=>e.work_date===d&&e.auto_closed);
+            return (
+              <div key={d} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"6px 0", borderBottom:`1px solid ${C.border}` }}>
+                <span style={{ fontSize:"13px", color:C.black }}>{fmtShortDate(d)}{d===today?" (Today)":""}{isAutoClosed?" ⚠":""}</span>
+                <div style={{ display:"flex", alignItems:"center", gap:"10px" }}>
+                  <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"13px", color:total>0?C.black:C.muted }}>{total.toFixed(2)}h</span>
+                  <button onClick={()=>{setEditDate(d);setEditingId(null);}} style={{ background:"none", border:`1px solid ${C.border}`, color:C.blue, padding:"3px 8px", borderRadius:"4px", cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", fontSize:"10px" }}>EDIT</button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.blue}`, borderRadius:"12px", padding:"16px 18px", display:"flex", flexDirection:"column", gap:"12px" }}>
+        <Label color={C.blue}>Edit a Day</Label>
+        <div style={{ fontSize:"11px", color:C.muted }}>Forgot to clock in or out? Pick the date and fix it here — no admin needed.</div>
+        <input type="date" value={editDate} onChange={e=>{setEditDate(e.target.value);setEditingId(null);}} style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"8px 10px", borderRadius:"8px", fontSize:"13px", fontFamily:"'Barlow',sans-serif", width:"100%", boxSizing:"border-box" }}/>
+        {editEntries.length===0 && <div style={{ fontSize:"12px", color:C.muted }}>No sessions logged for this day yet.</div>}
+        {editEntries.map(e => (
+          <div key={e.id} style={{ background:C.cardLt, borderRadius:"8px", padding:"10px 12px" }}>
+            {editingId===e.id ? (
+              <div style={{ display:"flex", flexDirection:"column", gap:"8px" }}>
+                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"8px" }}>
+                  <div>
+                    <div style={{ fontSize:"10px", color:C.muted, marginBottom:"4px" }}>Clock In</div>
+                    <input type="time" value={editForm.in} onChange={ev=>setEditForm(f=>({...f,in:ev.target.value}))} style={{ background:C.card, border:`1px solid ${C.border}`, color:C.black, padding:"8px", borderRadius:"8px", fontSize:"13px", width:"100%", boxSizing:"border-box" }}/>
+                  </div>
+                  <div>
+                    <div style={{ fontSize:"10px", color:C.muted, marginBottom:"4px" }}>Clock Out</div>
+                    <input type="time" value={editForm.out} onChange={ev=>setEditForm(f=>({...f,out:ev.target.value}))} style={{ background:C.card, border:`1px solid ${C.border}`, color:C.black, padding:"8px", borderRadius:"8px", fontSize:"13px", width:"100%", boxSizing:"border-box" }}/>
+                  </div>
+                </div>
+                <div style={{ display:"flex", gap:"8px" }}>
+                  <button onClick={saveEdit} disabled={saving} style={{ flex:1, background:C.blue, border:"none", color:C.white, padding:"8px", borderRadius:"8px", cursor:"pointer", fontWeight:"700", fontSize:"12px" }}>Save</button>
+                  <button onClick={()=>setEditingId(null)} style={{ background:"none", border:`1px solid ${C.border}`, color:C.muted, padding:"8px 14px", borderRadius:"8px", cursor:"pointer", fontSize:"12px" }}>Cancel</button>
+                  <button onClick={()=>deleteSession(e.id)} style={{ background:"none", border:"1px solid #ef4444", color:"#ef4444", padding:"8px 14px", borderRadius:"8px", cursor:"pointer", fontSize:"12px" }}>Delete</button>
+                </div>
+              </div>
+            ) : (
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                <span style={{ fontSize:"13px", color:C.black }}>
+                  {formatMTTime(e.clock_in)} → {e.clock_out ? formatMTTime(e.clock_out) : (e.work_date===today ? "still clocked in" : "—")}
+                  {e.auto_closed && <span style={{ color:C.gold }}> ⚠ auto-closed</span>}
+                </span>
+                <button onClick={()=>startEdit(e)} style={{ background:"none", border:`1px solid ${C.border}`, color:C.blue, padding:"4px 10px", borderRadius:"4px", cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", fontSize:"11px" }}>Edit Time</button>
+              </div>
+            )}
+          </div>
+        ))}
+        <button onClick={addSession} disabled={saving} style={{ background:C.cardLt, border:`1px solid ${C.blue}`, color:C.blue, padding:"10px", borderRadius:"8px", cursor:saving?"not-allowed":"pointer", fontWeight:"700", fontSize:"12px" }}>+ Add Session for This Day</button>
+      </div>
+    </div>
+  );
+}
+
 // ─── TECH DASHBOARD ───────────────────────────────────────────────────────────
-function TechDashboard({ tech, techs, upsells, switchovers, reviews, callbacks, quota, jobs, techHours, rideAlongs=[], onLogout }) {
+function TechDashboard({ tech, techs, upsells, switchovers, reviews, callbacks, quota, jobs, timeEntries=[], refreshAll=async()=>{}, rideAlongs=[], onLogout }) {
   const q = quota || DEFAULT_QUOTA;
   const [tab, setTab] = useState("overview");
   const [menuOpen, setMenuOpen] = useState(false);
+  const [toast, setToast] = useState(null);
+  const showToast = (msg, ok=true) => { setToast({msg,ok}); setTimeout(()=>setToast(null), 3000); };
+  // Ticks while this dashboard is open so an active clock-in's live running
+  // total (Time Sheet tab) advances without a manual refresh.
+  const [nowTick, setNowTick] = useState(Date.now());
+  useEffect(() => { const iv = setInterval(() => setNowTick(Date.now()), 30000); return () => clearInterval(iv); }, []);
   const tt = calcTotals(tech, upsells, switchovers, reviews, callbacks);
   const tier = getTier(tt.total);
   const nextTier = JOURNEY_TIERS.find(t=>t.minPts>tt.total);
@@ -2567,6 +2728,7 @@ function TechDashboard({ tech, techs, upsells, switchovers, reviews, callbacks, 
   const techNavSections = [
     { label:null, items:[
       ["overview","🏠","Overview"],
+      ["timesheet","🕒","Time Sheet"],
       ["reports","📊","My Reports"],
       ["leaderboard","🏆","Leaderboard"],
     ]},
@@ -2680,7 +2842,8 @@ function TechDashboard({ tech, techs, upsells, switchovers, reviews, callbacks, 
             {(()=>{
               const wkJobs = (jobs||[]).filter(j=>j.tech_id===tech.id&&j.week_key===wk);
               const wkRevenue = wkJobs.reduce((s,j)=>s+(j.revenue||0),0);
-              const wkHours   = wkJobs.reduce((s,j)=>s+(j.hours||0),0);
+              const wkEnd = new Date(wk+"T12:00:00Z"); wkEnd.setUTCDate(wkEnd.getUTCDate()+6);
+              const wkHours   = rangeHoursTotal(timeEntries, tech.id, wk, wkEnd.toISOString().split("T")[0], nowTick);
               if (wkRevenue===0&&wkHours===0) return null;
               const mt = new Date(Date.now()-6*60*60*1000);
               const day = mt.getDay();
@@ -2828,8 +2991,9 @@ function TechDashboard({ tech, techs, upsells, switchovers, reviews, callbacks, 
             )}
           </div>
         )}
-        {tab==="reports"&&<ReportsTab techs={techs} jobs={jobs||[]} upsells={upsells||[]} techHours={techHours||[]} techId={tech.id}/>}
-        {tab==="leaderboard"&&<Leaderboard techs={techs} jobs={jobs||[]} upsells={upsells} reviews={reviews} callbacks={callbacks||[]} switchovers={switchovers}/>}
+        {tab==="timesheet"&&<TimeSheetTab tech={tech} timeEntries={timeEntries} refreshAll={refreshAll} showToast={showToast} nowTick={nowTick}/>}
+        {tab==="reports"&&<ReportsTab techs={techs} jobs={jobs||[]} upsells={upsells||[]} timeEntries={timeEntries} techId={tech.id}/>}
+        {tab==="leaderboard"&&<Leaderboard techs={techs} jobs={jobs||[]} upsells={upsells} reviews={reviews} callbacks={callbacks||[]} switchovers={switchovers} timeEntries={timeEntries}/>}
         {tab==="badges"&&<BadgeGrid earned={tech.badges}/>}
         {tab==="upsells"&&<UpsellLeaderboard techs={techs} upsells={upsells} jobs={jobs||[]} currentId={tech.id}/>}
         {tab==="switchovers"&&<SwitchoverLeaderboard techs={techs} switchovers={switchovers} currentId={tech.id}/>}
@@ -2852,6 +3016,11 @@ function TechDashboard({ tech, techs, upsells, switchovers, reviews, callbacks, 
         )}
         {tab==="training"&&<PerfectDayTrainingPanel tech={tech}/>}
       </div>
+      {toast&&(
+        <div style={{ position:"fixed", bottom:"24px", left:"50%", transform:"translateX(-50%)", background:toast.ok?C.green:"#ef4444", color:C.white, padding:"12px 28px", borderRadius:"24px", fontSize:"14px", fontWeight:"900", zIndex:999, whiteSpace:"nowrap", fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:"1px", fontStyle:"italic", boxShadow:"0 4px 20px rgba(0,0,0,0.15)" }}>
+          {toast.msg}
+        </div>
+      )}
     </div>
   );
 }
@@ -2969,6 +3138,98 @@ function DeleteTab({ techs, upsells, switchovers, reviews, saving, setSaving, re
           })}
         </div>
       )}
+    </div>
+  );
+}
+
+// ─── ADMIN TIME SHEET ──────────────────────────────────────────────────────────
+function AdminTimeSheetTab({ techs, timeEntries, refreshAll, showToast }) {
+  const [rangePreset, setRangePreset] = useState("wtd");
+  const [cStart, setCStart] = useState("");
+  const [cEnd, setCEnd] = useState("");
+  const { start, end } = getDateRangeBounds(rangePreset, cStart, cEnd);
+
+  // Same active/archived + owner-exclusion pattern used everywhere else
+  // (OperationsProgressTab, TechDashboard's activeTechs) -- Truxton/Casey
+  // occasionally clocking in shouldn't appear on a per-tech hours ranking.
+  const rankedTechs = techs
+    .filter(t => t.is_active !== false && t.title !== "owner")
+    .map(t => ({ ...t, hours: rangeHoursTotal(timeEntries, t.id, start, end) }))
+    .filter(t => t.hours > 0)
+    .sort((a,b) => b.hours - a.hours);
+
+  const [bulkText, setBulkText] = useState("");
+  const [importing, setImporting] = useState(false);
+  const [importResult, setImportResult] = useState(null);
+
+  async function runImport() {
+    setImporting(true);
+    setImportResult(null);
+    const lines = bulkText.split("\n").map(l=>l.trim()).filter(Boolean);
+    const techByName = {};
+    techs.forEach(t => { techByName[t.name.toLowerCase()] = t; });
+    const rows = [];
+    const errors = [];
+    lines.forEach((line, i) => {
+      const parts = line.split(",").map(p=>p.trim());
+      if (parts.length !== 4) { errors.push(`Line ${i+1}: expected "Name, Date, In, Out" (4 fields), got ${parts.length} — "${line}"`); return; }
+      const [name, date, inTime, outTime] = parts;
+      const tech = techByName[name.toLowerCase()];
+      if (!tech) { errors.push(`Line ${i+1}: no tech named "${name}"`); return; }
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) { errors.push(`Line ${i+1}: date must be YYYY-MM-DD, got "${date}"`); return; }
+      if (!/^\d{1,2}:\d{2}$/.test(inTime) || !/^\d{1,2}:\d{2}$/.test(outTime)) { errors.push(`Line ${i+1}: times must be 24-hour HH:MM, got "${inTime}" / "${outTime}"`); return; }
+      const pad = t => t.length===4 ? "0"+t : t;
+      rows.push({ tech_id: tech.id, work_date: date, clock_in: mtTimeToIso(date, pad(inTime)), clock_out: mtTimeToIso(date, pad(outTime)) });
+    });
+    if (errors.length > 0) { setImportResult({ ok:false, errors }); setImporting(false); return; }
+    try {
+      await sb("time_entries", { method:"POST", body:JSON.stringify(rows), prefer:"return=minimal" });
+      await refreshAll();
+      setImportResult({ ok:true, count: rows.length });
+      setBulkText("");
+      showToast(`✅ Imported ${rows.length} session${rows.length===1?"":"s"}`);
+    } catch(e) { setImportResult({ ok:false, errors:[e.message] }); }
+    setImporting(false);
+  }
+
+  return (
+    <div style={{ display:"flex", flexDirection:"column", gap:"16px" }}>
+      <DateRangePicker label="🕒 Time Sheet" color={C.blue} preset={rangePreset} setPreset={setRangePreset} customStart={cStart} setCustomStart={setCStart} customEnd={cEnd} setCustomEnd={setCEnd}>
+        <div style={{ fontSize:"11px", color:C.blue, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", marginTop:"8px" }}>
+          {start} → {end} · {rankedTechs.length} tech{rankedTechs.length!==1?"s":""} with hours
+        </div>
+      </DateRangePicker>
+
+      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.blue}`, borderRadius:"12px", overflow:"hidden" }}>
+        <div style={{ padding:"14px 18px", borderBottom:`1px solid ${C.border}`, background:C.cardLt }}>
+          <Label color={C.blue}>🕒 Hours by Tech · {start} → {end}</Label>
+        </div>
+        <div style={{ padding:"14px 18px", display:"flex", flexDirection:"column", gap:"8px" }}>
+          {rankedTechs.length===0 && <div style={{ fontSize:"13px", color:C.muted, textAlign:"center", padding:"12px" }}>No hours logged in this range.</div>}
+          {rankedTechs.map((t,i)=>(
+            <div key={t.id} style={{ display:"flex", justifyContent:"space-between" }}>
+              <span style={{ fontSize:"13px", color:C.black }}>{medal(i)} {t.name}</span>
+              <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"13px", color:C.black }}>{t.hours.toFixed(2)}h</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.orange}`, borderRadius:"12px", padding:"20px", display:"flex", flexDirection:"column", gap:"12px" }}>
+        <Label color={C.orange}>Bulk Import — One-Time Backfill</Label>
+        <div style={{ fontSize:"12px", color:C.muted }}>One session per line: <code>Tech Name, YYYY-MM-DD, HH:MM, HH:MM</code> (24-hour, Mountain Time). Same tech + date twice = two sessions that day (e.g. a lunch break).</div>
+        <textarea value={bulkText} onChange={e=>setBulkText(e.target.value)} rows={8} placeholder={"Riley Lyon, 2026-06-02, 08:15, 16:30\nTom Lorenc, 2026-06-02, 07:30, 15:00"} style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"10px", borderRadius:"8px", fontSize:"12px", fontFamily:"monospace", width:"100%", boxSizing:"border-box", resize:"vertical" }}/>
+        <button onClick={runImport} disabled={importing||!bulkText.trim()} style={{ background:importing?"#333":C.orange, border:"none", color:C.white, padding:"13px", borderRadius:"12px", cursor:(importing||!bulkText.trim())?"not-allowed":"pointer", fontSize:"13px", fontWeight:"700", letterSpacing:"2px", fontFamily:"'Barlow Condensed',sans-serif", width:"100%", textTransform:"uppercase" }}>
+          {importing ? "Importing..." : "Import Sessions"}
+        </button>
+        {importResult && (
+          importResult.ok
+            ? <div style={{ fontSize:"12px", color:C.green }}>✅ Imported {importResult.count} session{importResult.count===1?"":"s"}.</div>
+            : <div style={{ background:"#ef444418", border:"1px solid #ef4444", borderRadius:"8px", padding:"10px", fontSize:"11px", color:"#ef4444", maxHeight:"200px", overflowY:"auto", display:"flex", flexDirection:"column", gap:"4px" }}>
+                {importResult.errors.map((e,i)=><div key={i}>{e}</div>)}
+              </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -4556,7 +4817,7 @@ function UpsellAuditTab({ techs, upsells, jobs }) {
 }
 
 // ─── ADMIN PANEL ──────────────────────────────────────────────────────────────
-function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlongs, schedules, quota, setQuota, jobs, techHours, pendingSplits=[], onLogout, refreshAll }) {
+function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlongs, schedules, quota, setQuota, jobs, timeEntries=[], pendingSplits=[], onLogout, refreshAll }) {
   // Live-standings views (Leaderboard, Journey Map) should only show active
   // techs, matching what the tech-facing app already does — archived techs
   // stay fully visible in Reports/Payroll/Upsell Audit where historical
@@ -4719,6 +4980,7 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
       ["upsells","💰","Upsells"],
       ["reviews","⭐","Reviews"],
       ["switchovers","🔄","Switchovers"],
+      ["timesheet","🕒","Time Sheet"],
       ["callbacks","📞","Callbacks"],
       ["ridealong","🚗","Ride-Alongs"],
     ]},
@@ -4873,6 +5135,10 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
             </>
           );
         })()}
+
+        {tab==="timesheet"&&(
+          <AdminTimeSheetTab techs={techs} timeEntries={timeEntries} refreshAll={refreshAll} showToast={showToast}/>
+        )}
 
         {tab==="callbacks"&&(
           <div style={{ display:"flex", flexDirection:"column", gap:"16px" }}>
@@ -5138,7 +5404,7 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
           </div>
         )}
         {tab==="operations"&&(
-          <OperationsProgressTab techs={techs} upsells={upsells} switchovers={switchovers} reviews={reviews} quota={quota} callbacks={callbacks||[]} jobs={jobs||[]} techHours={techHours||[]} rideAlongs={rideAlongs||[]}/>
+          <OperationsProgressTab techs={techs} upsells={upsells} switchovers={switchovers} reviews={reviews} quota={quota} callbacks={callbacks||[]} jobs={jobs||[]} timeEntries={timeEntries} rideAlongs={rideAlongs||[]}/>
         )}
         {tab==="quota"&&(
           <QuotaSettings quota={quota} onSave={saveQuota} saving={saving}/>
@@ -5151,20 +5417,10 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
         )}
 
         {tab==="reports"&&(
-          <ReportsTab techs={techs} jobs={jobs||[]} upsells={upsells||[]} techHours={techHours||[]} techId={null} refreshAll={refreshAll} showToast={showToast}
-            onSaveHours={async(tech_id,week_key,hours)=>{
-              setSaving(true);
-              try {
-                await sb("tech_hours?on_conflict=tech_id,week_key",{method:"POST",prefer:"resolution=merge-duplicates,return=minimal",body:JSON.stringify({tech_id,week_key,hours})});
-                await refreshAll();
-                showToast("✅ Hours saved!");
-              } catch(e){ showToast("Error: "+e.message,false); }
-              setSaving(false);
-            }}
-          />
+          <ReportsTab techs={techs} jobs={jobs||[]} upsells={upsells||[]} timeEntries={timeEntries} techId={null} refreshAll={refreshAll} showToast={showToast}/>
         )}
         {tab==="leaderboard"&&(
-          <Leaderboard techs={activeTechs} jobs={jobs||[]} upsells={upsells} reviews={reviews} callbacks={callbacks||[]} switchovers={switchovers}/>
+          <Leaderboard techs={activeTechs} jobs={jobs||[]} upsells={upsells} reviews={reviews} callbacks={callbacks||[]} switchovers={switchovers} timeEntries={timeEntries}/>
         )}
         {tab==="payroll"&&(
           <PayrollTab techs={techs} jobs={jobs||[]} upsells={upsells}/>
@@ -5213,7 +5469,7 @@ export default function App() {
   const [rideAlongs, setRideAlongs] = useState([]);
   const [schedules, setSchedules] = useState([]);
   const [jobs, setJobs] = useState([]);
-  const [techHours, setTechHours] = useState([]);
+  const [timeEntries, setTimeEntries] = useState([]);
   const [pendingSplits, setPendingSplits] = useState([]);
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -5223,7 +5479,7 @@ export default function App() {
 
   const loadAll = useCallback(async () => {
     try {
-      const [t,u,s,r,ra,sch,settings,cb,jb,th,ps] = await Promise.all([
+      const [t,u,s,r,ra,sch,settings,cb,jb,te,ps] = await Promise.all([
         sb("techs?select=*&order=name"),
         sb("upsells?select=*"),
         sb("switchovers?select=*"),
@@ -5233,11 +5489,11 @@ export default function App() {
         sb("settings?key=eq.quota&select=*").catch(()=>[]),
         sb("callbacks?select=*&order=created_at.desc").catch(()=>[]),
         sbAll("jobs?select=*&order=job_date.desc,id.asc").catch(()=>[]),
-        sb("tech_hours?select=*").catch(()=>[]),
+        sbAll("time_entries?select=*&order=work_date.desc,id.asc").catch(()=>[]),
         sb("jobs?split_confirmed=eq.false&select=hcp_job_id,tech_id,job_date,revenue,tips,upsell_amount,customer_name&order=job_date.desc").catch(()=>[]),
       ]);
       setTechs(t||[]); setUpsells(u||[]); setSwitchovers(s||[]); setReviews(r||[]);
-      setRideAlongs(ra||[]); setSchedules(sch||[]); setCallbacks(cb||[]); setJobs(jb||[]); setTechHours(th||[]);
+      setRideAlongs(ra||[]); setSchedules(sch||[]); setCallbacks(cb||[]); setJobs(jb||[]); setTimeEntries(te||[]);
       setPendingSplits(ps||[]);
       if (settings&&settings.length>0) {
         try { setQuota(JSON.parse(settings[0].value)); } catch {}
@@ -5356,11 +5612,11 @@ alter table jobs add column if not exists tips numeric default 0;`}
     <AdminPanel techs={techs} setTechs={setTechs} upsells={upsells} setUpsells={setUpsells}
       switchovers={switchovers} setSwitchovers={setSwitchovers} reviews={reviews} setReviews={setReviews}
       callbacks={callbacks} rideAlongs={rideAlongs} schedules={schedules} quota={quota} setQuota={setQuota}
-      jobs={jobs} techHours={techHours} pendingSplits={pendingSplits} onLogout={()=>setUser(null)} refreshAll={loadAll}/>
+      jobs={jobs} timeEntries={timeEntries} pendingSplits={pendingSplits} onLogout={()=>setUser(null)} refreshAll={loadAll}/>
   );
   if (user.type==="tech"&&currentTech) return (
     <TechDashboard tech={currentTech} techs={activeTechs} upsells={upsells} switchovers={switchovers}
-      reviews={reviews} callbacks={callbacks} quota={quota} jobs={jobs} techHours={techHours} rideAlongs={rideAlongs} onLogout={()=>setUser(null)}/>
+      reviews={reviews} callbacks={callbacks} quota={quota} jobs={jobs} timeEntries={timeEntries} refreshAll={loadAll} rideAlongs={rideAlongs} onLogout={()=>setUser(null)}/>
   );
   return null;
 }
