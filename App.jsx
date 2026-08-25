@@ -3143,6 +3143,7 @@ function DeleteTab({ techs, upsells, switchovers, reviews, saving, setSaving, re
 }
 
 // ─── ADMIN TIME SHEET ──────────────────────────────────────────────────────────
+const MONTH_NAMES = { january:0, jan:0, february:1, feb:1, march:2, mar:2, april:3, apr:3, may:4, june:5, jun:5, july:6, jul:6, august:7, aug:7, september:8, sep:8, sept:8, october:9, oct:9, november:10, nov:10, december:11, dec:11 };
 function AdminTimeSheetTab({ techs, timeEntries, refreshAll, showToast }) {
   const [rangePreset, setRangePreset] = useState("wtd");
   const [cStart, setCStart] = useState("");
@@ -3168,11 +3169,46 @@ function AdminTimeSheetTab({ techs, timeEntries, refreshAll, showToast }) {
     const lines = bulkText.split("\n").map(l=>l.trim()).filter(Boolean);
     const techByName = {};
     techs.forEach(t => { techByName[t.name.toLowerCase()] = t; });
+    const nowYear = new Date().getFullYear();
     const rows = [];
     const errors = [];
+
     lines.forEach((line, i) => {
+      // Format 2 — weekly total, historical June-1-to-present backfill only:
+      // "Name: Month Day TotalHours" e.g. "Jamuar Hill: July 4 37.18". No
+      // daily breakdown exists for this data, so it's spread evenly across 4
+      // consecutive days (Mon-Thu) starting at WeekStartDate, one synthetic
+      // 8am-start session per day -- keeps daily numbers plausible while
+      // still rolling up to the correct weekly total for Rev/Hr etc.
+      const weeklyMatch = line.match(/^(.+?):\s*([A-Za-z]+)\s+(\d{1,2})\s+([\d.]+)\s*$/);
+      if (weeklyMatch) {
+        const [, rawName, monthName, dayStr, hoursStr] = weeklyMatch;
+        const tech = techByName[rawName.trim().toLowerCase()];
+        if (!tech) { errors.push(`Line ${i+1}: no tech named "${rawName.trim()}"`); return; }
+        const monthIdx = MONTH_NAMES[monthName.toLowerCase()];
+        if (monthIdx === undefined) { errors.push(`Line ${i+1}: "${monthName}" isn't a recognized month name`); return; }
+        const totalHours = parseFloat(hoursStr);
+        if (isNaN(totalHours) || totalHours <= 0) { errors.push(`Line ${i+1}: invalid hours "${hoursStr}"`); return; }
+        const weekStart = new Date(nowYear, monthIdx, parseInt(dayStr,10));
+        if (weekStart.getDay() !== 1) {
+          const actualDay = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"][weekStart.getDay()];
+          errors.push(`Line ${i+1}: "${monthName} ${dayStr}" is a ${actualDay}, not a Monday — week start dates must be Mondays`);
+          return;
+        }
+        const perDayHours = totalHours / 4;
+        for (let d = 0; d < 4; d++) {
+          const dayDate = new Date(weekStart); dayDate.setDate(weekStart.getDate()+d);
+          const dayStrFmt = `${dayDate.getFullYear()}-${String(dayDate.getMonth()+1).padStart(2,"0")}-${String(dayDate.getDate()).padStart(2,"0")}`;
+          const clockIn = mtTimeToIso(dayStrFmt, "08:00");
+          const clockOut = new Date(new Date(clockIn).getTime() + perDayHours*3600000).toISOString();
+          rows.push({ tech_id: tech.id, work_date: dayStrFmt, clock_in: clockIn, clock_out: clockOut });
+        }
+        return;
+      }
+
+      // Format 1 — per-session: "Name, YYYY-MM-DD, HH:MM, HH:MM"
       const parts = line.split(",").map(p=>p.trim());
-      if (parts.length !== 4) { errors.push(`Line ${i+1}: expected "Name, Date, In, Out" (4 fields), got ${parts.length} — "${line}"`); return; }
+      if (parts.length !== 4) { errors.push(`Line ${i+1}: unrecognized format — expected "Name, YYYY-MM-DD, HH:MM, HH:MM" or "Name: Month Day TotalHours" — "${line}"`); return; }
       const [name, date, inTime, outTime] = parts;
       const tech = techByName[name.toLowerCase()];
       if (!tech) { errors.push(`Line ${i+1}: no tech named "${name}"`); return; }
@@ -3181,6 +3217,7 @@ function AdminTimeSheetTab({ techs, timeEntries, refreshAll, showToast }) {
       const pad = t => t.length===4 ? "0"+t : t;
       rows.push({ tech_id: tech.id, work_date: date, clock_in: mtTimeToIso(date, pad(inTime)), clock_out: mtTimeToIso(date, pad(outTime)) });
     });
+
     if (errors.length > 0) { setImportResult({ ok:false, errors }); setImporting(false); return; }
     try {
       await sb("time_entries", { method:"POST", body:JSON.stringify(rows), prefer:"return=minimal" });
@@ -3217,8 +3254,12 @@ function AdminTimeSheetTab({ techs, timeEntries, refreshAll, showToast }) {
 
       <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.orange}`, borderRadius:"12px", padding:"20px", display:"flex", flexDirection:"column", gap:"12px" }}>
         <Label color={C.orange}>Bulk Import — One-Time Backfill</Label>
-        <div style={{ fontSize:"12px", color:C.muted }}>One session per line: <code>Tech Name, YYYY-MM-DD, HH:MM, HH:MM</code> (24-hour, Mountain Time). Same tech + date twice = two sessions that day (e.g. a lunch break).</div>
-        <textarea value={bulkText} onChange={e=>setBulkText(e.target.value)} rows={8} placeholder={"Riley Lyon, 2026-06-02, 08:15, 16:30\nTom Lorenc, 2026-06-02, 07:30, 15:00"} style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"10px", borderRadius:"8px", fontSize:"12px", fontFamily:"monospace", width:"100%", boxSizing:"border-box", resize:"vertical" }}/>
+        <div style={{ fontSize:"12px", color:C.muted, display:"flex", flexDirection:"column", gap:"4px" }}>
+          <div>Two line formats, mix freely — one entry per line:</div>
+          <div>• Per-session: <code>Tech Name, YYYY-MM-DD, HH:MM, HH:MM</code> (24-hour, Mountain Time). Same tech + date twice = two sessions that day (e.g. a lunch break).</div>
+          <div>• Weekly total (historical, no daily breakdown available): <code>Tech Name: Month Day TotalHours</code> — day must be a <strong>Monday</strong>. Spread evenly across 4 synthetic Mon–Thu sessions so daily numbers stay plausible while the weekly total still rolls up correctly.</div>
+        </div>
+        <textarea value={bulkText} onChange={e=>setBulkText(e.target.value)} rows={8} placeholder={"Riley Lyon, 2026-06-02, 08:15, 16:30\nTom Lorenc, 2026-06-02, 07:30, 15:00\nJamuar Hill: July 4 37.18"} style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"10px", borderRadius:"8px", fontSize:"12px", fontFamily:"monospace", width:"100%", boxSizing:"border-box", resize:"vertical" }}/>
         <button onClick={runImport} disabled={importing||!bulkText.trim()} style={{ background:importing?"#333":C.orange, border:"none", color:C.white, padding:"13px", borderRadius:"12px", cursor:(importing||!bulkText.trim())?"not-allowed":"pointer", fontSize:"13px", fontWeight:"700", letterSpacing:"2px", fontFamily:"'Barlow Condensed',sans-serif", width:"100%", textTransform:"uppercase" }}>
           {importing ? "Importing..." : "Import Sessions"}
         </button>
