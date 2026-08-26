@@ -3190,7 +3190,7 @@ function AdminTimeSheetTab({ techs, timeEntries, refreshAll, showToast }) {
 
     lines.forEach((line, i) => {
       // Format 2 — weekly total, historical June-1-to-present backfill only:
-      // "Name: Month Day TotalHours" e.g. "Jamuar Hill: July 4 37.18". No
+      // "Name: Month Day TotalHours" e.g. "JaMuar Hill: July 4 37.18". No
       // daily breakdown exists for this data, so it's spread evenly across 4
       // consecutive days (Mon-Thu) starting at WeekStartDate, one synthetic
       // 8am-start session per day -- keeps daily numbers plausible while
@@ -3274,7 +3274,7 @@ function AdminTimeSheetTab({ techs, timeEntries, refreshAll, showToast }) {
           <div>• Per-session: <code>Tech Name, YYYY-MM-DD, HH:MM, HH:MM</code> (24-hour, Mountain Time). Same tech + date twice = two sessions that day (e.g. a lunch break).</div>
           <div>• Weekly total (historical, no daily breakdown available): <code>Tech Name: Month Day TotalHours</code> — day must be a <strong>Monday</strong>. Spread evenly across 4 synthetic Mon–Thu sessions so daily numbers stay plausible while the weekly total still rolls up correctly.</div>
         </div>
-        <textarea value={bulkText} onChange={e=>setBulkText(e.target.value)} rows={8} placeholder={"Riley Lyon, 2026-06-02, 08:15, 16:30\nTom Lorenc, 2026-06-02, 07:30, 15:00\nJamuar Hill: July 4 37.18"} style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"10px", borderRadius:"8px", fontSize:"12px", fontFamily:"monospace", width:"100%", boxSizing:"border-box", resize:"vertical" }}/>
+        <textarea value={bulkText} onChange={e=>setBulkText(e.target.value)} rows={8} placeholder={"Riley Lyon, 2026-06-02, 08:15, 16:30\nTom Lorenc, 2026-06-02, 07:30, 15:00\nJaMuar Hill: July 4 37.18"} style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"10px", borderRadius:"8px", fontSize:"12px", fontFamily:"monospace", width:"100%", boxSizing:"border-box", resize:"vertical" }}/>
         <button onClick={runImport} disabled={importing||!bulkText.trim()} style={{ background:importing?"#333":C.orange, border:"none", color:C.white, padding:"13px", borderRadius:"12px", cursor:(importing||!bulkText.trim())?"not-allowed":"pointer", fontSize:"13px", fontWeight:"700", letterSpacing:"2px", fontFamily:"'Barlow Condensed',sans-serif", width:"100%", textTransform:"uppercase" }}>
           {importing ? "Importing..." : "Import Sessions"}
         </button>

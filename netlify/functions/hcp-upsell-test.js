@@ -10,26 +10,10 @@ const UPSELL_SERVICES = [
   "Full Exterior Detail",
 ];
 
-const TECH_MAP = {
-  "Myles Madarieta":   "Myles Madarieta",
-  "Kade Andrew":       "Kade Andrew",
-  "Trevor Prince":     "Trevor Prince",
-  "Kyle Reiff":        "Kyle Reiff",
-  "Zak Lundblade":     "Zak Lundblade",
-  "Josh Halafuka":     "Josh Halafuka",
-  "Matthew Durkovich": "Matthew Durkovich",
-  "Max Hancock":       "Max Hancock",
-  "Milos Lewit":       "Milos Lewit",
-  "Mason Dixon":       "Mason Dixon",
-  "Tom Lorenc":        "Tom Lorenc",
-  "Ethan Hamilton":    "Ethan Hamilton",
-  "Caleb McDaniel":    "Caleb McDaniel",
-  "Riley Lyon":        "Riley Lyon",
-  "Britton Dookhran":  "Britton Dookhran",
-  "Atticus Andersen":  "Atticus Andersen",
-  "Landon White":      "Landon White",
-  "Jackson Vaughn":    "Jackson Vaughn",
-};
+// Was a hand-duplicated copy of lib/techMap.js (and already had the pre-fix
+// spellings, so a dry run here would've validated against the wrong names)
+// -- switched to the shared file so this can't drift out of sync again.
+const TECH_MAP = require('./lib/techMap');
 
 function getWeekKey() {
   const mt = new Date(Date.now() - 6 * 60 * 60 * 1000);

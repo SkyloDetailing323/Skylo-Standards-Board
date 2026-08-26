@@ -1,7 +1,7 @@
 // Shared TECH_MAP — add new hires here once; imported by all four sync functions.
 // Key = HCP employee name (exact, case-sensitive). Value = Supabase tech name.
 module.exports = {
-  "Atticus Andersen":  "Atticus Anderson",
+  "Atticus Andersen":  "Atticus Andersen",
   "Brian Wheelus":     "Brian Wheelus",
   "Britton Dookhran":  "Britton Dookhran",
   "Caleb McDaniel":    "Caleb McDaniel",
@@ -13,11 +13,11 @@ module.exports = {
   "Jack Watson":       "Jack Watson",
   "Jackson Payne":     "Jackson Payne",
   "Jackson Vaughn":    "Jackson Vaughn",
-  "JaMuar Hill":       "Jamuar Hill",
+  "JaMuar Hill":       "JaMuar Hill",
   "Jayden Brownlee":   "Jayden Brownlee",
-  "Josh Halafuka":     "Josh Halufuka",
+  "Josh Halafuka":     "Josh Halafuka",
   "Kade Andrew":       "Kade Andrew",
-  "Kyle Reiff":        "Kyle Rieff",
+  "Kyle Reiff":        "Kyle Reiff",
   "Landon White":      "Landon White",
   "Logan Mannikko":    "Logan Mannikko",
   "Mason Dixon":       "Mason Dixon",

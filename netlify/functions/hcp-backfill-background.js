@@ -5,32 +5,11 @@
 // collected -- tips themselves are manual-entry only (tip_entries table).
 // HCP returns monetary values in CENTS — divide by 100 for dollars.
 
-const TECH_MAP = {
-  "Myles Madarieta":   "Myles Madarieta",
-  "Kade Andrew":       "Kade Andrew",
-  "Kyle Reiff":        "Kyle Rieff",        // HCP → Supabase spelling
-  "Zak Lundblade":     "Zak Lundblade",
-  "Josh Halafuka":     "Josh Halufuka",     // HCP → Supabase spelling
-  "Matthew Durkovich": "Matthew Durkovich",
-  "Milos Lewit":       "Milos Lewit",
-  "Mason Dixon":       "Mason Dixon",
-  "Tom Lorenc":        "Tom Lorenc",
-  "Ethan Hamilton":    "Ethan Hamilton",
-  "Caleb McDaniel":    "Caleb McDaniel",
-  "Riley Lyon":        "Riley Lyon",
-  "Britton Dookhran":  "Britton Dookhran",
-  "Atticus Andersen":  "Atticus Anderson",  // HCP → Supabase spelling
-  "Landon White":      "Landon White",
-  "Jackson Vaughn":    "Jackson Vaughn",
-  "Brian Wheelus":     "Brian Wheelus",
-  // Archived techs — no longer active but include for historical revenue accuracy
-  "Ethan Hansen":      "Ethan Hansen",
-  "Riley Wooden":      "Riley Wooden",
-  "Will Faulkner":     "Will Faulkner",
-  "Cole Burtenshaw":   "Cole Burtenshaw",
-  "Max Hancock":       "Max Hancock",
-  "Trevor Prince":     "Trevor Prince",
-};
+// Was a hand-duplicated copy of lib/techMap.js, missing every tech added
+// since it was last hand-updated (Garrett Glauser, Jack Watson, Casey Brown,
+// Truxton Mcspadden, JaMuar Hill) -- switched to the shared file so this
+// can't drift out of sync again.
+const TECH_MAP = require('./lib/techMap');
 
 function getWeekKey(dateStr) {
   const d = new Date(dateStr + "T12:00:00Z");
