@@ -1197,23 +1197,16 @@ function ReportsTab({ techs, jobs, upsells=[], timeEntries=[], tipEntries=[], te
     return j.job_date >= start && j.job_date <= end;
   });
 
-  // Compute upsell totals from the upsells table (source of truth — includes manual entries)
-  function dateToWeekKey(dateStr) {
-    const d = new Date(dateStr + "T12:00:00Z");
-    const day = d.getUTCDay();
-    const back = day === 0 ? 6 : day - 1;
-    d.setUTCDate(d.getUTCDate() - back);
-    return d.toISOString().split("T")[0];
-  }
-  const startWk = dateToWeekKey(start);
-  const endWk   = dateToWeekKey(end);
+  // Upsell totals: day-exact via jobs.upsell_amount over inRange (same
+  // filtering as totalRevenue below), NOT the upsells table's week_key
+  // bucket — that only resolves to whole-week granularity, so any preset
+  // sharing a calendar week (e.g. Today/Yesterday/WTD) collapsed to the
+  // same total regardless of which was selected.
   const upsellByTech = {};
-  (upsells || []).forEach(u => {
-    if (u.week_key < startWk || u.week_key > endWk) return;
-    if (techId && u.tech_id !== techId) return;
-    upsellByTech[u.tech_id] = (upsellByTech[u.tech_id] || 0) + u.amount;
+  inRange.forEach(j => {
+    upsellByTech[j.tech_id] = (upsellByTech[j.tech_id] || 0) + (j.upsell_amount || 0);
   });
-  const totalUpsells = Object.values(upsellByTech).reduce((a,b)=>a+b,0);
+  const totalUpsells = inRange.reduce((s,j) => s+(j.upsell_amount||0), 0);
 
   const totalRevenue   = inRange.reduce((s,j) => s+(j.revenue||0), 0);
   const totalTips      = techId
