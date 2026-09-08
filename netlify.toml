@@ -11,6 +11,9 @@
 [functions."hcp-revenue-sync"]
   schedule = "*/5 * * * *"
 
+[functions."hcp-tip-sync"]
+  schedule = "*/5 * * * *"
+
 [functions."hcp-backfill"]
   timeout = 26
 
