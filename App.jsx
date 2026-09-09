@@ -189,9 +189,13 @@ function mostRecentTimestamp(rows) {
 }
 function getPayPeriods() {
   const anchor = new Date(PP_ANCHOR_END+"T12:00:00");
-  const today = new Date(Date.now()-6*60*60*1000).toISOString().split("T")[0];
+  const todayMs = Date.now()-6*60*60*1000;
+  // Forward bound is relative to today (not a fixed offset from the anchor) so
+  // periods keep generating indefinitely instead of silently stopping once
+  // real time passes anchor + a hardcoded number of periods.
+  const periodsAheadOfToday = Math.ceil((todayMs-anchor.getTime())/(14*24*60*60*1000)) + 4;
   const periods = [];
-  for (let i=-52; i<=4; i++) {
+  for (let i=-52; i<=periodsAheadOfToday; i++) {
     const end = new Date(anchor); end.setDate(anchor.getDate()+i*14);
     const start = new Date(end);  start.setDate(end.getDate()-13);
     const submit= new Date(end);  submit.setDate(end.getDate()+4);
