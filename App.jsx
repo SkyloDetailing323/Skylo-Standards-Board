@@ -175,6 +175,25 @@ function getMonthKey() {
   const now = new Date();
   return `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`;
 }
+// Real upsell $ for a tech (or team-wide if techId is falsy) over a job_date
+// range -- the same day-exact method ReportsTab uses (jobs.upsell_amount by
+// job_date), so quota/gamification views agree with Reports/personal logins
+// instead of the separate upsells table, whose week_key (a week's Monday)
+// month-prefix bucketing misattributes any week spanning a month boundary.
+function upsellAmountInRange(jobs, techId, start, end) {
+  return (jobs||[]).filter(j => (!techId || j.tech_id===techId) && j.job_date && j.job_date>=start && j.job_date<=end).reduce((s,j)=>s+(j.upsell_amount||0),0);
+}
+function monthBounds(year, month) {
+  const y = Number(year), m = Number(month);
+  const start = `${y}-${String(m).padStart(2,"0")}-01`;
+  const lastDay = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  const end = `${y}-${String(m).padStart(2,"0")}-${String(lastDay).padStart(2,"0")}`;
+  return { start, end };
+}
+function weekEndDate(wk) {
+  const d = new Date(wk+"T12:00:00Z"); d.setUTCDate(d.getUTCDate()+6);
+  return d.toISOString().split("T")[0];
+}
 function formatWeekLabel(key) {
   const d = new Date(key+"T00:00:00"), end = new Date(d);
   end.setDate(d.getDate()+6);
@@ -354,24 +373,25 @@ function DateRangePicker({ label="📊 Time Period", color=C.blue, preset, setPr
 const TEAM_LEAD_OVERRIDE_PCT_PARTIAL = 0.05; // 5% if lead + 2/3 of team hits quota
 const TEAM_LEAD_OVERRIDE_PCT_FULL    = 0.10; // 10% if lead + ALL of team hits quota
 
-function calcTeamOverride(tech, allTechs, upsells, switchovers, reviews, callbacks, quota) {
+function calcTeamOverride(tech, allTechs, upsells, switchovers, reviews, callbacks, quota, jobs) {
   const teamMembers = allTechs.filter(t=>t.team_lead_id===tech.id);
   if (teamMembers.length===0) return { overridePts:0, overridePct:0, teamMembers:[], allTeamHit:false, partialHit:false, leadHitsQuota:false, teamMemberStats:[], hittingCount:0 };
   const q = quota || DEFAULT_QUOTA;
   const now = new Date(); const y=now.getFullYear(); const mo=String(now.getMonth()+1).padStart(2,"0");
   const mk = getMonthKey();
+  const { start: mStart, end: mEnd } = monthBounds(y, mo);
 
   const teamMemberStats = teamMembers.map(m=>{
-    const monthUpsellAmt   = upsells.filter(u=>u.tech_id===m.id&&u.week_key?.startsWith(`${y}-${mo}`)).reduce((s,u)=>s+u.amount,0);
+    const monthUpsellAmt   = upsellAmountInRange(jobs, m.id, mStart, mEnd);
     const monthReviewCount = reviews.filter(r=>r.tech_id===m.id&&r.month_key===mk).reduce((s,r)=>s+r.count,0);
     const monthSwitchCount = switchovers.filter(s=>s.tech_id===m.id&&s.week_key?.startsWith(`${y}-${mo}`)).length;
     const upHit=monthUpsellAmt>=q.upsells, revHit=monthReviewCount>=q.reviews, swHit=monthSwitchCount>=q.switchovers;
-    const tt = calcTotals(m,upsells,switchovers,reviews,callbacks);
+    const tt = calcTotals(m,upsells,switchovers,reviews,callbacks,jobs);
     return { ...m, monthUpsellAmt, monthReviewCount, monthSwitchCount, upHit, revHit, swHit, allHit:upHit&&revHit&&swHit, total:tt.total };
   });
 
   // Lead's own quota
-  const leadMonthUpsells  = upsells.filter(u=>u.tech_id===tech.id&&u.week_key?.startsWith(`${y}-${mo}`)).reduce((s,u)=>s+u.amount,0);
+  const leadMonthUpsells  = upsellAmountInRange(jobs, tech.id, mStart, mEnd);
   const leadMonthReviews  = reviews.filter(r=>r.tech_id===tech.id&&r.month_key===mk).reduce((s,r)=>s+r.count,0);
   const leadMonthSwitches = switchovers.filter(s=>s.tech_id===tech.id&&s.week_key?.startsWith(`${y}-${mo}`)).length;
   const leadHitsQuota = leadMonthUpsells>=q.upsells && leadMonthReviews>=q.reviews && leadMonthSwitches>=q.switchovers;
@@ -390,9 +410,9 @@ function calcTeamOverride(tech, allTechs, upsells, switchovers, reviews, callbac
   return { overridePts, overridePct, teamMembers, teamMemberStats, allTeamHit, partialHit:twoThirdsHit&&!allTeamHit, leadHitsQuota, teamTotalPts, hittingCount, totalMembers };
 }
 
-function calcTotals(tech, upsells, switchovers, reviews, callbacks=[]) {
+function calcTotals(tech, upsells, switchovers, reviews, callbacks=[], jobs=[]) {
   const badgePts = calcBadgePts(tech.badges);
-  const upsellAmt = upsells.filter(u=>u.tech_id===tech.id).reduce((s,u)=>s+u.amount,0);
+  const upsellAmt = (jobs||[]).filter(j=>j.tech_id===tech.id).reduce((s,j)=>s+(j.upsell_amount||0),0);
   const upsellPts = Math.round(upsellAmt*UPSELL_PTS_PER_DOLLAR);
   const switchPts = switchovers.filter(s=>s.tech_id===tech.id).reduce((s,sw)=>s+(PLAN_MAP[sw.plan_id]?.pts||0),0);
   const byMonth = {};
@@ -1083,8 +1103,8 @@ function ReviewLeaderboard({ techs, reviews, currentId }) {
 }
 
 // ─── TOTAL LEADERBOARD ────────────────────────────────────────────────────────
-function TotalLeaderboard({ techs, upsells, switchovers, reviews, callbacks }) {
-  const ranked = [...techs].map(t=>{ const tt=calcTotals(t,upsells,switchovers,reviews,callbacks||[]); return {...t,...tt,tier:getTier(tt.total)}; }).sort((a,b)=>b.total-a.total);
+function TotalLeaderboard({ techs, upsells, switchovers, reviews, callbacks, jobs=[] }) {
+  const ranked = [...techs].map(t=>{ const tt=calcTotals(t,upsells,switchovers,reviews,callbacks||[],jobs); return {...t,...tt,tier:getTier(tt.total)}; }).sort((a,b)=>b.total-a.total);
   const top = ranked[0]?.total||1;
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:"8px" }}>
@@ -1543,10 +1563,10 @@ function Leaderboard({ techs, jobs, upsells, reviews, callbacks, switchovers, ti
     const revenue = tj.reduce((s,j)=>s+(j.revenue||0),0);
     const wkEnd   = new Date(wk+"T12:00:00Z"); wkEnd.setUTCDate(wkEnd.getUTCDate()+6);
     const hours   = rangeHoursTotal(timeEntries, t.id, wk, wkEnd.toISOString().split("T")[0]);
-    const wkUps   = upsells.filter(u=>u.tech_id===t.id&&u.week_key===wk).reduce((s,u)=>s+u.amount,0);
+    const wkUps   = upsellAmountInRange(jobs, t.id, wk, weekEndDate(wk));
     const mk      = getMonthKey();
     const mRevs   = reviews.filter(r=>r.tech_id===t.id&&r.month_key===mk).reduce((s,r)=>s+r.count,0);
-    const tt      = calcTotals(t,upsells,switchovers,reviews,callbacks||[]);
+    const tt      = calcTotals(t,upsells,switchovers,reviews,callbacks||[],jobs);
     return { ...t, revenue, hours, revhr:hours>0?revenue/hours:0, wkUps, mRevs, pts:tt.total };
   });
 
@@ -1616,11 +1636,11 @@ function Leaderboard({ techs, jobs, upsells, reviews, callbacks, switchovers, ti
 }
 
 // ─── JOURNEY BOARD ────────────────────────────────────────────────────────────
-function JourneyBoard({ techs, upsells, switchovers, reviews, quota, callbacks }) {
+function JourneyBoard({ techs, upsells, switchovers, reviews, quota, callbacks, jobs=[] }) {
   const [selected, setSelected] = useState(null);
   const mk = getMonthKey();
   const ranked = [...techs].map(t=>{
-    const tt=calcTotals(t,upsells,switchovers,reviews,callbacks||[]);
+    const tt=calcTotals(t,upsells,switchovers,reviews,callbacks||[],jobs);
     const tier=getTier(tt.total);
     const nextTier=JOURNEY_TIERS.find(t2=>t2.minPts>tt.total);
     const ptsToNext=nextTier?nextTier.minPts-tt.total:0;
@@ -1628,11 +1648,10 @@ function JourneyBoard({ techs, upsells, switchovers, reviews, quota, callbacks }
     const totalReviews=reviews.filter(r=>r.tech_id===t.id).reduce((s,r)=>s+r.count,0);
     const totalSwitches=switchovers.filter(s=>s.tech_id===t.id).length;
     // This month's actuals
-    const monthUpsells = upsells.filter(u=>u.tech_id===t.id && u.week_key && u.week_key >= mk.replace("-","")).reduce((s,u)=>s+u.amount, 0);
-    // Use week_key to approximate month — find all weeks in current month
     const monthUpsellAmt = (() => {
       const now = new Date(); const y = now.getFullYear(); const m = String(now.getMonth()+1).padStart(2,"0");
-      return upsells.filter(u=>u.tech_id===t.id && u.week_key && u.week_key.startsWith(`${y}-${m}`)).reduce((s,u)=>s+u.amount,0);
+      const { start, end } = monthBounds(y, m);
+      return upsellAmountInRange(jobs, t.id, start, end);
     })();
     const monthReviewCount = reviews.filter(r=>r.tech_id===t.id && r.month_key===mk).reduce((s,r)=>s+r.count,0);
     const monthSwitchCount = switchovers.filter(s=>s.tech_id===t.id && s.week_key && (() => { const now=new Date(); const y=now.getFullYear(); const m=String(now.getMonth()+1).padStart(2,"0"); return s.week_key.startsWith(`${y}-${m}`); })()).length;
@@ -1643,7 +1662,7 @@ function JourneyBoard({ techs, upsells, switchovers, reviews, quota, callbacks }
     <div style={{ display:"flex", flexDirection:"column", gap:"20px" }}>
       <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(300px,1fr))", gap:"12px" }}>
         {ranked.map((t,idx)=>(
-          <JourneyCard key={t.id} tech={t} rank={idx+1} total={ranked.length} upsells={upsells}
+          <JourneyCard key={t.id} tech={t} rank={idx+1} total={ranked.length} upsells={upsells} jobs={jobs}
             quota={quota||DEFAULT_QUOTA}
             onClick={()=>setSelected(selected===t.id?null:t.id)} expanded={selected===t.id}/>
         ))}
@@ -1666,15 +1685,15 @@ function JourneyBoard({ techs, upsells, switchovers, reviews, quota, callbacks }
   );
 }
 
-function JourneyCard({ tech, rank, total, onClick, expanded, upsells, quota }) {
+function JourneyCard({ tech, rank, total, onClick, expanded, upsells, quota, jobs=[] }) {
   const tier = tech.tier;
   const tenure = formatTenure(tech.start_date);
   const earnedBadges = ALL_BADGE_DEFS.filter(b=>tech.badges?.includes(b.id));
   const q = quota || DEFAULT_QUOTA;
-  
+
   // Current week pay breakdown
   const wk = getWeekKey();
-  const weekUpsellAmt = (upsells||[]).filter(u=>u.tech_id===tech.id&&u.week_key===wk).reduce((s,u)=>s+u.amount,0);
+  const weekUpsellAmt = upsellAmountInRange(jobs, tech.id, wk, weekEndDate(wk));
   const { totalPay, breakdown } = calcWeeklyPay(weekUpsellAmt);
   const nextPayTier = getNextPayTier(weekUpsellAmt);
 
@@ -1923,7 +1942,8 @@ function OperationsProgressTab({ techs, upsells, switchovers, reviews, quota, ca
   const activeTechs = techs.filter(t => t.is_active !== false && t.title !== "owner");
   const techStats = activeTechs.map(t => {
     const now = new Date(); const y = now.getFullYear(); const m = String(now.getMonth()+1).padStart(2,"0");
-    const monthUpsellAmt   = upsells.filter(u=>u.tech_id===t.id && u.week_key?.startsWith(`${y}-${m}`)).reduce((s,u)=>s+u.amount,0);
+    const { start: mStart, end: mEnd } = monthBounds(y, m);
+    const monthUpsellAmt   = upsellAmountInRange(jobs, t.id, mStart, mEnd);
     const monthReviewCount = reviews.filter(r=>r.tech_id===t.id && r.month_key===mk).reduce((s,r)=>s+r.count,0);
     const monthSwitchCount = switchovers.filter(s=>s.tech_id===t.id && s.week_key?.startsWith(`${y}-${m}`)).length;
     const upHit  = monthUpsellAmt   >= q.upsells;
@@ -1942,7 +1962,8 @@ function OperationsProgressTab({ techs, upsells, switchovers, reviews, quota, ca
 
   // Total team upsell revenue this month
   const now2 = new Date(); const y2 = now2.getFullYear(); const mo2 = String(now2.getMonth()+1).padStart(2,"0");
-  const monthTeamUpsells = upsells.filter(u=>u.week_key?.startsWith(`${y2}-${mo2}`)).reduce((s,u)=>s+u.amount,0);
+  const { start: teamMStart, end: teamMEnd } = monthBounds(y2, mo2);
+  const monthTeamUpsells = upsellAmountInRange(jobs, null, teamMStart, teamMEnd);
   const bonusAmt = Math.round(monthTeamUpsells * OPS_BONUS_PCT * 100) / 100;
 
   function mtWeekKeyFromDate(dateStr) {
@@ -2248,25 +2269,26 @@ function OperationsProgressTab({ techs, upsells, switchovers, reviews, quota, ca
 }
 
 // ─── TEAM LEAD PANEL ─────────────────────────────────────────────────────────
-function TeamLeadPanel({ tech, techs, upsells, switchovers, reviews, callbacks, quota }) {
+function TeamLeadPanel({ tech, techs, upsells, switchovers, reviews, callbacks, quota, jobs=[] }) {
   const q = quota || DEFAULT_QUOTA;
   const teamMembers = (techs||[]).filter(t=>t.team_lead_id===tech.id);
   const mk = getMonthKey();
   const now = new Date(); const y=now.getFullYear(); const mo=String(now.getMonth()+1).padStart(2,"0");
+  const { start: mStart, end: mEnd } = monthBounds(y, mo);
 
   // Lead's own quota
-  const leadUpsells  = (upsells||[]).filter(u=>u.tech_id===tech.id&&u.week_key?.startsWith(`${y}-${mo}`)).reduce((s,u)=>s+u.amount,0);
+  const leadUpsells  = upsellAmountInRange(jobs, tech.id, mStart, mEnd);
   const leadReviews  = (reviews||[]).filter(r=>r.tech_id===tech.id&&r.month_key===mk).reduce((s,r)=>s+r.count,0);
   const leadSwitches = (switchovers||[]).filter(s=>s.tech_id===tech.id&&s.week_key?.startsWith(`${y}-${mo}`)).length;
   const leadHitsQuota = leadUpsells>=q.upsells && leadReviews>=q.reviews && leadSwitches>=q.switchovers;
 
   // Team member stats
   const teamMemberStats = teamMembers.map(m=>{
-    const monthUpsellAmt   = (upsells||[]).filter(u=>u.tech_id===m.id&&u.week_key?.startsWith(`${y}-${mo}`)).reduce((s,u)=>s+u.amount,0);
+    const monthUpsellAmt   = upsellAmountInRange(jobs, m.id, mStart, mEnd);
     const monthReviewCount = (reviews||[]).filter(r=>r.tech_id===m.id&&r.month_key===mk).reduce((s,r)=>s+r.count,0);
     const monthSwitchCount = (switchovers||[]).filter(s=>s.tech_id===m.id&&s.week_key?.startsWith(`${y}-${mo}`)).length;
     const upHit=monthUpsellAmt>=q.upsells, revHit=monthReviewCount>=q.reviews, swHit=monthSwitchCount>=q.switchovers;
-    const tt = calcTotals(m,upsells||[],switchovers||[],reviews||[],callbacks||[]);
+    const tt = calcTotals(m,upsells||[],switchovers||[],reviews||[],callbacks||[],jobs);
     return { ...m, monthUpsellAmt, monthReviewCount, monthSwitchCount, upHit, revHit, swHit, allHit:upHit&&revHit&&swHit, total:tt.total };
   });
 
@@ -2437,7 +2459,7 @@ const INCENTIVE_TIERS = [
   },
 ];
 
-function IncentiveBoard({ techs, upsells, switchovers, reviews, callbacks, currentId }) {
+function IncentiveBoard({ techs, upsells, switchovers, reviews, callbacks, currentId, jobs=[] }) {
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:"16px" }}>
       <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.blue}`, borderRadius:"12px", padding:"16px 18px" }}>
@@ -2466,7 +2488,7 @@ function IncentiveBoard({ techs, upsells, switchovers, reviews, callbacks, curre
         const myTotal = currentId ? (() => {
           const tech = techs?.find(t=>t.id===currentId);
           if (!tech) return 0;
-          return calcTotals(tech, upsells, switchovers, reviews, callbacks).total;
+          return calcTotals(tech, upsells, switchovers, reviews, callbacks, jobs).total;
         })() : null;
         const unlocked = myTotal !== null && myTotal >= tier.pts;
         const progress = myTotal !== null ? Math.min(Math.round((myTotal / tier.pts) * 100), 100) : null;
@@ -2720,19 +2742,20 @@ function TechDashboard({ tech, techs, upsells, switchovers, reviews, callbacks, 
   // total (Time Sheet tab) advances without a manual refresh.
   const [nowTick, setNowTick] = useState(Date.now());
   useEffect(() => { const iv = setInterval(() => setNowTick(Date.now()), 30000); return () => clearInterval(iv); }, []);
-  const tt = calcTotals(tech, upsells, switchovers, reviews, callbacks);
+  const tt = calcTotals(tech, upsells, switchovers, reviews, callbacks, jobs);
   const tier = getTier(tt.total);
   const nextTier = JOURNEY_TIERS.find(t=>t.minPts>tt.total);
-  const allRanked = [...techs].map(t=>({...t,...calcTotals(t,upsells,switchovers,reviews,callbacks||[])})).sort((a,b)=>b.total-a.total);
+  const allRanked = [...techs].map(t=>({...t,...calcTotals(t,upsells,switchovers,reviews,callbacks||[],jobs)})).sort((a,b)=>b.total-a.total);
   const myPos = allRanked.findIndex(t=>t.id===tech.id)+1;
   const wk=getWeekKey(), mk=getMonthKey();
-  const weekUpsell = upsells.filter(u=>u.tech_id===tech.id&&u.week_key===wk).reduce((s,u)=>s+u.amount,0);
+  const weekUpsell = upsellAmountInRange(jobs, tech.id, wk, weekEndDate(wk));
   const monthReviews = reviews.filter(r=>r.tech_id===tech.id&&r.month_key===mk).reduce((s,r)=>s+r.count,0);
   const tenure = formatTenure(tech.start_date);
 
   // Month quota actuals
   const now = new Date(); const y = now.getFullYear(); const mo = String(now.getMonth()+1).padStart(2,"0");
-  const monthUpsellAmt   = upsells.filter(u=>u.tech_id===tech.id && u.week_key?.startsWith(`${y}-${mo}`)).reduce((s,u)=>s+u.amount,0);
+  const { start: mStart, end: mEnd } = monthBounds(y, mo);
+  const monthUpsellAmt   = upsellAmountInRange(jobs, tech.id, mStart, mEnd);
   const monthSwitchCount = switchovers.filter(s=>s.tech_id===tech.id && s.week_key?.startsWith(`${y}-${mo}`)).length;
   const upHit  = monthUpsellAmt   >= q.upsells;
   const revHit = monthReviews     >= q.reviews;
@@ -2985,7 +3008,7 @@ function TechDashboard({ tech, techs, upsells, switchovers, reviews, callbacks, 
                   {l:"🔄 Switchovers",  v:tt.switchPts,  c:C.blue},
                   {l:"⭐ Reviews",   v:tt.reviewPts,  c:C.gold},
                   ...(tt.callbackCount>0?[{l:`📞 Callbacks (${tt.callbackCount})`, v:tt.callbackPts, c:"#ef4444"}]:[]),
-                  ...(tech.is_lead?(()=>{ const {overridePts,overridePct,allTeamHit,partialHit}=calcTeamOverride(tech,techs,upsells,switchovers,reviews,callbacks||[],q); const active=allTeamHit||partialHit; return [{l:`👥 Team Override (${active?Math.round(overridePct*100)+"% unlocked":"locked"})`,v:active?`+${overridePts}`:"—",c:active?C.gold:C.muted}]; })():[]),
+                  ...(tech.is_lead?(()=>{ const {overridePts,overridePct,allTeamHit,partialHit}=calcTeamOverride(tech,techs,upsells,switchovers,reviews,callbacks||[],q,jobs); const active=allTeamHit||partialHit; return [{l:`👥 Team Override (${active?Math.round(overridePct*100)+"% unlocked":"locked"})`,v:active?`+${overridePts}`:"—",c:active?C.gold:C.muted}]; })():[]),
                 ].map(item=>(
                   <div key={item.l} style={{ background:C.cardLt, borderRadius:"4px", padding:"10px 12px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
                     <span style={{ fontSize:"12px", color:C.muted }}>{item.l}</span>
@@ -3019,21 +3042,21 @@ function TechDashboard({ tech, techs, upsells, switchovers, reviews, callbacks, 
         {tab==="upsells"&&<UpsellLeaderboard techs={techs} upsells={upsells} jobs={jobs||[]} currentId={tech.id}/>}
         {tab==="switchovers"&&<SwitchoverLeaderboard techs={techs} switchovers={switchovers} currentId={tech.id}/>}
         {tab==="reviews"&&<ReviewLeaderboard techs={techs} reviews={reviews} currentId={tech.id}/>}
-        {tab==="total"&&<TotalLeaderboard techs={techs} upsells={upsells} switchovers={switchovers} reviews={reviews} callbacks={callbacks||[]}/>}
+        {tab==="total"&&<TotalLeaderboard techs={techs} upsells={upsells} switchovers={switchovers} reviews={reviews} callbacks={callbacks||[]} jobs={jobs}/>}
         {tab==="journey"&&(
           <div>
             <div style={{ fontSize:"13px", color:C.muted, marginBottom:"16px" }}>Tap any card to expand full breakdown.</div>
-            <JourneyBoard techs={techs} upsells={upsells} switchovers={switchovers} reviews={reviews} quota={q} callbacks={callbacks||[]}/>
+            <JourneyBoard techs={techs} upsells={upsells} switchovers={switchovers} reviews={reviews} quota={q} callbacks={callbacks||[]} jobs={jobs}/>
           </div>
         )}
         {tab==="incentive"&&(
           <div>
             <div style={{ fontSize:"13px", color:C.muted, marginBottom:"16px" }}>Your personal progress toward each reward tier.</div>
-            <IncentiveBoard techs={techs} upsells={upsells} switchovers={switchovers} reviews={reviews} callbacks={callbacks||[]} currentId={tech.id}/>
+            <IncentiveBoard techs={techs} upsells={upsells} switchovers={switchovers} reviews={reviews} callbacks={callbacks||[]} currentId={tech.id} jobs={jobs}/>
           </div>
         )}
         {tab==="myteam"&&(
-          <TeamLeadPanel tech={tech} techs={techs} upsells={upsells} switchovers={switchovers} reviews={reviews} callbacks={callbacks||[]} quota={q}/>
+          <TeamLeadPanel tech={tech} techs={techs} upsells={upsells} switchovers={switchovers} reviews={reviews} callbacks={callbacks||[]} quota={q} jobs={jobs}/>
         )}
         {tab==="training"&&<PerfectDayTrainingPanel tech={tech}/>}
       </div>
@@ -5617,7 +5640,7 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
         {tab==="journey"&&(
           <div>
             <div style={{ fontSize:"13px", color:C.muted, marginBottom:"16px" }}>Tap any card to expand full breakdown.</div>
-            <JourneyBoard techs={activeTechs} upsells={upsells} switchovers={switchovers} reviews={reviews} quota={quota} callbacks={callbacks||[]}/>
+            <JourneyBoard techs={activeTechs} upsells={upsells} switchovers={switchovers} reviews={reviews} quota={quota} callbacks={callbacks||[]} jobs={jobs}/>
           </div>
         )}
         {tab==="operations"&&(
@@ -5629,7 +5652,7 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
         {tab==="incentive"&&(
           <div>
             <div style={{ fontSize:"13px", color:C.muted, marginBottom:"16px" }}>Team rewards overview — all tiers and prizes.</div>
-            <IncentiveBoard techs={techs} upsells={upsells} switchovers={switchovers} reviews={reviews} callbacks={callbacks||[]} currentId={null}/>
+            <IncentiveBoard techs={techs} upsells={upsells} switchovers={switchovers} reviews={reviews} callbacks={callbacks||[]} currentId={null} jobs={jobs}/>
           </div>
         )}
 
