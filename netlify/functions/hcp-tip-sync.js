@@ -211,6 +211,15 @@ exports.handler = async () => {
         continue;
       }
 
+      // HCP sends many other notification types from this same address
+      // (appointment reminders, review requests, etc.) -- only the "You just
+      // got paid!" template is an actual payment receipt worth parsing.
+      if (!/you\s+just\s+got\s+paid/i.test(msg.bodyText)) {
+        await markProcessed(id, null, "not_payment_email");
+        summary.skipped++;
+        continue;
+      }
+
       const parsed = parseTipEmail(msg.bodyText);
       if (!parsed.jobNumber || !parsed.serviceDateISO) {
         await markProcessed(id, null, "parse_error", JSON.stringify(parsed));

@@ -38,7 +38,7 @@ function parseMoney(str) {
 // Returns { jobNumber, serviceDateISO, tipAmount, amountPaid }. Any field
 // that couldn't be found comes back null -- callers decide what's fatal.
 function parseTipEmail(bodyText) {
-  const jobNumber = findAfterLabel(bodyText, /Job\s*Number\s*:?/i, /(\d{6,})/);
+  const jobNumber = findAfterLabel(bodyText, /Job\s*Number\s*:?/i, /(\d{3,})/);
   const dateStr   = findAfterLabel(bodyText, /Service\s*Date\s*:?/i, /([A-Za-z]{3,9}\s+\d{1,2},?\s*\d{4})/);
   const tipStr    = findAfterLabel(bodyText, /\bTip\b\s*:?/i, /\$?\s*(-?[\d,]+\.\d{2})/);
   const paidStr   = findAfterLabel(bodyText, /Amount\s*Paid\s*:?/i, /\$?\s*(-?[\d,]+\.\d{2})/);
