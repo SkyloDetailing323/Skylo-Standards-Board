@@ -23,7 +23,7 @@
 //     function then finishes writing it.
 
 const TECH_MAP = require('./lib/techMap');
-const { fetchJobSplits, resolveSplits } = require('./lib/splitHelper');
+const { fetchJobSplits, resolveSplits, distributeAmount } = require('./lib/splitHelper');
 const { getAccessToken, listMessageIds, getMessage } = require('./lib/gmailClient');
 const { parseTipEmail } = require('./lib/tipEmailParser');
 
@@ -154,11 +154,12 @@ async function resolveAndWriteTip(job, matchedEmployees, techByName, workDate, t
   const allConfirmed = splits.length > 0 && splits.every(s => s.confirmed);
   if (!allConfirmed) return { written: false, reason: "unconfirmed_split" };
 
-  for (const split of splits) {
+  const amounts = distributeAmount(tipAmount, splits);
+  for (let i = 0; i < splits.length; i++) {
+    const split = splits[i];
     const tech = techByName[split.skyloName];
     if (!tech) continue;
-    const amount = +(tipAmount * split.pct).toFixed(2);
-    await writeSingleTechTip(job, tech.id, workDate, amount);
+    await writeSingleTechTip(job, tech.id, workDate, amounts[i]);
   }
   return { written: true };
 }

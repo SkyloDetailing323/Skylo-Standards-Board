@@ -7,7 +7,7 @@
 // POST { from: "YYYY-MM-DD", to: "YYYY-MM-DD" }
 
 const TECH_MAP = require('./lib/techMap');
-const { fetchJobSplits, resolveSplits } = require('./lib/splitHelper');
+const { fetchJobSplits, resolveSplits, distributeAmount } = require('./lib/splitHelper');
 
 const FETCH_TIMEOUT_MS = 10000;
 
@@ -190,11 +190,13 @@ exports.handler = async (event) => {
       totalRev = Math.max(0, (meta.totalAmount - meta.tipAmount)) / 100;
     }
 
-    const splits = resolveSplits(jobId, meta.employees, splitMap, techByName);
-    for (const split of splits) {
+    const splits  = resolveSplits(jobId, meta.employees, splitMap, techByName);
+    const amounts = distributeAmount(totalRev, splits);
+    for (let i = 0; i < splits.length; i++) {
+      const split = splits[i];
       const tech = techByName[split.skyloName];
       if (!tech) continue;
-      const revenue = +(totalRev * split.pct).toFixed(2);
+      const revenue = amounts[i];
       batch.push({
         hcp_job_id:      jobId,
         tech_id:         tech.id,

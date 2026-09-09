@@ -4,7 +4,7 @@
 // Split %s come from the job_splits Supabase table; equal split fallback with split_confirmed=false.
 
 const TECH_MAP = require('./lib/techMap');
-const { fetchJobSplits, resolveSplits, fetchUpsellAttributions } = require('./lib/splitHelper');
+const { fetchJobSplits, resolveSplits, fetchUpsellAttributions, distributeAmount } = require('./lib/splitHelper');
 
 function getWeekKey(dateStr) {
   const d = new Date(dateStr + "T12:00:00Z");
@@ -165,18 +165,31 @@ exports.handler = async (event) => {
   const upsellAttribMap = matchedEmployees.length > 1 ? await fetchUpsellAttributions([jobId], sbFetch) : {};
   const splits = resolveSplits(jobId, matchedEmployees, splitMap, techByName);
 
-  for (const split of splits) {
+  // Upsell credit uses its own effective percentages -- if manually
+  // attributed, 100% goes to one tech and 0% to the rest, which can differ
+  // from the revenue split's percentages -- so it needs its own
+  // distributeAmount() pass rather than reusing the revenue split's shares.
+  const attribId = upsellAttribMap[jobId];
+  const upsellSplits = splits.map(s => {
+    const tech = techByName[s.skyloName];
+    const upsellPct = attribId ? (tech && attribId === tech.id ? 1.0 : 0) : s.pct;
+    return { ...s, pct: upsellPct };
+  });
+
+  const revenueAmounts = distributeAmount(totalRev, splits);
+  const upsellAmounts  = distributeAmount(totalUps, upsellSplits);
+
+  for (let i = 0; i < splits.length; i++) {
+    const split = splits[i];
     const tech = techByName[split.skyloName];
     if (!tech) {
       console.log(`Tech "${split.skyloName}" not in Supabase`);
       continue;
     }
 
-    const revenue   = +(totalRev * split.pct).toFixed(2);
-    // Upsell credit: if manually attributed, 100% to one tech; otherwise split by revenue %
-    const attribId  = upsellAttribMap[jobId];
-    const upsellPct = attribId ? (attribId === tech.id ? 1.0 : 0) : split.pct;
-    const upsells   = +(totalUps * upsellPct).toFixed(2);
+    const revenue   = revenueAmounts[i];
+    const upsellPct = upsellSplits[i].pct;
+    const upsells   = upsellAmounts[i];
 
     await sbFetch("jobs?on_conflict=hcp_job_id,tech_id", {
       method: "POST",

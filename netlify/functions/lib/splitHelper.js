@@ -71,4 +71,28 @@ async function fetchUpsellAttributions(jobIds, sbFetch) {
   return map;
 }
 
-module.exports = { fetchJobSplits, resolveSplits, fetchUpsellAttributions };
+// Divides a dollar total across split shares so they always sum to exactly
+// the total (to the penny), using largest-remainder rounding: each share is
+// rounded down first, then the leftover pennies (the gap between the sum of
+// rounded-down shares and the true total) are handed out one at a time to
+// the shares with the largest fractional remainder. Independently rounding
+// each share to its own nearest cent (the old `.toFixed(2)` approach) can
+// drift a cent or two off the true total -- e.g. a 3-way even split of $50
+// landing on $16.65/$16.67/$16.65 instead of summing exactly to $50.00.
+// Returns an array of dollar amounts, same order/length as `splits`.
+function distributeAmount(totalDollars, splits) {
+  if (!splits.length) return [];
+  const totalCents = Math.round(totalDollars * 100);
+  const raw    = splits.map(s => totalCents * s.pct);
+  const floors = raw.map(Math.floor);
+  const allocated = floors.reduce((a, b) => a + b, 0);
+  const remainder = totalCents - allocated;
+  const order = raw
+    .map((v, i) => ({ i, frac: v - floors[i] }))
+    .sort((a, b) => b.frac - a.frac);
+  const cents = [...floors];
+  for (let k = 0; k < remainder; k++) cents[order[k % order.length].i] += 1;
+  return cents.map(c => c / 100);
+}
+
+module.exports = { fetchJobSplits, resolveSplits, fetchUpsellAttributions, distributeAmount };

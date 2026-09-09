@@ -9,7 +9,7 @@
 // split as hcp-upsell-sync.js vs hcp-upsell-repair.js).
 
 const TECH_MAP = require('./lib/techMap');
-const { fetchJobSplits, resolveSplits } = require('./lib/splitHelper');
+const { fetchJobSplits, resolveSplits, distributeAmount } = require('./lib/splitHelper');
 
 function getMT() {
   const mt = new Date(Date.now() - 6 * 60 * 60 * 1000);
@@ -188,8 +188,10 @@ exports.handler = async () => {
       totalRev = Math.max(0, (meta.totalAmount - meta.tipAmount)) / 100;
     }
 
-    const splits = resolveSplits(jobId, meta.employees, splitMap, techByName);
-    for (const split of splits) {
+    const splits  = resolveSplits(jobId, meta.employees, splitMap, techByName);
+    const amounts = distributeAmount(totalRev, splits);
+    for (let i = 0; i < splits.length; i++) {
+      const split = splits[i];
       const tech = techByName[split.skyloName];
       if (!tech) continue;
       batch.push({
@@ -198,7 +200,7 @@ exports.handler = async () => {
         job_date:        meta.jobDate,
         week_key:        getWeekKey(meta.jobDate),
         hours:           0,
-        revenue:         +(totalRev * split.pct).toFixed(2),
+        revenue:         amounts[i],
         split_confirmed: split.confirmed,
         customer_name:   meta.customerName || null,
       });
