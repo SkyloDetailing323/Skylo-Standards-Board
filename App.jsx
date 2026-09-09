@@ -162,6 +162,15 @@ function getWeekKey() {
   const d = String(monday.getDate()).padStart(2,"0");
   return `${y}-${m}-${d}`;
 }
+// Snaps an arbitrary YYYY-MM-DD date to that week's Monday (same Mon-Sun
+// convention as getWeekKey, just for a picked date instead of "now").
+function dateToWeekKey(dateStr) {
+  const d = new Date(dateStr + "T12:00:00Z");
+  const day = d.getUTCDay();
+  const back = day === 0 ? 6 : day - 1;
+  d.setUTCDate(d.getUTCDate() - back);
+  return d.toISOString().split("T")[0];
+}
 function getMonthKey() {
   const now = new Date();
   return `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`;
@@ -4968,6 +4977,8 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
   const [awardForm, setAwardForm] = useState({techId:"",badgeId:""});
   const [addForm, setAddForm] = useState({name:"",pin:"",avatar:"",start_date:"",commission_rate:27});
   const [swForm, setSwForm] = useState({techId:"",planId:""});
+  const [editingSwId, setEditingSwId] = useState(null);
+  const [editSwForm, setEditSwForm] = useState({date:"",planId:""});
   const [swRangePreset, setSwRangePreset] = useState("wtd");
   const [swCStart, setSwCStart] = useState("");
   const [swCEnd, setSwCEnd] = useState("");
@@ -5043,6 +5054,29 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
     if (!swForm.techId||!swForm.planId) return showToast("Select a tech and plan",false);
     setSaving(true);
     try { await sb("switchovers",{method:"POST",body:JSON.stringify({tech_id:swForm.techId,week_key:getWeekKey(),plan_id:swForm.planId})}); await refreshAll(); showToast(`✅ Switchover logged!`); setSwForm({techId:"",planId:""}); }
+    catch(e){ showToast("Error: "+e.message,false); }
+    setSaving(false);
+  }
+  function startEditSwitchover(s) {
+    setEditingSwId(s.id);
+    setEditSwForm({ date: s.week_key, planId: s.plan_id });
+  }
+  async function saveEditSwitchover() {
+    if (!editSwForm.date) return showToast("Pick a date",false);
+    setSaving(true);
+    try {
+      const body = { week_key: dateToWeekKey(editSwForm.date), plan_id: editSwForm.planId };
+      await sb(`switchovers?id=eq.${editingSwId}`,{method:"PATCH",body:JSON.stringify(body),prefer:"return=minimal"});
+      await refreshAll();
+      setEditingSwId(null);
+      showToast("✅ Switchover updated");
+    } catch(e){ showToast("Error: "+e.message,false); }
+    setSaving(false);
+  }
+  async function deleteSwitchoverEntry(id) {
+    if (!window.confirm("Delete this switchover?")) return;
+    setSaving(true);
+    try { await sb(`switchovers?id=eq.${id}`,{method:"DELETE",prefer:"return=minimal"}); await refreshAll(); setEditingSwId(null); showToast("Switchover deleted"); }
     catch(e){ showToast("Error: "+e.message,false); }
     setSaving(false);
   }
@@ -5211,14 +5245,7 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
         )}
         {tab==="switchovers"&&(() => {
           const { start: swStart, end: swEnd } = getDateRangeBounds(swRangePreset, swCStart, swCEnd);
-          function mondayOf(dateStr) {
-            const d = new Date(dateStr + "T12:00:00Z");
-            const day = d.getUTCDay();
-            const back = day === 0 ? 6 : day - 1;
-            d.setUTCDate(d.getUTCDate() - back);
-            return d.toISOString().split("T")[0];
-          }
-          const swFromWk = mondayOf(swStart);
+          const swFromWk = dateToWeekKey(swStart);
           const swInRange = switchovers.filter(s => s.week_key >= swFromWk && s.week_key <= swEnd);
           const swByTech = {};
           swInRange.forEach(s => {
@@ -5267,6 +5294,55 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
                       })}
                     </tbody>
                   </table>
+                </div>
+              </div>
+
+              <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.purple}`, borderRadius:"12px", overflow:"hidden", marginTop:"16px" }}>
+                <div style={{ padding:"14px 18px", borderBottom:`1px solid ${C.border}`, background:C.cardLt }}>
+                  <Label color={C.purple}>Individual Entries · {swStart} → {swEnd}</Label>
+                </div>
+                <div style={{ padding:"14px 18px", display:"flex", flexDirection:"column", gap:"6px" }}>
+                  {swInRange.length===0 && <div style={{ fontSize:"13px", color:C.muted }}>No switchover entries in this range.</div>}
+                  {[...swInRange].sort((a,b)=>b.week_key.localeCompare(a.week_key)).map(s=>{
+                    const tech=techs.find(t=>t.id===s.tech_id);
+                    const plan=PLAN_MAP[s.plan_id];
+                    const pc=PLAN_COLORS[s.plan_id]||C.muted;
+                    return (
+                      <div key={s.id} style={{ background:C.cardLt, borderRadius:"8px", padding:"10px 12px" }}>
+                        {editingSwId===s.id ? (
+                          <div style={{ display:"flex", flexDirection:"column", gap:"8px" }}>
+                            <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"14px", color:C.black }}>{tech?.name}</div>
+                            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"8px" }}>
+                              <div>
+                                <div style={{ fontSize:"10px", color:C.muted, marginBottom:"4px" }}>Week (pick any day in it)</div>
+                                <input type="date" value={editSwForm.date} onChange={e=>setEditSwForm(f=>({...f,date:e.target.value}))} style={{ background:C.card, border:`1px solid ${C.border}`, color:C.black, padding:"8px", borderRadius:"8px", fontSize:"13px", width:"100%", boxSizing:"border-box" }}/>
+                              </div>
+                              <div>
+                                <div style={{ fontSize:"10px", color:C.muted, marginBottom:"4px" }}>Plan</div>
+                                <select value={editSwForm.planId} onChange={e=>setEditSwForm(f=>({...f,planId:e.target.value}))} style={{ background:C.card, border:`1px solid ${C.border}`, color:C.black, padding:"8px", borderRadius:"8px", fontSize:"13px", width:"100%", boxSizing:"border-box" }}>
+                                  {SERVICE_PLANS.map(p=><option key={p.id} value={p.id}>{p.label}</option>)}
+                                </select>
+                              </div>
+                            </div>
+                            <div style={{ fontSize:"11px", color:C.muted }}>Will be attributed to the week of {formatWeekLabel(dateToWeekKey(editSwForm.date||s.week_key))}</div>
+                            <div style={{ display:"flex", gap:"8px" }}>
+                              <button onClick={saveEditSwitchover} disabled={saving} style={{ flex:1, background:C.purple, border:"none", color:C.white, padding:"8px", borderRadius:"8px", cursor:"pointer", fontWeight:"700", fontSize:"12px" }}>Save</button>
+                              <button onClick={()=>setEditingSwId(null)} style={{ background:"none", border:`1px solid ${C.border}`, color:C.muted, padding:"8px 14px", borderRadius:"8px", cursor:"pointer", fontSize:"12px" }}>Cancel</button>
+                              <button onClick={()=>deleteSwitchoverEntry(s.id)} style={{ background:"none", border:"1px solid #ef4444", color:"#ef4444", padding:"8px 14px", borderRadius:"8px", cursor:"pointer", fontSize:"12px" }}>Delete</button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:"12px" }}>
+                            <div>
+                              <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"15px", color:C.black }}>{tech?.name}</div>
+                              <div style={{ fontSize:"12px", color:C.muted }}>{formatWeekLabel(s.week_key)} · <span style={{ color:pc, fontWeight:"700" }}>{plan?.label||s.plan_id} · +{plan?.pts||0}pts</span></div>
+                            </div>
+                            <button onClick={()=>startEditSwitchover(s)} style={{ background:"none", border:`1px solid ${C.border}`, color:C.purple, padding:"4px 10px", borderRadius:"4px", cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", fontSize:"11px", flexShrink:0 }}>Edit</button>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             </>
