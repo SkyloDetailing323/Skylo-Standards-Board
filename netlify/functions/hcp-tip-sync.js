@@ -223,7 +223,11 @@ exports.handler = async () => {
 
       const parsed = parseTipEmail(msg.bodyText);
       if (!parsed.jobNumber || !parsed.serviceDateISO) {
-        await markProcessed(id, null, "parse_error", JSON.stringify(parsed));
+       // Include a body snippet so a parse failure is self-diagnosing from
+// processed_tip_emails.detail alone -- no need to go pull the raw
+// email from Gmail by hand to see why a label didn't match.
+const detail = JSON.stringify({ ...parsed, bodySnippet: msg.bodyText.slice(0, 2000) });
+await markProcessed(id, null, "parse_error", detail);
         summary.errors++;
         continue;
       }
