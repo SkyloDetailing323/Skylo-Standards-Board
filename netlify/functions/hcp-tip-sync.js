@@ -79,6 +79,21 @@ function addDays(dateStr, days) {
   return d.toISOString().split("T")[0];
 }
 
+// tip_entries.work_date is deliberately the day the PAYMENT cleared, not the
+// job's Service Date -- unlike revenue/upsells (which stay pinned to the job
+// date), a tip can come in weeks or months after the job itself, and payroll
+// can't reasonably re-open old pay periods every time an old invoice gets
+// tipped. Matches HCP's own convention for tips, and matches how the
+// "Log a Tip" admin form has always been used (logged for the day the tip
+// was received). Service Date is still used for finding the job itself
+// (see findJobByInvoiceNumber) -- only the write below uses the paid date.
+// Mountain-time day boundary, matching the fixed UTC-6 offset used elsewhere
+// in this app (e.g. AdminTipEntry's date default, formatMTTime).
+function toPaidDateISO(internalDateMs) {
+  const d = new Date(internalDateMs - 6 * 60 * 60 * 1000);
+  return d.toISOString().split("T")[0];
+}
+
 // Finds the job whose invoice_number matches, searching a window around the
 // service date rather than relying on an (undocumented, untested) API filter.
 async function findJobByInvoiceNumber(invoiceNumber, serviceDateISO) {
@@ -251,8 +266,9 @@ await markProcessed(id, null, "parse_error", detail);
         continue;
       }
 
+      const paidDateISO = toPaidDateISO(msg.internalDate);
       const techByName = await getTechByName();
-      const result = await resolveAndWriteTip(job, matchedEmployees, techByName, parsed.serviceDateISO, parsed.tipAmount);
+      const result = await resolveAndWriteTip(job, matchedEmployees, techByName, paidDateISO, parsed.tipAmount);
 
       if (result.written) {
         await markProcessed(id, job.id, matchedEmployees.length > 1 ? "written_split" : "written");
@@ -264,7 +280,7 @@ await markProcessed(id, null, "parse_error", detail);
           prefer: "resolution=merge-duplicates,return=minimal",
           body: JSON.stringify({
             hcp_job_id: job.id,
-            job_date: parsed.serviceDateISO,
+            job_date: paidDateISO,
             tip_amount: parsed.tipAmount,
             employee_names: JSON.stringify(matchedEmployees.map(e => e.skyloName)),
           }),
