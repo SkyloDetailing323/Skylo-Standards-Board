@@ -183,6 +183,54 @@ async function resolveAndWriteTip(job, matchedEmployees, techByName, workDate, t
   return { written: true };
 }
 
+function hcpNamesFor(job) {
+  return (job.assigned_employees || [])
+    .map(e => `${e.first_name || ""} ${e.last_name || ""}`.trim())
+    .filter(Boolean);
+}
+
+// Matches the job's employees and writes (or holds) the tip, then records the
+// outcome in processed_tip_emails. Returns the status it recorded. Shared by
+// the main pass and the no_tech_match retry pass so both behave identically.
+async function writeTipForJob(id, msg, parsed, job, techByName) {
+  const matchedEmployees = matchedEmployeesFor(job, techByName);
+  if (matchedEmployees.length === 0) {
+    // Not a permanent skip: the retry pass re-checks these once the tech is
+    // added to `techs`. The HCP names are saved so that pass can tell, without
+    // any Gmail/HCP calls, whether a matching tech exists yet.
+    await markProcessed(id, job.id, "no_tech_match", JSON.stringify({ hcpNames: hcpNamesFor(job) }));
+    return "no_tech_match";
+  }
+
+  const paidDateISO = toPaidDateISO(msg.internalDate);
+  const result = await resolveAndWriteTip(job, matchedEmployees, techByName, paidDateISO, parsed.tipAmount);
+
+  if (result.written) {
+    const status = matchedEmployees.length > 1 ? "written_split" : "written";
+    await markProcessed(id, job.id, status);
+    return status;
+  }
+
+  // Hold for the split-confirmation resolver pass.
+  await sbFetch("pending_tip_splits?on_conflict=hcp_job_id", {
+    method: "POST",
+    prefer: "resolution=merge-duplicates,return=minimal",
+    body: JSON.stringify({
+      hcp_job_id: job.id,
+      job_date: paidDateISO,
+      tip_amount: parsed.tipAmount,
+      employee_names: JSON.stringify(matchedEmployees.map(e => e.skyloName)),
+    }),
+  });
+  await markProcessed(id, job.id, "pending_split");
+  return "pending_split";
+}
+
+// Max no_tech_match emails re-checked per run. Each costs a Gmail fetch plus
+// an HCP job lookup, so this keeps a run well inside the function timeout;
+// any backlog just drains over the next few 5-minute runs.
+const NO_MATCH_RETRY_LIMIT = 5;
+
 exports.handler = async () => {
   const missingEnv = ["GMAIL_CLIENT_ID", "GMAIL_CLIENT_SECRET", "GMAIL_REFRESH_TOKEN", "SUPABASE_URL", "SUPABASE_KEY", "HCP_API_KEY"]
     .filter(k => !process.env[k]);
@@ -264,34 +312,9 @@ await markProcessed(id, null, "parse_error", detail);
       }
 
       const techByName = await getTechByName();
-      const matchedEmployees = matchedEmployeesFor(job, techByName);
-      if (matchedEmployees.length === 0) {
-        await markProcessed(id, job.id, "no_tech_match");
-        summary.skipped++;
-        continue;
-      }
-
-      const paidDateISO = toPaidDateISO(msg.internalDate);
-      const result = await resolveAndWriteTip(job, matchedEmployees, techByName, paidDateISO, parsed.tipAmount);
-
-      if (result.written) {
-        await markProcessed(id, job.id, matchedEmployees.length > 1 ? "written_split" : "written");
-        summary[matchedEmployees.length > 1 ? "written_split" : "written"]++;
-      } else {
-        // Hold for the split-confirmation resolver pass below.
-        await sbFetch("pending_tip_splits?on_conflict=hcp_job_id", {
-          method: "POST",
-          prefer: "resolution=merge-duplicates,return=minimal",
-          body: JSON.stringify({
-            hcp_job_id: job.id,
-            job_date: paidDateISO,
-            tip_amount: parsed.tipAmount,
-            employee_names: JSON.stringify(matchedEmployees.map(e => e.skyloName)),
-          }),
-        });
-        await markProcessed(id, job.id, "pending_split");
-        summary.pending_split++;
-      }
+      const status = await writeTipForJob(id, msg, parsed, job, techByName);
+      if (status === "no_tech_match") summary.skipped++;
+      else summary[status]++;
     } catch (err) {
       console.error(`hcp-tip-sync: error processing message ${id}:`, err.message);
       summary.errors++;
@@ -307,7 +330,53 @@ await markProcessed(id, null, "parse_error", detail);
     });
   }
 
-  // --- 3. Resolver pass: pending split-tips that may now be confirmed -----
+  // --- 3. Retry pass: no_tech_match emails whose tech may now exist -------
+  // A new hire's tips arrive before their row is added to `techs`. Those
+  // emails were once marked no_tech_match and never looked at again (the
+  // Gmail cursor has moved past them), so their tips were silently lost.
+  // Re-check them here; once the tech exists, the tip is written normally.
+  let retriedNoMatch = 0;
+  try {
+    const noMatchRows = await sbFetch("processed_tip_emails?status=eq.no_tech_match&select=gmail_message_id,detail&order=created_at") || [];
+    const techByName = noMatchRows.length ? await getTechByName() : {};
+    const candidates = noMatchRows.filter(r => {
+      // Rows from before this retry existed have no saved names -- always try.
+      let names = null;
+      try { names = JSON.parse(r.detail || "null")?.hcpNames; } catch { names = null; }
+      return !Array.isArray(names) || names.some(n => matchTechName(n, techByName));
+    }).slice(0, NO_MATCH_RETRY_LIMIT);
+
+    for (const row of candidates) {
+      const id = row.gmail_message_id;
+      try {
+        const msg = await getMessage(accessToken, id);
+        const parsed = parseTipEmail(msg.bodyText);
+        // Re-file anything that now fails for a different reason, so it stops
+        // occupying a retry slot every run.
+        if (!parsed.jobNumber || !parsed.serviceDateISO) {
+          await markProcessed(id, null, "parse_error", JSON.stringify({ ...parsed, bodySnippet: msg.bodyText.slice(0, 2000) }));
+          continue;
+        }
+        if (!parsed.tipAmount || parsed.tipAmount <= 0) {
+          await markProcessed(id, null, "zero_tip");
+          continue;
+        }
+        const job = await findJobByInvoiceNumber(parsed.jobNumber, parsed.serviceDateISO);
+        if (!job) {
+          await markProcessed(id, null, "job_not_found", `invoice_number=${parsed.jobNumber}`);
+          continue;
+        }
+        const status = await writeTipForJob(id, msg, parsed, job, techByName);
+        if (status !== "no_tech_match") retriedNoMatch++;
+      } catch (err) {
+        console.error(`hcp-tip-sync: no_tech_match retry error for message ${id}:`, err.message);
+      }
+    }
+  } catch (err) {
+    console.error("hcp-tip-sync: no_tech_match retry pass failed:", err.message);
+  }
+
+  // --- 4. Resolver pass: pending split-tips that may now be confirmed -----
   const pending = await sbFetch("pending_tip_splits?select=*") || [];
   let resolved = 0;
   for (const p of pending) {
@@ -326,6 +395,6 @@ await markProcessed(id, null, "parse_error", detail);
     }
   }
 
-  console.log("hcp-tip-sync summary:", JSON.stringify({ ...summary, resolved_pending: resolved }));
-  return { statusCode: 200, body: JSON.stringify({ ok: true, ...summary, resolved_pending: resolved }) };
+  console.log("hcp-tip-sync summary:", JSON.stringify({ ...summary, retried_no_match: retriedNoMatch, resolved_pending: resolved }));
+  return { statusCode: 200, body: JSON.stringify({ ok: true, ...summary, retried_no_match: retriedNoMatch, resolved_pending: resolved }) };
 };
