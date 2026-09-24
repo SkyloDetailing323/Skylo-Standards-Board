@@ -8,7 +8,7 @@
 // since it was last hand-updated (Garrett Glauser, Jack Watson, Casey Brown,
 // Truxton Mcspadden, JaMuar Hill) -- switched to the shared file so this
 // can't drift out of sync again.
-const TECH_MAP = require('./lib/techMap');
+const { matchTechName } = require('./lib/matchTech');
 
 function getWeekKey(dateStr) {
   const d = new Date(dateStr + "T12:00:00Z");
@@ -95,8 +95,12 @@ exports.handler = async (event) => {
   if (!allTechs) return { statusCode: 500, body: JSON.stringify({ ok: false, error: "Could not load techs from Supabase" }) };
   const techByName = {};
   for (const t of allTechs) {
-    const existing = techByName[t.name];
-    if (!existing || (t.is_active && !existing.is_active)) techByName[t.name] = t;
+    // .trim() guards against a stray leading/trailing space in a tech's
+    // stored name silently breaking the exact-name match (found: "Trey
+    // Sanchez " had a trailing space in Supabase).
+    const key = (t.name || "").trim();
+    const existing = techByName[key];
+    if (!existing || (t.is_active && !existing.is_active)) techByName[key] = t;
   }
 
   let synced = 0, skipped = 0, page = 1;
@@ -135,7 +139,7 @@ exports.handler = async (event) => {
       if (!employee) { skipped++; continue; }
 
       const hcpName = `${employee.first_name || ""} ${employee.last_name || ""}`.trim();
-      const skyloName = TECH_MAP[hcpName];
+      const skyloName = matchTechName(hcpName, techByName);
       if (!skyloName) { skipped++; continue; }
 
       const tech = techByName[skyloName];

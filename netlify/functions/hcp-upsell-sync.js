@@ -3,8 +3,8 @@
 // Split jobs: revenue/upsells divided by confirmed split % (job_splits table),
 // falling back to equal split with split_confirmed=false.
 
-const TECH_MAP = require('./lib/techMap');
-const { fetchJobSplits, resolveSplits, fetchUpsellAttributions, distributeAmount } = require('./lib/splitHelper');
+const { matchTechName } = require('./lib/matchTech');
+const { fetchJobSplits, resolveSplits, fetchUpsellAttributions, distributeAmount, cleanupReassignedTechs } = require('./lib/splitHelper');
 
 function getMT() {
   const mt = new Date(Date.now() - 6 * 60 * 60 * 1000);
@@ -122,6 +122,21 @@ exports.handler = async () => {
   }
   console.log(`${allJobs.length} completed jobs`);
 
+  // Fetch techs — deterministic order, and prefer the active record if a
+  // duplicate name ever slips back in (instead of silently keeping whichever
+  // row Postgres happens to return last). Fetched before job matching below
+  // since matching is now a live lookup against this map, not a static file.
+  const allTechs = await sbFetch("techs?select=id,name,is_active&order=id");
+  const techByName = {};
+  for (const t of allTechs || []) {
+    // .trim() guards against a stray leading/trailing space in a tech's
+    // stored name silently breaking the exact-name match (found: "Trey
+    // Sanchez " had a trailing space in Supabase).
+    const key = (t.name || "").trim();
+    const existing = techByName[key];
+    if (!existing || (t.is_active && !existing.is_active)) techByName[key] = t;
+  }
+
   // Build job meta — store ALL matched employees. Bucket by actual completion
   // date (not scheduled date), then keep only jobs that actually completed
   // today — everything else was only fetched because of the padding.
@@ -129,7 +144,7 @@ exports.handler = async () => {
   for (const job of allJobs) {
     const matchedEmployees = (job.assigned_employees || []).map(e => {
       const hcpName   = `${e.first_name || ""} ${e.last_name || ""}`.trim();
-      const skyloName = TECH_MAP[hcpName];
+      const skyloName = matchTechName(hcpName, techByName);
       return skyloName ? { skyloName } : null;
     }).filter(Boolean);
     if (matchedEmployees.length === 0) continue;
@@ -143,16 +158,6 @@ exports.handler = async () => {
       totalAmount:  job.total_amount || 0,
       customerName: [job.customer?.first_name, job.customer?.last_name].filter(Boolean).join(" ") || null,
     };
-  }
-
-  // Fetch techs — deterministic order, and prefer the active record if a
-  // duplicate name ever slips back in (instead of silently keeping whichever
-  // row Postgres happens to return last).
-  const allTechs = await sbFetch("techs?select=id,name,is_active&order=id");
-  const techByName = {};
-  for (const t of allTechs || []) {
-    const existing = techByName[t.name];
-    if (!existing || (t.is_active && !existing.is_active)) techByName[t.name] = t;
   }
 
   // Fetch today's invoices in bulk
@@ -200,6 +205,11 @@ exports.handler = async () => {
     const totalUps    = inv ? inv.upsellTotal : 0;
 
     const splits = resolveSplits(jobId, meta.employees, splitMap, techByName);
+
+    // Remove any leftover row for a tech who's no longer on this job (e.g. a
+    // callback reassigned to someone else) before writing the current splits.
+    const currentTechIds = splits.map(s => techByName[s.skyloName]).filter(Boolean).map(t => t.id);
+    await cleanupReassignedTechs(jobId, currentTechIds, sbFetch);
 
     // Upsell credit uses its own effective percentages -- if manually
     // attributed, 100% goes to one tech and 0% to the rest, which can differ

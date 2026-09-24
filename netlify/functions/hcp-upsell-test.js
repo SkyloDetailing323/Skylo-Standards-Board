@@ -10,10 +10,9 @@ const UPSELL_SERVICES = [
   "Full Exterior Detail",
 ];
 
-// Was a hand-duplicated copy of lib/techMap.js (and already had the pre-fix
-// spellings, so a dry run here would've validated against the wrong names)
-// -- switched to the shared file so this can't drift out of sync again.
-const TECH_MAP = require('./lib/techMap');
+// Matching is now a live lookup against the techs table (see lib/matchTech.js)
+// instead of the old hand-maintained TECH_MAP whitelist.
+const { matchTechName } = require('./lib/matchTech');
 
 function getWeekKey() {
   const mt = new Date(Date.now() - 6 * 60 * 60 * 1000);
@@ -77,14 +76,6 @@ exports.handler = async () => {
   const hcpName = `${employee.first_name} ${employee.last_name}`.trim();
   log("Extract employee", { hcpName });
 
-  // Step: TECH_MAP lookup
-  const skyloName = TECH_MAP[hcpName];
-  if (!skyloName) {
-    log("TECH_MAP lookup", { hcpName, result: "no match" }, "fail");
-    return respond(steps, false, `No TECH_MAP entry for "${hcpName}"`);
-  }
-  log("TECH_MAP lookup", { hcpName, skyloName });
-
   // Step: check env vars
   const envCheck = {
     SUPABASE_URL: process.env.SUPABASE_URL ? "set" : "MISSING",
@@ -119,16 +110,26 @@ exports.handler = async () => {
   }
   log("Upsell total", { upsellItems, upsellTotal });
 
-  // Step: Supabase tech lookup (real read — safe, no writes)
+  // Step: Supabase tech lookup (real read — safe, no writes). This IS the
+  // match now -- an exact `techs.name` hit is what matchTechName checks too.
+  // Fetches every tech and matches client-side (same as the real sync
+  // functions) rather than an `eq.` filter, so a stray whitespace difference
+  // in a stored name behaves identically here as it would in production
+  // (see the .trim() note below -- found "Trey Sanchez " with a trailing
+  // space in Supabase, which an exact server-side `eq.` filter would miss).
   let tech = null;
+  let skyloName = null;
   try {
-    const techs = await sbFetch(`techs?name=eq.${encodeURIComponent(skyloName)}&select=id,name`);
-    if (!techs || techs.length === 0) {
-      log("Supabase tech lookup", { query: `name=eq.${skyloName}`, result: "not found" }, "fail");
-      return respond(steps, false, `Tech "${skyloName}" not found in Supabase techs table`);
+    const techs = await sbFetch(`techs?select=id,name,is_active`);
+    const techByName = {};
+    for (const t of techs || []) techByName[(t.name || "").trim()] = t;
+    skyloName = matchTechName(hcpName, techByName);
+    if (!skyloName) {
+      log("Supabase tech lookup", { query: `name=eq.${hcpName}`, result: "not found" }, "fail");
+      return respond(steps, false, `No tech named "${hcpName}" found in Supabase techs table`);
     }
-    tech = techs[0];
-    log("Supabase tech lookup", { query: `name=eq.${skyloName}`, result: tech });
+    tech = techByName[skyloName];
+    log("Supabase tech lookup", { query: `name=eq.${hcpName}`, result: tech });
   } catch (err) {
     log("Supabase tech lookup", { error: err.message }, "fail");
     return respond(steps, false, `Supabase read failed: ${err.message}`);

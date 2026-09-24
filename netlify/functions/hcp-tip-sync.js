@@ -22,7 +22,7 @@
 //     the split in the existing Split Jobs admin UI; a later run of this same
 //     function then finishes writing it.
 
-const TECH_MAP = require('./lib/techMap');
+const { matchTechName } = require('./lib/matchTech');
 const { fetchJobSplits, resolveSplits, distributeAmount } = require('./lib/splitHelper');
 const { getAccessToken, listMessageIds, getMessage } = require('./lib/gmailClient');
 const { parseTipEmail } = require('./lib/tipEmailParser');
@@ -119,10 +119,10 @@ async function findJobByInvoiceNumber(invoiceNumber, serviceDateISO) {
   return null;
 }
 
-function matchedEmployeesFor(job) {
+function matchedEmployeesFor(job, techByName) {
   return (job.assigned_employees || []).map(e => {
     const hcpName = `${e.first_name || ""} ${e.last_name || ""}`.trim();
-    const skyloName = TECH_MAP[hcpName];
+    const skyloName = matchTechName(hcpName, techByName);
     return skyloName ? { skyloName } : null;
   }).filter(Boolean);
 }
@@ -131,8 +131,12 @@ async function getTechByName() {
   const allTechs = await sbFetch("techs?select=id,name,is_active&order=id");
   const techByName = {};
   for (const t of (allTechs || [])) {
-    const existing = techByName[t.name];
-    if (!existing || (t.is_active && !existing.is_active)) techByName[t.name] = t;
+    // .trim() guards against a stray leading/trailing space in a tech's
+    // stored name silently breaking the exact-name match (found: "Trey
+    // Sanchez " had a trailing space in Supabase).
+    const key = (t.name || "").trim();
+    const existing = techByName[key];
+    if (!existing || (t.is_active && !existing.is_active)) techByName[key] = t;
   }
   return techByName;
 }
@@ -259,7 +263,8 @@ await markProcessed(id, null, "parse_error", detail);
         continue;
       }
 
-      const matchedEmployees = matchedEmployeesFor(job);
+      const techByName = await getTechByName();
+      const matchedEmployees = matchedEmployeesFor(job, techByName);
       if (matchedEmployees.length === 0) {
         await markProcessed(id, job.id, "no_tech_match");
         summary.skipped++;
@@ -267,7 +272,6 @@ await markProcessed(id, null, "parse_error", detail);
       }
 
       const paidDateISO = toPaidDateISO(msg.internalDate);
-      const techByName = await getTechByName();
       const result = await resolveAndWriteTip(job, matchedEmployees, techByName, paidDateISO, parsed.tipAmount);
 
       if (result.written) {

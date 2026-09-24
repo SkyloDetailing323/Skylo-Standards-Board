@@ -4984,8 +4984,65 @@ function UpsellAuditTab({ techs, upsells, jobs }) {
   );
 }
 
+// ─── TECH MATCHING ────────────────────────────────────────────────────────────
+// Reviews unmatched_hcp_employees (written daily by hcp-tech-match-check.js):
+// HCP employee names with no exact match in the techs table, whose revenue/
+// tips/upsells are silently being skipped by every hcp-*-sync function.
+function TechMatchAdmin({ unmatchedTechs, refreshAll, showToast }) {
+  const [busyName, setBusyName] = useState(null);
+
+  async function ignoreName(hcpName) {
+    setBusyName(hcpName);
+    try {
+      await sb("ignored_hcp_names", { method:"POST", body:JSON.stringify({ hcp_name:hcpName, note:"Ignored from Tech Matching admin panel" }) });
+      await refreshAll();
+      showToast(`"${hcpName}" won't be flagged again`);
+    } catch (err) {
+      showToast("⚠ " + err.message, false);
+    } finally {
+      setBusyName(null);
+    }
+  }
+
+  function copyName(hcpName) {
+    try {
+      navigator.clipboard.writeText(hcpName);
+      showToast(`Copied "${hcpName}" — paste it exactly into Add Tech`);
+    } catch {
+      showToast(hcpName);
+    }
+  }
+
+  return (
+    <div>
+      <div style={{ fontSize:"13px", color:C.muted, marginBottom:"16px", lineHeight:"1.5" }}>
+        These names showed up on an HCP job in the last ~2 weeks but don't exactly match any name in the tech roster — checked automatically every morning. Fix a typo in the matching tech's name, or add a new tech with this exact name (Copy Name, then Add Tech), and it'll clear itself off this list within a day. If a name will never be a paid tech in this app (an office account, a one-off contractor), use Ignore instead.
+      </div>
+      {unmatchedTechs.length === 0 && (
+        <div style={{ padding:"32px 16px", textAlign:"center", color:C.muted, fontSize:"14px" }}>Nothing unmatched right now.</div>
+      )}
+      {unmatchedTechs.map(row => (
+        <div key={row.hcp_name} style={{ background:"#fff", border:`1px solid ${C.border}`, borderRadius:"10px", padding:"12px 16px", marginBottom:"10px", display:"flex", justifyContent:"space-between", alignItems:"center", gap:"12px", flexWrap:"wrap" }}>
+          <div>
+            <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"15px", color:C.black }}>{row.hcp_name}</div>
+            <div style={{ fontSize:"12px", color:C.muted, marginTop:"2px" }}>
+              {row.job_count} job{row.job_count!==1?"s":""} · {row.first_seen&&fmtShortDate(row.first_seen)}–{row.last_seen&&fmtShortDate(row.last_seen)}
+            </div>
+          </div>
+          <div style={{ display:"flex", gap:"8px", flexShrink:0 }}>
+            <button onClick={()=>copyName(row.hcp_name)} style={{ background:"#fff", border:`1px solid ${C.border}`, borderRadius:"8px", padding:"8px 14px", cursor:"pointer", fontSize:"12px", fontWeight:"700", color:C.black }}>Copy Name</button>
+            <button disabled={busyName===row.hcp_name} onClick={()=>ignoreName(row.hcp_name)} style={{ background:"#f0f0f0", border:"none", borderRadius:"8px", padding:"8px 14px", cursor:"pointer", fontSize:"12px", fontWeight:"700", color:C.black, opacity:busyName===row.hcp_name?0.6:1 }}>
+              {busyName===row.hcp_name ? "..." : "Ignore"}
+            </button>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // ─── ADMIN PANEL ──────────────────────────────────────────────────────────────
-function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlongs, schedules, quota, setQuota, jobs, timeEntries=[], tipEntries=[], pendingSplits=[], onLogout, refreshAll }) {
+function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlongs, schedules, quota, setQuota, jobs, timeEntries=[], tipEntries=[], pendingSplits=[], unmatchedTechs=[], onLogout, refreshAll }) {
   // Live-standings views (Leaderboard, Journey Map) should only show active
   // techs, matching what the tech-facing app already does — archived techs
   // stay fully visible in Reports/Payroll/Upsell Audit where historical
@@ -5186,6 +5243,7 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
     { label:"HCP Sync", items:[
       ["splits","✂️", pendingSplits.length > 0 ? `Split Jobs (${new Set(pendingSplits.map(r=>r.hcp_job_id)).size})` : "Split Jobs"],
       ["upsellaudit","🔍","Upsell Audit"],
+      ["techmatch","🔗", unmatchedTechs.length > 0 ? `Tech Matching (${unmatchedTechs.length})` : "Tech Matching"],
     ]},
     { label:"Development", items:[
       ["development","📋","Development"],
@@ -5228,12 +5286,33 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
           );
         })()}
 
+        {unmatchedTechs.length > 0 && tab !== "techmatch" && (
+          <div style={{ background:"rgba(239,68,68,0.08)", border:"1px solid #ef4444", borderRadius:"10px", padding:"12px 16px", marginBottom:"16px", display:"flex", justifyContent:"space-between", alignItems:"center", gap:"12px" }}>
+            <div>
+              <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"14px", color:"#ef4444", letterSpacing:"0.5px" }}>
+                ⚠ {unmatchedTechs.length} HCP name{unmatchedTechs.length !== 1 ? "s" : ""} not matched to a tech
+              </div>
+              <div style={{ fontSize:"12px", color:C.muted, marginTop:"2px" }}>
+                Their revenue, tips, and upsells are being silently skipped until this is fixed.
+              </div>
+            </div>
+            <button
+              onClick={() => setTab("techmatch")}
+              style={{ background:"#ef4444", border:"none", color:"#fff", padding:"8px 18px", borderRadius:"8px", cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"12px", letterSpacing:"1.5px", textTransform:"uppercase", whiteSpace:"nowrap", flexShrink:0 }}
+            >Review Now</button>
+          </div>
+        )}
+
         {tab==="splits"&&(
           <SplitJobsAdmin techs={techs} pendingSplits={pendingSplits} refreshAll={refreshAll} showToast={showToast}/>
         )}
 
         {tab==="upsellaudit"&&(
           <UpsellAuditTab techs={techs} upsells={upsells} jobs={jobs}/>
+        )}
+
+        {tab==="techmatch"&&(
+          <TechMatchAdmin unmatchedTechs={unmatchedTechs} refreshAll={refreshAll} showToast={showToast}/>
         )}
 
         {tab==="development"&&(
@@ -5712,6 +5791,7 @@ export default function App() {
   const [timeEntries, setTimeEntries] = useState([]);
   const [tipEntries, setTipEntries] = useState([]);
   const [pendingSplits, setPendingSplits] = useState([]);
+  const [unmatchedTechs, setUnmatchedTechs] = useState([]);
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [dbError, setDbError] = useState(null);
@@ -5720,7 +5800,7 @@ export default function App() {
 
   const loadAll = useCallback(async () => {
     try {
-      const [t,u,s,r,ra,sch,settings,cb,jb,te,tp,ps] = await Promise.all([
+      const [t,u,s,r,ra,sch,settings,cb,jb,te,tp,ps,ut] = await Promise.all([
         sb("techs?select=*&order=name"),
         sb("upsells?select=*"),
         sb("switchovers?select=*"),
@@ -5733,10 +5813,11 @@ export default function App() {
         sbAll("time_entries?select=*&order=work_date.desc,id.asc").catch(()=>[]),
         sbAll("tip_entries?select=*&order=work_date.desc,id.asc").catch(()=>[]),
         sb("jobs?split_confirmed=eq.false&select=hcp_job_id,tech_id,job_date,revenue,tips,upsell_amount,customer_name&order=job_date.desc").catch(()=>[]),
+        sb("unmatched_hcp_employees?select=*&order=hcp_name").catch(()=>[]),
       ]);
       setTechs(t||[]); setUpsells(u||[]); setSwitchovers(s||[]); setReviews(r||[]);
       setRideAlongs(ra||[]); setSchedules(sch||[]); setCallbacks(cb||[]); setJobs(jb||[]); setTimeEntries(te||[]); setTipEntries(tp||[]);
-      setPendingSplits(ps||[]);
+      setPendingSplits(ps||[]); setUnmatchedTechs(ut||[]);
       if (settings&&settings.length>0) {
         try { setQuota(JSON.parse(settings[0].value)); } catch {}
       }
@@ -5854,7 +5935,7 @@ alter table jobs add column if not exists tips numeric default 0;`}
     <AdminPanel techs={techs} setTechs={setTechs} upsells={upsells} setUpsells={setUpsells}
       switchovers={switchovers} setSwitchovers={setSwitchovers} reviews={reviews} setReviews={setReviews}
       callbacks={callbacks} rideAlongs={rideAlongs} schedules={schedules} quota={quota} setQuota={setQuota}
-      jobs={jobs} timeEntries={timeEntries} tipEntries={tipEntries} pendingSplits={pendingSplits} onLogout={()=>setUser(null)} refreshAll={loadAll}/>
+      jobs={jobs} timeEntries={timeEntries} tipEntries={tipEntries} pendingSplits={pendingSplits} unmatchedTechs={unmatchedTechs} onLogout={()=>setUser(null)} refreshAll={loadAll}/>
   );
   if (user.type==="tech"&&currentTech) return (
     <TechDashboard tech={currentTech} techs={activeTechs} upsells={upsells} switchovers={switchovers}

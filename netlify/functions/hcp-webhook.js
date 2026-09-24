@@ -3,7 +3,7 @@
 // Split jobs: for multi-employee jobs, writes one row per tech with split revenue/upsells.
 // Split %s come from the job_splits Supabase table; equal split fallback with split_confirmed=false.
 
-const TECH_MAP = require('./lib/techMap');
+const { matchTechName } = require('./lib/matchTech');
 const { fetchJobSplits, resolveSplits, fetchUpsellAttributions, distributeAmount } = require('./lib/splitHelper');
 
 function getWeekKey(dateStr) {
@@ -113,26 +113,31 @@ exports.handler = async (event) => {
     return { statusCode: 200, body: "ok" };
   }
 
+  // Deterministic order, and prefer the active record if a duplicate name
+  // ever slips back in (instead of silently keeping whichever row Postgres
+  // happens to return last). Fetched before job matching below since
+  // matching is now a live lookup against this map, not a static file.
+  const allTechs = await sbFetch("techs?select=id,name,is_active&order=id");
+  const techByName = {};
+  for (const t of allTechs || []) {
+    // .trim() guards against a stray leading/trailing space in a tech's
+    // stored name silently breaking the exact-name match (found: "Trey
+    // Sanchez " had a trailing space in Supabase).
+    const key = (t.name || "").trim();
+    const existing = techByName[key];
+    if (!existing || (t.is_active && !existing.is_active)) techByName[key] = t;
+  }
+
   // Find all matched employees
   const matchedEmployees = (job.assigned_employees || []).map(e => {
     const hcpName   = `${e.first_name || ""} ${e.last_name || ""}`.trim();
-    const skyloName = TECH_MAP[hcpName];
+    const skyloName = matchTechName(hcpName, techByName);
     return skyloName ? { skyloName } : null;
   }).filter(Boolean);
 
   if (matchedEmployees.length === 0) {
-    console.log("No TECH_MAP match for any employee on job", jobId);
+    console.log("No tech match for any employee on job", jobId);
     return { statusCode: 200, body: "ok" };
-  }
-
-  // Deterministic order, and prefer the active record if a duplicate name
-  // ever slips back in (instead of silently keeping whichever row Postgres
-  // happens to return last).
-  const allTechs = await sbFetch("techs?select=id,name,is_active&order=id");
-  const techByName = {};
-  for (const t of allTechs || []) {
-    const existing = techByName[t.name];
-    if (!existing || (t.is_active && !existing.is_active)) techByName[t.name] = t;
   }
 
   // Bucket by actual completion date, not scheduled date — same fix already

@@ -7,8 +7,8 @@
 // Falls back to equal split if no confirmed split exists, and marks those rows
 // split_confirmed=false so the admin Split Jobs tab can flag them for Kyle.
 
-const TECH_MAP = require('./lib/techMap');
-const { fetchJobSplits, resolveSplits, fetchUpsellAttributions, distributeAmount } = require('./lib/splitHelper');
+const { matchTechName } = require('./lib/matchTech');
+const { fetchJobSplits, resolveSplits, fetchUpsellAttributions, distributeAmount, cleanupReassignedTechs } = require('./lib/splitHelper');
 
 const FETCH_TIMEOUT_MS = 10000;
 
@@ -148,8 +148,12 @@ exports.handler = async (event) => {
   const allTechs = await sbFetch("techs?select=id,name,is_active&order=id");
   const techByName = {};
   for (const t of allTechs || []) {
-    const existing = techByName[t.name];
-    if (!existing || (t.is_active && !existing.is_active)) techByName[t.name] = t;
+    // .trim() guards against a stray leading/trailing space in a tech's
+    // stored name silently breaking the exact-name match (found: "Trey
+    // Sanchez " had a trailing space in Supabase).
+    const key = (t.name || "").trim();
+    const existing = techByName[key];
+    if (!existing || (t.is_active && !existing.is_active)) techByName[key] = t;
   }
 
   // Fetch all completed jobs in the padded scheduled-date window
@@ -180,7 +184,7 @@ exports.handler = async (event) => {
   for (const job of allJobs) {
     const matchedEmployees = (job.assigned_employees || []).map(e => {
       const hcpName   = `${e.first_name || ""} ${e.last_name || ""}`.trim();
-      const skyloName = TECH_MAP[hcpName];
+      const skyloName = matchTechName(hcpName, techByName);
       return skyloName ? { skyloName } : null;
     }).filter(Boolean);
     if (matchedEmployees.length === 0) continue;
@@ -268,6 +272,11 @@ exports.handler = async (event) => {
     const totalDsc = inv ? inv.discount    : 0;
 
     const splits = resolveSplits(jobId, meta.employees, splitMap, techByName);
+
+    // Remove any leftover row for a tech who's no longer on this job (e.g. a
+    // callback reassigned to someone else) before writing the current splits.
+    const currentTechIds = splits.map(s => techByName[s.skyloName]).filter(Boolean).map(t => t.id);
+    await cleanupReassignedTechs(jobId, currentTechIds, sbFetch);
 
     // Upsell credit uses its own effective percentages -- if manually
     // attributed, 100% goes to one tech and 0% to the rest, which can differ

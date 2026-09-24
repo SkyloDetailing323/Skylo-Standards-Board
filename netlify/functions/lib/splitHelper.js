@@ -95,4 +95,29 @@ function distributeAmount(totalDollars, splits) {
   return cents.map(c => c / 100);
 }
 
-module.exports = { fetchJobSplits, resolveSplits, fetchUpsellAttributions, distributeAmount };
+// Deletes any jobs/upsells rows left over from a tech who is no longer
+// assigned to this job -- e.g. a callback where the customer asked for a
+// different tech and the job got reassigned to someone else entirely (not
+// just a split-percentage change). Every sync/repair pass only ever inserts
+// or updates rows for the CURRENTLY assigned techs (upsert on hcp_job_id +
+// tech_id), so a tech who gets swapped off a job never had their old row
+// touched -- it just sat there forever, double-counting that job's revenue
+// once under the old tech and once under whoever replaced them. Call this
+// once per job with the tech_ids currently assigned, right before writing
+// that job's new rows.
+async function cleanupReassignedTechs(hcpJobId, currentTechIds, sbFetch) {
+  if (!currentTechIds.length) return;
+  const inList = currentTechIds.map(id => `"${id}"`).join(",");
+  try {
+    await sbFetch(`jobs?hcp_job_id=eq.${hcpJobId}&tech_id=not.in.(${inList})`, {
+      method: "DELETE", prefer: "return=minimal",
+    });
+    await sbFetch(`upsells?hcp_job_id=eq.${hcpJobId}&tech_id=not.in.(${inList})`, {
+      method: "DELETE", prefer: "return=minimal",
+    });
+  } catch (err) {
+    console.log(`cleanupReassignedTechs failed for job ${hcpJobId}:`, err.message);
+  }
+}
+
+module.exports = { fetchJobSplits, resolveSplits, fetchUpsellAttributions, distributeAmount, cleanupReassignedTechs };
