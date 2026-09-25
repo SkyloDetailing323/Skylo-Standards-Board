@@ -226,10 +226,62 @@ async function writeTipForJob(id, msg, parsed, job, techByName) {
   return "pending_split";
 }
 
+// HCP sends a payment receipt ("You just got paid!") when a job is paid, and
+// a separate updated receipt ("You just got a tip from <customer>") when a
+// customer adds a tip afterwards, e.g. after a card-on-file charge. Both carry
+// the job's full Tip line; everything else HCP sends from this address
+// (appointment reminders, review requests, etc.) is skipped.
+const PAYMENT_OR_TIP_EMAIL = /you\s+just\s+got\s+(?:paid|a\s+tip)/i;
+
+// Classifies one fetched email, writes its tip if it has one, and records the
+// outcome in processed_tip_emails. Returns the status it recorded. Used by the
+// main pass and by the retry/recheck pass so both behave identically.
+async function processMessage(id, msg) {
+  if (msg.fromEmail !== HCP_SENDER) {
+    await markProcessed(id, null, "sender_mismatch", msg.fromEmail);
+    return "sender_mismatch";
+  }
+  if (!PAYMENT_OR_TIP_EMAIL.test(msg.bodyText)) {
+    await markProcessed(id, null, "not_payment_email");
+    return "not_payment_email";
+  }
+
+  const parsed = parseTipEmail(msg.bodyText);
+  if (!parsed.jobNumber || !parsed.serviceDateISO) {
+    // Include a body snippet so a parse failure is self-diagnosing from
+    // processed_tip_emails.detail alone -- no need to go pull the raw
+    // email from Gmail by hand to see why a label didn't match.
+    await markProcessed(id, null, "parse_error", JSON.stringify({ ...parsed, bodySnippet: msg.bodyText.slice(0, 2000) }));
+    return "parse_error";
+  }
+  if (!parsed.tipAmount || parsed.tipAmount <= 0) {
+    await markProcessed(id, null, "zero_tip");
+    return "zero_tip";
+  }
+
+  const job = await findJobByInvoiceNumber(parsed.jobNumber, parsed.serviceDateISO);
+  if (!job) {
+    await markProcessed(id, null, "job_not_found", `invoice_number=${parsed.jobNumber}`);
+    return "job_not_found";
+  }
+
+  const techByName = await getTechByName();
+  return writeTipForJob(id, msg, parsed, job, techByName);
+}
+
+// Maps processMessage statuses onto the run summary's counters.
+const SUMMARY_BUCKET = {
+  sender_mismatch: "skipped", not_payment_email: "skipped", no_tech_match: "skipped",
+  parse_error: "errors", job_not_found: "errors",
+};
+
 // Max no_tech_match emails re-checked per run. Each costs a Gmail fetch plus
 // an HCP job lookup, so this keeps a run well inside the function timeout;
 // any backlog just drains over the next few 5-minute runs.
 const NO_MATCH_RETRY_LIMIT = 5;
+// Max "recheck" emails re-run per run. Most are non-payment notices that cost
+// only a Gmail fetch, so this can be higher.
+const RECHECK_LIMIT = 15;
 
 exports.handler = async () => {
   const missingEnv = ["GMAIL_CLIENT_ID", "GMAIL_CLIENT_SECRET", "GMAIL_REFRESH_TOKEN", "SUPABASE_URL", "SUPABASE_KEY", "HCP_API_KEY"]
@@ -257,7 +309,10 @@ exports.handler = async () => {
 
   // --- 2. Fetch new payment emails ----------------------------------------
   const accessToken = await getAccessToken();
-  const ids = await listMessageIds(accessToken, sinceEpoch);
+  // Gmail lists newest first. Process oldest first so that when a job gets a
+  // payment receipt and then a later "you just got a tip" receipt, the later
+  // one (which carries the job's final tip total) is the one that sticks.
+  const ids = (await listMessageIds(accessToken, sinceEpoch)).reverse();
 
   let maxInternalDate = sinceEpoch * 1000;
   const summary = { checked: ids.length, written: 0, written_split: 0, pending_split: 0, zero_tip: 0, skipped: 0, errors: 0 };
@@ -273,48 +328,8 @@ exports.handler = async () => {
       const msg = await getMessage(accessToken, id);
       maxInternalDate = Math.max(maxInternalDate, msg.internalDate);
 
-      if (msg.fromEmail !== HCP_SENDER) {
-        await markProcessed(id, null, "sender_mismatch", msg.fromEmail);
-        summary.skipped++;
-        continue;
-      }
-
-      // HCP sends many other notification types from this same address
-      // (appointment reminders, review requests, etc.) -- only the "You just
-      // got paid!" template is an actual payment receipt worth parsing.
-      if (!/you\s+just\s+got\s+paid/i.test(msg.bodyText)) {
-        await markProcessed(id, null, "not_payment_email");
-        summary.skipped++;
-        continue;
-      }
-
-      const parsed = parseTipEmail(msg.bodyText);
-      if (!parsed.jobNumber || !parsed.serviceDateISO) {
-       // Include a body snippet so a parse failure is self-diagnosing from
-// processed_tip_emails.detail alone -- no need to go pull the raw
-// email from Gmail by hand to see why a label didn't match.
-const detail = JSON.stringify({ ...parsed, bodySnippet: msg.bodyText.slice(0, 2000) });
-await markProcessed(id, null, "parse_error", detail);
-        summary.errors++;
-        continue;
-      }
-      if (!parsed.tipAmount || parsed.tipAmount <= 0) {
-        await markProcessed(id, null, "zero_tip");
-        summary.zero_tip++;
-        continue;
-      }
-
-      const job = await findJobByInvoiceNumber(parsed.jobNumber, parsed.serviceDateISO);
-      if (!job) {
-        await markProcessed(id, null, "job_not_found", `invoice_number=${parsed.jobNumber}`);
-        summary.errors++;
-        continue;
-      }
-
-      const techByName = await getTechByName();
-      const status = await writeTipForJob(id, msg, parsed, job, techByName);
-      if (status === "no_tech_match") summary.skipped++;
-      else summary[status]++;
+      const status = await processMessage(id, msg);
+      summary[SUMMARY_BUCKET[status] || status]++;
     } catch (err) {
       console.error(`hcp-tip-sync: error processing message ${id}:`, err.message);
       summary.errors++;
@@ -330,50 +345,40 @@ await markProcessed(id, null, "parse_error", detail);
     });
   }
 
-  // --- 3. Retry pass: no_tech_match emails whose tech may now exist -------
-  // A new hire's tips arrive before their row is added to `techs`. Those
-  // emails were once marked no_tech_match and never looked at again (the
-  // Gmail cursor has moved past them), so their tips were silently lost.
-  // Re-check them here; once the tech exists, the tip is written normally.
+  // --- 3. Retry pass: emails worth a second look -------------------------
+  //  - no_tech_match: a new hire's tips arrive before their row is added to
+  //    `techs`. The Gmail cursor has already moved past these emails, so
+  //    without this they were never looked at again and the tips were lost.
+  //    Only retried once one of the job's HCP names matches a tech.
+  //  - recheck: set by hand (SQL) on processed rows that should be run
+  //    through the current rules again, e.g. after a rule change.
   let retriedNoMatch = 0;
+  let rechecked = 0;
   try {
-    const noMatchRows = await sbFetch("processed_tip_emails?status=eq.no_tech_match&select=gmail_message_id,detail&order=created_at") || [];
-    const techByName = noMatchRows.length ? await getTechByName() : {};
-    const candidates = noMatchRows.filter(r => {
-      // Rows from before this retry existed have no saved names -- always try.
+    const retryRows = await sbFetch("processed_tip_emails?status=in.(no_tech_match,recheck)&select=gmail_message_id,status,detail&order=created_at") || [];
+    const techByName = retryRows.length ? await getTechByName() : {};
+    const noMatch = retryRows.filter(r => {
+      if (r.status !== "no_tech_match") return false;
+      // Rows from before names were saved have none -- always try those.
       let names = null;
       try { names = JSON.parse(r.detail || "null")?.hcpNames; } catch { names = null; }
       return !Array.isArray(names) || names.some(n => matchTechName(n, techByName));
     }).slice(0, NO_MATCH_RETRY_LIMIT);
+    const recheck = retryRows.filter(r => r.status === "recheck").slice(0, RECHECK_LIMIT);
 
-    for (const row of candidates) {
+    for (const row of [...noMatch, ...recheck]) {
       const id = row.gmail_message_id;
       try {
         const msg = await getMessage(accessToken, id);
-        const parsed = parseTipEmail(msg.bodyText);
-        // Re-file anything that now fails for a different reason, so it stops
-        // occupying a retry slot every run.
-        if (!parsed.jobNumber || !parsed.serviceDateISO) {
-          await markProcessed(id, null, "parse_error", JSON.stringify({ ...parsed, bodySnippet: msg.bodyText.slice(0, 2000) }));
-          continue;
-        }
-        if (!parsed.tipAmount || parsed.tipAmount <= 0) {
-          await markProcessed(id, null, "zero_tip");
-          continue;
-        }
-        const job = await findJobByInvoiceNumber(parsed.jobNumber, parsed.serviceDateISO);
-        if (!job) {
-          await markProcessed(id, null, "job_not_found", `invoice_number=${parsed.jobNumber}`);
-          continue;
-        }
-        const status = await writeTipForJob(id, msg, parsed, job, techByName);
-        if (status !== "no_tech_match") retriedNoMatch++;
+        const status = await processMessage(id, msg);
+        if (row.status === "recheck") rechecked++;
+        else if (status !== "no_tech_match") retriedNoMatch++;
       } catch (err) {
-        console.error(`hcp-tip-sync: no_tech_match retry error for message ${id}:`, err.message);
+        console.error(`hcp-tip-sync: retry error for message ${id} (${row.status}):`, err.message);
       }
     }
   } catch (err) {
-    console.error("hcp-tip-sync: no_tech_match retry pass failed:", err.message);
+    console.error("hcp-tip-sync: retry pass failed:", err.message);
   }
 
   // --- 4. Resolver pass: pending split-tips that may now be confirmed -----
@@ -395,6 +400,6 @@ await markProcessed(id, null, "parse_error", detail);
     }
   }
 
-  console.log("hcp-tip-sync summary:", JSON.stringify({ ...summary, retried_no_match: retriedNoMatch, resolved_pending: resolved }));
-  return { statusCode: 200, body: JSON.stringify({ ok: true, ...summary, retried_no_match: retriedNoMatch, resolved_pending: resolved }) };
+  console.log("hcp-tip-sync summary:", JSON.stringify({ ...summary, retried_no_match: retriedNoMatch, rechecked, resolved_pending: resolved }));
+  return { statusCode: 200, body: JSON.stringify({ ok: true, ...summary, retried_no_match: retriedNoMatch, rechecked, resolved_pending: resolved }) };
 };

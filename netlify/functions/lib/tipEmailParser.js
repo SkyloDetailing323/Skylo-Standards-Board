@@ -40,7 +40,15 @@ function parseMoney(str) {
 function parseTipEmail(bodyText) {
   const jobNumber = findAfterLabel(bodyText, /Job\s*Number\s*:?/i, /(\d{3,})/);
   const dateStr   = findAfterLabel(bodyText, /Service\s*Date\s*:?/i, /([A-Za-z]{3,9}\s+\d{1,2},?\s*\d{4})/);
-  const tipStr    = findAfterLabel(bodyText, /\bTip\b\s*:?/i, /\$?\s*(-?[\d,]+\.\d{2})/);
+  // The Tip label is only searched for inside the receipt itself (after "Job
+  // Number"). HCP's "You just got a tip from <customer>" email has the word
+  // "tip" in its header line, which would otherwise be matched first and read
+  // as a $0 tip. A line that starts with "Tip" is preferred; the looser
+  // word match is the fallback for layouts that keep it mid-line.
+  const jobIdx    = bodyText.search(/Job\s*Number/i);
+  const receipt   = jobIdx >= 0 ? bodyText.slice(jobIdx) : bodyText;
+  const tipStr    = findAfterLabel(receipt, /(?:^|\n)[ \t]*Tip\b[ \t]*:?/i, /\$?\s*(-?[\d,]+\.\d{2})/)
+                 ?? findAfterLabel(receipt, /\bTip\b\s*:?/i, /\$?\s*(-?[\d,]+\.\d{2})/);
   const paidStr   = findAfterLabel(bodyText, /Amount\s*Paid\s*:?/i, /\$?\s*(-?[\d,]+\.\d{2})/);
 
   return {
