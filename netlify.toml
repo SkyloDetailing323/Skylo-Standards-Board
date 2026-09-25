@@ -26,6 +26,10 @@
 [functions."hcp-backfill-background"]
   # Background function — runs up to 15 min, no timeout issues
 
+[functions."hcp-report-import"]
+  # Manually triggered; pulls HCP report exports from team@skylod.com.
+  timeout = 26
+
 [functions."hcp-tech-match-check"]
   # Daily safety net: flags any HCP employee name with no exact match in the
   # techs table, so a new hire or a typo doesn't silently drop their revenue.
