@@ -100,9 +100,9 @@ exports.handler = async () => {
   const techNames = new Set((allTechs || []).map((t) => (t.name || "").trim()));
   const ignoredNames = new Set((ignoredRows || []).map((r) => r.hcp_name));
 
-  // Scan every job in the window regardless of work_status -- a scheduled or
-  // in-progress job still has assigned_employees, so this catches a name
-  // mismatch before the tech's first completed job (and first missed payout).
+  // Scan every non-canceled job in the window -- a scheduled or in-progress
+  // job still has assigned_employees, so this catches a name mismatch before
+  // the tech's first completed job (and first missed payout).
   const seen = {}; // hcpName -> { job_count, first_seen, last_seen, sample_job_id }
   let page = 1;
   const pageSize = 100;
@@ -123,6 +123,10 @@ exports.handler = async () => {
     if (jobs.length === 0) break;
 
     for (const job of jobs) {
+      // Canceled jobs ("user canceled" / "pro canceled") never produce
+      // revenue or tips, but can still carry former employees' names --
+      // counting them raised false alarms for archived staff.
+      if (/cancel/i.test(job.work_status || "")) continue;
       const jobDate = (job.schedule && job.schedule.scheduled_start ? job.schedule.scheduled_start.split("T")[0] : null) || today;
       for (const e of job.assigned_employees || []) {
         const hcpName = `${e.first_name || ""} ${e.last_name || ""}`.trim();
