@@ -1939,10 +1939,25 @@ function OperationsProgressTab({ techs, upsells, switchovers, reviews, quota, ca
   // Owner/admin accounts (title:"owner", e.g. Truxton/Casey) are tracked for
   // revenue completeness elsewhere but were never meant to count toward the
   // tech bonus-threshold quota -- they'd quietly inflate the denominator.
-  const activeTechs = techs.filter(t => t.is_active !== false && t.title !== "owner");
-  const techStats = activeTechs.map(t => {
-    const now = new Date(); const y = now.getFullYear(); const m = String(now.getMonth()+1).padStart(2,"0");
-    const { start: mStart, end: mEnd } = monthBounds(y, m);
+  // Will (field_supervisor) is the one being measured, so he's left out too.
+  const now = new Date(); const y = now.getFullYear(); const m = String(now.getMonth()+1).padStart(2,"0");
+  const { start: mStart, end: mEnd } = monthBounds(y, m);
+  const rosterTechs = techs.filter(t => t.is_active !== false && t.title !== "owner" && t.title !== "field_supervisor");
+  // New techs only count against Will's bonus once they've had a full month:
+  // a tech counts this month if their first paid job was on or before the 2nd
+  // (the 1st can land on a Sunday when nobody works). Anyone who hasn't had a
+  // paid job yet, or whose first one was the 3rd or later, is "ramping" and
+  // starts counting next month.
+  const firstPaidJob = {};
+  for (const j of jobs) {
+    if (!j.job_date || !((j.revenue||0) > 0)) continue;
+    if (!firstPaidJob[j.tech_id] || j.job_date < firstPaidJob[j.tech_id]) firstPaidJob[j.tech_id] = j.job_date;
+  }
+  const countCutoff = `${y}-${m}-02`;
+  const countsThisMonth = t => !!firstPaidJob[t.id] && firstPaidJob[t.id] <= countCutoff;
+  const activeTechs = rosterTechs.filter(countsThisMonth);
+  const nextMonthLabel = new Date(y, now.getMonth()+1).toLocaleDateString("en-US",{month:"short"});
+  const techStats = [...activeTechs, ...rosterTechs.filter(t => !countsThisMonth(t))].map(t => {
     const monthUpsellAmt   = upsellAmountInRange(jobs, t.id, mStart, mEnd);
     const monthReviewCount = reviews.filter(r=>r.tech_id===t.id && r.month_key===mk).reduce((s,r)=>s+r.count,0);
     const monthSwitchCount = switchovers.filter(s=>s.tech_id===t.id && s.week_key?.startsWith(`${y}-${m}`)).length;
@@ -1950,10 +1965,10 @@ function OperationsProgressTab({ techs, upsells, switchovers, reviews, quota, ca
     const revHit = monthReviewCount >= q.reviews;
     const swHit  = monthSwitchCount >= q.switchovers;
     const allHit = upHit && revHit && swHit;
-    return { ...t, monthUpsellAmt, monthReviewCount, monthSwitchCount, upHit, revHit, swHit, allHit, hitsCount:[upHit,revHit,swHit].filter(Boolean).length };
+    return { ...t, counts:countsThisMonth(t), monthUpsellAmt, monthReviewCount, monthSwitchCount, upHit, revHit, swHit, allHit, hitsCount:[upHit,revHit,swHit].filter(Boolean).length };
   });
 
-  const hittingCount  = techStats.filter(t=>t.allHit).length;
+  const hittingCount  = techStats.filter(t=>t.counts && t.allHit).length;
   const totalTechs    = activeTechs.length;
   const hitRate       = totalTechs > 0 ? hittingCount / totalTechs : 0;
   const bonusHit      = hitRate >= OPS_BONUS_THRESHOLD;
@@ -2039,10 +2054,11 @@ function OperationsProgressTab({ techs, upsells, switchovers, reviews, quota, ca
   const monthTeamSwitchovers = switchovers.filter(s => s.week_key?.startsWith(`${y2}-${mo2}`)).length;
 
   // KPI #8 — Rev/Hr. Real clock in/out data (time_entries), not the old
-  // manually-typed weekly tech_hours numbers. Scoped to the same active,
-  // non-owner tech population as the bonus threshold above -- Truxton/Casey
-  // occasionally clocking a job in shouldn't skew the team's Rev/Hr either.
-  const activeTechIds = new Set(activeTechs.map(t=>t.id));
+  // manually-typed weekly tech_hours numbers. Scoped to all active, non-owner
+  // techs (wider than the bonus-threshold roster above, which drops Will and
+  // ramping techs) -- Truxton/Casey occasionally clocking a job in shouldn't
+  // skew the team's Rev/Hr.
+  const activeTechIds = new Set(techs.filter(t => t.is_active !== false && t.title !== "owner").map(t=>t.id));
   const monthTeamHours = timeEntries.filter(e => activeTechIds.has(e.tech_id) && e.work_date.startsWith(`${y2}-${mo2}`)).reduce((s,e)=>s+sessionHours(e),0);
   const teamRevPerHr = monthTeamHours > 0 ? monthTeamRevenue / monthTeamHours : 0;
 
@@ -2112,7 +2128,7 @@ function OperationsProgressTab({ techs, upsells, switchovers, reviews, quota, ca
             <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"16px", color:bonusHit?C.green:C.muted }}>${bonusAmt.toFixed(2)} {!bonusHit&&"(locked)"}</span>
           </div>
         </div>
-        <div style={{ fontSize:"11px", color:C.muted, marginTop:"10px" }}>Month: {formatMonthLabel(mk)} · Unlocks when {Math.round(OPS_BONUS_THRESHOLD*100)}% of active techs hit all 3 quotas</div>
+        <div style={{ fontSize:"11px", color:C.muted, marginTop:"10px" }}>Month: {formatMonthLabel(mk)} · Unlocks when {Math.round(OPS_BONUS_THRESHOLD*100)}% of active techs hit all 3 quotas · A tech counts once their first paid job is on or before the 2nd of the month</div>
       </div>
 
       {/* Per-tech quota breakdown */}
@@ -2137,8 +2153,11 @@ function OperationsProgressTab({ techs, upsells, switchovers, reviews, quota, ca
             <div key={t.id} style={{ background:t.allHit?`${C.green}10`:C.cardLt, border:`1px solid ${t.allHit?C.green:C.border}`, borderRadius:"10px", padding:"12px 14px" }}>
               <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:"8px" }}>
                 <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontStyle:"italic", fontSize:"16px", color:C.black }}>{t.name}</div>
-                <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"13px", color:t.allHit?C.green:C.muted }}>
-                  {t.allHit ? "✅ ALL HIT" : `${t.hitsCount}/3`}
+                <div style={{ display:"flex", gap:"8px", alignItems:"center" }}>
+                  {!t.counts && <div style={{ background:`${C.orange}20`, color:C.orange, borderRadius:"10px", padding:"2px 8px", fontSize:"10px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", letterSpacing:"0.5px" }}>RAMPING · COUNTS FROM {nextMonthLabel.toUpperCase()}</div>}
+                  <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"13px", color:t.allHit?C.green:C.muted }}>
+                    {t.allHit ? "✅ ALL HIT" : `${t.hitsCount}/3`}
+                  </div>
                 </div>
               </div>
               <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:"6px" }}>
