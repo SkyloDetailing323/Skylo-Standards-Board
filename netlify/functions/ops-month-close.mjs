@@ -11,6 +11,7 @@
 import { computeOpsMonth, mountainDate } from "../../opsBonus.js";
 
 const PAGE = 1000;
+const FIRST_BONUS_MONTH = "2026-10";
 
 async function sbGetAll(path) {
   const rows = [];
@@ -44,6 +45,10 @@ function parseSetting(rows, key, fallback) {
 export default async () => {
   const today = mountainDate(new Date().toISOString());
   const monthKey = previousMonthKey(today);
+  // The plan starts in October 2026; September is only a preview.
+  if (monthKey < FIRST_BONUS_MONTH) {
+    return new Response(JSON.stringify({ ok: true, monthKey, skipped: "before the bonus plan started" }));
+  }
 
   const existing = await sbGetAll(`ops_monthly_results?month_key=eq.${monthKey}&select=month_key`);
   if (existing.length) {
