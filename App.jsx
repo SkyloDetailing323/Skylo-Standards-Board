@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { computeOpsMonth, monthRange, mountainDate, CALLBACK_TIERS, QUOTA_TIERS, RETENTION_TIERS, NON_ROUTE_VEHICLES, OPS_EXCLUDED_TITLES } from "./opsBonus.js";
 
 // ─── SUPABASE CONFIG ──────────────────────────────────────────────────────────
 const SUPABASE_URL = "https://mjmwxxvqcsptrocwucis.supabase.co";
@@ -58,7 +59,7 @@ const C = {
   red:     "#ef4444",
 };
 
-const ADMIN_PIN = "0000";
+const ADMIN_PIN = "7281";
 const PP_ANCHOR_END = "2026-06-13"; // known period end: pay date Jun 19, submit Jun 17
 const UPSELL_PTS_PER_DOLLAR = 0.5; // $2 = 1 pt
 const REVIEW_PTS = 5;
@@ -82,12 +83,6 @@ const FIRE_CATEGORIES = [
   { value:"policy_breach",  label:"Broke the policy manual" },
   { value:"culture",        label:"Hurting the company culture" },
 ];
-// Titles that never count toward Will's ops bonus -- owners, Will himself, and
-// staff who don't detail cars day to day.
-const OPS_EXCLUDED_TITLES = ["owner","field_supervisor","commercial_sales","sales_booking"];
-// Operations bonus: triggered when X% of active techs hit all 3 quotas in the month
-const OPS_BONUS_THRESHOLD = 0.75; // 75% of active techs must hit quota
-const OPS_BONUS_PCT = 0.05;       // 5% of total team upsell revenue that month
 
 const LOGO_SRC = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 160 45'%3E%3Ctext x='80' y='34' font-family='Arial Black,sans-serif' font-size='30' font-weight='900' font-style='italic' fill='%232b9cf0' text-anchor='middle'%3ESkylo%3C/text%3E%3C/svg%3E";
 
@@ -2017,367 +2012,374 @@ function QuotaSettings({ quota, onSave, saving, readOnly=false }) {
         )}
       </div>
       <div style={{ background:`${C.blue}10`, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"16px 18px" }}>
-        <Label color={C.blue}>💡 Operations Bonus Rule</Label>
-        <div style={{ fontSize:"13px", color:C.black, marginBottom:"6px" }}>When <strong>{Math.round(OPS_BONUS_THRESHOLD*100)}% or more of active techs hit all 3 quotas</strong> in a month, Will earns <strong style={{ color:C.green }}>5% of the total team upsell revenue</strong> for that month.</div>
-        <div style={{ fontSize:"12px", color:C.muted }}>The more the team upsells, the more Will earns — no cap. He's incentivized to coach everyone to their max, not just hit a threshold.</div>
+        <Label color={C.blue}>💡 How these feed Will's bonus</Label>
+        <div style={{ fontSize:"13px", color:C.black }}>These are the per-tech monthly targets for the quota bonus. Will is paid a flat amount by the share of counted techs who hit all three (60% → $200, 70% → $300, 85% → $400, 100% → $500). See Operations Progress for all four of his bonuses.</div>
       </div>
     </div>
   );
 }
 
-function OperationsProgressTab({ techs, upsells, switchovers, reviews, quota, callbacks=[], jobs=[], timeEntries=[], rideAlongs=[] }) {
-  const mk = getMonthKey();
-  const q = quota || DEFAULT_QUOTA;
-
-  // Archived techs shouldn't count toward the quota-hit denominator or appear
-  // in the breakdown below — they're not working, so including them made the
-  // team's hit rate look worse than it actually is among current techs.
-  // Owner/admin accounts (title:"owner", e.g. Truxton/Casey) are tracked for
-  // revenue completeness elsewhere but were never meant to count toward the
-  // tech bonus-threshold quota -- they'd quietly inflate the denominator.
-  // Will (field_supervisor) is the one being measured, so he's left out too,
-  // along with sales staff who don't detail (OPS_EXCLUDED_TITLES).
-  const now = new Date(); const y = now.getFullYear(); const m = String(now.getMonth()+1).padStart(2,"0");
-  const { start: mStart, end: mEnd } = monthBounds(y, m);
-  const rosterTechs = techs.filter(t => t.is_active !== false && !OPS_EXCLUDED_TITLES.includes(t.title));
-  // New techs only count against Will's bonus once they've had a full month:
-  // a tech counts this month if their first paid job was on or before the 2nd
-  // (the 1st can land on a Sunday when nobody works). Anyone who hasn't had a
-  // paid job yet, or whose first one was the 3rd or later, is "ramping" and
-  // starts counting next month.
-  const firstPaidJob = {};
-  for (const j of jobs) {
-    if (!j.job_date || !((j.revenue||0) > 0)) continue;
-    if (!firstPaidJob[j.tech_id] || j.job_date < firstPaidJob[j.tech_id]) firstPaidJob[j.tech_id] = j.job_date;
+// Will's (Field Supervisor) bonus page: staffing (the gate), callback rate,
+// quota and quarterly retention. All the math lives in opsBonus.js so the
+// month-end snapshot function computes the same numbers as this page.
+// Past months show the saved snapshot when there is one; owners can re-save
+// after fixing data, but the Field Supervisor can only view.
+function opsMonthOptions(today) {
+  const out = [];
+  let [y, m] = today.slice(0,7).split("-").map(Number);
+  while (y > 2026 || (y === 2026 && m >= 9)) {
+    out.push(`${y}-${String(m).padStart(2,"0")}`);
+    m -= 1; if (m === 0) { m = 12; y -= 1; }
   }
-  const countCutoff = `${y}-${m}-02`;
-  const countsThisMonth = t => !!firstPaidJob[t.id] && firstPaidJob[t.id] <= countCutoff;
-  const activeTechs = rosterTechs.filter(countsThisMonth);
-  const nextMonthLabel = new Date(y, now.getMonth()+1).toLocaleDateString("en-US",{month:"short"});
-  const techStats = [...activeTechs, ...rosterTechs.filter(t => !countsThisMonth(t))].map(t => {
-    const monthUpsellAmt   = upsellAmountInRange(jobs, t.id, mStart, mEnd);
-    const monthReviewCount = reviews.filter(r=>r.tech_id===t.id && r.month_key===mk).reduce((s,r)=>s+r.count,0);
-    const monthSwitchCount = switchovers.filter(s=>s.tech_id===t.id && s.week_key?.startsWith(`${y}-${m}`)).length;
-    const upHit  = monthUpsellAmt   >= q.upsells;
-    const revHit = monthReviewCount >= q.reviews;
-    const swHit  = monthSwitchCount >= q.switchovers;
-    const allHit = upHit && revHit && swHit;
-    return { ...t, counts:countsThisMonth(t), monthUpsellAmt, monthReviewCount, monthSwitchCount, upHit, revHit, swHit, allHit, hitsCount:[upHit,revHit,swHit].filter(Boolean).length };
-  });
+  return out;
+}
+const OPS_LEAVE_LABEL = { fired:"Fired", quit_notice:"Quit w/ notice", walked_off:"Walked off" };
+const money = n => `$${Number(n||0).toLocaleString(undefined,{maximumFractionDigits:2})}`;
 
-  const hittingCount  = techStats.filter(t=>t.counts && t.allHit).length;
-  const totalTechs    = activeTechs.length;
-  const hitRate       = totalTechs > 0 ? hittingCount / totalTechs : 0;
-  const bonusHit      = hitRate >= OPS_BONUS_THRESHOLD;
-  const pctDisplay    = Math.round(hitRate * 100);
-  const neededForBonus = Math.ceil(OPS_BONUS_THRESHOLD * totalTechs);
+function OpsCard({ title, color, pay, status, statusColor, children }) {
+  return (
+    <div style={{ background:C.white, border:`1px solid ${C.border}`, borderTop:`3px solid ${color}`, borderRadius:"12px", padding:"18px", boxShadow:"0 2px 8px rgba(43,156,240,0.08)" }}>
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:"10px", marginBottom:"10px" }}>
+        <Label color={color}>{title}</Label>
+        <div style={{ textAlign:"right" }}>
+          <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"24px", color:pay>0?C.green:C.muted, lineHeight:1 }}>{money(pay)}</div>
+          {status && <div style={{ fontSize:"10px", fontWeight:"800", letterSpacing:"1px", color:statusColor||C.muted, marginTop:"3px" }}>{status}</div>}
+        </div>
+      </div>
+      {children}
+    </div>
+  );
+}
+function TierTable({ tiers, activeLabel, suffix="" }) {
+  return (
+    <div style={{ display:"flex", flexDirection:"column", gap:"3px", marginTop:"10px" }}>
+      {tiers.map(t=>{
+        const on = t.label===activeLabel;
+        return (
+          <div key={t.label} style={{ display:"flex", justifyContent:"space-between", fontSize:"12px", padding:"4px 8px", borderRadius:"6px", background:on?`${C.green}18`:C.cardLt, border:`1px solid ${on?C.green:"transparent"}`, color:C.black, fontWeight:on?"800":"400" }}>
+            <span>{on?"▶ ":""}{t.label}</span><span>{money(t.pay)}{suffix}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+const statLine = { fontSize:"12px", color:C.muted, marginTop:"4px" };
+const bigNum = { fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"32px", color:C.black, lineHeight:1 };
 
-  // Total team upsell revenue this month
-  const now2 = new Date(); const y2 = now2.getFullYear(); const mo2 = String(now2.getMonth()+1).padStart(2,"0");
-  const { start: teamMStart, end: teamMEnd } = monthBounds(y2, mo2);
-  const monthTeamUpsells = upsellAmountInRange(jobs, null, teamMStart, teamMEnd);
-  const bonusAmt = Math.round(monthTeamUpsells * OPS_BONUS_PCT * 100) / 100;
+function OperationsProgressTab({ techs, switchovers, reviews, quota, callbacks=[], jobs=[], isManager=false }) {
+  const today = mountainDate(new Date().toISOString());
+  const months = opsMonthOptions(today);
+  const [monthKey, setMonthKey] = useState(months[0]);
+  const { truckCount, holidays, loaded:settingsLoaded } = useStaffingSettings();
+  const [schedule, setSchedule] = useState([]);
+  const [exceptions, setExceptions] = useState([]);
+  const [snapshots, setSnapshots] = useState({});
+  const [loaded, setLoaded] = useState(false);
+  const [showLive, setShowLive] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState(null);
 
-  function mtWeekKeyFromDate(dateStr) {
-    const d = new Date(dateStr + "T12:00:00Z");
-    const day = d.getUTCDay();
-    const back = day === 0 ? 6 : day - 1;
-    d.setUTCDate(d.getUTCDate() - back);
-    return d.toISOString().split("T")[0];
-  }
-
-  // KPI 1 — ride-alongs completed this week. A row in ride_alongs IS the
-  // completion record (no separate status field) — confirmed no "completed"
-  // boolean exists anywhere in the schema.
-  const RIDE_ALONG_WEEKLY_TARGET = 4;
-  const thisWeekKey = getWeekKey();
-  const rideAlongsThisWeek = rideAlongs.filter(r => r.date && mtWeekKeyFromDate(r.date) === thisWeekKey).length;
-  const rideAlongHit = rideAlongsThisWeek >= RIDE_ALONG_WEEKLY_TARGET;
-
-  // KPI 2 — check-in completion + on-time rate. checkins isn't in the global
-  // loadAll() state (same as DevelopmentTab, which fetches it locally too),
-  // so this tab fetches its own copy. NOTE: milestones are week 1/2/4/6/12 in
-  // the actual schema, not week 1/2/4/8/12 — there's no "week_8" anywhere.
-  // "Tote/truck audits" are NOT a separate tracked entity — confirmed no such
-  // table/field exists; only these tech check-ins are real data.
-  const [checkins, setCheckins] = useState([]);
-  const [checkinsLoaded, setCheckinsLoaded] = useState(false);
-  useEffect(() => {
-    sb("checkins?select=*").then(rows => { setCheckins(rows||[]); setCheckinsLoaded(true); }).catch(()=>setCheckinsLoaded(true));
+  const loadExtras = useCallback(async () => {
+    const [sch, exc, snaps] = await Promise.all([
+      sb("tech_schedule?select=*").catch(()=>[]),
+      sb("schedule_exceptions?select=*").catch(()=>[]),
+      sb("ops_monthly_results?select=*").catch(()=>[]),
+    ]);
+    setSchedule(sch||[]); setExceptions(exc||[]);
+    setSnapshots(Object.fromEntries((snaps||[]).map(s=>[s.month_key,s])));
+    setLoaded(true);
   }, []);
-  const todayStr = new Date().toISOString().split("T")[0];
-  const dueCheckins = checkins.filter(c => c.scheduled_date && c.scheduled_date <= todayStr);
-  const completedCheckins = dueCheckins.filter(c => c.status === "completed");
-  const onTimeCheckins = completedCheckins.filter(c => c.completed_date && c.completed_date <= c.scheduled_date);
-  const checkinCompletionRate = dueCheckins.length > 0 ? (completedCheckins.length / dueCheckins.length) * 100 : null;
-  const checkinOnTimeRate = completedCheckins.length > 0 ? (onTimeCheckins.length / completedCheckins.length) * 100 : null;
+  useEffect(() => { loadExtras(); }, [loadExtras]);
 
-  // KPI 3 — audit calibration accuracy. No supervisor re-audit/spot-check
-  // data source exists anywhere in the codebase — this is a manual-entry
-  // number stored in the settings table, same pattern as the quota JSON blob,
-  // until a real calibration data source gets built.
-  const [calibration, setCalibration] = useState(null);
-  const [calibrationInput, setCalibrationInput] = useState("");
-  const [calibrationSaving, setCalibrationSaving] = useState(false);
-  useEffect(() => {
-    sb("settings?key=eq.calibration_accuracy&select=*").then(rows => {
-      if (rows && rows[0]) { try { const v = JSON.parse(rows[0].value); setCalibration(v); setCalibrationInput(String(v.pct)); } catch {} }
-    }).catch(()=>{});
-  }, []);
-  async function saveCalibration() {
-    const pct = parseFloat(calibrationInput);
-    if (isNaN(pct)) return;
-    setCalibrationSaving(true);
+  const live = (loaded && settingsLoaded) ? computeOpsMonth({
+    monthKey, today, techs, jobs, reviews, switchovers, callbacks, quota,
+    schedule, exceptions, truckCount, holidays,
+  }) : null;
+  const monthOver = monthRange(monthKey).end < today;
+  const snap = snapshots[monthKey];
+  const r = (monthOver && snap && !showLive) ? snap.results : live;
+
+  async function saveSnapshot() {
+    if (isManager || !live) return;
+    setSaving(true);
     try {
-      const value = JSON.stringify({ pct, updatedAt: new Date().toISOString().split("T")[0] });
-      const existing = await sb("settings?key=eq.calibration_accuracy&select=id").catch(()=>[]);
-      if (existing && existing.length > 0) await sb(`settings?id=eq.${existing[0].id}`, { method:"PATCH", body: JSON.stringify({ value }), prefer:"return=minimal" });
-      else await sb("settings", { method:"POST", body: JSON.stringify({ key:"calibration_accuracy", value }) });
-      setCalibration({ pct, updatedAt: new Date().toISOString().split("T")[0] });
-    } catch {}
-    setCalibrationSaving(false);
+      await sb("ops_monthly_results?on_conflict=month_key",{ method:"POST", prefer:"resolution=merge-duplicates,return=minimal",
+        body: JSON.stringify({ month_key:monthKey, results:live, saved_at:new Date().toISOString(), saved_by:"owner" }) });
+      await loadExtras(); setShowLive(false);
+      setMsg(`✅ Saved ${formatMonthLabel(monthKey)} results`);
+    } catch(e) { setMsg("Error saving: "+e.message); }
+    setSaving(false);
   }
 
-  // KPIs 5-8 — team-wide rates for the current month, reusing the same
-  // revenue/hours/upsell computations ReportsTab already does at team level.
-  const monthJobs = jobs.filter(j => j.job_date && j.job_date.startsWith(`${y2}-${mo2}`));
-  const monthTeamRevenue = monthJobs.reduce((s,j)=>s+(j.revenue||0),0);
-  const teamUpsellRate = monthTeamRevenue > 0 ? (monthTeamUpsells / monthTeamRevenue) * 100 : 0;
-
-  const monthTeamReviews = reviews.filter(r => r.month_key === mk).reduce((s,r)=>s+(r.count||0),0);
-  const reviewQuotaTarget = q.reviews * totalTechs;
-  const teamReviewRate = reviewQuotaTarget > 0 ? (monthTeamReviews / reviewQuotaTarget) * 100 : 0;
-
-  const monthTeamSwitchovers = switchovers.filter(s => s.week_key?.startsWith(`${y2}-${mo2}`)).length;
-
-  // KPI #8 — Rev/Hr. Real clock in/out data (time_entries), not the old
-  // manually-typed weekly tech_hours numbers. Scoped to all active, non-owner
-  // techs (wider than the bonus-threshold roster above, which drops Will and
-  // ramping techs) -- Truxton/Casey occasionally clocking a job in shouldn't
-  // skew the team's Rev/Hr.
-  const activeTechIds = new Set(techs.filter(t => t.is_active !== false && t.title !== "owner").map(t=>t.id));
-  const monthTeamHours = timeEntries.filter(e => activeTechIds.has(e.tech_id) && e.work_date.startsWith(`${y2}-${mo2}`)).reduce((s,e)=>s+sessionHours(e),0);
-  const teamRevPerHr = monthTeamHours > 0 ? monthTeamRevenue / monthTeamHours : 0;
-
-  // Callback rate has no job-level linkage (callbacks only carry tech_id +
-  // reason + created_at), so this is jobs-in-period vs callbacks-in-period,
-  // not a true per-job attribution — the best available with real data.
-  const monthCallbacks = callbacks.filter(c => c.created_at && c.created_at.startsWith(`${y2}-${mo2}`)).length;
-  const callbackRate = monthJobs.length > 0 ? (monthCallbacks / monthJobs.length) * 100 : 0;
-
-  // 8-week trend — no charting library exists in this app (package.json has
-  // only react/react-dom), so this is a lightweight CSS bar trend rather than
-  // pulling in a new dependency.
-  const last8WeekKeys = [];
-  { const base = new Date(); for (let i=7;i>=0;i--) { const wd=new Date(base); wd.setDate(base.getDate()-i*7); last8WeekKeys.push(mtWeekKeyFromDate(wd.toISOString().split("T")[0])); } }
-  const trendWeeks = [...new Set(last8WeekKeys)].map(wk => {
-    const wkJobs = jobs.filter(j=>j.week_key===wk);
-    const wkRev  = wkJobs.reduce((s,j)=>s+(j.revenue||0),0);
-    const wkEnd  = new Date(wk+"T12:00:00Z"); wkEnd.setUTCDate(wkEnd.getUTCDate()+6);
-    const wkHrs  = timeEntries.filter(e=>activeTechIds.has(e.tech_id) && e.work_date>=wk && e.work_date<=wkEnd.toISOString().split("T")[0]).reduce((s,e)=>s+sessionHours(e),0);
-    const wkCallbacks = callbacks.filter(c => c.created_at && mtWeekKeyFromDate(c.created_at.split("T")[0]) === wk).length;
-    return { wk, revPerHr: wkHrs>0?wkRev/wkHrs:0, callbackRate: wkJobs.length>0?(wkCallbacks/wkJobs.length)*100:0 };
-  });
-  const maxRevPerHr = Math.max(1, ...trendWeeks.map(w=>w.revPerHr));
-  const maxCallbackRate = Math.max(1, ...trendWeeks.map(w=>w.callbackRate));
+  if (!r) return <div style={{ fontSize:"13px", color:C.muted, padding:"20px" }}>Loading…</div>;
+  const { staffing:st, callbacks:cb, quota:qt, retention:rt } = r;
+  const gateNote = !r.gateOpen ? "Voided — staffing was missed this month" : null;
+  const statusMap = {
+    earned:{ text:"✅ EARNED", color:C.green }, on_track:{ text:"ON TRACK", color:C.green },
+    at_risk:{ text:"⚠️ SHORT DAYS AHEAD", color:C.gold }, missed:{ text:"❌ MISSED", color:"#ef4444" },
+  };
+  const stStatus = statusMap[st.status] || statusMap.on_track;
+  const inProgress = !monthOver;
 
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:"16px" }}>
-      {/* Will's bonus status */}
-      <div style={{ background:bonusHit?`${C.green}15`:C.white, border:`2px solid ${bonusHit?C.green:C.border}`, borderTop:`3px solid ${bonusHit?C.green:C.blue}`, borderRadius:"12px", padding:"20px", boxShadow:"0 2px 8px rgba(43,156,240,0.08)" }}>
-        <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontStyle:"italic", fontSize:"13px", color:bonusHit?C.green:C.muted, letterSpacing:"2px", textTransform:"uppercase", marginBottom:"6px" }}>
-          {bonusHit ? "🎉 BONUS UNLOCKED" : "⏳ BONUS IN PROGRESS"}
-        </div>
-        <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontStyle:"italic", fontSize:"36px", color:bonusHit?C.green:C.black, lineHeight:1, marginBottom:"4px" }}>
-          {bonusHit ? `$${bonusAmt.toFixed(2)} EARNED` : `$${bonusAmt.toFixed(2)} PROJECTED`}
-        </div>
-        <div style={{ fontSize:"12px", color:C.muted, marginBottom:"4px" }}>
-          5% of ${monthTeamUpsells.toLocaleString()} team upsells this month
-        </div>
-        <div style={{ fontSize:"13px", color:C.muted, marginBottom:"16px" }}>
-          {bonusHit
-            ? `${hittingCount} of ${totalTechs} techs hit all quotas — great coaching, Will.`
-            : `${hittingCount} of ${totalTechs} techs on quota. Need ${neededForBonus - hittingCount} more to unlock.`}
-        </div>
-        <div style={{ marginBottom:"8px" }}>
-          <div style={{ display:"flex", justifyContent:"space-between", marginBottom:"4px" }}>
-            <span style={{ fontSize:"11px", color:C.muted, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>TEAM QUOTA RATE</span>
-            <span style={{ fontSize:"11px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", color:bonusHit?C.green:C.black }}>{pctDisplay}% <span style={{ color:C.muted }}>/</span> {Math.round(OPS_BONUS_THRESHOLD*100)}% needed</span>
+      {/* Month picker + total */}
+      <div style={{ background:r.gateOpen?C.white:"#fff5f5", border:`2px solid ${r.gateOpen?C.border:"#ef4444"}`, borderTop:`3px solid ${r.gateOpen?C.blue:"#ef4444"}`, borderRadius:"12px", padding:"18px" }}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:"10px" }}>
+          <div>
+            <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontStyle:"italic", fontSize:"13px", color:C.muted, letterSpacing:"2px" }}>WILL'S OPERATIONS BONUS</div>
+            <select value={monthKey} onChange={e=>{ setMonthKey(e.target.value); setShowLive(false); setMsg(null); }}
+              style={{ marginTop:"6px", background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"6px 10px", borderRadius:"8px", fontSize:"15px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800" }}>
+              {months.map(m=><option key={m} value={m}>{formatMonthLabel(m)}{m==="2026-09"?" (preview — plan starts Oct)":""}</option>)}
+            </select>
           </div>
-          <div style={{ background:C.border, borderRadius:"6px", height:"10px", overflow:"hidden" }}>
-            <div style={{ width:`${Math.min(pctDisplay,100)}%`, height:"100%", background:bonusHit?C.green:C.blue, borderRadius:"6px" }}/>
-          </div>
-          <div style={{ display:"flex", justifyContent:"flex-end", marginTop:"3px" }}>
-            <div style={{ width:`${OPS_BONUS_THRESHOLD*100}%`, borderRight:`2px dashed ${C.muted}`, height:"6px", marginTop:"-3px" }}/>
+          <div style={{ textAlign:"right" }}>
+            <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"36px", color:r.totalPay>0?C.green:C.black, lineHeight:1 }}>{money(r.totalPay)}</div>
+            <div style={{ fontSize:"11px", color:C.muted }}>{inProgress?"projected so far":"for the month"}{r.isQuarterEnd?` · includes ${rt.quarter.label} retention`:""}</div>
           </div>
         </div>
-        <div style={{ background:C.cardLt, border:`1px solid ${C.border}`, borderRadius:"8px", padding:"10px 12px", marginTop:"12px" }}>
-          <div style={{ display:"flex", justifyContent:"space-between", fontSize:"12px", color:C.muted, marginBottom:"4px" }}>
-            <span>Team upsells this month</span>
-            <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", color:C.black }}>${monthTeamUpsells.toLocaleString()}</span>
-          </div>
-          <div style={{ display:"flex", justifyContent:"space-between", fontSize:"12px", color:C.muted, marginBottom:"4px" }}>
-            <span>Will's rate</span>
-            <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", color:C.black }}>{Math.round(OPS_BONUS_PCT*100)}%</span>
-          </div>
-          <div style={{ display:"flex", justifyContent:"space-between", fontSize:"13px", borderTop:`1px solid ${C.border}`, paddingTop:"6px", marginTop:"4px" }}>
-            <span style={{ fontWeight:"700", color:C.black }}>Will's bonus</span>
-            <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"16px", color:bonusHit?C.green:C.muted }}>${bonusAmt.toFixed(2)} {!bonusHit&&"(locked)"}</span>
-          </div>
+        {!r.gateOpen && <div style={{ marginTop:"10px", fontSize:"13px", color:"#ef4444", fontWeight:"700" }}>Staffing was short on {st.missedDays.length} day{st.missedDays.length!==1?"s":""}, so this month's callback and quota bonuses are voided.</div>}
+        <div style={{ display:"flex", gap:"10px", alignItems:"center", marginTop:"10px", flexWrap:"wrap", fontSize:"12px", color:C.muted }}>
+          {monthOver && snap && <span>Saved {new Date(snap.saved_at).toLocaleString("en-US",{month:"short",day:"numeric",hour:"numeric",minute:"2-digit"})}{showLive?" · showing live numbers":""}</span>}
+          {monthOver && !snap && <span>Not saved yet — showing live numbers</span>}
+          {monthOver && snap && <button onClick={()=>setShowLive(v=>!v)} style={{ background:"none", border:`1px solid ${C.border}`, color:C.blue, padding:"3px 10px", borderRadius:"6px", cursor:"pointer", fontSize:"11px", fontWeight:"700" }}>{showLive?"Show saved":"Show live"}</button>}
+          {monthOver && !isManager && <button onClick={saveSnapshot} disabled={saving} style={{ background:C.blue, border:"none", color:C.white, padding:"4px 12px", borderRadius:"6px", cursor:saving?"not-allowed":"pointer", fontSize:"11px", fontWeight:"800" }}>{saving?"Saving…":snap?"Recalculate & save":"Save results"}</button>}
+          {msg && <span style={{ color:C.black }}>{msg}</span>}
         </div>
-        <div style={{ fontSize:"11px", color:C.muted, marginTop:"10px" }}>Month: {formatMonthLabel(mk)} · Unlocks when {Math.round(OPS_BONUS_THRESHOLD*100)}% of active techs hit all 3 quotas · A tech counts once their first paid job is on or before the 2nd of the month</div>
       </div>
 
-      {/* Per-tech quota breakdown */}
-      <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:"12px", overflow:"hidden", boxShadow:"0 2px 8px rgba(43,156,240,0.08)" }}>
-        <div style={{ padding:"14px 18px", borderBottom:`1px solid ${C.border}`, background:C.cardLt }}>
-          <Label color={C.blue}>📊 This Month's Quota Status — {formatMonthLabel(mk)}</Label>
-          <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:"8px", marginTop:"4px" }}>
-            {[
-              { label:"Upsell Quota",      val:`$${q.upsells}/mo`,    color:C.green },
-              { label:"Review Quota",      val:`${q.reviews}/mo`,     color:C.gold  },
-              { label:"Switchover Quota",  val:`${q.switchovers}/mo`, color:C.blue  },
-            ].map(item=>(
-              <div key={item.label} style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:"8px", padding:"8px 10px", textAlign:"center" }}>
-                <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"16px", color:item.color }}>{item.val}</div>
-                <div style={{ fontSize:"9px", color:C.muted, textTransform:"uppercase", letterSpacing:"1px" }}>{item.label}</div>
+      {/* 1. Staffing */}
+      <OpsCard title="🚚 Staffing — the gate" color={C.blue} pay={st.pay} status={stStatus.text} statusColor={stStatus.color}>
+        <div style={{ fontSize:"13px", color:C.black }}>Needs <strong>{st.days[0]?.needed ?? truckCount} techs</strong> scheduled on the trucks every Mon–Sat workday. One short day misses the month and voids the callback and quota bonuses.</div>
+        <div style={statLine}>Full roster target: {st.rosterTarget} techs (trucks ÷ 2 × 3) · Holidays skipped</div>
+        <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(64px,1fr))", gap:"4px", marginTop:"12px" }}>
+          {st.days.map(d=>{
+            const bg = d.short ? (d.past ? "#ef4444" : C.gold) : (d.past ? C.green : `${C.green}55`);
+            return (
+              <div key={d.date} title={`${d.scheduled} of ${d.needed} scheduled`} style={{ background:bg, color:C.white, borderRadius:"6px", padding:"4px", textAlign:"center", fontSize:"10px", fontWeight:"800" }}>
+                <div>{new Date(d.date+"T12:00:00").toLocaleDateString("en-US",{weekday:"short",day:"numeric"})}</div>
+                <div style={{ fontSize:"12px" }}>{d.scheduled}/{d.needed}</div>
               </div>
-            ))}
-          </div>
+            );
+          })}
         </div>
-        <div style={{ padding:"14px 18px", display:"flex", flexDirection:"column", gap:"10px" }}>
-          {techStats.map(t=>(
-            <div key={t.id} style={{ background:t.allHit?`${C.green}10`:C.cardLt, border:`1px solid ${t.allHit?C.green:C.border}`, borderRadius:"10px", padding:"12px 14px" }}>
-              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:"8px" }}>
-                <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontStyle:"italic", fontSize:"16px", color:C.black }}>{t.name}</div>
-                <div style={{ display:"flex", gap:"8px", alignItems:"center" }}>
-                  {!t.counts && <div style={{ background:`${C.orange}20`, color:C.orange, borderRadius:"10px", padding:"2px 8px", fontSize:"10px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", letterSpacing:"0.5px" }}>RAMPING · COUNTS FROM {nextMonthLabel.toUpperCase()}</div>}
-                  <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"13px", color:t.allHit?C.green:C.muted }}>
-                    {t.allHit ? "✅ ALL HIT" : `${t.hitsCount}/3`}
-                  </div>
+        {st.missedDays.length>0 && <div style={{ ...statLine, color:"#ef4444", fontWeight:"700" }}>Short: {st.missedDays.map(d=>`${fmtShortDate(d.date)} (${d.scheduled}/${d.needed})`).join(", ")}</div>}
+        {st.upcomingShort.length>0 && <div style={{ ...statLine, color:C.gold, fontWeight:"700" }}>Coming up short: {st.upcomingShort.map(d=>`${fmtShortDate(d.date)} (${d.scheduled}/${d.needed})`).join(", ")}</div>}
+        <div style={statLine}>Based on the Work Schedule tab plus any time off or extra days entered there.</div>
+      </OpsCard>
+
+      {/* 2. Callback rate */}
+      <OpsCard title="📞 Callback Rate" color="#ef4444" pay={r.gateOpen?cb.pay:0} status={gateNote || (cb.tier?cb.tier.label:"2.00%+ — no bonus")} statusColor={gateNote?"#ef4444":cb.tier?C.green:C.muted}>
+        <div style={{ display:"flex", alignItems:"baseline", gap:"10px" }}>
+          <div style={bigNum}>{cb.rate.toFixed(2)}%</div>
+          <div style={{ fontSize:"13px", color:C.muted }}>{cb.count} callback{cb.count!==1?"s":""} ÷ {cb.jobCount} jobs</div>
+        </div>
+        <div style={statLine}>Standard is 2%. Split-job callbacks count ½ per tech.</div>
+        <TierTable tiers={CALLBACK_TIERS} activeLabel={cb.tier?.label}/>
+        {inProgress && cb.jobCount>0 && (
+          <div style={{ ...statLine, color:C.black }}>
+            At {cb.jobCount} jobs so far: {cb.allowance.map(a=>`≤${a.maxCallbacks} for ${money(a.pay)}`).join(" · ")}
+          </div>
+        )}
+      </OpsCard>
+
+      {/* 3. Quota */}
+      <OpsCard title="📋 Team Quota" color={C.green} pay={r.gateOpen?qt.pay:0} status={gateNote || (qt.tier?`${qt.tier.label} tier`:"Under 60% — no bonus")} statusColor={gateNote?"#ef4444":qt.tier?C.green:C.muted}>
+        <div style={{ display:"flex", alignItems:"baseline", gap:"10px" }}>
+          <div style={bigNum}>{qt.pct.toFixed(2)}%</div>
+          <div style={{ fontSize:"13px", color:C.muted }}>{qt.hitting} of {qt.counted} counted techs hit all 3</div>
+        </div>
+        <div style={statLine}>Targets: {money(quota?.upsells??400)} upsells · {quota?.reviews??6} Google 5-star reviews · {quota?.switchovers??1} switchover (Zak: $300 · 4 · 1)</div>
+        {qt.nextTier && qt.counted>0 && <div style={{ ...statLine, color:C.black, fontWeight:"700" }}>{qt.neededForNext} more tech{qt.neededForNext!==1?"s":""} hitting quota → {qt.nextTier.label} ({money(qt.nextTier.pay)})</div>}
+        <TierTable tiers={QUOTA_TIERS} activeLabel={qt.tier?.label}/>
+        <div style={{ display:"flex", flexDirection:"column", gap:"6px", marginTop:"14px" }}>
+          {qt.rows.map(t=>(
+            <div key={t.id} style={{ background:t.allHit?`${C.green}10`:C.cardLt, border:`1px solid ${t.allHit?C.green:C.border}`, borderRadius:"8px", padding:"8px 10px" }}>
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:"6px" }}>
+                <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"15px", color:C.black }}>
+                  {t.name}
+                  {t.prorated && <span style={{ fontSize:"10px", color:C.gold, marginLeft:"6px" }}>LEFT {fmtShortDate(t.left_date).toUpperCase()} · {t.prorated}-WEEK TARGETS</span>}
+                  {!t.prorated && t.left_date && <span style={{ fontSize:"10px", color:C.gold, marginLeft:"6px" }}>LEFT {fmtShortDate(t.left_date).toUpperCase()}</span>}
                 </div>
+                <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"13px", color:t.allHit?C.green:C.muted }}>{t.allHit?"✅ ALL HIT":`${t.hitsCount}/3`}</div>
               </div>
-              <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:"6px" }}>
+              <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:"4px" }}>
                 {[
-                  { label:"Upsells",    val:`$${t.monthUpsellAmt}`,  target:`$${q.upsells}`,  hit:t.upHit,  color:C.green },
-                  { label:"Reviews",    val:t.monthReviewCount,       target:q.reviews,         hit:t.revHit, color:C.gold  },
-                  { label:"Switchovers",   val:t.monthSwitchCount,       target:q.switchovers,     hit:t.swHit,  color:C.blue  },
+                  { label:"Upsells", val:money(t.upsells), target:money(t.targets.upsells), hit:t.upHit },
+                  { label:"Reviews", val:t.reviews, target:t.targets.reviews, hit:t.revHit },
+                  { label:"Switchovers", val:t.switchovers, target:t.targets.switchovers, hit:t.swHit },
                 ].map(col=>(
-                  <div key={col.label} style={{ background:col.hit?`${col.color}15`:C.white, border:`1px solid ${col.hit?col.color:C.border}`, borderRadius:"6px", padding:"6px 8px", textAlign:"center" }}>
-                    <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"15px", color:col.hit?col.color:C.black }}>{col.val}{col.hit?" ✓":""}</div>
+                  <div key={col.label} style={{ background:col.hit?`${C.green}15`:C.white, border:`1px solid ${col.hit?C.green:C.border}`, borderRadius:"6px", padding:"4px 6px", textAlign:"center" }}>
+                    <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"14px", color:col.hit?C.green:C.black }}>{col.val}{col.hit?" ✓":""}</div>
                     <div style={{ fontSize:"9px", color:C.muted, textTransform:"uppercase", letterSpacing:"1px" }}>{col.label} / {col.target}</div>
                   </div>
                 ))}
               </div>
             </div>
           ))}
+          {qt.rows.length===0 && <div style={{ fontSize:"12px", color:C.muted }}>No counted techs this month.</div>}
         </div>
-      </div>
-
-      {/* KPI 1: Ride-Alongs This Week */}
-      <div style={{ background:C.white, border:`1px solid ${C.border}`, borderTop:`3px solid ${rideAlongHit?C.green:C.orange}`, borderRadius:"12px", padding:"18px", boxShadow:"0 2px 8px rgba(43,156,240,0.08)" }}>
-        <Label color={rideAlongHit?C.green:C.orange}>🚗 Ride-Alongs This Week</Label>
-        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-          <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"32px", color:rideAlongHit?C.green:C.black }}>{rideAlongsThisWeek} <span style={{ fontSize:"16px", color:C.muted }}>/ {RIDE_ALONG_WEEKLY_TARGET} target</span></div>
-          <div style={{ fontSize:"24px" }}>{rideAlongHit?"✅":"⚠️"}</div>
-        </div>
-        <div style={{ fontSize:"11px", color:C.muted, marginTop:"4px" }}>Week of {formatWeekLabel(thisWeekKey)}</div>
-      </div>
-
-      {/* KPI 2: Check-In Completion & On-Time Rate */}
-      <div style={{ background:C.white, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.blue}`, borderRadius:"12px", padding:"18px", boxShadow:"0 2px 8px rgba(43,156,240,0.08)" }}>
-        <Label color={C.blue}>📋 Check-In Completion Rate</Label>
-        <div style={{ fontSize:"11px", color:C.muted, marginBottom:"10px" }}>Week 1/2/4/6/12 tech check-ins (the actual milestones tracked — there's no week 8). Tote/truck audits aren't a separate tracked data source yet.</div>
-        {!checkinsLoaded ? (
-          <div style={{ fontSize:"12px", color:C.muted }}>Loading…</div>
-        ) : dueCheckins.length===0 ? (
-          <div style={{ fontSize:"12px", color:C.muted }}>No check-ins due yet.</div>
-        ) : (
-          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"10px" }}>
-            <div style={{ background:C.cardLt, borderRadius:"8px", padding:"10px", textAlign:"center" }}>
-              <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"22px", color:C.black }}>{checkinCompletionRate.toFixed(0)}%</div>
-              <div style={{ fontSize:"9px", color:C.muted, textTransform:"uppercase", letterSpacing:"1px" }}>Completed ({completedCheckins.length}/{dueCheckins.length} due)</div>
-            </div>
-            <div style={{ background:C.cardLt, borderRadius:"8px", padding:"10px", textAlign:"center" }}>
-              <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"22px", color:C.black }}>{checkinOnTimeRate===null?"—":checkinOnTimeRate.toFixed(0)+"%"}</div>
-              <div style={{ fontSize:"9px", color:C.muted, textTransform:"uppercase", letterSpacing:"1px" }}>On-Time ({onTimeCheckins.length}/{completedCheckins.length} completed)</div>
-            </div>
+        {qt.ramping.length>0 && (
+          <div style={{ marginTop:"12px", fontSize:"12px", color:C.muted }}>
+            <strong style={{ color:C.black }}>Not counted this month:</strong> {qt.ramping.map(t=>`${t.name} (${t.reason})`).join(" · ")}
           </div>
         )}
-      </div>
+        {qt.leftEarly.length>0 && (
+          <div style={{ marginTop:"6px", fontSize:"12px", color:C.muted }}>
+            <strong style={{ color:C.black }}>Left with under 4 workdays (not counted):</strong> {qt.leftEarly.map(t=>`${t.name} (${fmtShortDate(t.left_date)})`).join(" · ")}
+          </div>
+        )}
+        <div style={statLine}>Counts once a tech's first paid job is on or before the 2nd of the month. Commercial, sales, owners and Will aren't counted.</div>
+      </OpsCard>
 
-      {/* KPI 3: Audit Calibration Accuracy — manual entry, no automated source exists */}
-      <div style={{ background:C.white, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.purple}`, borderRadius:"12px", padding:"18px", boxShadow:"0 2px 8px rgba(43,156,240,0.08)" }}>
-        <Label color={C.purple}>🎯 Audit Calibration Accuracy</Label>
-        <div style={{ fontSize:"11px", color:C.muted, marginBottom:"10px" }}>Manual entry — no supervisor re-audit/spot-check data source exists yet. Enter the latest calibration % here until that's built.</div>
-        <div style={{ display:"flex", gap:"8px", alignItems:"center" }}>
-          <input type="number" min="0" max="100" value={calibrationInput} onChange={e=>setCalibrationInput(e.target.value)}
-            style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"8px 10px", borderRadius:"8px", fontSize:"14px", width:"100px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}/>
-          <span style={{ fontSize:"12px", color:C.muted }}>%</span>
-          <button onClick={saveCalibration} disabled={calibrationSaving} style={{ background:calibrationSaving?"#333":C.purple, border:"none", color:C.white, padding:"8px 16px", borderRadius:"8px", cursor:calibrationSaving?"not-allowed":"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", fontSize:"12px" }}>
-            {calibrationSaving?"Saving...":"Save"}
-          </button>
+      {/* 4. Retention */}
+      <OpsCard title={`🤝 Retention — ${rt.quarter.label}`} color={C.purple} pay={rt.pay}
+        status={rt.quarterOver?"FOR THE QUARTER":"PROJECTED · PAID AT QUARTER END"} statusColor={rt.quarterOver?C.green:C.muted}>
+        <div style={{ display:"flex", alignItems:"baseline", gap:"10px" }}>
+          <div style={bigNum}>{rt.baseCount>0?`${rt.pct.toFixed(2)}%`:"—"}</div>
+          <div style={{ fontSize:"13px", color:C.muted }}>{rt.baseCount} techs past 90 days on {fmtShortDate(rt.quarter.start)} · {rt.losses} regrettable loss{rt.losses!==1?"es":""}</div>
         </div>
-        {calibration && <div style={{ fontSize:"11px", color:C.muted, marginTop:"8px" }}>Last recorded: {calibration.pct}% on {calibration.updatedAt}</div>}
-      </div>
-
-      {/* KPI 4: Team Churn Rate — flagged as not computable, no fabricated number */}
-      <div style={{ background:"#fff8e6", border:"1px solid #f59e0b44", borderTop:"3px solid #f59e0b", borderRadius:"12px", padding:"18px" }}>
-        <Label color="#f59e0b">📉 Team Churn Rate — Not Available Yet</Label>
-        <div style={{ fontSize:"12px", color:C.black }}>Archiving a tech only flips a status flag today — there's no timestamp recorded for when someone actually left, and hire date isn't reliably filled in for every tech. A trustworthy churn rate needs both before this can show a real number.</div>
-      </div>
-
-      {/* KPIs 5-7: Team Upsell Rate / Review Rate / Switchover Total */}
-      <div style={{ background:C.white, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.green}`, borderRadius:"12px", padding:"18px", boxShadow:"0 2px 8px rgba(43,156,240,0.08)" }}>
-        <Label color={C.green}>📈 Team Rates — {formatMonthLabel(mk)}</Label>
-        <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:"10px" }}>
-          <div style={{ background:C.cardLt, borderRadius:"8px", padding:"10px", textAlign:"center" }}>
-            <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"20px", color:C.green }}>{teamUpsellRate.toFixed(1)}%</div>
-            <div style={{ fontSize:"9px", color:C.muted, textTransform:"uppercase", letterSpacing:"1px" }}>Upsell Rate</div>
+        <div style={statLine}>Owner-approved firings are left out. Quits, walk-offs and unapproved firings count as losses. Pays the tier × 3 for the quarter.</div>
+        <TierTable tiers={RETENTION_TIERS} activeLabel={rt.tier?.label} suffix=" × 3"/>
+        <div style={{ marginTop:"12px", display:"flex", flexDirection:"column", gap:"6px", fontSize:"12px", color:C.black }}>
+          <div><strong>Regrettable (counts against Will):</strong> {rt.regrettable.length ? rt.regrettable.map(t=>`${t.name} — ${OPS_LEAVE_LABEL[t.leave_reason]||"left"} ${t.left_date?fmtShortDate(t.left_date):""}${t.leave_reason==="fired"?(t.fire_approval==="denied"?" (firing denied)":" (firing not approved yet)"):""}`).join(" · ") : "None"}</div>
+          <div><strong>Non-regrettable (approved firings):</strong> {rt.approvedFires.length ? rt.approvedFires.map(t=>`${t.name} — ${fmtShortDate(t.left_date)}`).join(" · ") : "None"}</div>
+          {rt.pendingFires.length>0 && <div style={{ color:C.gold, fontWeight:"700" }}>Waiting for owner approval: {rt.pendingFires.map(t=>t.name).join(", ")} — counted as losses until approved</div>}
+        </div>
+        <div style={{ marginTop:"14px", paddingTop:"12px", borderTop:`1px solid ${C.border}` }}>
+          <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"14px", color:C.black }}>
+            New hires reaching 90 days: {rt.newHires.pct==null?"—":`${rt.newHires.pct.toFixed(0)}%`}{rt.newHires.rating?` · ${rt.newHires.rating}`:""}
+            <span style={{ fontSize:"11px", color:C.muted, fontWeight:"600", marginLeft:"6px" }}>tracked, not paid</span>
           </div>
-          <div style={{ background:C.cardLt, borderRadius:"8px", padding:"10px", textAlign:"center" }}>
-            <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"20px", color:C.gold }}>{teamReviewRate.toFixed(0)}%</div>
-            <div style={{ fontSize:"9px", color:C.muted, textTransform:"uppercase", letterSpacing:"1px" }}>Review Rate ({monthTeamReviews}/{reviewQuotaTarget})</div>
-          </div>
-          <div style={{ background:C.cardLt, borderRadius:"8px", padding:"10px", textAlign:"center" }}>
-            <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"20px", color:C.blue }}>{monthTeamSwitchovers}</div>
-            <div style={{ fontSize:"9px", color:C.muted, textTransform:"uppercase", letterSpacing:"1px" }}>Switchovers</div>
+          <div style={statLine}>90%+ excellent · 80–89.99% great · 70–79.99% average · under 70% underperforming</div>
+          <div style={{ display:"flex", flexWrap:"wrap", gap:"4px", marginTop:"8px" }}>
+            {rt.newHires.cohort.map(c=>(
+              <span key={c.id} style={{ fontSize:"11px", padding:"3px 8px", borderRadius:"10px", background:c.status==="made_it"?`${C.green}20`:c.status==="left"?"#ef444420":C.cardLt, color:C.black }}>
+                {c.name} · {c.status==="made_it"?"made 90 days":c.status==="left"?`left ${fmtShortDate(c.left_date)}`:`day 90 on ${fmtShortDate(c.day90)}`}
+              </span>
+            ))}
+            {rt.newHires.cohort.length===0 && <span style={{ fontSize:"12px", color:C.muted }}>No new hires hit day 90 this quarter.</span>}
           </div>
         </div>
-      </div>
+      </OpsCard>
+    </div>
+  );
+}
 
-      {/* KPI 8: Team Rev/Hr + Callback Rate, with an 8-week trend */}
+// ─── WORK SCHEDULE ───────────────────────────────────────────────────────────
+// Each tech's regular Mon–Sat days and vehicle, plus one-off time off / extra
+// days. Feeds the staffing check in Operations Progress. BB (commercial) and
+// AUX (Zak's backup truck) are on the schedule but don't count toward staffing.
+const SCHEDULE_DAYS = ["Mon","Tue","Wed","Thu","Fri","Sat"];
+function WorkScheduleTab({ techs, showToast=()=>{} }) {
+  const { truckCount, holidays } = useStaffingSettings();
+  const [rows, setRows] = useState([]);
+  const [exceptions, setExceptions] = useState([]);
+  const [loaded, setLoaded] = useState(false);
+  const [exForm, setExForm] = useState({ tech_id:"", date:"", kind:"off", note:"" });
+  const [busy, setBusy] = useState(false);
+  const load = useCallback(async () => {
+    const [sch, exc] = await Promise.all([
+      sb("tech_schedule?select=*").catch(()=>[]),
+      sb("schedule_exceptions?select=*&order=date.asc").catch(()=>[]),
+    ]);
+    setRows(sch||[]); setExceptions(exc||[]); setLoaded(true);
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const active = techs.filter(t => t.is_active !== false && t.title !== "owner").sort((a,b)=>a.name.localeCompare(b.name));
+  const cell = (techId, wd) => rows.find(r => r.tech_id===techId && r.weekday===wd);
+  async function setCell(techId, wd, vehicle) {
+    const v = vehicle.trim();
+    const existing = cell(techId, wd);
+    if ((existing?.vehicle||"") === v) return;
+    setBusy(true);
+    try {
+      if (!v) await sb(`tech_schedule?tech_id=eq.${techId}&weekday=eq.${wd}`, { method:"DELETE", prefer:"return=minimal" });
+      else await sb("tech_schedule?on_conflict=tech_id,weekday", { method:"POST", prefer:"resolution=merge-duplicates,return=minimal", body: JSON.stringify({ tech_id:techId, weekday:wd, vehicle:v }) });
+      await load();
+    } catch(e) { showToast("Error saving schedule: "+e.message, false); }
+    setBusy(false);
+  }
+  async function addException() {
+    if (!exForm.tech_id || !exForm.date) return showToast("Pick a tech and a date", false);
+    setBusy(true);
+    try {
+      await sb("schedule_exceptions?on_conflict=tech_id,date", { method:"POST", prefer:"resolution=merge-duplicates,return=minimal", body: JSON.stringify({ ...exForm, note: exForm.note||null }) });
+      setExForm(f => ({ ...f, date:"", note:"" }));
+      await load(); showToast("✅ Saved");
+    } catch(e) { showToast("Error: "+e.message, false); }
+    setBusy(false);
+  }
+  async function removeException(id) {
+    setBusy(true);
+    try { await sb(`schedule_exceptions?id=eq.${id}`, { method:"DELETE", prefer:"return=minimal" }); await load(); }
+    catch(e) { showToast("Error: "+e.message, false); }
+    setBusy(false);
+  }
+  const counts = SCHEDULE_DAYS.map((_,i) => rows.filter(r => r.weekday===i+1 && !NON_ROUTE_VEHICLES.includes(r.vehicle) && active.some(t=>t.id===r.tech_id && !t.on_leave)).length);
+  const today = mountainDate(new Date().toISOString());
+  const upcoming = exceptions.filter(e => e.date >= today);
+  const techName = id => techs.find(t=>t.id===id)?.name || "Unknown";
+  const inp = { background:C.white, border:`1px solid ${C.border}`, color:C.black, padding:"4px 6px", borderRadius:"4px", fontSize:"12px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", width:"100%", boxSizing:"border-box" };
+  if (!loaded) return <div style={{ fontSize:"13px", color:C.muted, padding:"20px" }}>Loading…</div>;
+  return (
+    <div style={{ display:"flex", flexDirection:"column", gap:"16px" }}>
       <div style={{ background:C.white, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.blue}`, borderRadius:"12px", padding:"18px", boxShadow:"0 2px 8px rgba(43,156,240,0.08)" }}>
-        <Label color={C.blue}>📊 Rev/Hr & Callback Rate — Last 8 Weeks</Label>
-        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"16px", marginTop:"8px", marginBottom:"14px" }}>
-          <div style={{ textAlign:"center" }}>
-            <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"20px", color:C.black }}>${teamRevPerHr.toFixed(2)}/hr</div>
-            <div style={{ fontSize:"9px", color:C.muted, textTransform:"uppercase" }}>This Month</div>
-          </div>
-          <div style={{ textAlign:"center" }}>
-            <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"20px", color:C.black }}>{callbackRate.toFixed(1)}%</div>
-            <div style={{ fontSize:"9px", color:C.muted, textTransform:"uppercase" }}>Callback Rate ({monthCallbacks}/{monthJobs.length} jobs)</div>
-          </div>
+        <Label color={C.blue}>🗓 Weekly Truck Schedule</Label>
+        <div style={{ fontSize:"12px", color:C.muted, marginBottom:"10px" }}>Type the vehicle a tech drives each day (e.g. Mav 3, Van 5). Leave it blank for a day off. BB and AUX don't count toward staffing. Needs {truckCount} on trucks every workday.</div>
+        <div style={{ overflowX:"auto" }}>
+          <table style={{ borderCollapse:"collapse", width:"100%", minWidth:"560px" }}>
+            <thead>
+              <tr>
+                <th style={{ textAlign:"left", fontSize:"11px", color:C.muted, padding:"4px" }}>Tech</th>
+                {SCHEDULE_DAYS.map((d,i)=>(
+                  <th key={d} style={{ fontSize:"11px", color:counts[i]<truckCount?"#ef4444":C.green, padding:"4px" }}>{d}<div style={{ fontSize:"10px" }}>{counts[i]}/{truckCount}</div></th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {active.map(t=>(
+                <tr key={t.id} style={{ borderTop:`1px solid ${C.border}` }}>
+                  <td style={{ fontSize:"13px", fontWeight:"700", color:C.black, padding:"4px", whiteSpace:"nowrap" }}>{t.name}{t.on_leave&&<span style={{ fontSize:"10px", color:C.gold, marginLeft:"4px" }}>ON LEAVE</span>}</td>
+                  {SCHEDULE_DAYS.map((d,i)=>(
+                    <td key={d} style={{ padding:"3px" }}>
+                      <input key={`${t.id}-${i}-${cell(t.id,i+1)?.vehicle||""}`} defaultValue={cell(t.id,i+1)?.vehicle||""} disabled={busy}
+                        onBlur={e=>setCell(t.id,i+1,e.target.value)} onKeyDown={e=>{ if(e.key==="Enter") e.target.blur(); }}
+                        style={{ ...inp, background:cell(t.id,i+1)?`${C.blue}12`:C.white }}/>
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
-        <div style={{ fontSize:"10px", color:C.muted, marginBottom:"8px" }}>No job-level link exists on callbacks (only tech_id/reason/date), so this is callbacks-in-period ÷ jobs-in-period, not true per-job attribution.</div>
-        <div style={{ display:"flex", flexDirection:"column", gap:"6px" }}>
-          {trendWeeks.map(w=>(
-            <div key={w.wk} style={{ display:"grid", gridTemplateColumns:"70px 1fr 1fr", gap:"8px", alignItems:"center" }}>
-              <div style={{ fontSize:"10px", color:C.muted }}>{formatWeekLabel(w.wk)}</div>
-              <div style={{ background:C.border, borderRadius:"4px", height:"14px", position:"relative", overflow:"hidden" }}>
-                <div style={{ width:`${(w.revPerHr/maxRevPerHr)*100}%`, height:"100%", background:C.blue, borderRadius:"4px" }}/>
-                <div style={{ position:"absolute", top:0, left:"4px", fontSize:"9px", color:C.black, lineHeight:"14px" }}>${w.revPerHr.toFixed(0)}/hr</div>
-              </div>
-              <div style={{ background:C.border, borderRadius:"4px", height:"14px", position:"relative", overflow:"hidden" }}>
-                <div style={{ width:`${(w.callbackRate/maxCallbackRate)*100}%`, height:"100%", background:"#ef4444", borderRadius:"4px" }}/>
-                <div style={{ position:"absolute", top:0, left:"4px", fontSize:"9px", color:C.black, lineHeight:"14px" }}>{w.callbackRate.toFixed(0)}%</div>
-              </div>
+      </div>
+      <div style={{ background:C.white, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.gold}`, borderRadius:"12px", padding:"18px", boxShadow:"0 2px 8px rgba(43,156,240,0.08)" }}>
+        <Label color={C.gold}>🏖 Time Off & Extra Days</Label>
+        <div style={{ fontSize:"12px", color:C.muted, marginBottom:"10px" }}>One-off changes to the weekly schedule. "Off" takes a tech off a day they'd normally work; "Extra" adds them on a day they normally don't.</div>
+        <div style={{ display:"flex", gap:"8px", flexWrap:"wrap", alignItems:"center" }}>
+          <select value={exForm.tech_id} onChange={e=>setExForm(f=>({...f,tech_id:e.target.value}))} style={{ ...inp, width:"auto" }}>
+            <option value="">Pick a tech…</option>
+            {active.map(t=><option key={t.id} value={t.id}>{t.name}</option>)}
+          </select>
+          <input type="date" value={exForm.date} onChange={e=>setExForm(f=>({...f,date:e.target.value}))} style={{ ...inp, width:"auto" }}/>
+          <select value={exForm.kind} onChange={e=>setExForm(f=>({...f,kind:e.target.value}))} style={{ ...inp, width:"auto" }}>
+            <option value="off">Off</option>
+            <option value="extra">Extra day</option>
+          </select>
+          <input value={exForm.note} onChange={e=>setExForm(f=>({...f,note:e.target.value}))} placeholder="Note (optional)" style={{ ...inp, width:"180px" }}/>
+          <button onClick={addException} disabled={busy} style={{ background:C.gold, border:"none", color:C.white, padding:"6px 14px", borderRadius:"8px", cursor:busy?"not-allowed":"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"13px" }}>Add</button>
+        </div>
+        <div style={{ display:"flex", flexDirection:"column", gap:"4px", marginTop:"12px" }}>
+          {upcoming.map(e=>(
+            <div key={e.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", fontSize:"13px", background:C.cardLt, borderRadius:"6px", padding:"6px 10px" }}>
+              <span><strong>{techName(e.tech_id)}</strong> · {new Date(e.date+"T12:00:00").toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric"})} · {e.kind==="off"?"Off":"Extra day"}{holidays.includes(e.date)?" (holiday)":""}{e.note?` — ${e.note}`:""}</span>
+              <button onClick={()=>removeException(e.id)} disabled={busy} style={{ background:"none", border:"none", color:"#ef4444", cursor:"pointer", fontSize:"14px" }}>×</button>
             </div>
           ))}
-        </div>
-        <div style={{ display:"flex", gap:"16px", marginTop:"8px" }}>
-          <div style={{ fontSize:"9px", color:C.muted }}>🔵 Rev/hr</div>
-          <div style={{ fontSize:"9px", color:C.muted }}>🔴 Callback rate</div>
+          {upcoming.length===0 && <div style={{ fontSize:"12px", color:C.muted }}>Nothing upcoming.</div>}
         </div>
       </div>
     </div>
@@ -4277,6 +4279,7 @@ const TITLE_LABELS = {
   lead_detail_pro:      "Lead Detail Pro",
   equipment_coordinator:"Equipment Coordinator",
   field_supervisor:     "Field Supervisor",
+  commercial_detail:    "Commercial Detail Pro",
   commercial_sales:     "Commercial Sales",
   sales_booking:        "Sales & Booking",
 };
@@ -5184,7 +5187,7 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
   const [swCStart, setSwCStart] = useState("");
   const [swCEnd, setSwCEnd] = useState("");
   const [reviewForm, setReviewForm] = useState({});
-  const [cbForm, setCbForm] = useState({techId:"",reason:""});
+  const [cbForm, setCbForm] = useState({techId:"",splitTechId:"",reason:""});
   const [archivingId, setArchivingId] = useState(null);
   const [archiveForm, setArchiveForm] = useState({left_date:"",leave_reason:"",fire_category:"",fire_notes:""});
   const [toast, setToast] = useState(null);
@@ -5231,6 +5234,7 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
     setSaving(false);
   }
   async function updateStartDate(techId,date) {
+    if (isManager && techs.find(t=>t.id===techId)?.start_date) return showToast("Only an owner can change a start date",false);
     try { await sb(`techs?id=eq.${techId}`,{method:"PATCH",body:JSON.stringify({start_date:date||null}),prefer:"return=minimal"}); if(date)await scheduleCheckins(techId,date).catch(()=>{}); await refreshAll(); showToast("✅ Start date saved!"); }
     catch(e){ showToast("Error: "+e.message,false); }
   }
@@ -5318,10 +5322,17 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
     const tech = techs.find(t=>t.id===cbForm.techId);
     setSaving(true);
     try {
-      await sb("callbacks",{method:"POST",body:JSON.stringify({tech_id:cbForm.techId,reason:cbForm.reason||""})});
+      // A split job's callback is logged as ½ for each tech so it still adds
+      // up to one callback in Will's callback rate.
+      const split = cbForm.splitTechId && cbForm.splitTechId!==cbForm.techId;
+      const rows = split
+        ? [cbForm.techId, cbForm.splitTechId].map(id=>({tech_id:id, reason:cbForm.reason||"", weight:0.5}))
+        : [{tech_id:cbForm.techId, reason:cbForm.reason||"", weight:1}];
+      await sb("callbacks",{method:"POST",body:JSON.stringify(rows)});
       await refreshAll();
-      showToast(`📞 Callback logged for ${tech?.name} — ${Math.abs(CALLBACK_PTS)} pts deducted`);
-      setCbForm({techId:"",reason:""});
+      const partner = split ? techs.find(t=>t.id===cbForm.splitTechId) : null;
+      showToast(`📞 Callback logged for ${tech?.name}${partner?` and ${partner.name} (split, ½ each)`:""} — ${Math.abs(CALLBACK_PTS)} pts deducted`);
+      setCbForm({techId:"",splitTechId:"",reason:""});
     } catch(e){ showToast("Error: "+e.message,false); }
     setSaving(false);
   }
@@ -5378,6 +5389,7 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
       ["leaderboard","🏆","Leaderboard"],
       ["payroll","💵","Payroll"],
       ["operations","📈","Operations Progress"],
+      ["schedule","🗓","Work Schedule"],
     ]},
     { label:"Team Activity", items:[
       ["upsells","💰","Upsells"],
@@ -5624,6 +5636,10 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
                 <option value="">— Select Tech —</option>
                 {techs.map(t=><option key={t.id} value={t.id}>{t.name}</option>)}
               </select>
+              <select value={cbForm.splitTechId||""} onChange={e=>setCbForm(f=>({...f,splitTechId:e.target.value}))} style={sel(cbForm?.splitTechId)}>
+                <option value="">Split job? Pick the other tech (optional)</option>
+                {techs.filter(t=>t.id!==cbForm.techId).map(t=><option key={t.id} value={t.id}>{t.name}</option>)}
+              </select>
               <input placeholder="Reason / job description (optional)" value={cbForm.reason||""} onChange={e=>setCbForm(f=>({...f,reason:e.target.value}))} style={inp}/>
               <button onClick={logCallback} disabled={saving} style={{ ...btn("#ef4444"), color:C.white }}>{saving?"Saving...":"Log Callback — Deduct Points"}</button>
             </div>
@@ -5738,18 +5754,18 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
                 </div>
                 <div style={{ display:"flex", alignItems:"center", gap:"10px", marginBottom:"10px" }}>
                   <span style={{ fontSize:"12px", color:C.muted }}>Start date:</span>
-                  <input type="date" defaultValue={t.start_date||""} onBlur={e=>updateStartDate(t.id,e.target.value)} style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"4px 8px", borderRadius:"4px", fontSize:"12px", fontFamily:"'Barlow Condensed',sans-serif" }}/>
+                  <input type="date" defaultValue={t.start_date||""} disabled={isManager&&!!t.start_date} onBlur={e=>updateStartDate(t.id,e.target.value)} style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"4px 8px", borderRadius:"4px", fontSize:"12px", fontFamily:"'Barlow Condensed',sans-serif" }}/>
                   {t.start_date&&<span style={{ fontSize:"12px", color:C.blue, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>{formatTenure(t.start_date)}</span>}
                 </div>
                 <div style={{ display:"flex", alignItems:"center", gap:"10px", marginBottom:"10px" }}>
                   <span style={{ fontSize:"12px", color:C.muted }}>Title:</span>
-                  <select defaultValue={t.title||"detail_apprentice"}
+                  <select defaultValue={t.title||"detail_apprentice"} disabled={isManager&&OPS_EXCLUDED_TITLES.includes(t.title)}
                     onChange={async e=>{
                       await sb(`techs?id=eq.${t.id}`,{method:"PATCH",body:JSON.stringify({title:e.target.value}),prefer:"return=minimal"});
                       await refreshAll(); showToast(`✅ Title saved for ${t.name}`);
                     }}
                     style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.purple, padding:"4px 8px", borderRadius:"4px", fontSize:"13px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", cursor:"pointer" }}>
-                    {Object.entries(TITLE_LABELS).map(([val,label])=><option key={val} value={val}>{label}</option>)}
+                    {Object.entries(TITLE_LABELS).filter(([val])=>!isManager||val===t.title||!OPS_EXCLUDED_TITLES.includes(val)).map(([val,label])=><option key={val} value={val}>{label}</option>)}
                   </select>
                 </div>
                 <div style={{ display:"flex", alignItems:"center", gap:"10px", marginBottom:"10px" }}>
@@ -5772,6 +5788,14 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
                     </span>
                   ):null; })}
                 </div>
+                <label style={{ display:"flex", alignItems:"center", gap:"8px", marginTop:"10px", fontSize:"12px", color:C.black, cursor:isManager?"not-allowed":"pointer" }}>
+                  <input type="checkbox" checked={!!t.on_leave} disabled={isManager||saving}
+                    onChange={async e=>{
+                      await sb(`techs?id=eq.${t.id}`,{method:"PATCH",body:JSON.stringify({on_leave:e.target.checked}),prefer:"return=minimal"});
+                      await refreshAll(); showToast(e.target.checked?`${t.name} marked on leave`:`${t.name} back from leave`);
+                    }}/>
+                  On leave (injury, etc.) — not counted for staffing or quota while checked{isManager?" · owner only":""}
+                </label>
                 <div style={{ marginTop:"12px", paddingTop:"12px", borderTop:`1px solid ${C.border}` }}>
                   {archivingId!==t.id ? (
                     <button onClick={()=>startArchive(t)} disabled={saving} style={{ background:"none", border:"1px solid #f59e0b", color:"#f59e0b", padding:"7px 16px", borderRadius:"8px", cursor:saving?"not-allowed":"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"12px", letterSpacing:"1px", textTransform:"uppercase" }}>
@@ -5931,7 +5955,10 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
           </div>
         )}
         {tab==="operations"&&(
-          <OperationsProgressTab techs={techs} upsells={upsells} switchovers={switchovers} reviews={reviews} quota={quota} callbacks={callbacks||[]} jobs={jobs||[]} timeEntries={timeEntries} rideAlongs={rideAlongs||[]}/>
+          <OperationsProgressTab techs={techs} switchovers={switchovers} reviews={reviews} quota={quota} callbacks={callbacks||[]} jobs={jobs||[]} isManager={isManager}/>
+        )}
+        {tab==="schedule"&&(
+          <WorkScheduleTab techs={techs} showToast={showToast}/>
         )}
         {tab==="quota"&&(
           <div style={{ display:"flex", flexDirection:"column", gap:"16px" }}>
