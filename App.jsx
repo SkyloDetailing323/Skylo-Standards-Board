@@ -1930,11 +1930,12 @@ function useStaffingSettings() {
   }, []);
   return { truckCount, setTruckCount, holidays, setHolidays, loaded };
 }
-function StaffingSettings({ showToast=()=>{} }) {
+function StaffingSettings({ showToast=()=>{}, readOnly=false }) {
   const { truckCount, setTruckCount, holidays, setHolidays, loaded } = useStaffingSettings();
   const [newHoliday, setNewHoliday] = useState("");
   const [saving, setSaving] = useState(false);
   async function save(nextTrucks, nextHolidays) {
+    if (readOnly) return;
     setSaving(true);
     try {
       await saveSetting("truck_count", nextTrucks);
@@ -1952,9 +1953,9 @@ function StaffingSettings({ showToast=()=>{} }) {
       {!loaded ? <div style={{ fontSize:"12px", color:C.muted }}>Loading…</div> : (<>
         <div style={{ display:"flex", alignItems:"center", gap:"10px", marginBottom:"8px" }}>
           <span style={{ fontSize:"13px", color:C.black }}>Working trucks:</span>
-          <button disabled={saving||truckCount<=1} onClick={()=>save(truckCount-1, holidays)} style={{ ...btn, background:C.cardLt, color:C.black }}>−</button>
+          {!readOnly&&<button disabled={saving||truckCount<=1} onClick={()=>save(truckCount-1, holidays)} style={{ ...btn, background:C.cardLt, color:C.black }}>−</button>}
           <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"22px", color:C.black, minWidth:"28px", textAlign:"center" }}>{truckCount}</span>
-          <button disabled={saving} onClick={()=>save(truckCount+1, holidays)} style={{ ...btn, background:C.cardLt, color:C.black }}>+</button>
+          {!readOnly&&<button disabled={saving} onClick={()=>save(truckCount+1, holidays)} style={{ ...btn, background:C.cardLt, color:C.black }}>+</button>}
         </div>
         <div style={{ fontSize:"12px", color:C.muted, marginBottom:"16px" }}>
           Needs <strong style={{ color:C.black }}>{truckCount} techs scheduled</strong> every Mon–Sat workday · Fully staffed roster: <strong style={{ color:C.black }}>{Math.ceil(truckCount/2*3)} techs</strong> (trucks ÷ 2 × 3)
@@ -1964,22 +1965,23 @@ function StaffingSettings({ showToast=()=>{} }) {
           {sorted.map(d=>(
             <span key={d} style={{ background:C.cardLt, border:`1px solid ${C.border}`, borderRadius:"6px", padding:"3px 8px", fontSize:"12px", display:"inline-flex", alignItems:"center", gap:"6px" }}>
               {new Date(d+"T12:00:00").toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric",year:"numeric"})}
-              <button disabled={saving} onClick={()=>save(truckCount, holidays.filter(h=>h!==d))} style={{ background:"none", border:"none", color:"#ef4444", cursor:"pointer", fontSize:"13px", padding:0 }}>×</button>
+              {!readOnly&&<button disabled={saving} onClick={()=>save(truckCount, holidays.filter(h=>h!==d))} style={{ background:"none", border:"none", color:"#ef4444", cursor:"pointer", fontSize:"13px", padding:0 }}>×</button>}
             </span>
           ))}
           {sorted.length===0&&<span style={{ fontSize:"12px", color:C.muted }}>None</span>}
         </div>
+        {readOnly ? <div style={{ fontSize:"12px", color:C.muted, fontStyle:"italic" }}>Only an owner can change trucks or holidays.</div> :
         <div style={{ display:"flex", gap:"8px", alignItems:"center" }}>
           <input type="date" value={newHoliday} onChange={e=>setNewHoliday(e.target.value)} style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"4px 8px", borderRadius:"4px", fontSize:"12px" }}/>
           <button disabled={saving||!newHoliday||holidays.includes(newHoliday)} onClick={()=>{ save(truckCount, [...holidays,newHoliday]); setNewHoliday(""); }} style={{ ...btn, background:C.blue, color:C.white }}>Add holiday</button>
-        </div>
+        </div>}
       </>)}
     </div>
   );
 }
 
 // ─── KYLE BONUS + QUOTA SETTINGS ─────────────────────────────────────────────
-function QuotaSettings({ quota, onSave, saving }) {
+function QuotaSettings({ quota, onSave, saving, readOnly=false }) {
   const [form, setForm] = useState({ ...quota });
   const inp = { background:C.white, border:`1px solid ${C.border}`, color:C.black, padding:"10px 14px", borderRadius:"8px", fontSize:"16px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", width:"100%", boxSizing:"border-box" };
   return (
@@ -1998,17 +2000,21 @@ function QuotaSettings({ quota, onSave, saving }) {
               <div style={{ fontSize:"11px", color:C.muted }}>{f.desc}</div>
             </div>
             <div style={{ display:"flex", alignItems:"center", gap:"10px" }}>
-              <input type="number" value={form[f.key]} min={0}
+              <input type="number" value={form[f.key]} min={0} disabled={readOnly}
                 onChange={e=>setForm(v=>({...v,[f.key]:Number(e.target.value)}))}
                 style={inp}/>
               <span style={{ fontSize:"12px", color:C.muted, whiteSpace:"nowrap", fontFamily:"'Barlow Condensed',sans-serif" }}>{f.suffix}</span>
             </div>
           </div>
         ))}
+        {readOnly ? (
+          <div style={{ fontSize:"12px", color:C.muted, fontStyle:"italic" }}>Only an owner can change quota targets.</div>
+        ) : (
         <button disabled={saving} onClick={()=>onSave(form)}
           style={{ background:saving?C.border:C.blue, border:"none", color:C.white, padding:"13px", borderRadius:"24px", cursor:saving?"not-allowed":"pointer", fontSize:"14px", fontWeight:"900", fontStyle:"italic", letterSpacing:"2px", fontFamily:"'Barlow Condensed',sans-serif", textTransform:"uppercase" }}>
           {saving?"Saving...":"Save Quota Targets"}
         </button>
+        )}
       </div>
       <div style={{ background:`${C.blue}10`, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"16px 18px" }}>
         <Label color={C.blue}>💡 Operations Bonus Rule</Label>
@@ -5154,7 +5160,10 @@ function TechMatchAdmin({ unmatchedTechs, refreshAll, showToast }) {
 }
 
 // ─── ADMIN PANEL ──────────────────────────────────────────────────────────────
-function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlongs, schedules, quota, setQuota, jobs, timeEntries=[], tipEntries=[], pendingSplits=[], unmatchedTechs=[], onLogout, refreshAll }) {
+// isManager: logged in as the Field Supervisor. Same panel as the owners, but
+// read-only on anything that decides his own bonus (quota targets, trucks and
+// holidays, firing approvals, calibration) so he can't move his own numbers.
+function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlongs, schedules, quota, setQuota, jobs, timeEntries=[], tipEntries=[], pendingSplits=[], unmatchedTechs=[], onLogout, refreshAll, isManager=false }) {
   // Live-standings views (Leaderboard, Journey Map) should only show active
   // techs, matching what the tech-facing app already does — archived techs
   // stay fully visible in Reports/Payroll/Upsell Audit where historical
@@ -5183,6 +5192,7 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
 
   const showToast=(msg,ok=true)=>{ setToast({msg,ok}); setTimeout(()=>setToast(null),3000); };
   async function saveQuota(newQuota) {
+    if (isManager) return showToast("Only an owner can change quota targets",false);
     setSaving(true);
     try {
       const existing = await sb("settings?key=eq.quota&select=id").catch(()=>[]);
@@ -5255,6 +5265,7 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
     setSaving(false);
   }
   async function reviewFiring(tech, decision) {
+    if (isManager) return showToast("Only an owner can approve or deny a firing",false);
     setSaving(true);
     try {
       await sb(`techs?id=eq.${tech.id}`,{method:"PATCH",body:JSON.stringify({fire_approval:decision, fire_reviewed_at:new Date().toISOString()}),prefer:"return=minimal"});
@@ -5825,7 +5836,7 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
                             <div style={{ fontSize:"10px", fontWeight:"700", marginTop:"2px", color:t.fire_approval==="approved"?C.green:t.fire_approval==="denied"?"#ef4444":"#f59e0b" }}>
                               {t.fire_approval==="approved"?"✅ FIRING APPROVED — doesn't count against the ops bonus":t.fire_approval==="denied"?"❌ FIRING DENIED — counts as a loss":"⏳ WAITING FOR ADMIN APPROVAL"}
                             </div>
-                            {t.fire_approval==="pending"&&(
+                            {t.fire_approval==="pending"&&!isManager&&(
                               <div style={{ display:"flex", gap:"6px", marginTop:"6px" }}>
                                 <button onClick={()=>reviewFiring(t,"approved")} disabled={saving} style={{ background:C.green, border:"none", color:C.white, padding:"4px 10px", borderRadius:"6px", cursor:"pointer", fontSize:"11px", fontWeight:"800" }}>APPROVE</button>
                                 <button onClick={()=>reviewFiring(t,"denied")} disabled={saving} style={{ background:"#ef4444", border:"none", color:C.white, padding:"4px 10px", borderRadius:"6px", cursor:"pointer", fontSize:"11px", fontWeight:"800" }}>DENY</button>
@@ -5924,8 +5935,8 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
         )}
         {tab==="quota"&&(
           <div style={{ display:"flex", flexDirection:"column", gap:"16px" }}>
-            <QuotaSettings quota={quota} onSave={saveQuota} saving={saving}/>
-            <StaffingSettings showToast={showToast}/>
+            <QuotaSettings quota={quota} onSave={saveQuota} saving={saving} readOnly={isManager}/>
+            <StaffingSettings showToast={showToast} readOnly={isManager}/>
           </div>
         )}
         {tab==="incentive"&&(
@@ -6033,7 +6044,10 @@ export default function App() {
 
   function handlePin(pin) {
     if (pin===ADMIN_PIN) { setUser({type:"admin"}); return true; }
-    const tech=techs?.find(t=>t.pin===pin);
+    const tech=techs?.find(t=>t.pin===pin && t.is_active!==false);
+    // The Field Supervisor (Will) gets the admin panel, minus anything that
+    // feeds his own ops bonus -- see `isManager` in AdminPanel.
+    if (tech && tech.title==="field_supervisor") { setUser({type:"admin",role:"manager",techId:tech.id}); return true; }
     if (tech) { setUser({type:"tech",techId:tech.id}); return true; }
     return false;
   }
@@ -6135,7 +6149,8 @@ alter table jobs add column if not exists tips numeric default 0;`}
     <AdminPanel techs={techs} setTechs={setTechs} upsells={upsells} setUpsells={setUpsells}
       switchovers={switchovers} setSwitchovers={setSwitchovers} reviews={reviews} setReviews={setReviews}
       callbacks={callbacks} rideAlongs={rideAlongs} schedules={schedules} quota={quota} setQuota={setQuota}
-      jobs={jobs} timeEntries={timeEntries} tipEntries={tipEntries} pendingSplits={pendingSplits} unmatchedTechs={unmatchedTechs} onLogout={()=>setUser(null)} refreshAll={loadAll}/>
+      jobs={jobs} timeEntries={timeEntries} tipEntries={tipEntries} pendingSplits={pendingSplits} unmatchedTechs={unmatchedTechs} onLogout={()=>setUser(null)} refreshAll={loadAll}
+      isManager={user.role==="manager"}/>
   );
   if (user.type==="tech"&&currentTech) return (
     <TechDashboard tech={currentTech} techs={activeTechs} upsells={upsells} switchovers={switchovers}
