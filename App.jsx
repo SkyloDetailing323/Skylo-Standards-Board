@@ -71,6 +71,20 @@ const DEFAULT_QUOTA = {
   reviews: 6,        // count per month — mid between 5 floor and 7 avg
   switchovers: 2,    // count per month — floor for now, team is still developing
 };
+// Why a tech left -- recorded when they're archived, drives the retention KPIs.
+const LEAVE_REASONS = [
+  { value:"fired",       label:"Fired",                                   short:"Fired" },
+  { value:"quit_notice", label:"Quit with 2 weeks' notice",               short:"Quit w/ notice" },
+  { value:"walked_off",  label:"Left with no notice / walked off",        short:"Walked off" },
+];
+const FIRE_CATEGORIES = [
+  { value:"low_production", label:"Low production" },
+  { value:"policy_breach",  label:"Broke the policy manual" },
+  { value:"culture",        label:"Hurting the company culture" },
+];
+// Titles that never count toward Will's ops bonus -- owners, Will himself, and
+// staff who don't detail cars day to day.
+const OPS_EXCLUDED_TITLES = ["owner","field_supervisor","commercial_sales","sales_booking"];
 // Operations bonus: triggered when X% of active techs hit all 3 quotas in the month
 const OPS_BONUS_THRESHOLD = 0.75; // 75% of active techs must hit quota
 const OPS_BONUS_PCT = 0.05;       // 5% of total team upsell revenue that month
@@ -1888,6 +1902,82 @@ function JourneyCard({ tech, rank, total, onClick, expanded, upsells, quota, job
 }
 
 
+// ─── STAFFING SETTINGS (trucks + holidays) ───────────────────────────────────
+// Will's staffing KPI: every Mon-Sat workday that isn't a company holiday needs
+// one scheduled tech per working truck; a full roster is trucks / 2 * 3.
+const DEFAULT_TRUCK_COUNT = 12;
+const DEFAULT_HOLIDAYS = ["2026-11-26","2026-11-27","2026-11-28","2026-12-24","2026-12-25","2026-12-26","2027-01-01"];
+async function saveSetting(key, value) {
+  const existing = await sb(`settings?key=eq.${key}&select=id`).catch(()=>[]);
+  if (existing && existing.length > 0) await sb(`settings?id=eq.${existing[0].id}`,{method:"PATCH",body:JSON.stringify({value:JSON.stringify(value)}),prefer:"return=minimal"});
+  else await sb("settings",{method:"POST",body:JSON.stringify({key,value:JSON.stringify(value)})});
+}
+function useStaffingSettings() {
+  const [truckCount, setTruckCount] = useState(DEFAULT_TRUCK_COUNT);
+  const [holidays, setHolidays] = useState(DEFAULT_HOLIDAYS);
+  const [loaded, setLoaded] = useState(false);
+  useEffect(() => {
+    sb("settings?key=in.(truck_count,holidays)&select=key,value").then(rows => {
+      for (const r of rows||[]) {
+        try {
+          const v = JSON.parse(r.value);
+          if (r.key==="truck_count" && Number.isFinite(v)) setTruckCount(v);
+          if (r.key==="holidays" && Array.isArray(v)) setHolidays(v);
+        } catch {}
+      }
+      setLoaded(true);
+    }).catch(()=>setLoaded(true));
+  }, []);
+  return { truckCount, setTruckCount, holidays, setHolidays, loaded };
+}
+function StaffingSettings({ showToast=()=>{} }) {
+  const { truckCount, setTruckCount, holidays, setHolidays, loaded } = useStaffingSettings();
+  const [newHoliday, setNewHoliday] = useState("");
+  const [saving, setSaving] = useState(false);
+  async function save(nextTrucks, nextHolidays) {
+    setSaving(true);
+    try {
+      await saveSetting("truck_count", nextTrucks);
+      await saveSetting("holidays", nextHolidays);
+      setTruckCount(nextTrucks); setHolidays(nextHolidays);
+      showToast("✅ Staffing settings saved");
+    } catch(e) { showToast("Error saving: "+e.message,false); }
+    setSaving(false);
+  }
+  const sorted = [...holidays].sort();
+  const btn = { border:"none", borderRadius:"8px", padding:"6px 14px", cursor:saving?"not-allowed":"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"13px" };
+  return (
+    <div style={{ background:C.white, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.blue}`, borderRadius:"12px", padding:"20px", boxShadow:"0 2px 8px rgba(43,156,240,0.08)" }}>
+      <Label color={C.blue}>🚚 Trucks & Staffing</Label>
+      {!loaded ? <div style={{ fontSize:"12px", color:C.muted }}>Loading…</div> : (<>
+        <div style={{ display:"flex", alignItems:"center", gap:"10px", marginBottom:"8px" }}>
+          <span style={{ fontSize:"13px", color:C.black }}>Working trucks:</span>
+          <button disabled={saving||truckCount<=1} onClick={()=>save(truckCount-1, holidays)} style={{ ...btn, background:C.cardLt, color:C.black }}>−</button>
+          <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"22px", color:C.black, minWidth:"28px", textAlign:"center" }}>{truckCount}</span>
+          <button disabled={saving} onClick={()=>save(truckCount+1, holidays)} style={{ ...btn, background:C.cardLt, color:C.black }}>+</button>
+        </div>
+        <div style={{ fontSize:"12px", color:C.muted, marginBottom:"16px" }}>
+          Needs <strong style={{ color:C.black }}>{truckCount} techs scheduled</strong> every Mon–Sat workday · Fully staffed roster: <strong style={{ color:C.black }}>{Math.ceil(truckCount/2*3)} techs</strong> (trucks ÷ 2 × 3)
+        </div>
+        <div style={{ fontSize:"13px", color:C.black, marginBottom:"6px" }}>Company holidays (not counted as workdays):</div>
+        <div style={{ display:"flex", flexWrap:"wrap", gap:"6px", marginBottom:"10px" }}>
+          {sorted.map(d=>(
+            <span key={d} style={{ background:C.cardLt, border:`1px solid ${C.border}`, borderRadius:"6px", padding:"3px 8px", fontSize:"12px", display:"inline-flex", alignItems:"center", gap:"6px" }}>
+              {new Date(d+"T12:00:00").toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric",year:"numeric"})}
+              <button disabled={saving} onClick={()=>save(truckCount, holidays.filter(h=>h!==d))} style={{ background:"none", border:"none", color:"#ef4444", cursor:"pointer", fontSize:"13px", padding:0 }}>×</button>
+            </span>
+          ))}
+          {sorted.length===0&&<span style={{ fontSize:"12px", color:C.muted }}>None</span>}
+        </div>
+        <div style={{ display:"flex", gap:"8px", alignItems:"center" }}>
+          <input type="date" value={newHoliday} onChange={e=>setNewHoliday(e.target.value)} style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"4px 8px", borderRadius:"4px", fontSize:"12px" }}/>
+          <button disabled={saving||!newHoliday||holidays.includes(newHoliday)} onClick={()=>{ save(truckCount, [...holidays,newHoliday]); setNewHoliday(""); }} style={{ ...btn, background:C.blue, color:C.white }}>Add holiday</button>
+        </div>
+      </>)}
+    </div>
+  );
+}
+
 // ─── KYLE BONUS + QUOTA SETTINGS ─────────────────────────────────────────────
 function QuotaSettings({ quota, onSave, saving }) {
   const [form, setForm] = useState({ ...quota });
@@ -1939,10 +2029,11 @@ function OperationsProgressTab({ techs, upsells, switchovers, reviews, quota, ca
   // Owner/admin accounts (title:"owner", e.g. Truxton/Casey) are tracked for
   // revenue completeness elsewhere but were never meant to count toward the
   // tech bonus-threshold quota -- they'd quietly inflate the denominator.
-  // Will (field_supervisor) is the one being measured, so he's left out too.
+  // Will (field_supervisor) is the one being measured, so he's left out too,
+  // along with sales staff who don't detail (OPS_EXCLUDED_TITLES).
   const now = new Date(); const y = now.getFullYear(); const m = String(now.getMonth()+1).padStart(2,"0");
   const { start: mStart, end: mEnd } = monthBounds(y, m);
-  const rosterTechs = techs.filter(t => t.is_active !== false && t.title !== "owner" && t.title !== "field_supervisor");
+  const rosterTechs = techs.filter(t => t.is_active !== false && !OPS_EXCLUDED_TITLES.includes(t.title));
   // New techs only count against Will's bonus once they've had a full month:
   // a tech counts this month if their first paid job was on or before the 2nd
   // (the 1st can land on a Sunday when nobody works). Anyone who hasn't had a
@@ -4180,6 +4271,8 @@ const TITLE_LABELS = {
   lead_detail_pro:      "Lead Detail Pro",
   equipment_coordinator:"Equipment Coordinator",
   field_supervisor:     "Field Supervisor",
+  commercial_sales:     "Commercial Sales",
+  sales_booking:        "Sales & Booking",
 };
 const TRAINER_TITLES = ["lead_detail_pro","equipment_coordinator","field_supervisor"];
 
@@ -5083,6 +5176,8 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
   const [swCEnd, setSwCEnd] = useState("");
   const [reviewForm, setReviewForm] = useState({});
   const [cbForm, setCbForm] = useState({techId:"",reason:""});
+  const [archivingId, setArchivingId] = useState(null);
+  const [archiveForm, setArchiveForm] = useState({left_date:"",leave_reason:"",fire_category:"",fire_notes:""});
   const [toast, setToast] = useState(null);
   const [saving, setSaving] = useState(false);
 
@@ -5129,21 +5224,49 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
     try { await sb(`techs?id=eq.${techId}`,{method:"PATCH",body:JSON.stringify({start_date:date||null}),prefer:"return=minimal"}); if(date)await scheduleCheckins(techId,date).catch(()=>{}); await refreshAll(); showToast("✅ Start date saved!"); }
     catch(e){ showToast("Error: "+e.message,false); }
   }
+  function startArchive(tech) {
+    setArchivingId(tech.id);
+    setArchiveForm({ left_date:new Date().toISOString().split("T")[0], leave_reason:"", fire_category:"", fire_notes:"" });
+  }
+  // Archiving records when and why a tech left -- the retention KPIs in
+  // Operations Progress are built from these. A firing only stops counting
+  // against the ops bonus once an admin approves it (fire_approval), so a quit
+  // can't be relabeled as a firing to protect the bonus.
   async function archiveTech(tech) {
-    const confirmed = window.confirm(`Archive ${tech.name}?\n\nThey'll be removed from the leaderboard but their revenue and job history stay in the system. You can reactivate them anytime.`);
-    if (!confirmed) return;
+    const f = archiveForm;
+    if (!f.left_date) return showToast("Pick the date they left",false);
+    if (!f.leave_reason) return showToast("Pick why they left",false);
+    if (f.leave_reason==="fired" && !f.fire_category) return showToast("Pick the reason for the firing",false);
+    if (f.leave_reason==="fired" && !f.fire_notes.trim()) return showToast("Add notes explaining the firing",false);
     setSaving(true);
     try {
-      await sb(`techs?id=eq.${tech.id}`,{method:"PATCH",body:JSON.stringify({is_active:false}),prefer:"return=minimal"});
+      const fired = f.leave_reason==="fired";
+      await sb(`techs?id=eq.${tech.id}`,{method:"PATCH",body:JSON.stringify({
+        is_active:false, left_date:f.left_date, leave_reason:f.leave_reason,
+        fire_category: fired ? f.fire_category : null,
+        fire_notes: fired ? f.fire_notes.trim() : null,
+        fire_approval: fired ? "pending" : null,
+        fire_reviewed_at: null,
+      }),prefer:"return=minimal"});
       await refreshAll();
+      setArchivingId(null);
       showToast(`${tech.name} archived`);
+    } catch(e){ showToast("Error: "+e.message,false); }
+    setSaving(false);
+  }
+  async function reviewFiring(tech, decision) {
+    setSaving(true);
+    try {
+      await sb(`techs?id=eq.${tech.id}`,{method:"PATCH",body:JSON.stringify({fire_approval:decision, fire_reviewed_at:new Date().toISOString()}),prefer:"return=minimal"});
+      await refreshAll();
+      showToast(decision==="approved" ? `✅ Firing approved for ${tech.name}` : `Firing denied for ${tech.name} — counts as a loss`);
     } catch(e){ showToast("Error: "+e.message,false); }
     setSaving(false);
   }
   async function reactivateTech(tech) {
     setSaving(true);
     try {
-      await sb(`techs?id=eq.${tech.id}`,{method:"PATCH",body:JSON.stringify({is_active:true}),prefer:"return=minimal"});
+      await sb(`techs?id=eq.${tech.id}`,{method:"PATCH",body:JSON.stringify({is_active:true, left_date:null, leave_reason:null, fire_category:null, fire_notes:null, fire_approval:null, fire_reviewed_at:null}),prefer:"return=minimal"});
       await refreshAll();
       showToast(`✅ ${tech.name} reactivated`);
     } catch(e){ showToast("Error: "+e.message,false); }
@@ -5639,9 +5762,46 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
                   ):null; })}
                 </div>
                 <div style={{ marginTop:"12px", paddingTop:"12px", borderTop:`1px solid ${C.border}` }}>
-                  <button onClick={()=>archiveTech(t)} disabled={saving} style={{ background:"none", border:"1px solid #f59e0b", color:"#f59e0b", padding:"7px 16px", borderRadius:"8px", cursor:saving?"not-allowed":"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"12px", letterSpacing:"1px", textTransform:"uppercase" }}>
-                    📦 Archive {t.name}
-                  </button>
+                  {archivingId!==t.id ? (
+                    <button onClick={()=>startArchive(t)} disabled={saving} style={{ background:"none", border:"1px solid #f59e0b", color:"#f59e0b", padding:"7px 16px", borderRadius:"8px", cursor:saving?"not-allowed":"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"12px", letterSpacing:"1px", textTransform:"uppercase" }}>
+                      📦 Archive {t.name}
+                    </button>
+                  ) : (
+                    <div style={{ background:"#fff8e6", border:"1px solid #f59e0b44", borderRadius:"10px", padding:"12px", display:"flex", flexDirection:"column", gap:"10px" }}>
+                      <div style={{ fontSize:"12px", color:C.black }}>Archiving removes {t.name} from the leaderboard. Their revenue and job history stay in the system.</div>
+                      <div style={{ display:"flex", alignItems:"center", gap:"10px", flexWrap:"wrap" }}>
+                        <span style={{ fontSize:"12px", color:C.muted }}>Last day:</span>
+                        <input type="date" value={archiveForm.left_date} onChange={e=>setArchiveForm(f=>({...f,left_date:e.target.value}))} style={{ background:C.white, border:`1px solid ${C.border}`, color:C.black, padding:"4px 8px", borderRadius:"4px", fontSize:"12px", fontFamily:"'Barlow Condensed',sans-serif" }}/>
+                      </div>
+                      <div style={{ display:"flex", flexDirection:"column", gap:"6px" }}>
+                        <span style={{ fontSize:"12px", color:C.muted }}>Why did they leave?</span>
+                        {LEAVE_REASONS.map(r=>(
+                          <label key={r.value} style={{ display:"flex", alignItems:"center", gap:"8px", fontSize:"13px", color:C.black, cursor:"pointer" }}>
+                            <input type="radio" name={`leave-${t.id}`} checked={archiveForm.leave_reason===r.value} onChange={()=>setArchiveForm(f=>({...f,leave_reason:r.value}))}/>
+                            {r.label}
+                          </label>
+                        ))}
+                      </div>
+                      {archiveForm.leave_reason==="fired"&&(
+                        <div style={{ display:"flex", flexDirection:"column", gap:"6px" }}>
+                          <span style={{ fontSize:"12px", color:C.muted }}>Reason for firing (an admin has to approve it before it stops counting against the ops bonus):</span>
+                          <select value={archiveForm.fire_category} onChange={e=>setArchiveForm(f=>({...f,fire_category:e.target.value}))} style={{ background:C.white, border:`1px solid ${C.border}`, color:C.black, padding:"6px 8px", borderRadius:"4px", fontSize:"13px" }}>
+                            <option value="">Pick one…</option>
+                            {FIRE_CATEGORIES.map(c=><option key={c.value} value={c.value}>{c.label}</option>)}
+                          </select>
+                          <textarea value={archiveForm.fire_notes} onChange={e=>setArchiveForm(f=>({...f,fire_notes:e.target.value}))} placeholder="What happened? Production numbers, which policy, etc." rows={3} style={{ background:C.white, border:`1px solid ${C.border}`, color:C.black, padding:"6px 8px", borderRadius:"4px", fontSize:"13px", fontFamily:"inherit" }}/>
+                        </div>
+                      )}
+                      <div style={{ display:"flex", gap:"8px" }}>
+                        <button onClick={()=>archiveTech(t)} disabled={saving} style={{ background:"#f59e0b", border:"none", color:C.white, padding:"7px 16px", borderRadius:"8px", cursor:saving?"not-allowed":"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"12px", letterSpacing:"1px", textTransform:"uppercase" }}>
+                          {saving?"Saving...":`Archive ${t.name}`}
+                        </button>
+                        <button onClick={()=>setArchivingId(null)} disabled={saving} style={{ background:"none", border:`1px solid ${C.border}`, color:C.muted, padding:"7px 16px", borderRadius:"8px", cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"12px", letterSpacing:"1px", textTransform:"uppercase" }}>
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             ))}
@@ -5654,7 +5814,25 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
                     <div key={t.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", background:"#fff", border:"1px solid #f59e0b33", borderRadius:"8px", padding:"10px 14px" }}>
                       <div>
                         <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"15px", color:C.muted }}>{t.name}</div>
-                        <div style={{ fontSize:"10px", color:C.muted, letterSpacing:"1px" }}>ARCHIVED · NOT ON LEADERBOARD</div>
+                        <div style={{ fontSize:"10px", color:C.muted, letterSpacing:"1px" }}>
+                          ARCHIVED · NOT ON LEADERBOARD
+                          {t.left_date&&` · LEFT ${fmtShortDate(t.left_date).toUpperCase()}`}
+                          {t.leave_reason&&` · ${(LEAVE_REASONS.find(r=>r.value===t.leave_reason)?.short||"").toUpperCase()}`}
+                        </div>
+                        {t.leave_reason==="fired"&&(
+                          <div style={{ fontSize:"11px", color:C.black, marginTop:"4px" }}>
+                            <strong>{FIRE_CATEGORIES.find(c=>c.value===t.fire_category)?.label||"No reason given"}</strong>{t.fire_notes&&` — ${t.fire_notes}`}
+                            <div style={{ fontSize:"10px", fontWeight:"700", marginTop:"2px", color:t.fire_approval==="approved"?C.green:t.fire_approval==="denied"?"#ef4444":"#f59e0b" }}>
+                              {t.fire_approval==="approved"?"✅ FIRING APPROVED — doesn't count against the ops bonus":t.fire_approval==="denied"?"❌ FIRING DENIED — counts as a loss":"⏳ WAITING FOR ADMIN APPROVAL"}
+                            </div>
+                            {t.fire_approval==="pending"&&(
+                              <div style={{ display:"flex", gap:"6px", marginTop:"6px" }}>
+                                <button onClick={()=>reviewFiring(t,"approved")} disabled={saving} style={{ background:C.green, border:"none", color:C.white, padding:"4px 10px", borderRadius:"6px", cursor:"pointer", fontSize:"11px", fontWeight:"800" }}>APPROVE</button>
+                                <button onClick={()=>reviewFiring(t,"denied")} disabled={saving} style={{ background:"#ef4444", border:"none", color:C.white, padding:"4px 10px", borderRadius:"6px", cursor:"pointer", fontSize:"11px", fontWeight:"800" }}>DENY</button>
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </div>
                       <button onClick={()=>reactivateTech(t)} disabled={saving} style={{ background:"none", border:"1px solid #00c853", color:"#00c853", padding:"6px 14px", borderRadius:"8px", cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"11px", letterSpacing:"1px" }}>
                         REACTIVATE
@@ -5745,7 +5923,10 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
           <OperationsProgressTab techs={techs} upsells={upsells} switchovers={switchovers} reviews={reviews} quota={quota} callbacks={callbacks||[]} jobs={jobs||[]} timeEntries={timeEntries} rideAlongs={rideAlongs||[]}/>
         )}
         {tab==="quota"&&(
-          <QuotaSettings quota={quota} onSave={saveQuota} saving={saving}/>
+          <div style={{ display:"flex", flexDirection:"column", gap:"16px" }}>
+            <QuotaSettings quota={quota} onSave={saveQuota} saving={saving}/>
+            <StaffingSettings showToast={showToast}/>
+          </div>
         )}
         {tab==="incentive"&&(
           <div>
