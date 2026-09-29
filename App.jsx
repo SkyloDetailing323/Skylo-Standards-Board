@@ -5,6 +5,12 @@ import { computeOpsMonth, monthRange, mountainDate, CALLBACK_TIERS, QUOTA_TIERS,
 const SUPABASE_URL = "https://mjmwxxvqcsptrocwucis.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1qbXd4eHZxY3NwdHJvY3d1Y2lzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg4Njk2MjAsImV4cCI6MjA5NDQ0NTYyMH0.YLwGKFvrAn3F8viFgP0oZ6hzqSSq7w8FrNT1y3sy_Sc";
 
+// Every techs column the browser is allowed to read. `pin` is deliberately
+// left out: PINs are checked server-side (netlify/functions/auth-login.js)
+// and the anon role has no SELECT on that column. Add new techs columns here
+// AND grant them to anon/authenticated, or they won't load.
+const TECH_COLUMNS = "id,name,avatar,badges,start_date,is_lead,team_lead_id,team_name,hourly_rate,commission_rate,is_active,onboarding_stage,assigned_trainer_id,cert_status,cert_attempts,classroom_complete,title,left_date,leave_reason,fire_category,fire_notes,fire_approval,fire_reviewed_at,on_leave";
+
 async function sb(path, opts = {}) {
   const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
     headers: {
@@ -59,7 +65,6 @@ const C = {
   red:     "#ef4444",
 };
 
-const ADMIN_PIN = "7281";
 const PP_ANCHOR_END = "2026-06-13"; // known period end: pay date Jun 19, submit Jun 17
 const UPSELL_PTS_PER_DOLLAR = 0.5; // $2 = 1 pt
 const REVIEW_PTS = 5;
@@ -647,13 +652,20 @@ function Pill({ children, color=C.blue }) {
 function PinPad({ onSubmit }) {
   const [pin, setPin] = useState("");
   const [shake, setShake] = useState(false);
+  const [checking, setChecking] = useState(false);
+  const [msg, setMsg] = useState("");
   useEffect(() => {
     if (pin.length===4) {
-      const ok = onSubmit(pin);
-      if (!ok) { setShake(true); setTimeout(()=>{ setShake(false); setPin(""); },500); }
+      setChecking(true);
+      Promise.resolve(onSubmit(pin)).then(result => {
+        setChecking(false);
+        if (result === true) return;
+        setMsg(result === "locked" ? "Too many wrong PINs — try again in 15 minutes." : result === "offline" ? "Can't reach the server — check your connection." : "");
+        setShake(true); setTimeout(()=>{ setShake(false); setPin(""); },500);
+      });
     }
   }, [pin]);
-  const press = d => { if (pin.length<4) setPin(p=>p+d); };
+  const press = d => { if (pin.length<4 && !checking) { setMsg(""); setPin(p=>p+d); } };
   return (
     <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:"32px" }}>
       <div style={{ display:"flex", gap:"14px", animation:shake?"shake .4s ease":"none" }}>
@@ -661,6 +673,7 @@ function PinPad({ onSubmit }) {
           <div key={i} style={{ width:"16px", height:"16px", borderRadius:"50%", background:i<pin.length?C.blue:"transparent", border:`2px solid ${i<pin.length?C.blue:C.border}` }}/>
         ))}
       </div>
+      {msg && <div style={{ fontSize:"13px", color:"#ef4444", fontWeight:"700", maxWidth:"240px", textAlign:"center" }}>{msg}</div>}
       <div style={{ display:"grid", gridTemplateColumns:"repeat(3,72px)", gap:"10px" }}>
         {[1,2,3,4,5,6,7,8,9,"",0,"⌫"].map((d,i)=>(
           <button key={i} onClick={()=>d==="⌫"?setPin(p=>p.slice(0,-1)):d!==""?press(String(d)):null}
@@ -5418,10 +5431,19 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
   }
   async function addTech() {
     if (!addForm.name||!addForm.pin||addForm.pin.length!==4) return showToast("Name + 4-digit PIN required",false);
-    if (techs.find(t=>t.pin===addForm.pin)) return showToast("PIN already in use",false);
     setSaving(true);
-    try { const avatar=addForm.avatar||addForm.name.split(" ").map(w=>w[0]).join("").toUpperCase().slice(0,2); const res=await sb("techs",{method:"POST",body:JSON.stringify({name:addForm.name,pin:addForm.pin,avatar,badges:["day_one"],start_date:addForm.start_date||null,commission_rate:parseInt(addForm.commission_rate)||27,title:addForm.title||"detail_apprentice"})}); if(res&&res[0]&&addForm.start_date)await scheduleCheckins(res[0].id,addForm.start_date).catch(()=>{}); await refreshAll(); showToast(`✅ ${addForm.name} added!`); setAddForm({name:"",pin:"",avatar:"",start_date:"",commission_rate:27,title:"detail_apprentice"}); }
-    catch(e){ showToast("Error: "+e.message,false); }
+    try { const avatar=addForm.avatar||addForm.name.split(" ").map(w=>w[0]).join("").toUpperCase().slice(0,2); const res=await sb("techs?select=id",{method:"POST",body:JSON.stringify({name:addForm.name,pin:addForm.pin,avatar,badges:["day_one"],start_date:addForm.start_date||null,commission_rate:parseInt(addForm.commission_rate)||27,title:addForm.title||"detail_apprentice"})}); if(res&&res[0]&&addForm.start_date)await scheduleCheckins(res[0].id,addForm.start_date).catch(()=>{}); await refreshAll(); showToast(`✅ ${addForm.name} added!`); setAddForm({name:"",pin:"",avatar:"",start_date:"",commission_rate:27,title:"detail_apprentice"}); }
+    catch(e){ showToast(/duplicate|23505|techs_pin/i.test(e.message) ? "That PIN is already in use — pick another" : "Error: "+e.message,false); }
+    setSaving(false);
+  }
+  // PINs aren't readable from the browser, so they can be replaced but not shown.
+  async function changePin(tech) {
+    const pin = window.prompt(`New 4-digit PIN for ${tech.name}:`);
+    if (pin===null) return;
+    if (!/^\d{4}$/.test(pin)) return showToast("PIN must be 4 digits",false);
+    setSaving(true);
+    try { await sb(`techs?id=eq.${tech.id}`,{method:"PATCH",body:JSON.stringify({pin}),prefer:"return=minimal"}); showToast(`✅ PIN changed for ${tech.name}`); }
+    catch(e){ showToast(/duplicate|23505|techs_pin/i.test(e.message) ? "That PIN is already in use — pick another" : "Error: "+e.message,false); }
     setSaving(false);
   }
   async function updateStartDate(techId,date) {
@@ -6091,7 +6113,7 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
                     />
                     <span style={{ fontSize:"11px", color:C.purple, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", paddingLeft:"4px" }}>{TITLE_LABELS[t.title] || "Detail Apprentice"}</span>
                   </div>
-                  <span style={{ fontSize:"12px", color:C.muted, fontFamily:"'Barlow Condensed',sans-serif" }}>PIN: {t.pin}</span>
+                  {!isManager&&t.title!=="owner"&&<button onClick={()=>changePin(t)} disabled={saving} style={{ background:"none", border:`1px solid ${C.border}`, color:C.muted, padding:"3px 10px", borderRadius:"6px", cursor:"pointer", fontSize:"11px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>🔒 Change PIN</button>}
                 </div>
                 <div style={{ display:"flex", alignItems:"center", gap:"10px", marginBottom:"10px" }}>
                   <span style={{ fontSize:"12px", color:C.muted }}>Start date:</span>
@@ -6380,7 +6402,7 @@ export default function App() {
   const loadAll = useCallback(async () => {
     try {
       const [t,u,s,r,ra,sch,settings,cb,jb,te,tp,ps,ut] = await Promise.all([
-        sb("techs?select=*&order=name"),
+        sb(`techs?select=${TECH_COLUMNS}&order=name`),
         sb("upsells?select=*"),
         sb("switchovers?select=*"),
         sb("reviews?select=*"),
@@ -6410,14 +6432,21 @@ export default function App() {
     return () => clearInterval(interval);
   }, [loadAll]);
 
-  function handlePin(pin) {
-    if (pin===ADMIN_PIN) { setUser({type:"admin"}); return true; }
-    const tech=techs?.find(t=>t.pin===pin && t.is_active!==false);
-    // The Field Supervisor (Will) gets the admin panel, minus anything that
-    // feeds his own ops bonus -- see `isManager` in AdminPanel.
-    if (tech && tech.title==="field_supervisor") { setUser({type:"admin",role:"manager",techId:tech.id}); return true; }
-    if (tech) { setUser({type:"tech",techId:tech.id}); return true; }
-    return false;
+  // PINs are checked on the server so they never ship to the browser. Owners
+  // (OWNER_PINS env var) and the Field Supervisor get the admin panel; the
+  // Field Supervisor in manager mode -- see `isManager` in AdminPanel.
+  async function handlePin(pin) {
+    let res;
+    try {
+      res = await fetch("/.netlify/functions/auth-login", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ pin }) });
+    } catch { return "offline"; }
+    if (res.status === 429) return "locked";
+    if (!res.ok) return false;
+    const u = await res.json().catch(()=>null);
+    if (!u) return false;
+    if (u.type === "admin") setUser({ type:"admin", role:u.role, techId:u.techId, name:u.name, token:u.token });
+    else setUser({ type:"tech", techId:u.techId, token:u.token });
+    return true;
   }
   // Feeds TechDashboard's entire `techs` prop -- excluding owner/admin
   // accounts (title:"owner") here means every gamification view a tech sees
