@@ -3319,7 +3319,7 @@ function TechDashboard({ tech, techs, upsells, switchovers, reviews, callbacks, 
         {tab==="myteam"&&(
           <TeamLeadPanel tech={tech} techs={techs} upsells={upsells} switchovers={switchovers} reviews={reviews} callbacks={callbacks||[]} quota={q} jobs={jobs}/>
         )}
-        {tab==="training"&&<PerfectDayTrainingPanel tech={tech}/>}
+        {tab==="training"&&<PerfectDayTrainingPanel tech={tech} techs={techs}/>}
       </div>
       {toast&&(
         <div style={{ position:"fixed", bottom:"24px", left:"50%", transform:"translateX(-50%)", background:toast.ok?C.green:"#ef4444", color:C.white, padding:"12px 28px", borderRadius:"24px", fontSize:"14px", fontWeight:"900", zIndex:999, whiteSpace:"nowrap", fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:"1px", fontStyle:"italic", boxShadow:"0 4px 20px rgba(0,0,0,0.15)" }}>
@@ -4446,29 +4446,55 @@ async function scheduleCheckins(techId, startDate) {
   }
 }
 
-function PerfectDayTrainingPanel({ tech }) {
+// Tech-facing Perfect Day rubric. Everyone sees their own sign-off progress
+// (read-only). Team leads / trainers also get a picker for the Detail
+// Apprentices on their team: picking one opens that apprentice's rubric and
+// lets the lead sign items off for them (recorded with the lead as trainer).
+function PerfectDayTrainingPanel({ tech, techs=[] }) {
   const [rubricItems, setRubricItems] = useState([]);
   const [signoffs, setSignoffs] = useState({});
   const [expandedScript, setExpandedScript] = useState({});
   const [loading, setLoading] = useState(true);
+  const [subjectId, setSubjectId] = useState(tech.id);
+  const [savingItem, setSavingItem] = useState(null);
+
+  const isTrainer = !!tech.is_lead || TRAINER_TITLES.includes(tech.title);
+  const isApprentice = t => t.is_active!==false && t.id!==tech.id && (t.title||"detail_apprentice")==="detail_apprentice";
+  const myTrainees = isTrainer ? techs.filter(t => isApprentice(t) && (t.team_lead_id===tech.id || t.assigned_trainer_id===tech.id)).sort((x,y)=>x.name.localeCompare(y.name)) : [];
+  const otherApprentices = isTrainer ? techs.filter(t => isApprentice(t) && !myTrainees.includes(t)).sort((x,y)=>x.name.localeCompare(y.name)) : [];
+  const subject = subjectId===tech.id ? tech : techs.find(t=>t.id===subjectId) || tech;
+  const training = subject.id !== tech.id;
+  const techName = id => techs.find(t=>t.id===id)?.name || (id===tech.id ? tech.name : "a trainer");
 
   useEffect(() => {
+    setLoading(true);
     Promise.all([
       sb("rubric_items?select=*&order=sort_order"),
-      sb(`training_signoffs?tech_id=eq.${tech.id}&select=rubric_item_id,signed_off`),
+      sb(`training_signoffs?tech_id=eq.${subjectId}&select=rubric_item_id,signed_off,trainer_id,signed_off_at`),
     ]).then(([items, offs]) => {
       setRubricItems(items || []);
       const map = {};
-      for (const o of (offs || [])) map[o.rubric_item_id] = o.signed_off;
+      for (const o of (offs || [])) map[o.rubric_item_id] = o;
       setSignoffs(map);
       setLoading(false);
     }).catch(() => setLoading(false));
-  }, [tech.id]);
+  }, [subjectId]);
 
-  if (loading) return <div style={{ color:C.muted, padding:"16px" }}>Loading training progress...</div>;
+  async function toggle(item) {
+    if (!training || savingItem) return;
+    const cur = signoffs[item.id];
+    const next = !(cur?.signed_off);
+    setSavingItem(item.id);
+    try {
+      const row = { tech_id:subject.id, rubric_item_id:item.id, trainer_id:tech.id, signed_off:next, signed_off_at: next ? new Date().toISOString() : null };
+      await sb("training_signoffs?on_conflict=tech_id,rubric_item_id", { method:"POST", prefer:"resolution=merge-duplicates,return=minimal", body:JSON.stringify(row) });
+      setSignoffs(m => ({ ...m, [item.id]: row }));
+    } catch(e) { window.alert("Couldn't save: "+e.message); }
+    setSavingItem(null);
+  }
 
   const total = rubricItems.length;
-  const done = rubricItems.filter(i => signoffs[i.id]).length;
+  const done = rubricItems.filter(i => signoffs[i.id]?.signed_off).length;
   const pct = total ? Math.round((done / total) * 100) : 0;
 
   const byPhase = {}, phases = [];
@@ -4479,38 +4505,55 @@ function PerfectDayTrainingPanel({ tech }) {
 
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:"12px" }}>
-      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"16px" }}>
-        <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"16px", color:C.black, marginBottom:"10px" }}>
-          Perfect Day Training — {done}/{total} items signed off
+      {isTrainer && (
+        <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.purple}`, borderRadius:"12px", padding:"14px 16px" }}>
+          <div style={{ fontSize:"11px", color:C.muted, letterSpacing:"1px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", marginBottom:"6px" }}>WHOSE RUBRIC?</div>
+          <select value={subjectId} onChange={e=>setSubjectId(e.target.value)}
+            style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"10px 12px", borderRadius:"10px", fontSize:"15px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", width:"100%" }}>
+            <option value={tech.id}>My own rubric</option>
+            {myTrainees.length>0 && <optgroup label="Apprentices I'm training">{myTrainees.map(t=><option key={t.id} value={t.id}>{t.name}</option>)}</optgroup>}
+            {otherApprentices.length>0 && <optgroup label="Other apprentices">{otherApprentices.map(t=><option key={t.id} value={t.id}>{t.name}</option>)}</optgroup>}
+          </select>
+          {myTrainees.length===0 && <div style={{ fontSize:"11px", color:C.muted, marginTop:"6px" }}>No apprentices on your team yet — an admin assigns them in the Teams tab.</div>}
         </div>
-        <Bar pct={pct} color={done === total && total > 0 ? C.green : C.blue} h={8}/>
+      )}
+      <div style={{ background:training?`${C.purple}10`:C.card, border:`1px solid ${training?C.purple:C.border}`, borderRadius:"12px", padding:"16px" }}>
+        {training && <div style={{ fontSize:"11px", color:C.purple, letterSpacing:"2px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", marginBottom:"4px" }}>TRAINING RUBRIC FOR</div>}
+        <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:training?"22px":"16px", color:C.black, marginBottom:"10px" }}>
+          {training ? subject.name : "Perfect Day Training"} — {done}/{total} items signed off
+        </div>
+        <Bar pct={pct} color={done === total && total > 0 ? C.green : training ? C.purple : C.blue} h={8}/>
         <div style={{ fontSize:"11px", color:C.muted, marginTop:"4px" }}>
-          {pct}% complete{done === total && total > 0 ? " — eligible for cert!" : ""}
+          {pct}% complete{done === total && total > 0 ? " — eligible for cert!" : ""}{training ? " · tap an item to sign it off (tap again to undo)" : ""}
         </div>
       </div>
-      {total === 0 && (
+      {loading && <div style={{ color:C.muted, padding:"16px" }}>Loading training progress...</div>}
+      {!loading && total === 0 && (
         <div style={{ background:C.cardLt, border:`1px solid ${C.border}`, borderRadius:"10px", padding:"14px", fontSize:"13px", color:C.muted }}>
           Rubric items not seeded yet. Ask an admin to seed them in the Development tab.
         </div>
       )}
-      {phases.map(phase => (
+      {!loading && phases.map(phase => (
         <div key={phase} style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", overflow:"hidden" }}>
-          <div style={{ background:C.cardLt, padding:"10px 16px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"13px", color:C.blue, letterSpacing:"1px" }}>
+          <div style={{ background:C.cardLt, padding:"10px 16px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"13px", color:training?C.purple:C.blue, letterSpacing:"1px" }}>
             {PHASE_LABELS[phase] || phase}
           </div>
-          {byPhase[phase].map(item => (
-            <div key={item.id} style={{ padding:"10px 16px", borderBottom:`1px solid ${C.border}40` }}>
+          {byPhase[phase].map(item => {
+            const so = signoffs[item.id], on = !!so?.signed_off;
+            return (
+            <div key={item.id} onClick={()=>toggle(item)} style={{ padding:"10px 16px", borderBottom:`1px solid ${C.border}40`, cursor:training?"pointer":"default", opacity:savingItem===item.id?0.5:1 }}>
               <div style={{ display:"flex", alignItems:"flex-start", gap:"10px" }}>
-                <div style={{ width:"18px", height:"18px", borderRadius:"3px", border:`2px solid ${signoffs[item.id] ? C.green : C.border}`, background:signoffs[item.id] ? C.green : "transparent", flexShrink:0, display:"flex", alignItems:"center", justifyContent:"center", marginTop:"1px" }}>
-                  {signoffs[item.id] && <span style={{ color:C.white, fontSize:"11px", lineHeight:1 }}>✓</span>}
+                <div style={{ width:training?"22px":"18px", height:training?"22px":"18px", borderRadius:"4px", border:`2px solid ${on ? C.green : C.border}`, background:on ? C.green : "transparent", flexShrink:0, display:"flex", alignItems:"center", justifyContent:"center", marginTop:"1px" }}>
+                  {on && <span style={{ color:C.white, fontSize:"12px", lineHeight:1 }}>✓</span>}
                 </div>
                 <div style={{ flex:1 }}>
-                  <div style={{ fontSize:"13px", color:signoffs[item.id] ? C.muted : C.black, textDecoration:signoffs[item.id] ? "line-through" : "none" }}>
+                  <div style={{ fontSize:"13px", color:on ? C.muted : C.black, textDecoration:on ? "line-through" : "none" }}>
                     <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", color:C.muted, marginRight:"4px" }}>#{item.sort_order}</span>
                     {item.description}
                   </div>
+                  {on && so.trainer_id && <div style={{ fontSize:"10px", color:C.green, marginTop:"2px" }}>Signed off by {techName(so.trainer_id)}{so.signed_off_at?` · ${new Date(so.signed_off_at).toLocaleDateString("en-US",{month:"short",day:"numeric"})}`:""}</div>}
                   {item.has_script && (
-                    <button onClick={() => setExpandedScript(s => ({...s, [item.id]: !s[item.id]}))} style={{ background:"none", border:"none", color:C.blue, fontSize:"11px", cursor:"pointer", padding:"2px 0", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>
+                    <button onClick={e => { e.stopPropagation(); setExpandedScript(s => ({...s, [item.id]: !s[item.id]})); }} style={{ background:"none", border:"none", color:C.blue, fontSize:"11px", cursor:"pointer", padding:"2px 0", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>
                       {expandedScript[item.id] ? "▲ Hide script" : "▼ View script"}
                     </button>
                   )}
@@ -4522,7 +4565,8 @@ function PerfectDayTrainingPanel({ tech }) {
                 </div>
               </div>
             </div>
-          ))}
+            );
+          })}
         </div>
       ))}
     </div>
