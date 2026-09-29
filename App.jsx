@@ -2304,7 +2304,49 @@ function OperationsProgressTab({ techs, switchovers, reviews, quota, callbacks=[
 // Each tech's regular Mon–Sat days and vehicle, plus one-off time off / extra
 // days. Feeds the staffing check in Operations Progress. BB (commercial) and
 // AUX (Zak's backup truck) are on the schedule but don't count toward staffing.
+// Rows are grouped into pods (techs who share trucks) and colored by crew,
+// which is worked out from the days each tech works -- nothing to maintain.
 const SCHEDULE_DAYS = ["Mon","Tue","Wed","Thu","Fri","Sat"];
+const SCHEDULE_VEHICLES = ["Mav 1","Mav 2","Mav 3","Mav 4","Mav 5","Mav 6","Mav 7","Mav 8","Mav 9","Mav 10","Mav 11","Van 3","Van 5","BB","AUX"];
+const CREWS = [
+  { id:"red",    label:"Red crew",   days:"1235", color:"#e53935" },
+  { id:"blue",   label:"Blue crew",  days:"3456", color:"#1e40af" },
+  { id:"green",  label:"Green crew", days:"1246", color:"#16a34a" },
+  { id:"other",  label:"Other days", days:null,   color:"#8b5cf6" },
+  { id:"bb",     label:"BB (commercial)", days:null, color:"#f59e0b" },
+  { id:"aux",    label:"AUX (backup)",    days:null, color:"#64748b" },
+];
+const CREW_BY_ID = Object.fromEntries(CREWS.map(c=>[c.id,c]));
+function crewFor(rows) {
+  if (!rows.length) return null;
+  if (rows.every(r=>r.vehicle==="BB")) return CREW_BY_ID.bb;
+  if (rows.every(r=>r.vehicle==="AUX")) return CREW_BY_ID.aux;
+  const days = rows.map(r=>r.weekday).sort().join("");
+  return CREWS.find(c=>c.days===days) || CREW_BY_ID.other;
+}
+const vehicleSortKey = v => { const m=/^(Mav|Van)\s*(\d+)/i.exec(v||""); return m ? (m[1].toLowerCase()==="mav"?0:100)+Number(m[2]) : 500; };
+// Pods = techs connected by sharing a vehicle on any day (e.g. Logan, Trey and
+// Milos all rotate through Mav 1 and Mav 2).
+function schedulePods(active, rows) {
+  const parent = {}; const find = x => parent[x]===x ? x : (parent[x]=find(parent[x]));
+  active.forEach(t=>parent[t.id]=t.id);
+  const byVehicle = {};
+  rows.forEach(r=>{ if (parent[r.tech_id]===undefined) return; (byVehicle[r.vehicle]=byVehicle[r.vehicle]||[]).push(r.tech_id); });
+  Object.entries(byVehicle).forEach(([v,ids])=>{ if (v==="BB"||v==="AUX") return; ids.forEach(id=>{ parent[find(id)]=find(ids[0]); }); });
+  const groups = {};
+  active.forEach(t=>{ (groups[find(t.id)]=groups[find(t.id)]||[]).push(t); });
+  const crewOrder = { red:0, blue:1, green:2, other:3, bb:4, aux:5 };
+  const pods = Object.values(groups).map(ts=>{
+    const mine = rows.filter(r=>ts.some(t=>t.id===r.tech_id));
+    const key = mine.length ? Math.min(...mine.map(r=>vehicleSortKey(r.vehicle))) : 9999;
+    const members = ts.map(t=>({ t, crew: crewFor(rows.filter(r=>r.tech_id===t.id)) }))
+      .sort((x,y)=>(crewOrder[x.crew?.id]??9)-(crewOrder[y.crew?.id]??9) || x.t.name.localeCompare(y.t.name));
+    return { key, members, scheduled: mine.length>0 };
+  });
+  const scheduled = pods.filter(p=>p.scheduled).sort((x,y)=>x.key-y.key);
+  const unscheduled = pods.filter(p=>!p.scheduled).flatMap(p=>p.members).sort((x,y)=>x.t.name.localeCompare(y.t.name));
+  return unscheduled.length ? [...scheduled, { key:99999, members:unscheduled, scheduled:false }] : scheduled;
+}
 function WorkScheduleTab({ techs, showToast=()=>{} }) {
   const { truckCount, holidays } = useStaffingSettings();
   const [rows, setRows] = useState([]);
@@ -2312,6 +2354,9 @@ function WorkScheduleTab({ techs, showToast=()=>{} }) {
   const [loaded, setLoaded] = useState(false);
   const [exForm, setExForm] = useState({ tech_id:"", date:"", kind:"off", note:"" });
   const [busy, setBusy] = useState(false);
+  const [editing, setEditing] = useState(null);   // {techId, wd} with a dropdown open
+  const [swapMode, setSwapMode] = useState(false);
+  const [swapFirst, setSwapFirst] = useState(null); // {techId, wd}
   const load = useCallback(async () => {
     const [sch, exc] = await Promise.all([
       sb("tech_schedule?select=*").catch(()=>[]),
@@ -2321,18 +2366,37 @@ function WorkScheduleTab({ techs, showToast=()=>{} }) {
   }, []);
   useEffect(() => { load(); }, [load]);
 
-  const active = techs.filter(t => t.is_active !== false && t.title !== "owner").sort((a,b)=>a.name.localeCompare(b.name));
+  const active = techs.filter(t => t.is_active !== false && t.title !== "owner");
   const cell = (techId, wd) => rows.find(r => r.tech_id===techId && r.weekday===wd);
+  async function writeCell(techId, wd, vehicle) {
+    if (!vehicle) await sb(`tech_schedule?tech_id=eq.${techId}&weekday=eq.${wd}`, { method:"DELETE", prefer:"return=minimal" });
+    else await sb("tech_schedule?on_conflict=tech_id,weekday", { method:"POST", prefer:"resolution=merge-duplicates,return=minimal", body: JSON.stringify({ tech_id:techId, weekday:wd, vehicle }) });
+  }
   async function setCell(techId, wd, vehicle) {
-    const v = vehicle.trim();
-    const existing = cell(techId, wd);
-    if ((existing?.vehicle||"") === v) return;
+    setEditing(null);
+    if ((cell(techId,wd)?.vehicle||"") === (vehicle||"")) return;
+    setBusy(true);
+    try { await writeCell(techId, wd, vehicle); await load(); }
+    catch(e) { showToast("Error saving schedule: "+e.message, false); }
+    setBusy(false);
+  }
+  async function tapCell(techId, wd) {
+    if (busy) return;
+    if (!swapMode) { setEditing({ techId, wd }); return; }
+    if (!swapFirst) { setSwapFirst({ techId, wd }); return; }
+    const a = swapFirst, b = { techId, wd };
+    setSwapFirst(null);
+    if (a.techId===b.techId && a.wd===b.wd) return;
+    const va = cell(a.techId,a.wd)?.vehicle||"", vb = cell(b.techId,b.wd)?.vehicle||"";
+    if (va===vb) return;
     setBusy(true);
     try {
-      if (!v) await sb(`tech_schedule?tech_id=eq.${techId}&weekday=eq.${wd}`, { method:"DELETE", prefer:"return=minimal" });
-      else await sb("tech_schedule?on_conflict=tech_id,weekday", { method:"POST", prefer:"resolution=merge-duplicates,return=minimal", body: JSON.stringify({ tech_id:techId, weekday:wd, vehicle:v }) });
+      await writeCell(a.techId, a.wd, vb);
+      await writeCell(b.techId, b.wd, va);
       await load();
-    } catch(e) { showToast("Error saving schedule: "+e.message, false); }
+      const n = id => techs.find(t=>t.id===id)?.name?.split(" ")[0] || "?";
+      showToast(`🔁 Swapped ${n(a.techId)} ${SCHEDULE_DAYS[a.wd-1]} ↔ ${n(b.techId)} ${SCHEDULE_DAYS[b.wd-1]}`);
+    } catch(e) { showToast("Error swapping: "+e.message, false); }
     setBusy(false);
   }
   async function addException() {
@@ -2352,58 +2416,104 @@ function WorkScheduleTab({ techs, showToast=()=>{} }) {
     setBusy(false);
   }
   const counts = SCHEDULE_DAYS.map((_,i) => rows.filter(r => r.weekday===i+1 && !NON_ROUTE_VEHICLES.includes(r.vehicle) && active.some(t=>t.id===r.tech_id && !t.on_leave)).length);
+  const vehicles = [...new Set([...SCHEDULE_VEHICLES, ...rows.map(r=>r.vehicle)])].sort((x,y)=>vehicleSortKey(x)-vehicleSortKey(y)||x.localeCompare(y));
+  const pods = schedulePods(active, rows);
   const today = mountainDate(new Date().toISOString());
   const upcoming = exceptions.filter(e => e.date >= today);
   const techName = id => techs.find(t=>t.id===id)?.name || "Unknown";
-  const inp = { background:C.white, border:`1px solid ${C.border}`, color:C.black, padding:"4px 6px", borderRadius:"4px", fontSize:"12px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", width:"100%", boxSizing:"border-box" };
+  const inp = { background:C.white, border:`1px solid ${C.border}`, color:C.black, padding:"6px 8px", borderRadius:"6px", fontSize:"12px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", boxSizing:"border-box" };
   if (!loaded) return <div style={{ fontSize:"13px", color:C.muted, padding:"20px" }}>Loading…</div>;
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:"16px" }}>
       <div style={{ background:C.white, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.blue}`, borderRadius:"12px", padding:"18px", boxShadow:"0 2px 8px rgba(43,156,240,0.08)" }}>
-        <Label color={C.blue}>🗓 Weekly Truck Schedule</Label>
-        <div style={{ fontSize:"12px", color:C.muted, marginBottom:"10px" }}>Type the vehicle a tech drives each day (e.g. Mav 3, Van 5). Leave it blank for a day off. BB and AUX don't count toward staffing. Needs {truckCount} on trucks every workday.</div>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:"10px", flexWrap:"wrap" }}>
+          <div>
+            <Label color={C.blue}>🗓 Weekly Truck Schedule</Label>
+            <div style={{ fontSize:"12px", color:C.muted }}>{swapMode ? "Swap mode: tap one box, then another, and they trade." : "Tap a box to pick the vehicle (or Off)."} Needs {truckCount} on trucks every workday.</div>
+          </div>
+          <button onClick={()=>{ setSwapMode(v=>!v); setSwapFirst(null); setEditing(null); }}
+            style={{ background:swapMode?C.blue:C.cardLt, border:`1px solid ${swapMode?C.blue:C.border}`, color:swapMode?C.white:C.black, padding:"8px 14px", borderRadius:"20px", cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"13px", letterSpacing:"1px" }}>
+            🔁 {swapMode ? "SWAP MODE ON" : "SWAP"}
+          </button>
+        </div>
+        <div style={{ display:"flex", flexWrap:"wrap", gap:"10px", margin:"10px 0" }}>
+          {CREWS.map(c=>(
+            <span key={c.id} style={{ display:"inline-flex", alignItems:"center", gap:"5px", fontSize:"11px", color:C.black }}>
+              <span style={{ width:"12px", height:"12px", borderRadius:"3px", background:c.color }}/>{c.label}{c.days&&<span style={{ color:C.muted }}>({c.days.split("").map(d=>SCHEDULE_DAYS[d-1]).join("/")})</span>}
+            </span>
+          ))}
+          <span style={{ display:"inline-flex", alignItems:"center", gap:"5px", fontSize:"11px", color:C.black }}>
+            <span style={{ width:"12px", height:"12px", borderRadius:"3px", background:C.blueLt, border:`1px solid ${C.blue}` }}/>⭐ Team lead
+          </span>
+        </div>
         <div style={{ overflowX:"auto" }}>
-          <table style={{ borderCollapse:"collapse", width:"100%", minWidth:"560px" }}>
+          <table style={{ borderCollapse:"separate", borderSpacing:"3px", width:"100%", minWidth:"600px" }}>
             <thead>
               <tr>
                 <th style={{ textAlign:"left", fontSize:"11px", color:C.muted, padding:"4px" }}>Tech</th>
                 {SCHEDULE_DAYS.map((d,i)=>(
-                  <th key={d} style={{ fontSize:"11px", color:counts[i]<truckCount?"#ef4444":C.green, padding:"4px" }}>{d}<div style={{ fontSize:"10px" }}>{counts[i]}/{truckCount}</div></th>
+                  <th key={d} style={{ fontSize:"11px", color:counts[i]<truckCount?"#ef4444":C.green, padding:"4px", fontFamily:"'Barlow Condensed',sans-serif" }}>{d.toUpperCase()}<div style={{ fontSize:"10px" }}>{counts[i]}/{truckCount}</div></th>
                 ))}
               </tr>
             </thead>
-            <tbody>
-              {active.map(t=>(
-                <tr key={t.id} style={{ borderTop:`1px solid ${C.border}` }}>
-                  <td style={{ fontSize:"13px", fontWeight:"700", color:C.black, padding:"4px", whiteSpace:"nowrap" }}>{t.name}{t.on_leave&&<span style={{ fontSize:"10px", color:C.gold, marginLeft:"4px" }}>ON LEAVE</span>}</td>
-                  {SCHEDULE_DAYS.map((d,i)=>(
-                    <td key={d} style={{ padding:"3px" }}>
-                      <input key={`${t.id}-${i}-${cell(t.id,i+1)?.vehicle||""}`} defaultValue={cell(t.id,i+1)?.vehicle||""} disabled={busy}
-                        onBlur={e=>setCell(t.id,i+1,e.target.value)} onKeyDown={e=>{ if(e.key==="Enter") e.target.blur(); }}
-                        style={{ ...inp, background:cell(t.id,i+1)?`${C.blue}12`:C.white }}/>
-                    </td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
+            {pods.map((pod,pi)=>(
+              <tbody key={pi}>
+                {pi>0&&<tr><td colSpan={7} style={{ height:"8px" }}/></tr>}
+                {!pod.scheduled&&<tr><td colSpan={7} style={{ fontSize:"11px", color:C.muted, fontWeight:"800", letterSpacing:"1px", padding:"4px 8px" }}>NOT ON THE SCHEDULE — tap a box to add them</td></tr>}
+                {pod.members.map(({t, crew})=>{
+                  const color = crew?.color || C.muted;
+                  return (
+                    <tr key={t.id}>
+                      <td style={{ fontSize:"13px", fontWeight:"800", color:C.black, padding:"6px 8px", whiteSpace:"nowrap", borderRadius:"6px", fontFamily:"'Barlow Condensed',sans-serif", background:t.is_lead?C.blueLt:"transparent", border:t.is_lead?`1px solid ${C.blue}`:"1px solid transparent" }}>
+                        {t.is_lead&&"⭐ "}{t.name}{t.on_leave&&<span style={{ fontSize:"10px", color:C.gold, marginLeft:"4px" }}>ON LEAVE</span>}
+                      </td>
+                      {SCHEDULE_DAYS.map((d,i)=>{
+                        const wd=i+1, v=cell(t.id,wd)?.vehicle||"";
+                        const isEditing = editing && editing.techId===t.id && editing.wd===wd;
+                        const isPicked = swapFirst && swapFirst.techId===t.id && swapFirst.wd===wd;
+                        if (isEditing) return (
+                          <td key={d} style={{ padding:0 }}>
+                            <select autoFocus value={v} onChange={e=>setCell(t.id,wd,e.target.value)} onBlur={()=>setEditing(null)}
+                              style={{ ...inp, width:"100%", border:`2px solid ${C.blue}` }}>
+                              <option value="">Off</option>
+                              {vehicles.map(x=><option key={x} value={x}>{x}</option>)}
+                            </select>
+                          </td>
+                        );
+                        return (
+                          <td key={d} onClick={()=>tapCell(t.id,wd)}
+                            style={{ cursor:busy?"wait":"pointer", borderRadius:"6px", padding:"7px 6px", textAlign:"center", fontSize:"12px", fontWeight:"800", fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:"0.5px",
+                              background: v ? color : C.cardLt, color: v ? C.white : C.border,
+                              outline: isPicked ? `3px solid ${C.black}` : "none", outlineOffset:"-3px",
+                              boxShadow: v ? "0 1px 3px rgba(13,34,64,0.15)" : "none" }}>
+                            {v || "—"}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            ))}
           </table>
         </div>
+        <div style={{ fontSize:"11px", color:C.muted, marginTop:"8px" }}>Crews and groups update on their own from the days each tech works. Team leads are set in the Teams tab. BB and AUX don't count toward staffing.</div>
       </div>
       <div style={{ background:C.white, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.gold}`, borderRadius:"12px", padding:"18px", boxShadow:"0 2px 8px rgba(43,156,240,0.08)" }}>
         <Label color={C.gold}>🏖 Time Off & Extra Days</Label>
         <div style={{ fontSize:"12px", color:C.muted, marginBottom:"10px" }}>One-off changes to the weekly schedule. "Off" takes a tech off a day they'd normally work; "Extra" adds them on a day they normally don't.</div>
         <div style={{ display:"flex", gap:"8px", flexWrap:"wrap", alignItems:"center" }}>
-          <select value={exForm.tech_id} onChange={e=>setExForm(f=>({...f,tech_id:e.target.value}))} style={{ ...inp, width:"auto" }}>
+          <select value={exForm.tech_id} onChange={e=>setExForm(f=>({...f,tech_id:e.target.value}))} style={inp}>
             <option value="">Pick a tech…</option>
-            {active.map(t=><option key={t.id} value={t.id}>{t.name}</option>)}
+            {[...active].sort((a,b)=>a.name.localeCompare(b.name)).map(t=><option key={t.id} value={t.id}>{t.name}</option>)}
           </select>
-          <input type="date" value={exForm.date} onChange={e=>setExForm(f=>({...f,date:e.target.value}))} style={{ ...inp, width:"auto" }}/>
-          <select value={exForm.kind} onChange={e=>setExForm(f=>({...f,kind:e.target.value}))} style={{ ...inp, width:"auto" }}>
+          <input type="date" value={exForm.date} onChange={e=>setExForm(f=>({...f,date:e.target.value}))} style={inp}/>
+          <select value={exForm.kind} onChange={e=>setExForm(f=>({...f,kind:e.target.value}))} style={inp}>
             <option value="off">Off</option>
             <option value="extra">Extra day</option>
           </select>
           <input value={exForm.note} onChange={e=>setExForm(f=>({...f,note:e.target.value}))} placeholder="Note (optional)" style={{ ...inp, width:"180px" }}/>
-          <button onClick={addException} disabled={busy} style={{ background:C.gold, border:"none", color:C.white, padding:"6px 14px", borderRadius:"8px", cursor:busy?"not-allowed":"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"13px" }}>Add</button>
+          <button onClick={addException} disabled={busy} style={{ background:C.gold, border:"none", color:C.white, padding:"7px 14px", borderRadius:"8px", cursor:busy?"not-allowed":"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"13px" }}>Add</button>
         </div>
         <div style={{ display:"flex", flexDirection:"column", gap:"4px", marginTop:"12px" }}>
           {upcoming.map(e=>(
