@@ -149,13 +149,16 @@ function isWorking(t, date) {
 }
 
 // ─── callback rate ──────────────────────────────────────────────────────────
-// Callbacks logged in the month ÷ jobs completed in the month. A split-job
-// callback is logged as ½ per tech (weight 0.5), so it still adds up to 1.
+// Callbacks on jobs completed in the month ÷ jobs completed in the month.
+// A callback is dated by its job (job_date), not when it was logged, since
+// they're often reported days later; older rows fall back to created_at.
+// A split-job callback is logged once per tech with weight 1/n, so it still
+// adds up to one callback.
 export function computeCallbacks({ monthKey, jobs, callbacks }) {
   const { start, end } = monthRange(monthKey);
   const jobIds = new Set();
   for (const j of jobs||[]) if (j.job_date>=start && j.job_date<=end && (j.revenue||0)>0) jobIds.add(j.hcp_job_id);
-  const monthCallbacks = (callbacks||[]).filter(c => { const d = c.created_at && mountainDate(c.created_at); return d && d>=start && d<=end; });
+  const monthCallbacks = (callbacks||[]).filter(c => { const d = c.job_date || (c.created_at && mountainDate(c.created_at)); return d && d>=start && d<=end; });
   const count = monthCallbacks.reduce((s,c)=>s+(c.weight==null?1:Number(c.weight)),0);
   const jobCount = jobIds.size;
   const rate = jobCount > 0 ? round2(count/jobCount*100) : 0;
