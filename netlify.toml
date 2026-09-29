@@ -35,3 +35,7 @@
   # techs table, so a new hire or a typo doesn't silently drop their revenue.
   schedule = "0 13 * * *"
   timeout = 26
+
+[functions."ghl-sync-cron"]
+  # Kicks off ghl-sync-background (GoHighLevel -> Supabase) every 15 minutes.
+  schedule = "*/15 * * * *"
