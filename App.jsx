@@ -4459,69 +4459,183 @@ async function scheduleCheckins(techId, startDate) {
   }
 }
 
-// Tech-facing Perfect Day rubric. Everyone sees their own sign-off progress
-// (read-only). Team leads / trainers also get a picker for the Detail
-// Apprentices on their team: picking one opens that apprentice's rubric and
-// lets the lead sign items off for them (recorded with the lead as trainer).
-function PerfectDayTrainingPanel({ tech, techs=[] }) {
+// Training runs day by day: on every training day the trainer goes through
+// the whole Perfect Day section with the apprentice (each item checked off,
+// or marked N/A when it didn't come up that day), and over the course of
+// training every Miscellaneous item gets done MISC_REPS times. Training is
+// complete after TRAINING_MIN_DAYS full Perfect Days plus all misc reps.
+const TRAINING_MIN_DAYS = 8;
+const MISC_REPS = 3;
+const TRAINING_PACE = { ahead:"Ahead of pace", on_track:"On track", behind:"Behind pace" };
+
+function trainingProgress(items, checks) {
+  const daily = items.filter(i => (i.section || "daily") === "daily");
+  const misc = items.filter(i => i.section === "misc");
+  const dailyIds = new Set(daily.map(i => i.id)), miscIds = new Set(misc.map(i => i.id));
+  const perDay = {}, miscCount = {};
+  for (const c of checks) {
+    if (dailyIds.has(c.rubric_item_id)) perDay[c.day_date] = (perDay[c.day_date] || 0) + 1;
+    else if (miscIds.has(c.rubric_item_id)) miscCount[c.rubric_item_id] = (miscCount[c.rubric_item_id] || 0) + 1;
+  }
+  const dayCounts = Object.values(perDay);
+  const fullDays = daily.length ? dayCounts.filter(n => n >= daily.length).length : 0;
+  // Best TRAINING_MIN_DAYS days count toward the bar, so a partial day
+  // still moves it but extra days can't push past 100%.
+  const dailyDone = dayCounts.sort((a, b) => b - a).slice(0, TRAINING_MIN_DAYS).reduce((s, n) => s + Math.min(n, daily.length), 0);
+  const dailyMax = TRAINING_MIN_DAYS * daily.length;
+  const miscDone = misc.reduce((s, i) => s + Math.min(miscCount[i.id] || 0, MISC_REPS), 0);
+  const miscMax = MISC_REPS * misc.length;
+  const max = dailyMax + miscMax;
+  return {
+    daily, misc, perDay, miscCount, fullDays, dailyDone, dailyMax, miscDone, miscMax,
+    pct: max ? Math.round(((dailyDone + miscDone) / max) * 100) : 0,
+    complete: daily.length > 0 && fullDays >= TRAINING_MIN_DAYS && miscDone >= miscMax,
+  };
+}
+
+const fmtDay = d => new Date(d + "T12:00:00Z").toLocaleDateString("en-US", { weekday:"short", month:"short", day:"numeric", timeZone:"UTC" });
+
+// Perfect Day training tracker.
+// - Trainers (team leads / trainer titles) pick the apprentice they're
+//   training, then check items off day by day and write that day's notes.
+// - Everyone else sees their own progress read-only (notes are trainer-only).
+// - Admin mode (Development tab) shows one fixed apprentice, editable, with
+//   the trainer chosen in the Development tab's "signing off as" picker.
+function PerfectDayTrainingPanel({ tech=null, techs=[], admin=false, fixedSubject=null, adminTrainerId="", onChange }) {
+  const today = mountainDate(new Date().toISOString());
   const [rubricItems, setRubricItems] = useState([]);
-  const [signoffs, setSignoffs] = useState({});
+  const [checks, setChecks] = useState([]);
+  const [notes, setNotes] = useState([]);
   const [expandedScript, setExpandedScript] = useState({});
   const [loading, setLoading] = useState(true);
-  const [subjectId, setSubjectId] = useState(tech.id);
-  const [savingItem, setSavingItem] = useState(null);
+  const [subjectId, setSubjectId] = useState(fixedSubject?.id || tech?.id);
+  const [day, setDay] = useState(today);
+  const [view, setView] = useState("daily");
+  const [saving, setSaving] = useState(null);
+  const [noteForm, setNoteForm] = useState({});
+  const [noteDirty, setNoteDirty] = useState(false);
+  const [addingDay, setAddingDay] = useState(false);
 
-  const isTrainer = !!tech.is_lead || TRAINER_TITLES.includes(tech.title);
-  const isApprentice = t => t.is_active!==false && t.id!==tech.id && (t.title||"detail_apprentice")==="detail_apprentice";
-  const myTrainees = isTrainer ? techs.filter(t => isApprentice(t) && (t.team_lead_id===tech.id || t.assigned_trainer_id===tech.id)).sort((x,y)=>x.name.localeCompare(y.name)) : [];
-  const otherApprentices = isTrainer ? techs.filter(t => isApprentice(t) && !myTrainees.includes(t)).sort((x,y)=>x.name.localeCompare(y.name)) : [];
-  const subject = subjectId===tech.id ? tech : techs.find(t=>t.id===subjectId) || tech;
-  const training = subject.id !== tech.id;
-  const techName = id => techs.find(t=>t.id===id)?.name || (id===tech.id ? tech.name : "a trainer");
+  const isTrainer = admin || !!tech?.is_lead || TRAINER_TITLES.includes(tech?.title);
+  const isApprentice = t => t.is_active!==false && t.id!==tech?.id && (t.title||"detail_apprentice")==="detail_apprentice";
+  const myTrainees = isTrainer && !admin ? techs.filter(t => isApprentice(t) && (t.team_lead_id===tech.id || t.assigned_trainer_id===tech.id)).sort((x,y)=>x.name.localeCompare(y.name)) : [];
+  const otherApprentices = isTrainer && !admin ? techs.filter(t => isApprentice(t) && !myTrainees.includes(t)).sort((x,y)=>x.name.localeCompare(y.name)) : [];
+  const subject = fixedSubject || (subjectId===tech?.id ? tech : techs.find(t=>t.id===subjectId)) || tech;
+  const training = admin || (subject && tech && subject.id !== tech.id);
+  const trainerId = admin ? (adminTrainerId || subject?.assigned_trainer_id || subject?.team_lead_id || null) : tech?.id;
+  const techName = id => techs.find(t=>t.id===id)?.name || (id===tech?.id ? tech.name : "a trainer");
 
   useEffect(() => {
+    if (!subject?.id) return;
     setLoading(true);
     Promise.all([
       sb("rubric_items?select=*&order=sort_order"),
-      sb(`training_signoffs?tech_id=eq.${subjectId}&select=rubric_item_id,signed_off,trainer_id,signed_off_at`),
-    ]).then(([items, offs]) => {
-      setRubricItems(items || []);
-      const map = {};
-      for (const o of (offs || [])) map[o.rubric_item_id] = o;
-      setSignoffs(map);
+      sb(`training_checks?trainee_id=eq.${subject.id}&select=*`),
+      training ? sb(`training_day_notes?trainee_id=eq.${subject.id}&select=*&order=day_date.desc`) : Promise.resolve([]),
+    ]).then(([items, cks, nts]) => {
+      setRubricItems(items || []); setChecks(cks || []); setNotes(nts || []);
       setLoading(false);
     }).catch(() => setLoading(false));
-  }, [subjectId]);
+  }, [subject?.id]);
 
-  async function toggle(item) {
-    if (!training || savingItem) return;
-    const cur = signoffs[item.id];
-    const next = !(cur?.signed_off);
-    setSavingItem(item.id);
+  useEffect(() => {
+    setNoteForm(notes.find(n => n.day_date === day) || {});
+    setNoteDirty(false);
+  }, [day, subject?.id, notes.length]);
+
+  const prog = trainingProgress(rubricItems, checks);
+  const dayChecks = {};
+  for (const c of checks) if (c.day_date === day) dayChecks[c.rubric_item_id] = c;
+  const trainingDays = [...new Set([...checks.map(c => c.day_date), ...notes.map(n => n.day_date)])].sort();
+  const dayList = training && !trainingDays.includes(day) ? [...trainingDays, day].sort() : trainingDays;
+  const dayNumber = d => trainingDays.filter(x => x <= d).length + (trainingDays.includes(d) ? 0 : 1);
+  const dailyToday = prog.daily.filter(i => dayChecks[i.id]).length;
+
+  useEffect(() => {
+    // Trainees looking at their own rubric open on their latest training day.
+    if (!training && trainingDays.length && !trainingDays.includes(day)) setDay(trainingDays[trainingDays.length - 1]);
+  }, [training, trainingDays.length]);
+
+  async function setCheck(item, status) {
+    if (!training || saving) return;
+    const cur = dayChecks[item.id];
+    setSaving(item.id);
     try {
-      const row = { tech_id:subject.id, rubric_item_id:item.id, trainer_id:tech.id, signed_off:next, signed_off_at: next ? new Date().toISOString() : null };
-      await sb("training_signoffs?on_conflict=tech_id,rubric_item_id", { method:"POST", prefer:"resolution=merge-duplicates,return=minimal", body:JSON.stringify(row) });
-      setSignoffs(m => ({ ...m, [item.id]: row }));
-    } catch(e) { window.alert("Couldn't save: "+e.message); }
-    setSavingItem(null);
+      if (cur && (status === null || cur.status === status)) {
+        await sb(`training_checks?id=eq.${cur.id}`, { method:"DELETE", prefer:"return=minimal" });
+        setChecks(cs => cs.filter(c => c.id !== cur.id));
+      } else {
+        const row = { trainee_id:subject.id, day_date:day, rubric_item_id:item.id, status, trainer_id:trainerId };
+        const res = await sb("training_checks?on_conflict=trainee_id,day_date,rubric_item_id", { method:"POST", prefer:"resolution=merge-duplicates,return=representation", body:JSON.stringify(row) });
+        const saved = res?.[0] || { ...row, id:cur?.id };
+        setChecks(cs => [...cs.filter(c => !(c.day_date===day && c.rubric_item_id===item.id)), saved]);
+      }
+      onChange && onChange();
+    } catch(e) { window.alert("Couldn't save: " + e.message); }
+    setSaving(null);
   }
 
-  const total = rubricItems.length;
-  const done = rubricItems.filter(i => signoffs[i.id]?.signed_off).length;
-  const pct = total ? Math.round((done / total) * 100) : 0;
+  async function saveNotes() {
+    setSaving("notes");
+    try {
+      const row = {
+        trainee_id:subject.id, day_date:day, trainer_id:trainerId,
+        overall_rating:noteForm.overall_rating || null, pace:noteForm.pace || null,
+        jobs_count:noteForm.jobs_count === "" || noteForm.jobs_count == null ? null : Number(noteForm.jobs_count),
+        customer_rating:noteForm.customer_rating || null,
+        went_well:noteForm.went_well || null, needs_work:noteForm.needs_work || null, focus_tomorrow:noteForm.focus_tomorrow || null,
+        incident:!!noteForm.incident, incident_notes:noteForm.incident ? (noteForm.incident_notes || null) : null,
+        updated_at:new Date().toISOString(),
+      };
+      const res = await sb("training_day_notes?on_conflict=trainee_id,day_date", { method:"POST", prefer:"resolution=merge-duplicates,return=representation", body:JSON.stringify(row) });
+      const saved = res?.[0] || row;
+      setNotes(ns => [saved, ...ns.filter(n => n.day_date !== day)].sort((a,b) => b.day_date.localeCompare(a.day_date)));
+      setNoteDirty(false);
+    } catch(e) { window.alert("Couldn't save notes: " + e.message); }
+    setSaving(null);
+  }
+
+  const setNote = (k, v) => { setNoteForm(f => ({ ...f, [k]:v })); setNoteDirty(true); };
+  const heading = { fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", letterSpacing:"1px" };
+  const small = { fontSize:"11px", color:C.muted, letterSpacing:"1px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800" };
+  const inp = { background:C.white, border:`1px solid ${C.border}`, color:C.black, padding:"9px 12px", borderRadius:"8px", fontSize:"14px", fontFamily:"'Barlow',sans-serif", width:"100%", boxSizing:"border-box" };
+  const accent = training ? C.purple : C.blue;
 
   const byPhase = {}, phases = [];
-  for (const item of rubricItems) {
+  for (const item of prog.daily) {
     if (!byPhase[item.phase]) { byPhase[item.phase] = []; phases.push(item.phase); }
     byPhase[item.phase].push(item);
   }
+  const miscByPhase = {}, miscPhases = [];
+  for (const item of prog.misc) {
+    const p = item.phase || "misc";
+    if (!miscByPhase[p]) { miscByPhase[p] = []; miscPhases.push(p); }
+    miscByPhase[p].push(item);
+  }
+
+  const scriptToggle = item => item.has_script && (<>
+    <button onClick={e => { e.stopPropagation(); setExpandedScript(s => ({...s, [item.id]: !s[item.id]})); }} style={{ background:"none", border:"none", color:C.blue, fontSize:"11px", cursor:"pointer", padding:"2px 0", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>
+      {expandedScript[item.id] ? "▲ Hide script" : "▼ View script"}
+    </button>
+    {expandedScript[item.id] && <div style={{ background:C.blueXlt, border:`1px solid ${C.border}`, borderRadius:"6px", padding:"8px 10px", fontSize:"12px", color:C.black, marginTop:"4px", lineHeight:1.5 }}>{item.script_text}</div>}
+  </>);
+
+  const Stars = ({ k }) => (
+    <div style={{ display:"flex", gap:"4px" }}>
+      {[1,2,3,4,5].map(n => (
+        <button key={n} onClick={() => setNote(k, noteForm[k]===n ? null : n)} style={{ background:"none", border:"none", cursor:"pointer", fontSize:"24px", padding:0, color:(noteForm[k]||0) >= n ? C.gold : C.border, lineHeight:1 }}>★</button>
+      ))}
+    </div>
+  );
+
+  if (!subject) return null;
 
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:"12px" }}>
-      {isTrainer && (
+      {isTrainer && !admin && (
         <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.purple}`, borderRadius:"12px", padding:"14px 16px" }}>
-          <div style={{ fontSize:"11px", color:C.muted, letterSpacing:"1px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", marginBottom:"6px" }}>WHOSE RUBRIC?</div>
-          <select value={subjectId} onChange={e=>setSubjectId(e.target.value)}
+          <div style={{ ...small, marginBottom:"6px" }}>WHO ARE YOU TRAINING?</div>
+          <select value={subjectId} onChange={e=>{ setSubjectId(e.target.value); setDay(today); setView("daily"); }}
             style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"10px 12px", borderRadius:"10px", fontSize:"15px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", width:"100%" }}>
             <option value={tech.id}>My own rubric</option>
             {myTrainees.length>0 && <optgroup label="Apprentices I'm training">{myTrainees.map(t=><option key={t.id} value={t.id}>{t.name}</option>)}</optgroup>}
@@ -4530,58 +4644,202 @@ function PerfectDayTrainingPanel({ tech, techs=[] }) {
           {myTrainees.length===0 && <div style={{ fontSize:"11px", color:C.muted, marginTop:"6px" }}>No apprentices on your team yet — an admin assigns them in the Teams tab.</div>}
         </div>
       )}
+
+      {/* Progress */}
       <div style={{ background:training?`${C.purple}10`:C.card, border:`1px solid ${training?C.purple:C.border}`, borderRadius:"12px", padding:"16px" }}>
-        {training && <div style={{ fontSize:"11px", color:C.purple, letterSpacing:"2px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", marginBottom:"4px" }}>TRAINING RUBRIC FOR</div>}
-        <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:training?"22px":"16px", color:C.black, marginBottom:"10px" }}>
-          {training ? subject.name : "Perfect Day Training"} — {done}/{total} items signed off
+        {training && <div style={{ fontSize:"11px", color:C.purple, letterSpacing:"2px", ...heading, marginBottom:"4px" }}>TRAINING</div>}
+        <div style={{ display:"flex", alignItems:"baseline", justifyContent:"space-between", gap:"10px", marginBottom:"8px" }}>
+          <div style={{ ...heading, fontSize:"22px", color:C.black, letterSpacing:0 }}>{training ? subject.name : "Perfect Day Training"}</div>
+          <div style={{ ...heading, fontSize:"28px", color:prog.complete ? C.green : accent, letterSpacing:0 }}>{prog.pct}%</div>
         </div>
-        <Bar pct={pct} color={done === total && total > 0 ? C.green : training ? C.purple : C.blue} h={8}/>
-        <div style={{ fontSize:"11px", color:C.muted, marginTop:"4px" }}>
-          {pct}% complete{done === total && total > 0 ? " — eligible for cert!" : ""}{training ? " · tap an item to sign it off (tap again to undo)" : ""}
+        <Bar pct={prog.pct} color={prog.complete ? C.green : accent} h={12}/>
+        <div style={{ fontSize:"12px", color:prog.complete ? C.green : C.muted, marginTop:"6px", fontWeight:prog.complete?"700":"400" }}>
+          {prog.complete ? "✅ Training complete — ready for the Perfect Day cert" : `${trainingDays.length} training day${trainingDays.length===1?"":"s"} logged · minimum ${TRAINING_MIN_DAYS}`}
+        </div>
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"12px", marginTop:"14px" }}>
+          <div>
+            <div style={small}>PERFECT DAY · {prog.fullDays}/{TRAINING_MIN_DAYS} FULL DAYS</div>
+            <div style={{ display:"flex", gap:"3px", marginTop:"6px" }}>
+              {Array.from({ length:TRAINING_MIN_DAYS }, (_, i) => <div key={i} style={{ flex:1, height:"8px", borderRadius:"3px", background:i < prog.fullDays ? C.green : C.border }}/>)}
+            </div>
+          </div>
+          <div>
+            <div style={small}>MISCELLANEOUS · {prog.miscDone}/{prog.miscMax} REPS</div>
+            <div style={{ marginTop:"6px" }}><Bar pct={prog.miscMax ? (prog.miscDone/prog.miscMax)*100 : 0} color={prog.miscMax && prog.miscDone>=prog.miscMax ? C.green : C.gold} h={8}/></div>
+            {prog.misc.length===0 && <div style={{ fontSize:"10px", color:C.muted, marginTop:"3px" }}>No misc items yet</div>}
+          </div>
         </div>
       </div>
+
       {loading && <div style={{ color:C.muted, padding:"16px" }}>Loading training progress...</div>}
-      {!loading && total === 0 && (
+      {!loading && rubricItems.length === 0 && (
         <div style={{ background:C.cardLt, border:`1px solid ${C.border}`, borderRadius:"10px", padding:"14px", fontSize:"13px", color:C.muted }}>
           Rubric items not seeded yet. Ask an admin to seed them in the Development tab.
         </div>
       )}
-      {!loading && phases.map(phase => (
-        <div key={phase} style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", overflow:"hidden" }}>
-          <div style={{ background:C.cardLt, padding:"10px 16px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"13px", color:training?C.purple:C.blue, letterSpacing:"1px" }}>
-            {PHASE_LABELS[phase] || phase}
+
+      {!loading && rubricItems.length > 0 && (<>
+        {/* Day picker */}
+        {(training || dayList.length > 0) && (
+          <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"12px 14px" }}>
+            <div style={{ ...small, marginBottom:"8px" }}>TRAINING DAY</div>
+            <div style={{ display:"flex", gap:"6px", overflowX:"auto", paddingBottom:"4px" }}>
+              {dayList.map(d => {
+                const n = prog.perDay[d] || 0, full = prog.daily.length && n >= prog.daily.length, on = d === day;
+                return (
+                  <button key={d} onClick={() => setDay(d)} style={{ flexShrink:0, background:on ? accent : C.cardLt, color:on ? C.white : C.black, border:`1px solid ${on ? accent : full ? C.green : C.border}`, borderRadius:"10px", padding:"6px 10px", cursor:"pointer", textAlign:"left", fontFamily:"'Barlow Condensed',sans-serif" }}>
+                    <div style={{ fontWeight:"900", fontSize:"13px" }}>Day {dayNumber(d)}{full ? " ✓" : ""}</div>
+                    <div style={{ fontSize:"11px", opacity:0.85 }}>{d === today ? "Today" : fmtDay(d)} · {n}/{prog.daily.length}</div>
+                  </button>
+                );
+              })}
+              {training && (addingDay
+                ? <input type="date" max={today} autoFocus onChange={e => { if (e.target.value) { setDay(e.target.value); setAddingDay(false); } }} onBlur={() => setAddingDay(false)} style={{ ...inp, width:"auto", flexShrink:0 }}/>
+                : <button onClick={() => setAddingDay(true)} style={{ flexShrink:0, background:"none", border:`1px dashed ${C.border}`, borderRadius:"10px", padding:"6px 10px", cursor:"pointer", color:C.muted, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"12px" }}>+ Other date</button>)}
+            </div>
           </div>
-          {byPhase[phase].map(item => {
-            const so = signoffs[item.id], on = !!so?.signed_off;
-            return (
-            <div key={item.id} onClick={()=>toggle(item)} style={{ padding:"10px 16px", borderBottom:`1px solid ${C.border}40`, cursor:training?"pointer":"default", opacity:savingItem===item.id?0.5:1 }}>
-              <div style={{ display:"flex", alignItems:"flex-start", gap:"10px" }}>
-                <div style={{ width:training?"22px":"18px", height:training?"22px":"18px", borderRadius:"4px", border:`2px solid ${on ? C.green : C.border}`, background:on ? C.green : "transparent", flexShrink:0, display:"flex", alignItems:"center", justifyContent:"center", marginTop:"1px" }}>
-                  {on && <span style={{ color:C.white, fontSize:"12px", lineHeight:1 }}>✓</span>}
-                </div>
-                <div style={{ flex:1 }}>
-                  <div style={{ fontSize:"13px", color:on ? C.muted : C.black, textDecoration:on ? "line-through" : "none" }}>
-                    <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", color:C.muted, marginRight:"4px" }}>#{item.sort_order}</span>
-                    {item.description}
-                  </div>
-                  {on && so.trainer_id && <div style={{ fontSize:"10px", color:C.green, marginTop:"2px" }}>Signed off by {techName(so.trainer_id)}{so.signed_off_at?` · ${new Date(so.signed_off_at).toLocaleDateString("en-US",{month:"short",day:"numeric"})}`:""}</div>}
-                  {item.has_script && (
-                    <button onClick={e => { e.stopPropagation(); setExpandedScript(s => ({...s, [item.id]: !s[item.id]})); }} style={{ background:"none", border:"none", color:C.blue, fontSize:"11px", cursor:"pointer", padding:"2px 0", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>
-                      {expandedScript[item.id] ? "▲ Hide script" : "▼ View script"}
-                    </button>
-                  )}
-                  {item.has_script && expandedScript[item.id] && (
-                    <div style={{ background:C.blueXlt, border:`1px solid ${C.border}`, borderRadius:"6px", padding:"8px 10px", fontSize:"12px", color:C.black, marginTop:"4px", lineHeight:1.5 }}>
-                      {item.script_text}
+        )}
+
+        {/* Section switcher */}
+        <div style={{ display:"flex", gap:"6px" }}>
+          {[["daily",`Perfect Day ${dailyToday}/${prog.daily.length}`],["misc","Miscellaneous"],...(training?[["notes", notes.some(n=>n.day_date===day) ? "Notes ✓" : "Notes"]]:[])].map(([id,label]) => (
+            <button key={id} onClick={() => setView(id)} style={{ flex:1, background:view===id ? accent : C.card, color:view===id ? C.white : C.black, border:`1px solid ${view===id ? accent : C.border}`, borderRadius:"20px", padding:"9px 6px", cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"13px", letterSpacing:"1px", textTransform:"uppercase" }}>{label}</button>
+          ))}
+        </div>
+
+        {view==="daily" && (<>
+          <div style={{ fontSize:"12px", color:C.muted, padding:"0 4px" }}>
+            {training
+              ? <>Go through every item on {day===today ? "today's" : fmtDay(day)+"'s"} jobs. Tap to check it off · <b>N/A</b> if it didn't come up that day.</>
+              : dayList.length ? <>Showing {day===today ? "today" : fmtDay(day)}. Your trainer checks these off as you go.</> : "Your trainer checks these off with you each training day."}
+          </div>
+          {phases.map(phase => (
+            <div key={phase} style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", overflow:"hidden" }}>
+              <div style={{ background:C.cardLt, padding:"10px 16px", ...heading, fontSize:"13px", color:accent, display:"flex", justifyContent:"space-between" }}>
+                <span>{PHASE_LABELS[phase] || phase}</span>
+                <span style={{ color:C.muted }}>{byPhase[phase].filter(i=>dayChecks[i.id]).length}/{byPhase[phase].length}</span>
+              </div>
+              {byPhase[phase].map(item => {
+                const ck = dayChecks[item.id], done = ck?.status==="done", na = ck?.status==="na";
+                return (
+                  <div key={item.id} onClick={() => setCheck(item, "done")} style={{ padding:"10px 16px", borderBottom:`1px solid ${C.border}40`, cursor:training?"pointer":"default", opacity:saving===item.id?0.5:1 }}>
+                    <div style={{ display:"flex", alignItems:"flex-start", gap:"10px" }}>
+                      <div style={{ width:"22px", height:"22px", borderRadius:"4px", border:`2px solid ${done ? C.green : na ? C.muted : C.border}`, background:done ? C.green : na ? C.border : "transparent", flexShrink:0, display:"flex", alignItems:"center", justifyContent:"center", marginTop:"1px" }}>
+                        {done && <span style={{ color:C.white, fontSize:"12px", lineHeight:1 }}>✓</span>}
+                        {na && <span style={{ color:C.muted, fontSize:"9px", fontWeight:"900", lineHeight:1 }}>N/A</span>}
+                      </div>
+                      <div style={{ flex:1 }}>
+                        <div style={{ fontSize:"13px", color:ck ? C.muted : C.black, textDecoration:done ? "line-through" : "none", fontStyle:na ? "italic" : "normal" }}>
+                          <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", color:C.muted, marginRight:"4px" }}>#{item.sort_order}</span>
+                          {item.description}
+                        </div>
+                        {ck && ck.trainer_id && training && <div style={{ fontSize:"10px", color:done ? C.green : C.muted, marginTop:"2px" }}>{na ? "N/A" : "Checked"} by {techName(ck.trainer_id)}</div>}
+                        {scriptToggle(item)}
+                      </div>
+                      {training && (
+                        <button onClick={e => { e.stopPropagation(); setCheck(item, "na"); }} style={{ flexShrink:0, background:na ? C.muted : "none", color:na ? C.white : C.muted, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"3px 8px", fontSize:"10px", fontWeight:"900", cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif" }}>N/A</button>
+                      )}
                     </div>
-                  )}
+                  </div>
+                );
+              })}
+            </div>
+          ))}
+        </>)}
+
+        {view==="misc" && (<>
+          <div style={{ fontSize:"12px", color:C.muted, padding:"0 4px" }}>
+            Each of these gets trained {MISC_REPS} times over the course of training — they don't come up on every job.{training ? ` Tap an item to log a rep on ${day===today ? "today" : fmtDay(day)} (tap again to undo).` : ""}
+          </div>
+          {prog.misc.length === 0 && (
+            <div style={{ background:C.cardLt, border:`1px solid ${C.border}`, borderRadius:"10px", padding:"14px", fontSize:"13px", color:C.muted }}>No miscellaneous items have been added yet.</div>
+          )}
+          {miscPhases.map(phase => (
+            <div key={phase} style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", overflow:"hidden" }}>
+              <div style={{ background:C.cardLt, padding:"10px 16px", ...heading, fontSize:"13px", color:C.gold }}>{PHASE_LABELS[phase] || (phase==="misc" ? "Miscellaneous" : phase)}</div>
+              {miscByPhase[phase].map(item => {
+                const reps = checks.filter(c => c.rubric_item_id===item.id).sort((a,b)=>a.day_date.localeCompare(b.day_date));
+                const doneToday = !!dayChecks[item.id], complete = reps.length >= MISC_REPS;
+                return (
+                  <div key={item.id} onClick={() => setCheck(item, "done")} style={{ padding:"10px 16px", borderBottom:`1px solid ${C.border}40`, cursor:training?"pointer":"default", opacity:saving===item.id?0.5:1, background:doneToday ? `${C.gold}10` : "transparent" }}>
+                    <div style={{ display:"flex", alignItems:"flex-start", gap:"10px" }}>
+                      <div style={{ display:"flex", gap:"3px", flexShrink:0, marginTop:"3px" }}>
+                        {Array.from({ length:MISC_REPS }, (_, i) => <div key={i} style={{ width:"14px", height:"14px", borderRadius:"50%", background:i < reps.length ? (complete ? C.green : C.gold) : "transparent", border:`2px solid ${i < reps.length ? (complete ? C.green : C.gold) : C.border}` }}/>)}
+                      </div>
+                      <div style={{ flex:1 }}>
+                        <div style={{ fontSize:"13px", color:complete ? C.muted : C.black }}>
+                          <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", color:C.muted, marginRight:"4px" }}>#{item.sort_order}</span>
+                          {item.description}
+                        </div>
+                        {reps.length > 0 && <div style={{ fontSize:"10px", color:C.muted, marginTop:"2px" }}>Done {reps.map(r => fmtDay(r.day_date)).join(" · ")}{doneToday && training ? " — logged for this day" : ""}</div>}
+                        {scriptToggle(item)}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ))}
+        </>)}
+
+        {view==="notes" && training && (
+          <div style={{ display:"flex", flexDirection:"column", gap:"12px" }}>
+            <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.purple}`, borderRadius:"12px", padding:"16px", display:"flex", flexDirection:"column", gap:"14px" }}>
+              <div style={{ ...heading, fontSize:"16px", color:C.black }}>Day {dayNumber(day)} notes · {day===today ? "Today" : fmtDay(day)}</div>
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"12px" }}>
+                <div><div style={{ ...small, marginBottom:"4px" }}>OVERALL DAY</div><Stars k="overall_rating"/></div>
+                <div><div style={{ ...small, marginBottom:"4px" }}>WITH CUSTOMERS</div><Stars k="customer_rating"/></div>
+                <div>
+                  <div style={{ ...small, marginBottom:"4px" }}>PACE</div>
+                  <select value={noteForm.pace || ""} onChange={e => setNote("pace", e.target.value)} style={inp}>
+                    <option value="">—</option>
+                    {Object.entries(TRAINING_PACE).map(([k,v]) => <option key={k} value={k}>{v}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <div style={{ ...small, marginBottom:"4px" }}>JOBS TODAY</div>
+                  <input type="number" min="0" inputMode="numeric" value={noteForm.jobs_count ?? ""} onChange={e => setNote("jobs_count", e.target.value)} style={inp}/>
                 </div>
               </div>
+              {[["went_well","👍 WHAT THEY DID WELL","Things they nailed, improvements since yesterday..."],
+                ["needs_work","🔧 WHAT NEEDS WORK","Mistakes, missed steps, habits to fix..."],
+                ["focus_tomorrow","🎯 FOCUS FOR NEXT DAY","The 1–2 things to drill next time out..."]].map(([k,label,ph]) => (
+                <div key={k}>
+                  <div style={{ ...small, marginBottom:"4px" }}>{label}</div>
+                  <textarea value={noteForm[k] || ""} onChange={e => setNote(k, e.target.value)} placeholder={ph} rows={3} style={{ ...inp, resize:"vertical" }}/>
+                </div>
+              ))}
+              <label style={{ display:"flex", alignItems:"center", gap:"8px", fontSize:"13px", color:C.black, cursor:"pointer" }}>
+                <input type="checkbox" checked={!!noteForm.incident} onChange={e => setNote("incident", e.target.checked)} style={{ width:"16px", height:"16px" }}/>
+                Damage, safety issue, or customer complaint today
+              </label>
+              {noteForm.incident && <textarea value={noteForm.incident_notes || ""} onChange={e => setNote("incident_notes", e.target.value)} placeholder="What happened?" rows={2} style={{ ...inp, resize:"vertical", borderColor:C.red }}/>}
+              <button onClick={saveNotes} disabled={saving==="notes" || !noteDirty} style={{ background:noteDirty ? C.purple : C.border, border:"none", color:C.white, padding:"11px 18px", borderRadius:"20px", cursor:noteDirty ? "pointer" : "default", fontSize:"13px", fontWeight:"900", fontStyle:"italic", letterSpacing:"2px", fontFamily:"'Barlow Condensed',sans-serif", textTransform:"uppercase" }}>
+                {saving==="notes" ? "Saving..." : noteDirty ? "Save notes" : notes.some(n=>n.day_date===day) ? "✓ Saved" : "Save notes"}
+              </button>
             </div>
-            );
-          })}
-        </div>
-      ))}
+
+            {notes.filter(n => n.day_date !== day).length > 0 && (
+              <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"14px 16px" }}>
+                <div style={{ ...small, marginBottom:"8px" }}>EARLIER DAYS</div>
+                {notes.filter(n => n.day_date !== day).map(n => (
+                  <div key={n.day_date} onClick={() => setDay(n.day_date)} style={{ padding:"10px 0", borderTop:`1px solid ${C.border}40`, cursor:"pointer" }}>
+                    <div style={{ display:"flex", justifyContent:"space-between", gap:"8px", fontSize:"12px" }}>
+                      <span style={{ ...heading, color:C.black, fontSize:"13px" }}>Day {dayNumber(n.day_date)} · {fmtDay(n.day_date)}</span>
+                      <span style={{ color:C.gold }}>{n.overall_rating ? "★".repeat(n.overall_rating) : ""}{n.pace ? <span style={{ color:n.pace==="behind" ? C.red : C.muted, marginLeft:"6px" }}>{TRAINING_PACE[n.pace]}</span> : null}</span>
+                    </div>
+                    {n.went_well && <div style={{ fontSize:"12px", color:C.black, marginTop:"3px" }}>👍 {n.went_well}</div>}
+                    {n.needs_work && <div style={{ fontSize:"12px", color:C.black, marginTop:"3px" }}>🔧 {n.needs_work}</div>}
+                    {n.focus_tomorrow && <div style={{ fontSize:"12px", color:C.black, marginTop:"3px" }}>🎯 {n.focus_tomorrow}</div>}
+                    {n.incident && <div style={{ fontSize:"12px", color:C.red, marginTop:"3px" }}>⚠️ {n.incident_notes || "Incident noted"}</div>}
+                    {n.trainer_id && <div style={{ fontSize:"10px", color:C.muted, marginTop:"3px" }}>— {techName(n.trainer_id)}</div>}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </>)}
     </div>
   );
 }
@@ -4595,6 +4853,7 @@ function DevelopmentTab({ techs, rideAlongs, refreshAll, showToast }) {
   const [devView, setDevView] = useState("signoff");
   const [rubricItems, setRubricItems] = useState(null);
   const [signoffs, setSignoffs] = useState([]);
+  const [trainingChecks, setTrainingChecks] = useState([]);
   const [certs, setCerts] = useState([]);
   const [certResults, setCertResults] = useState([]);
   const [checkins, setCheckins] = useState([]);
@@ -4621,13 +4880,15 @@ function DevelopmentTab({ techs, rideAlongs, refreshAll, showToast }) {
   async function loadDevData() {
     setLoadingDev(true);
     try {
-      const [items, offs, c, cr, ci] = await Promise.all([
+      const [items, offs, c, cr, ci, tc] = await Promise.all([
         sb("rubric_items?select=*&order=sort_order"),
         sb("training_signoffs?select=*"),
         sb("perfect_day_certs?select=*&order=created_at.desc"),
         sb("perfect_day_cert_results?select=*"),
         sb("checkins?select=*&order=scheduled_date"),
+        sb("training_checks?select=trainee_id,day_date,rubric_item_id,status"),
       ]);
+      setTrainingChecks(tc || []);
       setRubricItems(items || []);
       setSignoffs(offs || []);
       setCerts(c || []);
@@ -4635,6 +4896,10 @@ function DevelopmentTab({ techs, rideAlongs, refreshAll, showToast }) {
       setCheckins(ci || []);
     } catch(e) { showToast("Error loading dev data: " + e.message, false); }
     setLoadingDev(false);
+  }
+
+  async function loadTrainingChecks() {
+    try { setTrainingChecks(await sb("training_checks?select=trainee_id,day_date,rubric_item_id,status") || []); } catch {}
   }
 
   async function seedRubricItems() {
@@ -4647,31 +4912,15 @@ function DevelopmentTab({ techs, rideAlongs, refreshAll, showToast }) {
     setSeeding(false);
   }
 
-  async function toggleSignoff(techId, itemId) {
-    if (!trainerSel) { showToast("Select a trainer first", false); return; }
-    const existing = signoffs.find(s => s.tech_id === techId && s.rubric_item_id === itemId);
-    const newVal = !(existing?.signed_off);
-    try {
-      await sb("training_signoffs?on_conflict=tech_id,rubric_item_id", {
-        method:"POST", prefer:"resolution=merge-duplicates,return=minimal",
-        body:JSON.stringify({ tech_id:techId, rubric_item_id:itemId, trainer_id:trainerSel, signed_off:newVal, signed_off_at: newVal ? new Date().toISOString() : null }),
-      });
-      setSignoffs(prev => {
-        const filtered = prev.filter(s => !(s.tech_id===techId && s.rubric_item_id===itemId));
-        return [...filtered, { tech_id:techId, rubric_item_id:itemId, trainer_id:trainerSel, signed_off:newVal }];
-      });
-    } catch(e) { showToast("Error: " + e.message, false); }
-  }
-
   async function advanceStage(tech) {
     const order = ["classroom","field_training","cert_pending","cert_passed","active"];
     const idx = order.indexOf(tech.onboarding_stage || "classroom");
     if (idx < 0 || idx >= order.length - 1) return;
     const next = order[idx + 1];
     if (next === "cert_pending" && rubricItems) {
-      const done = signoffs.filter(s => s.tech_id === tech.id && s.signed_off).length;
-      if (done < rubricItems.length) {
-        showToast(`❌ All ${rubricItems.length} items must be signed off before cert`, false);
+      const p = trainingProgress(rubricItems, trainingChecks.filter(c => c.trainee_id === tech.id));
+      if (!p.complete) {
+        showToast(`❌ Training isn't done yet: ${p.fullDays}/${TRAINING_MIN_DAYS} full Perfect Days, ${p.miscDone}/${p.miscMax} misc reps`, false);
         return;
       }
     }
@@ -4735,11 +4984,6 @@ function DevelopmentTab({ techs, rideAlongs, refreshAll, showToast }) {
       byPhase[item.phase].push(item);
     }
   }
-  const signoffMap = {};
-  for (const s of signoffs) {
-    if (!signoffMap[s.tech_id]) signoffMap[s.tech_id] = {};
-    signoffMap[s.tech_id][s.rubric_item_id] = s.signed_off;
-  }
   const stageOrder = ["classroom","field_training","cert_pending","cert_passed","active"];
   const activeTechs = techs.filter(t => t.is_active !== false);
 
@@ -4772,8 +5016,7 @@ function DevelopmentTab({ techs, rideAlongs, refreshAll, showToast }) {
           {activeTechs.map(tech => {
             const sc = STAGE_CONFIG[tech.onboarding_stage || "classroom"] || STAGE_CONFIG.classroom;
             const items = rubricItems || [];
-            const tSoffs = signoffMap[tech.id] || {};
-            const doneCount = items.filter(i => tSoffs[i.id]).length;
+            const tProg = trainingProgress(items, trainingChecks.filter(c => c.trainee_id === tech.id));
             const isExp = expandedTech === tech.id;
             const stageIdx = stageOrder.indexOf(tech.onboarding_stage || "classroom");
             const canAdv = stageIdx >= 0 && stageIdx < stageOrder.indexOf("active");
@@ -4782,7 +5025,7 @@ function DevelopmentTab({ techs, rideAlongs, refreshAll, showToast }) {
                 <div onClick={() => setExpandedTech(isExp ? null : tech.id)} style={{ padding:"12px 16px", display:"flex", alignItems:"center", gap:"12px", cursor:"pointer", background:C.cardLt }}>
                   <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"16px", color:C.black, flex:1 }}>{tech.name}</div>
                   <Pill color={sc.color}>{sc.icon} {sc.label}</Pill>
-                  <div style={{ fontSize:"12px", color:C.muted }}>{doneCount}/{items.length}</div>
+                  <div style={{ fontSize:"12px", color:tProg.complete ? C.green : C.muted }}>{tProg.pct}% · {tProg.fullDays}/{TRAINING_MIN_DAYS} days</div>
                   <div style={{ fontSize:"13px", color:C.muted }}>{isExp ? "▲" : "▼"}</div>
                 </div>
                 {isExp && (
@@ -4791,32 +5034,7 @@ function DevelopmentTab({ techs, rideAlongs, refreshAll, showToast }) {
                       <input type="checkbox" id={`cc_${tech.id}`} checked={!!tech.classroom_complete} onChange={e => sb(`techs?id=eq.${tech.id}`,{method:"PATCH",body:JSON.stringify({classroom_complete:e.target.checked}),prefer:"return=minimal"}).then(()=>refreshAll()).catch(e=>showToast("Error: "+e.message,false))} style={{ width:"16px", height:"16px", cursor:"pointer" }}/>
                       <label htmlFor={`cc_${tech.id}`} style={{ fontSize:"13px", color:C.black, cursor:"pointer" }}>Classroom training complete</label>
                     </div>
-                    <Bar pct={items.length ? Math.round((doneCount/items.length)*100) : 0} color={doneCount===items.length&&items.length>0 ? C.green : C.blue} h={6}/>
-                    {phases.map(phase => (
-                      <div key={phase}>
-                        <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"12px", color:C.blue, letterSpacing:"1px", marginBottom:"4px", marginTop:"8px" }}>{PHASE_LABELS[phase] || phase}</div>
-                        {byPhase[phase].map(item => (
-                          <div key={item.id} style={{ padding:"5px 0", borderBottom:`1px solid ${C.border}20` }}>
-                            <div style={{ display:"flex", alignItems:"flex-start", gap:"10px" }}>
-                              <input type="checkbox" checked={!!tSoffs[item.id]} onChange={() => toggleSignoff(tech.id, item.id)} style={{ width:"15px", height:"15px", marginTop:"2px", cursor:"pointer" }}/>
-                              <div style={{ flex:1 }}>
-                                <div style={{ fontSize:"12px", color:tSoffs[item.id] ? C.muted : C.black, textDecoration:tSoffs[item.id] ? "line-through" : "none" }}>
-                                  <span style={{ color:C.muted, marginRight:"4px" }}>#{item.sort_order}</span>{item.description}
-                                </div>
-                                {item.has_script && (<>
-                                  <button onClick={() => setExpandedScript(s => ({...s, [`${tech.id}_${item.id}`]: !s[`${tech.id}_${item.id}`]}))} style={{ background:"none", border:"none", color:C.blue, fontSize:"10px", cursor:"pointer", padding:"2px 0", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>
-                                    {expandedScript[`${tech.id}_${item.id}`] ? "▲ Hide" : "▼ Script"}
-                                  </button>
-                                  {expandedScript[`${tech.id}_${item.id}`] && (
-                                    <div style={{ background:C.blueXlt, border:`1px solid ${C.border}`, borderRadius:"6px", padding:"8px 10px", fontSize:"11px", color:C.black, marginTop:"4px", lineHeight:1.5 }}>{item.script_text}</div>
-                                  )}
-                                </>)}
-                              </div>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    ))}
+                    <PerfectDayTrainingPanel admin techs={techs} fixedSubject={tech} adminTrainerId={trainerSel} onChange={loadTrainingChecks}/>
                     <div style={{ display:"flex", gap:"8px", marginTop:"8px", flexWrap:"wrap" }}>
                       {canAdv && <button onClick={() => advanceStage(tech)} style={btnSm(C.green)}>Advance → {STAGE_CONFIG[stageOrder[stageIdx+1]]?.label}</button>}
                       <button onClick={() => sb(`techs?id=eq.${tech.id}`,{method:"PATCH",body:JSON.stringify({onboarding_stage:"hard_fail"}),prefer:"return=minimal"}).then(()=>{ refreshAll(); showToast(`${tech.name} → Hard Fail`); loadDevData(); }).catch(e=>showToast("Error: "+e.message,false))} style={btnSm(C.red)}>Mark Hard Fail</button>
