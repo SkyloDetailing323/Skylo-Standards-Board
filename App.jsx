@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { TEST_QUESTIONS, shuffle } from "./trainingTest.js";
 import { computeOpsMonth, monthRange, mountainDate, CALLBACK_TIERS, QUOTA_TIERS, RETENTION_TIERS, NON_ROUTE_VEHICLES, OPS_EXCLUDED_TITLES } from "./opsBonus.js";
 
 // ─── SUPABASE CONFIG ──────────────────────────────────────────────────────────
@@ -4875,25 +4876,355 @@ function PerfectDayTrainingPanel({ tech=null, techs=[], admin=false, fixedSubjec
   );
 }
 
+// ─── FINAL DAY: written test + in-person Perfect Day evaluation ─────────────
+// Will (or an owner) runs both from the Detail Apprentice Training tab on the
+// apprentice's final training day. Owners see every result there too.
+
+const fmtWhen = iso => iso ? new Date(iso).toLocaleDateString("en-US", { month:"short", day:"numeric", year:"numeric", timeZone:"America/Denver" }) : "";
+const QUESTION_BY_ID = Object.fromEntries(TEST_QUESTIONS.map(q => [q.id, q]));
+
+// The apprentice takes the test on the administrator's device. Questions come
+// one at a time with the four answers shuffled; after each round only the
+// missed questions come back (re-shuffled) until every one is answered right.
+// Right answers are never shown while the test is running.
+function WrittenTestRunner({ trainee, adminUser, onExit }) {
+  const [test, setTest] = useState(null);
+  const [roundIds, setRoundIds] = useState([]);
+  const [roundNo, setRoundNo] = useState(1);
+  const [order, setOrder] = useState([]);
+  const [idx, setIdx] = useState(0);
+  const [picks, setPicks] = useState({});
+  const [result, setResult] = useState(null);
+  const [saving, setSaving] = useState(false);
+
+  function startRound(ids, n) {
+    setRoundIds(ids); setRoundNo(n); setIdx(0); setPicks({}); setResult(null);
+    setOrder(shuffle(ids).map(id => { const q = QUESTION_BY_ID[id]; return { id, choices: shuffle([q.correct, ...q.wrong]) }; }));
+  }
+
+  async function begin() {
+    setSaving(true);
+    try {
+      const row = { trainee_id:trainee.id, administered_by:adminUser?.techId || null, administered_by_name:adminUser?.name || null, total_questions:TEST_QUESTIONS.length, status:"in_progress", rounds:[] };
+      const res = await sb("training_tests", { method:"POST", body:JSON.stringify(row) });
+      setTest(res?.[0] || row);
+      startRound(TEST_QUESTIONS.map(q => q.id), 1);
+    } catch(e) { window.alert("Couldn't start the test: " + e.message); }
+    setSaving(false);
+  }
+
+  async function submitRound() {
+    const wrong = order.filter(o => picks[o.id] !== QUESTION_BY_ID[o.id].correct).map(o => ({ id:o.id, picked:picks[o.id] }));
+    const rounds = [...(test.rounds || []), { round:roundNo, asked:roundIds, wrong, at:new Date().toISOString() }];
+    const passed = wrong.length === 0;
+    const patch = { rounds, ...(roundNo === 1 ? { first_try_correct:roundIds.length - wrong.length } : {}), ...(passed ? { status:"passed", completed_at:new Date().toISOString() } : {}) };
+    setSaving(true);
+    try {
+      if (test.id) await sb(`training_tests?id=eq.${test.id}`, { method:"PATCH", prefer:"return=minimal", body:JSON.stringify(patch) });
+      setTest(t => ({ ...t, ...patch }));
+      setResult({ asked:roundIds.length, wrong });
+    } catch(e) { window.alert("Couldn't save answers — check the connection and tap Submit again. " + e.message); }
+    setSaving(false);
+  }
+
+  async function quit() {
+    if (!window.confirm("Stop this test? It will be saved as not finished and they'll start over next time.")) return;
+    if (test?.id && test.status === "in_progress") await sb(`training_tests?id=eq.${test.id}`, { method:"PATCH", prefer:"return=minimal", body:JSON.stringify({ status:"abandoned", completed_at:new Date().toISOString() }) }).catch(()=>{});
+    onExit();
+  }
+
+  const wrap = { background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.purple}`, borderRadius:"12px", padding:"18px", display:"flex", flexDirection:"column", gap:"14px" };
+  const big = (bg, on=true) => ({ background:on ? bg : C.border, border:"none", color:C.white, padding:"13px 18px", borderRadius:"22px", cursor:on ? "pointer" : "default", fontSize:"14px", fontWeight:"900", fontStyle:"italic", letterSpacing:"2px", fontFamily:"'Barlow Condensed',sans-serif", textTransform:"uppercase" });
+  const h = { fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", color:C.black };
+
+  if (!test) return (
+    <div style={wrap}>
+      <div style={{ ...h, fontSize:"22px" }}>📝 Written Test — {trainee.name}</div>
+      <div style={{ fontSize:"13px", color:C.black, lineHeight:1.6 }}>
+        {TEST_QUESTIONS.length} multiple-choice questions covering the Perfect Day rubric and the Miscellaneous section. Hand the phone to {trainee.name.split(" ")[0]} once you start.
+        <br/><br/>To pass they need <b>100%</b>. After the first try, any missed questions come back (in a new order) until every one is right. The right answers aren't shown during the test.
+      </div>
+      <button onClick={begin} disabled={saving} style={big(C.purple, !saving)}>{saving ? "Starting..." : "Start test"}</button>
+      <button onClick={onExit} style={{ background:"none", border:"none", color:C.muted, cursor:"pointer", fontSize:"13px" }}>Cancel</button>
+    </div>
+  );
+
+  if (result) {
+    const passed = result.wrong.length === 0;
+    return (
+      <div style={wrap}>
+        <div style={{ ...h, fontSize:"13px", color:C.purple, letterSpacing:"2px" }}>{roundNo === 1 ? "FIRST TRY" : `RETAKE ${roundNo - 1}`}</div>
+        <div style={{ ...h, fontSize:"40px", color:passed ? C.green : C.black }}>{result.asked - result.wrong.length}/{result.asked}</div>
+        {passed ? (<>
+          <div style={{ fontSize:"15px", color:C.green, fontWeight:"700" }}>✅ Test passed{roundNo > 1 ? ` after ${roundNo - 1} retake${roundNo > 2 ? "s" : ""}` : " — 100% on the first try!"}</div>
+          {test.first_try_correct != null && roundNo > 1 && <div style={{ fontSize:"13px", color:C.muted }}>First try: {test.first_try_correct}/{test.total_questions}</div>}
+          <div style={{ fontSize:"13px", color:C.black }}>Hand the phone back to {adminUser?.name || "Will"}. Next up: the in-person Perfect Day evaluation.</div>
+          <button onClick={onExit} style={big(C.green)}>Done</button>
+        </>) : (<>
+          <div style={{ fontSize:"14px", color:C.black }}>{result.wrong.length} question{result.wrong.length===1?"":"s"} missed. Retake {result.wrong.length===1?"it":"them"} until every answer is right.</div>
+          <button onClick={() => startRound(result.wrong.map(w => w.id), roundNo + 1)} style={big(C.purple)}>Retake {result.wrong.length} missed question{result.wrong.length===1?"":"s"}</button>
+          <button onClick={quit} style={{ background:"none", border:"none", color:C.muted, cursor:"pointer", fontSize:"12px" }}>Stop test</button>
+        </>)}
+      </div>
+    );
+  }
+
+  const cur = order[idx];
+  if (!cur) return null;
+  const q = QUESTION_BY_ID[cur.id];
+  const answered = order.filter(o => picks[o.id]).length;
+  const last = idx === order.length - 1;
+  return (
+    <div style={wrap}>
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline" }}>
+        <div style={{ ...h, fontSize:"13px", color:C.purple, letterSpacing:"2px" }}>{roundNo === 1 ? "WRITTEN TEST" : `RETAKE ${roundNo - 1}`} · {trainee.name.split(" ")[0].toUpperCase()}</div>
+        <div style={{ fontSize:"12px", color:C.muted }}>{idx + 1} of {order.length}</div>
+      </div>
+      <Bar pct={(answered / order.length) * 100} color={C.purple} h={6}/>
+      <div style={{ fontSize:"11px", color:C.muted, letterSpacing:"1px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800" }}>{q.topic.toUpperCase()}</div>
+      <div style={{ fontSize:"17px", color:C.black, fontWeight:"600", lineHeight:1.4 }}>{q.q}</div>
+      <div style={{ display:"flex", flexDirection:"column", gap:"8px" }}>
+        {cur.choices.map((c, i) => {
+          const on = picks[cur.id] === c;
+          return (
+            <button key={c} onClick={() => setPicks(p => ({ ...p, [cur.id]:c }))} style={{ textAlign:"left", background:on ? `${C.purple}15` : C.white, border:`2px solid ${on ? C.purple : C.border}`, borderRadius:"10px", padding:"12px 14px", cursor:"pointer", fontSize:"14px", color:C.black, display:"flex", gap:"10px", alignItems:"flex-start", lineHeight:1.4 }}>
+              <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", color:on ? C.purple : C.muted }}>{"ABCD"[i]}</span><span>{c}</span>
+            </button>
+          );
+        })}
+      </div>
+      <div style={{ display:"flex", gap:"8px" }}>
+        <button onClick={() => setIdx(i => Math.max(0, i - 1))} disabled={idx === 0} style={{ ...big(C.muted, idx > 0), flex:"0 0 auto" }}>Back</button>
+        {!last
+          ? <button onClick={() => setIdx(i => i + 1)} disabled={!picks[cur.id]} style={{ ...big(C.purple, !!picks[cur.id]), flex:1 }}>Next</button>
+          : <button onClick={submitRound} disabled={saving || answered < order.length} style={{ ...big(C.green, !saving && answered === order.length), flex:1 }}>{saving ? "Saving..." : answered < order.length ? `${order.length - answered} unanswered` : "Submit answers"}</button>}
+      </div>
+      {last && answered < order.length && (
+        <button onClick={() => setIdx(order.findIndex(o => !picks[o.id]))} style={{ background:"none", border:"none", color:C.blue, cursor:"pointer", fontSize:"12px" }}>Go to the first unanswered question</button>
+      )}
+      <button onClick={quit} style={{ background:"none", border:"none", color:C.muted, cursor:"pointer", fontSize:"12px" }}>Stop test</button>
+    </div>
+  );
+}
+
+// Will walks the apprentice's final day and marks every Perfect Day item
+// pass or fail. Saved to perfect_day_certs like the Development tab's cert,
+// so attempt counts, cert status and the onboarding stage stay in sync.
+function FinalEvalRunner({ trainee, adminUser, rubricItems, priorAttempts, onExit, refreshAll }) {
+  const items = rubricItems.filter(i => (i.section || "daily") === "daily");
+  const [scores, setScores] = useState({});
+  const [itemNotes, setItemNotes] = useState({});
+  const [date, setDate] = useState(mountainDate(new Date().toISOString()));
+  const [saving, setSaving] = useState(false);
+  const [done, setDone] = useState(null);
+  const byPhase = {}, phases = [];
+  for (const i of items) { if (!byPhase[i.phase]) { byPhase[i.phase] = []; phases.push(i.phase); } byPhase[i.phase].push(i); }
+  const scored = items.filter(i => scores[i.id]).length;
+  const fails = items.filter(i => scores[i.id] === "fail");
+
+  async function submit() {
+    if (scored < items.length) return window.alert(`Score every item first — ${items.length - scored} left.`);
+    const overall = fails.length === 0 ? "pass" : "fail";
+    const attempt = priorAttempts + 1;
+    setSaving(true);
+    try {
+      const res = await sb("perfect_day_certs", { method:"POST", body:JSON.stringify({ tech_id:trainee.id, attempt_number:attempt, administered_by:adminUser?.techId || null, test_date:date, overall_result:overall }) });
+      const certId = res?.[0]?.id;
+      if (!certId) throw new Error("No evaluation id returned");
+      await sb("perfect_day_cert_results", { method:"POST", prefer:"return=minimal", body:JSON.stringify(items.map(i => ({ cert_id:certId, rubric_item_id:i.id, result:scores[i.id], notes:itemNotes[i.id] || null }))) });
+      const certStatus = overall==="pass" ? "passed" : attempt===1 ? "failed_retest_1" : attempt===2 ? "failed_retest_2" : "hard_fail";
+      await sb(`techs?id=eq.${trainee.id}`, { method:"PATCH", prefer:"return=minimal", body:JSON.stringify({ cert_attempts:attempt, cert_status:certStatus, ...(overall==="pass" ? { onboarding_stage:"cert_passed" } : {}) }) });
+      refreshAll && refreshAll();
+      setDone({ overall, attempt });
+    } catch(e) { window.alert("Couldn't save the evaluation: " + e.message); }
+    setSaving(false);
+  }
+
+  const btn = (bg, on=true) => ({ background:on ? bg : C.border, border:"none", color:C.white, padding:"12px 18px", borderRadius:"22px", cursor:on ? "pointer" : "default", fontSize:"13px", fontWeight:"900", fontStyle:"italic", letterSpacing:"2px", fontFamily:"'Barlow Condensed',sans-serif", textTransform:"uppercase" });
+
+  if (done) return (
+    <div style={{ background:C.card, border:`1px solid ${done.overall==="pass" ? C.green : C.red}`, borderRadius:"12px", padding:"18px", display:"flex", flexDirection:"column", gap:"10px" }}>
+      <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"24px", color:done.overall==="pass" ? C.green : C.red }}>{done.overall==="pass" ? "✅ Passed the Perfect Day evaluation" : `❌ Did not pass (attempt ${done.attempt})`}</div>
+      {done.overall!=="pass" && <div style={{ fontSize:"13px", color:C.black }}>Missed {fails.length} item{fails.length===1?"":"s"}: {fails.map(i => `#${i.sort_order}`).join(", ")}. {done.attempt >= 3 ? "That was the third attempt — marked Hard Fail." : "They can retest after more training."}</div>}
+      <button onClick={onExit} style={btn(C.blue)}>Done</button>
+    </div>
+  );
+
+  return (
+    <div style={{ display:"flex", flexDirection:"column", gap:"12px" }}>
+      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.gold}`, borderRadius:"12px", padding:"16px", display:"flex", flexDirection:"column", gap:"8px" }}>
+        <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"20px", color:C.black }}>🏁 Final Perfect Day Evaluation — {trainee.name}</div>
+        <div style={{ fontSize:"12px", color:C.muted }}>Attempt {priorAttempts + 1}{priorAttempts >= 2 ? " (last chance — a third fail is a Hard Fail)" : ""}. Watch them run the full Perfect Day and mark every item. Every item must pass.</div>
+        <div style={{ display:"flex", alignItems:"center", gap:"8px" }}>
+          <span style={{ fontSize:"11px", color:C.muted, fontWeight:"800" }}>DATE</span>
+          <input type="date" value={date} onChange={e => setDate(e.target.value)} style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:"8px", padding:"6px 10px", fontSize:"14px" }}/>
+        </div>
+        <Bar pct={(scored / items.length) * 100} color={fails.length ? C.red : C.green} h={6}/>
+        <div style={{ fontSize:"12px", color:C.muted }}>{scored}/{items.length} scored · {fails.length} fail{fails.length===1?"":"s"}</div>
+        <button onClick={() => setScores(Object.fromEntries(items.map(i => [i.id, scores[i.id] || "pass"])))} style={{ alignSelf:"flex-start", background:"none", border:`1px solid ${C.border}`, color:C.muted, borderRadius:"14px", padding:"4px 12px", fontSize:"11px", cursor:"pointer" }}>Mark all unscored as pass</button>
+      </div>
+      {phases.map(phase => (
+        <div key={phase} style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", overflow:"hidden" }}>
+          <div style={{ background:C.cardLt, padding:"10px 16px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"13px", color:C.gold, letterSpacing:"1px" }}>{PHASE_LABELS[phase] || phase}</div>
+          {byPhase[phase].map(item => {
+            const s = scores[item.id];
+            return (
+              <div key={item.id} style={{ padding:"10px 16px", borderBottom:`1px solid ${C.border}40` }}>
+                <div style={{ display:"flex", gap:"10px", alignItems:"flex-start" }}>
+                  <div style={{ flex:1, fontSize:"13px", color:C.black }}><span style={{ color:C.muted, fontWeight:"700", marginRight:"4px" }}>#{item.sort_order}</span>{item.description}</div>
+                  {["pass","fail"].map(v => (
+                    <button key={v} onClick={() => setScores(sc => ({ ...sc, [item.id]: sc[item.id]===v ? undefined : v }))} style={{ flexShrink:0, background:s===v ? (v==="pass" ? C.green : C.red) : "none", color:s===v ? C.white : C.muted, border:`1px solid ${s===v ? (v==="pass" ? C.green : C.red) : C.border}`, borderRadius:"12px", padding:"4px 10px", fontSize:"11px", fontWeight:"900", cursor:"pointer", textTransform:"uppercase", fontFamily:"'Barlow Condensed',sans-serif" }}>{v}</button>
+                  ))}
+                </div>
+                {s === "fail" && <input value={itemNotes[item.id] || ""} onChange={e => setItemNotes(n => ({ ...n, [item.id]:e.target.value }))} placeholder="What went wrong?" style={{ marginTop:"6px", width:"100%", boxSizing:"border-box", background:C.white, border:`1px solid ${C.red}`, borderRadius:"8px", padding:"7px 10px", fontSize:"13px" }}/>}
+              </div>
+            );
+          })}
+        </div>
+      ))}
+      <div style={{ display:"flex", gap:"8px" }}>
+        <button onClick={() => { if (window.confirm("Leave without saving this evaluation?")) onExit(); }} style={btn(C.muted)}>Cancel</button>
+        <button onClick={submit} disabled={saving || scored < items.length} style={{ ...btn(fails.length ? C.red : C.green, !saving && scored === items.length), flex:1 }}>{saving ? "Saving..." : scored < items.length ? `${items.length - scored} left to score` : fails.length ? `Submit — ${fails.length} fail${fails.length===1?"":"s"}` : "Submit — all pass"}</button>
+      </div>
+    </div>
+  );
+}
+
+// Results for one apprentice: every written test (with what they missed and
+// what the right answer was) and every in-person evaluation.
+function FinalDayResults({ trainee, tests, evals, evalResults, rubricItems, techs, onStartTest, onStartEval }) {
+  const [openTest, setOpenTest] = useState(null);
+  const [openEval, setOpenEval] = useState(null);
+  const name = id => techs.find(t => t.id === id)?.name;
+  const item = id => rubricItems.find(i => i.id === id);
+  const passedTest = tests.find(t => t.status === "passed");
+  const passedEval = evals.find(e => e.overall_result === "pass");
+  const small = { fontSize:"11px", color:C.muted, letterSpacing:"1px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800" };
+  const startBtn = color => ({ background:color, border:"none", color:C.white, padding:"8px 14px", borderRadius:"16px", cursor:"pointer", fontSize:"12px", fontWeight:"900", fontStyle:"italic", letterSpacing:"1px", fontFamily:"'Barlow Condensed',sans-serif", textTransform:"uppercase" });
+  const row = { padding:"10px 0", borderTop:`1px solid ${C.border}40`, cursor:"pointer" };
+
+  return (
+    <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.gold}`, borderRadius:"12px", padding:"16px", display:"flex", flexDirection:"column", gap:"14px" }}>
+      <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"18px", color:C.black }}>🏁 Final Day</div>
+
+      <div>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:"8px" }}>
+          <div>
+            <div style={small}>1 · WRITTEN TEST</div>
+            <div style={{ fontSize:"13px", color:passedTest ? C.green : C.black, marginTop:"2px" }}>
+              {passedTest ? `✅ Passed ${fmtWhen(passedTest.completed_at)} · ${passedTest.first_try_correct}/${passedTest.total_questions} on the first try` : tests.length ? "Not passed yet" : "Not taken yet"}
+            </div>
+          </div>
+          <button onClick={onStartTest} style={startBtn(C.purple)}>{tests.length ? "New test" : "Start test"}</button>
+        </div>
+        {tests.map(t => {
+          const missed = t.rounds?.[0]?.wrong || [];
+          const retakes = Math.max(0, (t.rounds?.length || 0) - 1);
+          const open = openTest === t.id;
+          return (
+            <div key={t.id} onClick={() => setOpenTest(open ? null : t.id)} style={row}>
+              <div style={{ display:"flex", justifyContent:"space-between", fontSize:"12px", gap:"8px" }}>
+                <span style={{ color:C.black, fontWeight:"700" }}>{fmtWhen(t.started_at)} · {t.status==="passed" ? "Passed" : t.status==="abandoned" ? "Stopped early" : "In progress"}</span>
+                <span style={{ color:C.muted }}>{t.first_try_correct != null ? `${t.first_try_correct}/${t.total_questions} first try` : "—"}{retakes ? ` · ${retakes} retake${retakes===1?"":"s"}` : ""} {open ? "▲" : "▼"}</span>
+              </div>
+              <div style={{ fontSize:"10px", color:C.muted }}>Given by {t.administered_by_name || name(t.administered_by) || "—"}</div>
+              {open && (
+                <div style={{ marginTop:"8px", display:"flex", flexDirection:"column", gap:"8px" }}>
+                  {missed.length === 0 && <div style={{ fontSize:"12px", color:C.green }}>{t.first_try_correct != null ? "No misses on the first try." : "No answers submitted."}</div>}
+                  {missed.map(w => {
+                    const q = QUESTION_BY_ID[w.id];
+                    const tries = (t.rounds || []).filter(r => r.wrong.some(x => x.id === w.id)).length;
+                    return q && (
+                      <div key={w.id} style={{ background:`${C.red}08`, border:`1px solid ${C.red}30`, borderRadius:"8px", padding:"8px 10px", fontSize:"12px" }}>
+                        <div style={{ color:C.black, fontWeight:"600" }}>{q.q}</div>
+                        <div style={{ color:C.red, marginTop:"3px" }}>✗ Picked: {w.picked}</div>
+                        <div style={{ color:C.green }}>✓ Right: {q.correct}</div>
+                        {tries > 1 && <div style={{ color:C.muted, marginTop:"2px" }}>Missed {tries} times before getting it right</div>}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      <div>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:"8px" }}>
+          <div>
+            <div style={small}>2 · IN-PERSON PERFECT DAY EVALUATION</div>
+            <div style={{ fontSize:"13px", color:passedEval ? C.green : C.black, marginTop:"2px" }}>
+              {passedEval ? `✅ Passed ${fmtWhen(passedEval.test_date + "T12:00:00Z")} (attempt ${passedEval.attempt_number})` : evals.length ? `Not passed yet · ${evals.length} attempt${evals.length===1?"":"s"}` : "Not done yet"}
+            </div>
+            {!passedTest && <div style={{ fontSize:"11px", color:C.gold, marginTop:"2px" }}>Do the written test first.</div>}
+          </div>
+          {!passedEval && <button onClick={onStartEval} style={startBtn(C.gold)}>Start evaluation</button>}
+        </div>
+        {evals.map(e => {
+          const res = evalResults.filter(r => r.cert_id === e.id);
+          const fails = res.filter(r => r.result === "fail");
+          const open = openEval === e.id;
+          return (
+            <div key={e.id} onClick={() => setOpenEval(open ? null : e.id)} style={row}>
+              <div style={{ display:"flex", justifyContent:"space-between", fontSize:"12px", gap:"8px" }}>
+                <span style={{ color:e.overall_result==="pass" ? C.green : C.red, fontWeight:"700" }}>{fmtWhen(e.test_date + "T12:00:00Z")} · Attempt {e.attempt_number} · {e.overall_result==="pass" ? "Passed" : "Failed"}</span>
+                <span style={{ color:C.muted }}>{res.length - fails.length}/{res.length} items {open ? "▲" : "▼"}</span>
+              </div>
+              <div style={{ fontSize:"10px", color:C.muted }}>Given by {name(e.administered_by) || "—"}</div>
+              {open && (
+                <div style={{ marginTop:"8px", display:"flex", flexDirection:"column", gap:"6px" }}>
+                  {fails.length === 0 && <div style={{ fontSize:"12px", color:C.green }}>Every item passed.</div>}
+                  {fails.map(r => (
+                    <div key={r.id} style={{ background:`${C.red}08`, border:`1px solid ${C.red}30`, borderRadius:"8px", padding:"8px 10px", fontSize:"12px" }}>
+                      <div style={{ color:C.black }}>✗ #{item(r.rubric_item_id)?.sort_order} {item(r.rubric_item_id)?.description || r.rubric_item_id}</div>
+                      {r.notes && <div style={{ color:C.muted, marginTop:"2px" }}>{r.notes}</div>}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // Owner / manager overview of every Detail Apprentice's training: progress
 // toward the 8 full Perfect Days + misc reps, who's training them, and their
 // latest day. Tap an apprentice to open their rubric (editable, notes shown).
-function TrainingOverviewTab({ techs }) {
+function TrainingOverviewTab({ techs, currentUser, refreshAll }) {
   const [items, setItems] = useState([]);
   const [checks, setChecks] = useState([]);
   const [notes, setNotes] = useState([]);
+  const [tests, setTests] = useState([]);
+  const [evals, setEvals] = useState([]);
+  const [evalResults, setEvalResults] = useState([]);
   const [loading, setLoading] = useState(true);
   const [openId, setOpenId] = useState(null);
+  const [mode, setMode] = useState(null); // null | "test" | "eval"
   const [trainerSel, setTrainerSel] = useState("");
+
+  // Who is giving the test/evaluation: the manager's own tech record, or the
+  // owner's (owners log in by name, so match it to their owner tech row).
+  const first = (currentUser?.name || "").toLowerCase().split(" ")[0];
+  const adminUser = currentUser?.techId
+    ? { techId:currentUser.techId, name:techs.find(t => t.id === currentUser.techId)?.name || currentUser.name }
+    : { techId:(first && techs.find(t => t.title === "owner" && t.name.toLowerCase().startsWith(first))?.id) || null, name:currentUser?.name || null };
 
   async function load() {
     try {
-      const [it, ck, nt] = await Promise.all([
+      const [it, ck, nt, ts, ev, er] = await Promise.all([
         sb("rubric_items?select=*&order=sort_order"),
         sb("training_checks?select=trainee_id,day_date,rubric_item_id,status"),
         sb("training_day_notes?select=trainee_id,day_date,overall_rating,pace,incident&order=day_date.desc"),
+        sb("training_tests?select=*&order=started_at.desc"),
+        sb("perfect_day_certs?select=*&order=created_at.desc"),
+        sb("perfect_day_cert_results?select=*"),
       ]);
       setItems(it || []); setChecks(ck || []); setNotes(nt || []);
+      setTests(ts || []); setEvals(ev || []); setEvalResults(er || []);
     } catch {}
     setLoading(false);
   }
@@ -4916,6 +5247,9 @@ function TrainingOverviewTab({ techs }) {
 
   if (loading) return <div style={{ color:C.muted, padding:"20px" }}>Loading training...</div>;
 
+  if (open && mode === "test") return <WrittenTestRunner trainee={open.t} adminUser={adminUser} onExit={() => { setMode(null); load(); }}/>;
+  if (open && mode === "eval") return <FinalEvalRunner trainee={open.t} adminUser={adminUser} rubricItems={items} priorAttempts={evals.filter(e => e.tech_id === open.t.id).length} refreshAll={refreshAll} onExit={() => { setMode(null); load(); }}/>;
+
   if (open) {
     const trainers = techs.filter(t => t.is_active !== false && (t.is_lead || TRAINER_TITLES.includes(t.title)));
     return (
@@ -4928,6 +5262,9 @@ function TrainingOverviewTab({ techs }) {
             {trainers.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
           </select>
         </div>
+        <FinalDayResults trainee={open.t} tests={tests.filter(x => x.trainee_id === open.t.id)} evals={evals.filter(e => e.tech_id === open.t.id)} evalResults={evalResults} rubricItems={items} techs={techs}
+          onStartTest={() => setMode("test")}
+          onStartEval={() => { if (!tests.some(x => x.trainee_id === open.t.id && x.status === "passed") && !window.confirm(`${open.t.name} hasn't passed the written test yet. Start the in-person evaluation anyway?`)) return; setMode("eval"); }}/>
         <PerfectDayTrainingPanel key={open.t.id} admin techs={techs} fixedSubject={open.t} adminTrainerId={trainerSel || trainerOf(open.t) || ""}/>
       </div>
     );
@@ -4966,7 +5303,9 @@ function TrainingOverviewTab({ techs }) {
             {lastNote?.overall_rating ? <span style={{ color:C.gold }}>{"★".repeat(lastNote.overall_rating)}</span> : null}
             {lastNote?.pace === "behind" && <span style={{ color:C.red }}>Behind pace</span>}
             {notes.some(n => n.trainee_id === t.id && n.incident) && <span style={{ color:C.red }}>⚠️ Incident noted</span>}
-            {prog.complete && <span style={{ color:C.green, fontWeight:"700" }}>✅ Ready for cert</span>}
+            {prog.complete && !evals.some(e => e.tech_id === t.id && e.overall_result === "pass") && <span style={{ color:C.green, fontWeight:"700" }}>✅ Ready for final day</span>}
+            {(() => { const pt = tests.find(x => x.trainee_id === t.id && x.status === "passed"); return pt ? <span style={{ color:C.purple }}>📝 Test passed · {pt.first_try_correct}/{pt.total_questions} first try</span> : null; })()}
+            {(() => { const es = evals.filter(e => e.tech_id === t.id); if (!es.length) return null; const p = es.find(e => e.overall_result === "pass"); return <span style={{ color:p ? C.green : C.red, fontWeight:"700" }}>{p ? "🏁 Final eval passed" : `🏁 Final eval failed ×${es.length}`}</span>; })()}
           </div>
         </div>
       ))}
@@ -5716,7 +6055,7 @@ function TechMatchAdmin({ unmatchedTechs, refreshAll, showToast }) {
 // isManager: logged in as the Field Supervisor. Same panel as the owners, but
 // read-only on anything that decides his own bonus (quota targets, trucks and
 // holidays, firing approvals, calibration) so he can't move his own numbers.
-function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlongs, schedules, quota, setQuota, jobs, timeEntries=[], tipEntries=[], pendingSplits=[], unmatchedTechs=[], onLogout, refreshAll, isManager=false }) {
+function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlongs, schedules, quota, setQuota, jobs, timeEntries=[], tipEntries=[], pendingSplits=[], unmatchedTechs=[], onLogout, refreshAll, isManager=false, currentUser=null }) {
   // Live-standings views (Leaderboard, Journey Map) should only show active
   // techs, matching what the tech-facing app already does — archived techs
   // stay fully visible in Reports/Payroll/Upsell Audit where historical
@@ -6074,7 +6413,7 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
           <TechMatchAdmin unmatchedTechs={unmatchedTechs} refreshAll={refreshAll} showToast={showToast}/>
         )}
 
-        {tab==="training"&&<TrainingOverviewTab techs={techs}/>}
+        {tab==="training"&&<TrainingOverviewTab techs={techs} currentUser={currentUser} refreshAll={refreshAll}/>}
 
         {tab==="development"&&(
           <DevelopmentTab techs={techs} rideAlongs={rideAlongs||[]} refreshAll={refreshAll} showToast={showToast}/>
@@ -6900,7 +7239,7 @@ alter table jobs add column if not exists tips numeric default 0;`}
       switchovers={switchovers} setSwitchovers={setSwitchovers} reviews={reviews} setReviews={setReviews}
       callbacks={callbacks} rideAlongs={rideAlongs} schedules={schedules} quota={quota} setQuota={setQuota}
       jobs={jobs} timeEntries={timeEntries} tipEntries={tipEntries} pendingSplits={pendingSplits} unmatchedTechs={unmatchedTechs} onLogout={()=>setUser(null)} refreshAll={loadAll}
-      isManager={user.role==="manager"}/>
+      isManager={user.role==="manager"} currentUser={user}/>
   );
   if (user.type==="tech"&&currentTech) return (
     <TechDashboard tech={currentTech} techs={activeTechs} upsells={upsells} switchovers={switchovers}
