@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, Fragment } from "react";
 import { TEST_QUESTIONS, shuffle } from "./trainingTest.js";
 import { computeOpsMonth, monthRange, mountainDate, CALLBACK_TIERS, QUOTA_TIERS, RETENTION_TIERS, NON_ROUTE_VEHICLES, OPS_EXCLUDED_TITLES } from "./opsBonus.js";
 
@@ -5266,6 +5266,339 @@ function FinalDayResults({ trainee, prog, tests, evals, evalResults, rubricItems
   );
 }
 
+// ─── MARKETING & SALES (owners only) ─────────────────────────────────────────
+// Both dashboards come from /.netlify/functions/reports, which reads the GHL
+// mirror and ad spend tables server-side (the browser can't read those) after
+// checking the login token is an owner's.
+
+const usd = n => n == null ? "—" : `$${Math.round(Number(n)).toLocaleString()}`;
+const money2 = n => n == null || !isFinite(n) ? "—" : `$${Number(n).toFixed(2)}`;
+const pctOf = (a, b) => b ? `${Math.round((a / b) * 100)}%` : "—";
+const fmtMinutes = m => m == null ? "—" : m < 60 ? `${m} min` : m < 1440 ? `${Math.floor(m / 60)}h ${m % 60}m` : `${(m / 1440).toFixed(1)} days`;
+
+function rangeFor(preset) {
+  const today = mountainDate(new Date().toISOString());
+  const [y, m] = today.split("-").map(Number);
+  const iso = (yy, mm, dd) => `${yy}-${String(mm).padStart(2, "0")}-${String(dd).padStart(2, "0")}`;
+  const back = n => { const d = new Date(today + "T12:00:00Z"); d.setUTCDate(d.getUTCDate() - n); return d.toISOString().slice(0, 10); };
+  if (preset === "last_month") { const py = m === 1 ? y - 1 : y, pm = m === 1 ? 12 : m - 1; return { from: iso(py, pm, 1), to: iso(py, pm, new Date(Date.UTC(py, pm, 0)).getUTCDate()) }; }
+  if (preset === "7") return { from: back(6), to: today };
+  if (preset === "30") return { from: back(29), to: today };
+  if (preset === "today") return { from: today, to: today };
+  return { from: iso(y, m, 1), to: today };
+}
+
+function GrowthRange({ range, setRange }) {
+  const [preset, setPreset] = useState("month");
+  const presets = [["today","Today"],["7","7 days"],["month","This month"],["last_month","Last month"],["30","30 days"],["custom","Custom"]];
+  const date = { background:C.white, border:`1px solid ${C.border}`, borderRadius:"8px", padding:"6px 8px", fontSize:"13px", color:C.black };
+  return (
+    <div style={{ display:"flex", flexWrap:"wrap", gap:"6px", alignItems:"center" }}>
+      {presets.map(([k, label]) => (
+        <button key={k} onClick={() => { setPreset(k); if (k !== "custom") setRange(rangeFor(k)); }} style={{ background:preset===k ? C.blue : C.white, color:preset===k ? C.white : C.black, border:`1px solid ${preset===k ? C.blue : C.border}`, borderRadius:"16px", padding:"5px 12px", fontSize:"12px", fontWeight:"700", cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif" }}>{label}</button>
+      ))}
+      {preset === "custom" && (<>
+        <input type="date" value={range.from} max={range.to} onChange={e => setRange(r => ({ ...r, from:e.target.value }))} style={date}/>
+        <span style={{ color:C.muted }}>→</span>
+        <input type="date" value={range.to} min={range.from} onChange={e => setRange(r => ({ ...r, to:e.target.value }))} style={date}/>
+      </>)}
+    </div>
+  );
+}
+
+function useGrowthReport(params, token) {
+  const [state, setState] = useState({ loading:true, data:null, error:null });
+  const qs = new URLSearchParams(params).toString();
+  useEffect(() => {
+    let live = true;
+    setState(s => ({ ...s, loading:true, error:null }));
+    fetch(`/.netlify/functions/reports?${qs}`, { headers:{ Authorization:`Bearer ${token || ""}` } })
+      .then(async r => { const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`); return j; })
+      .then(data => live && setState({ loading:false, data, error:null }))
+      .catch(e => live && setState({ loading:false, data:null, error:e.message }));
+    return () => { live = false; };
+  }, [qs, token]);
+  return state;
+}
+
+function StatTile({ label, value, sub, pending }) {
+  return (
+    <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"12px 14px", minWidth:0 }}>
+      <div style={{ fontSize:"10px", color:C.muted, letterSpacing:"1px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", textTransform:"uppercase" }}>{label}</div>
+      <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:pending ? "16px" : "26px", color:pending ? C.muted : C.black, marginTop:"2px", lineHeight:1.1 }}>{value}</div>
+      {sub && <div style={{ fontSize:"11px", color:C.muted, marginTop:"2px" }}>{sub}</div>}
+    </div>
+  );
+}
+const TileGrid = ({ children }) => <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(140px, 1fr))", gap:"8px" }}>{children}</div>;
+
+// One series per chart, so no legend -- the card title names it. Hover a bar
+// for the day's number.
+function DailyBars({ title, days, value, color = C.blue, fmt = v => v }) {
+  const [hover, setHover] = useState(null);
+  const vals = days.map(value), max = Math.max(1, ...vals);
+  const total = vals.reduce((s, v) => s + v, 0);
+  const W = 600, H = 120, gap = 2, bw = Math.max(1, (W - gap * (days.length - 1)) / Math.max(1, days.length));
+  const h = hover != null ? days[hover] : null;
+  return (
+    <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"12px 14px" }}>
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", marginBottom:"6px" }}>
+        <div style={{ fontSize:"11px", color:C.muted, letterSpacing:"1px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800" }}>{title.toUpperCase()}</div>
+        <div style={{ fontSize:"12px", color:C.black }}>{h ? <>{fmtDay(h.d)}: <b>{fmt(value(h))}</b></> : <>Total <b>{fmt(total)}</b></>}</div>
+      </div>
+      <svg viewBox={`0 0 ${W} ${H}`} style={{ width:"100%", height:"110px", display:"block" }} onMouseLeave={() => setHover(null)}>
+        <line x1="0" x2={W} y1={H - 0.5} y2={H - 0.5} stroke={C.border} strokeWidth="1"/>
+        {days.map((d, i) => {
+          const v = vals[i], bh = v ? Math.max(3, (v / max) * (H - 8)) : 0, x = i * (bw + gap);
+          return (
+            <g key={d.d} onMouseEnter={() => setHover(i)} onTouchStart={() => setHover(i)}>
+              <rect x={x} y="0" width={bw + gap} height={H} fill="transparent"/>
+              {bh > 0 && <rect x={x} y={H - bh} width={bw} height={bh} rx={Math.min(4, bw / 2)} fill={color} opacity={hover == null || hover === i ? 1 : 0.45}/>}
+            </g>
+          );
+        })}
+      </svg>
+      {days.length > 1 && <div style={{ display:"flex", justifyContent:"space-between", fontSize:"10px", color:C.muted, marginTop:"4px" }}><span>{fmtDay(days[0].d)}</span><span>{fmtDay(days[days.length - 1].d)}</span></div>}
+    </div>
+  );
+}
+
+function ConnectionCard({ title, connected, lastSync, steps, note }) {
+  const [open, setOpen] = useState(!connected);
+  return (
+    <div style={{ background:connected ? `${C.green}10` : `${C.gold}12`, border:`1px solid ${connected ? C.green : C.gold}`, borderRadius:"12px", padding:"12px 14px" }}>
+      <div onClick={() => setOpen(o => !o)} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", cursor:"pointer", gap:"8px" }}>
+        <div style={{ fontSize:"13px", color:C.black, fontWeight:"700" }}>{connected ? "✅" : "🔌"} {title}: {connected ? `connected${lastSync ? ` · last sync ${new Date(lastSync).toLocaleString("en-US", { month:"short", day:"numeric", hour:"numeric", minute:"2-digit", timeZone:"America/Denver" })}` : ""}` : "not connected yet"}</div>
+        {steps && <span style={{ fontSize:"12px", color:C.muted }}>{open ? "▲" : "How to connect ▼"}</span>}
+      </div>
+      {note && <div style={{ fontSize:"12px", color:C.muted, marginTop:"4px" }}>{note}</div>}
+      {open && steps && <ol style={{ margin:"8px 0 0", paddingLeft:"20px", fontSize:"12px", color:C.black, lineHeight:1.6 }}>{steps.map((s, i) => <li key={i}>{s}</li>)}</ol>}
+    </div>
+  );
+}
+
+const SubTabs = ({ tabs, active, setActive }) => (
+  <div style={{ display:"flex", gap:"6px", overflowX:"auto" }}>
+    {tabs.map(([k, label]) => (
+      <button key={k} onClick={() => setActive(k)} style={{ flexShrink:0, background:active===k ? C.black : C.card, color:active===k ? C.white : C.black, border:`1px solid ${active===k ? C.black : C.border}`, borderRadius:"20px", padding:"8px 14px", cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"13px", letterSpacing:"1px", textTransform:"uppercase" }}>{label}</button>
+    ))}
+  </div>
+);
+const SectionTitle = ({ children }) => <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"16px", color:C.black, marginTop:"6px" }}>{children}</div>;
+const ReportState = ({ s }) => s.error ? <div style={{ background:`${C.red}10`, border:`1px solid ${C.red}`, borderRadius:"10px", padding:"12px", fontSize:"13px", color:C.red }}>Couldn't load: {s.error}</div> : s.loading && !s.data ? <div style={{ color:C.muted, padding:"16px" }}>Loading...</div> : null;
+const REVENUE_PENDING = "Needs HCP link";
+const REVENUE_NOTE = "Revenue and ROAS turn on once HCP customers are matched to these leads (next build).";
+
+function ChannelTiles({ ch, paid }) {
+  const cpl = paid && ch.leads ? ch.spend / ch.leads : null;
+  const cpb = paid && ch.booked ? ch.spend / ch.booked : null;
+  return (
+    <TileGrid>
+      <StatTile label="Leads" value={ch.leads} sub="New customers in GHL"/>
+      {paid && <StatTile label="Ad spend" value={usd(ch.spend)} sub={ch.last_spend_day ? `through ${fmtDay(ch.last_spend_day)}` : "no spend data yet"}/>}
+      {paid && <StatTile label="Cost per lead" value={ch.spend ? money2(cpl) : "—"}/>}
+      <StatTile label="Booked" value={ch.booked} sub={`${pctOf(ch.booked, ch.leads)} of leads`}/>
+      {paid && <StatTile label="Cost per booking" value={ch.spend ? money2(cpb) : "—"}/>}
+      <StatTile label="Revenue" value={REVENUE_PENDING} pending/>
+      {paid && <StatTile label="ROAS" value={REVENUE_PENDING} pending/>}
+      {paid && ch.impressions > 0 && <StatTile label="Clicks" value={Number(ch.clicks).toLocaleString()} sub={`${pctOf(ch.clicks, ch.impressions)} CTR · ${Number(ch.impressions).toLocaleString()} impr.`}/>}
+    </TileGrid>
+  );
+}
+
+function MetaCampaigns({ campaigns }) {
+  const [open, setOpen] = useState(null);
+  if (!campaigns.length) return <div style={{ fontSize:"13px", color:C.muted }}>No Meta campaigns in this range.</div>;
+  const th = { textAlign:"right", padding:"6px 8px", fontSize:"10px", color:C.muted, letterSpacing:"1px", fontWeight:"800", whiteSpace:"nowrap" };
+  const td = { textAlign:"right", padding:"8px", fontSize:"12px", color:C.black, whiteSpace:"nowrap", fontVariantNumeric:"tabular-nums" };
+  const row = (x, sub) => [
+    usd(x.spend), x.leads, x.spend && x.leads ? money2(x.spend / x.leads) : "—", x.booked, x.spend && x.booked ? money2(x.spend / x.booked) : "—",
+  ];
+  return (
+    <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", overflowX:"auto" }}>
+      <table style={{ width:"100%", borderCollapse:"collapse", minWidth:"520px" }}>
+        <thead><tr style={{ background:C.cardLt }}>
+          <th style={{ ...th, textAlign:"left" }}>CAMPAIGN / AD</th><th style={th}>SPEND</th><th style={th}>LEADS</th><th style={th}>CPL</th><th style={th}>BOOKED</th><th style={th}>$/BOOKING</th>
+        </tr></thead>
+        <tbody>
+          {campaigns.map(c => (<Fragment key={c.id}>
+            <tr onClick={() => setOpen(open === c.id ? null : c.id)} style={{ borderTop:`1px solid ${C.border}`, cursor:"pointer" }}>
+              <td style={{ ...td, textAlign:"left", whiteSpace:"normal", fontWeight:"700" }}>{open === c.id ? "▾" : "▸"} {c.name || c.id}</td>
+              {row(c).map((v, i) => <td key={i} style={td}>{v}</td>)}
+            </tr>
+            {open === c.id && (c.ads || []).map(a => (
+              <tr key={a.id} style={{ background:C.blueXlt }}>
+                <td style={{ ...td, textAlign:"left", whiteSpace:"normal", paddingLeft:"24px" }}>{a.name || a.id}<div style={{ fontSize:"10px", color:C.muted }}>{a.adset}</div></td>
+                {row(a).map((v, i) => <td key={i} style={td}>{v}</td>)}
+              </tr>
+            ))}
+          </Fragment>))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+const META_STEPS = [
+  "developers.facebook.com → My Apps → Create App → type Business → name it \"Skylo Reporting\".",
+  "business.facebook.com → Settings → Users → System users → Add (Employee role).",
+  "On that system user: Assign assets → Ad accounts → your ad account → View performance only.",
+  "Generate token → pick the Skylo Reporting app → check ads_read → expiration Never.",
+  "Netlify → Site configuration → Environment variables → add META_ADS_TOKEN (the token) and META_AD_ACCOUNT_ID (the number after act= in Ads Manager's URL). Mark both secret.",
+  "Tell Claude it's in — one backfill run pulls your history, then it updates every morning.",
+];
+const GOOGLE_STEPS = [
+  "Google Ads → Reports → build a report: Campaign, Day, Cost, Impressions, Clicks, Conversions.",
+  "Schedule → Daily → email it to the inbox the app reads (team@skylod.com).",
+  "In parallel: Google Ads → Tools → API Center → apply for a developer token (takes a few days). Once approved, it becomes a direct connection.",
+];
+const LSA_STEPS = [
+  "Make sure your Local Services account is linked to your Google Ads account.",
+  "In Google Ads, schedule a daily Local Services report (leads, charged leads, spend) emailed to team@skylod.com.",
+  "LSA leads that come in by phone also need to land in GHL (call forwarding or the LSA → GHL integration) so we can follow them to bookings.",
+];
+const GA4_STEPS = [
+  "Google Analytics → Admin → Property access management → add a service account Claude will give you (Viewer).",
+  "Send Claude the GA4 Property ID (Admin → Property settings).",
+];
+
+function MarketingTab({ token }) {
+  const [range, setRange] = useState(() => rangeFor("month"));
+  const [sub, setSub] = useState("meta");
+  const s = useGrowthReport({ type:"marketing", ...range }, token);
+  const d = s.data;
+  const ch = d?.channels || {};
+  const conn = d?.connections || {};
+  const all = Object.values(ch).reduce((t, c) => ({ leads:t.leads + c.leads, booked:t.booked + c.booked, spend:t.spend + Number(c.spend) }), { leads:0, booked:0, spend:0 });
+  const days = d?.daily || [];
+  return (
+    <div style={{ display:"flex", flexDirection:"column", gap:"12px" }}>
+      <GrowthRange range={range} setRange={setRange}/>
+      <ReportState s={s}/>
+      {d && (<>
+        <div style={{ background:C.black, borderRadius:"12px", padding:"14px 16px", display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(110px, 1fr))", gap:"10px", color:C.white }}>
+          {[["All leads", all.leads], ["Booked", `${all.booked} · ${pctOf(all.booked, all.leads)}`], ["Ad spend", usd(all.spend)], ["Blended CPL", all.spend ? money2(all.spend / all.leads) : "—"], ["Revenue / ROAS", "Soon"]].map(([l, v]) => (
+            <div key={l}><div style={{ fontSize:"10px", opacity:0.7, letterSpacing:"1px", fontWeight:"800", fontFamily:"'Barlow Condensed',sans-serif" }}>{l.toUpperCase()}</div><div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"22px" }}>{v}</div></div>
+          ))}
+        </div>
+        <SubTabs tabs={[["meta","Meta Ads"],["google","Google Ads"],["lsa","Local Services"],["website","Website"]]} active={sub} setActive={setSub}/>
+
+        {sub === "meta" && (<>
+          <ConnectionCard title="Meta Ads spend" connected={conn.meta?.connected} lastSync={conn.meta?.last_sync} steps={conn.meta?.connected ? null : META_STEPS}
+            note={conn.meta?.connected ? (conn.meta?.last_result?.ok === false ? `Last sync failed: ${conn.meta.last_result.error}` : null) : "Leads below are already live from GHL (Facebook/Instagram ads). Connect Meta to add spend, cost per lead, and cost per booking per ad."}/>
+          <ChannelTiles ch={ch.meta} paid/>
+          <DailyBars title="Meta leads per day" days={days} value={x => x.leads?.meta || 0}/>
+          {Number(ch.meta.spend) > 0 && <DailyBars title="Meta spend per day" days={days} value={x => Number(x.spend?.meta || 0)} fmt={usd}/>}
+          <SectionTitle>Campaigns & ads</SectionTitle>
+          <MetaCampaigns campaigns={d.meta_campaigns || []}/>
+          <div style={{ fontSize:"11px", color:C.muted }}>Leads and bookings come from GHL, matched to the exact ad by its tracking tag. {REVENUE_NOTE}</div>
+        </>)}
+
+        {sub === "google" && (<>
+          <ConnectionCard title="Google Ads spend" connected={conn.google?.connected} steps={GOOGLE_STEPS} note="Google Ads leads show up here automatically once they arrive in GHL with Google's tracking."/>
+          <ChannelTiles ch={ch.google} paid/>
+          <DailyBars title="Google Ads leads per day" days={days} value={x => x.leads?.google || 0}/>
+        </>)}
+
+        {sub === "lsa" && (<>
+          <ConnectionCard title="Local Services Ads" connected={conn.lsa?.connected} steps={LSA_STEPS}/>
+          <ChannelTiles ch={ch.lsa} paid/>
+        </>)}
+
+        {sub === "website" && (<>
+          <ConnectionCard title="Google Analytics (visitors)" connected={conn.ga4?.connected} steps={GA4_STEPS} note="Form leads from skylod.com are live from GHL below. Connecting Analytics adds visitors and the form conversion rate."/>
+          <ChannelTiles ch={{ ...ch.website, leads:ch.website.leads + ch.social.leads, booked:ch.website.booked + ch.social.booked }}/>
+          <DailyBars title="Website form leads per day" days={days} value={x => (x.leads?.website || 0) + (x.leads?.social || 0)}/>
+          <SectionTitle>Where website leads came from</SectionTitle>
+          <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"6px 14px" }}>
+            {(d.website_sources || []).length === 0 && <div style={{ fontSize:"13px", color:C.muted, padding:"8px 0" }}>No website leads in this range.</div>}
+            {(d.website_sources || []).map(w => (
+              <div key={w.source} style={{ display:"flex", justifyContent:"space-between", padding:"8px 0", borderBottom:`1px solid ${C.border}40`, fontSize:"13px" }}>
+                <span style={{ color:C.black }}>{w.source === "Social media" ? "Social media (organic / link in bio)" : w.source}</span>
+                <span style={{ color:C.muted }}><b style={{ color:C.black }}>{w.leads}</b> leads · {w.booked} booked</span>
+              </div>
+            ))}
+          </div>
+          {(d.website_pages || []).length > 0 && (<>
+            <SectionTitle>Top lead pages</SectionTitle>
+            <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"6px 14px" }}>
+              {d.website_pages.map(p => (
+                <div key={p.page} style={{ display:"flex", justifyContent:"space-between", gap:"8px", padding:"8px 0", borderBottom:`1px solid ${C.border}40`, fontSize:"12px" }}>
+                  <span style={{ color:C.black, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{p.page.replace(/^https?:\/\//, "")}</span><b>{p.leads}</b>
+                </div>
+              ))}
+            </div>
+          </>)}
+        </>)}
+        {s.loading && <div style={{ fontSize:"11px", color:C.muted }}>Refreshing...</div>}
+      </>)}
+    </div>
+  );
+}
+
+function FunnelBlock({ k, label }) {
+  if (!k) return null;
+  return (
+    <TileGrid>
+      <StatTile label={`${label} leads`} value={k.leads} sub="New customers in range"/>
+      <StatTile label="Contacted" value={k.contacted} sub={`${pctOf(k.contacted, k.leads)} of leads`}/>
+      <StatTile label="Time to first contact" value={fmtMinutes(k.median_minutes_to_contact)} sub="median"/>
+      {k.demos > 0 && <StatTile label="Demo details set" value={k.demos}/>}
+      <StatTile label="Jobs booked" value={k.booked_in_period} sub="booked in this range"/>
+      <StatTile label="Booking rate" value={pctOf(k.booked_from_leads, k.leads)} sub={`${k.booked_from_leads} of these leads booked`}/>
+    </TileGrid>
+  );
+}
+
+function SalesTab({ token }) {
+  const [range, setRange] = useState(() => rangeFor("month"));
+  const [rep, setRep] = useState("trevor");
+  const s = useGrowthReport({ type:"sales", rep, ...range }, token);
+  const d = s.data;
+  return (
+    <div style={{ display:"flex", flexDirection:"column", gap:"12px" }}>
+      <SubTabs tabs={[["trevor","Trevor · Inbound"],["ethan","Ethan · Commercial"]]} active={rep} setActive={setRep}/>
+      <GrowthRange range={range} setRange={setRange}/>
+      <ReportState s={s}/>
+      {d && d.rep?.toLowerCase() === rep && (<>
+        {!d.ghl_user_found && <div style={{ fontSize:"12px", color:C.red }}>Couldn't find {d.rep} as a GHL user.</div>}
+        <SectionTitle>Revenue</SectionTitle>
+        <TileGrid>
+          <StatTile label="Revenue sold" value={REVENUE_PENDING} pending/>
+          <StatTile label="Revenue serviced" value={REVENUE_PENDING} pending/>
+          <StatTile label="Recurring plans sold" value={d.plans?.sold ?? 0} sub={Object.entries(d.plans?.by_plan || {}).map(([p, n]) => `${n} ${p}`).join(" · ") || "none in range"}/>
+          {d.plans?.cancelled > 0 && <StatTile label="Plans cancelled" value={d.plans.cancelled}/>}
+        </TileGrid>
+        <div style={{ fontSize:"11px", color:C.muted }}>{REVENUE_NOTE}</div>
+
+        <SectionTitle>Calls & texts</SectionTitle>
+        <TileGrid>
+          <StatTile label="Outbound calls" value={d.calls?.total ?? 0} sub={`${d.calls?.days_calling || 0} days calling`}/>
+          <StatTile label="Calls per day" value={d.calls?.per_day ?? 0} sub="on days calling"/>
+          <StatTile label="Conversations" value={d.calls?.connected ?? 0} sub={`calls 1+ min · ${pctOf(d.calls?.connected, d.calls?.total)}`}/>
+          <StatTile label="Talk time" value={fmtMinutes(d.calls?.talk_minutes)}/>
+          <StatTile label="Texts sent" value={d.texts ?? 0}/>
+        </TileGrid>
+        <DailyBars title="Outbound calls per day" days={d.daily || []} value={x => x.calls}/>
+
+        {rep === "trevor" ? (<>
+          <SectionTitle>Inbound leads</SectionTitle>
+          <FunnelBlock k={d.by_kind?.all} label="Inbound"/>
+        </>) : (<>
+          <SectionTitle>Warm inbound</SectionTitle>
+          <FunnelBlock k={d.by_kind?.warm} label="Inbound"/>
+          <SectionTitle>Cold outreach</SectionTitle>
+          <FunnelBlock k={d.by_kind?.cold} label="Cold"/>
+          <div style={{ fontSize:"11px", color:C.muted }}>Cold = commercial deals that started in "Outbound - Uncontacted" or came from Apollo / personal research.</div>
+        </>)}
+        <DailyBars title="Jobs booked per day" days={d.daily || []} value={x => x.booked} color={C.green}/>
+        <div style={{ fontSize:"11px", color:C.muted }}>From GHL pipelines: {(d.pipelines || []).join(", ")}. Calls and texts are the ones {d.rep} made in GHL.</div>
+        {s.loading && <div style={{ fontSize:"11px", color:C.muted }}>Refreshing...</div>}
+      </>)}
+    </div>
+  );
+}
+
 // Owner / manager overview of every Detail Apprentice's training: progress
 // toward the 8 full Perfect Days + misc reps, who's training them, and their
 // latest day. Tap an apprentice to open their rubric (editable, notes shown).
@@ -6418,6 +6751,10 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
       ["upsellaudit","🔍","Upsell Audit"],
       ["techmatch","🔗", unmatchedTechs.length > 0 ? `Tech Matching (${unmatchedTechs.length})` : "Tech Matching"],
     ]},
+    ...(isManager ? [] : [{ label:"Growth", items:[
+      ["marketing","📣","Marketing"],
+      ["sales","🤝","Sales"],
+    ]}]),
     { label:"Development", items:[
       ["training","🎓","Detail Apprentice Training"],
       ["development","📋","Development"],
@@ -6489,6 +6826,8 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
           <TechMatchAdmin unmatchedTechs={unmatchedTechs} refreshAll={refreshAll} showToast={showToast}/>
         )}
 
+        {tab==="marketing"&&!isManager&&<MarketingTab token={currentUser?.token}/>}
+        {tab==="sales"&&!isManager&&<SalesTab token={currentUser?.token}/>}
         {tab==="training"&&<TrainingOverviewTab techs={techs} currentUser={currentUser} refreshAll={refreshAll}/>}
 
         {tab==="development"&&(

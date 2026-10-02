@@ -39,3 +39,9 @@
 [functions."ghl-sync-cron"]
   # Kicks off ghl-sync-background (GoHighLevel -> Supabase) every 15 minutes.
   schedule = "*/15 * * * *"
+
+[functions."meta-ads-sync"]
+  # Daily Meta ad spend pull (last 7 days). 13:20 UTC = early morning MT.
+  # Does nothing until META_ADS_TOKEN and META_AD_ACCOUNT_ID are set.
+  schedule = "20 13 * * *"
+  timeout = 26
