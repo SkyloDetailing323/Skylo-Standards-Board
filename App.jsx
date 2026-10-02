@@ -5374,7 +5374,7 @@ function DailyBars({ title, days, value, color = C.blue, fmt = v => v }) {
   );
 }
 
-function ConnectionCard({ title, connected, lastSync, steps, note }) {
+function ConnectionCard({ title, connected, lastSync, steps, note, connectUrl, connectLabel }) {
   const [open, setOpen] = useState(!connected);
   return (
     <div style={{ background:connected ? `${C.green}10` : `${C.gold}12`, border:`1px solid ${connected ? C.green : C.gold}`, borderRadius:"12px", padding:"12px 14px" }}>
@@ -5384,6 +5384,7 @@ function ConnectionCard({ title, connected, lastSync, steps, note }) {
       </div>
       {note && <div style={{ fontSize:"12px", color:C.muted, marginTop:"4px" }}>{note}</div>}
       {open && steps && <ol style={{ margin:"8px 0 0", paddingLeft:"20px", fontSize:"12px", color:C.black, lineHeight:1.6 }}>{steps.map((s, i) => <li key={i}>{s}</li>)}</ol>}
+      {connectUrl && <a href={connectUrl} style={{ display:"inline-block", marginTop:"10px", background:C.blue, color:C.white, padding:"8px 16px", borderRadius:"18px", fontSize:"12px", fontWeight:"900", textDecoration:"none", fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:"1px", textTransform:"uppercase" }}>{connectLabel || "Connect"}</a>}
     </div>
   );
 }
@@ -5460,9 +5461,9 @@ const META_STEPS = [
   "Tell Claude it's in — one backfill run pulls your history, then it updates every morning.",
 ];
 const GOOGLE_STEPS = [
-  "Google Ads → Reports → build a report: Campaign, Day, Cost, Impressions, Clicks, Conversions.",
-  "Schedule → Daily → email it to the inbox the app reads (team@skylod.com).",
-  "In parallel: Google Ads → Tools → API Center → apply for a developer token (takes a few days). Once approved, it becomes a direct connection.",
+  "Google Cloud (project Skylo Tip Sync) → Google Ads API → access level Explorer or higher.",
+  "Ad account linked to the Skylo Detailing Manager account.",
+  "Tap Connect Google Ads below and sign in as team@skylod.com → Allow.",
 ];
 const LSA_STEPS = [
   "Make sure your Local Services account is linked to your Google Ads account.",
@@ -5508,13 +5509,16 @@ function MarketingTab({ token }) {
         </>)}
 
         {sub === "google" && (<>
-          <ConnectionCard title="Google Ads spend" connected={conn.google?.connected} steps={GOOGLE_STEPS} note="Google Ads leads show up here automatically once they arrive in GHL with Google's tracking."/>
+          <ConnectionCard title="Google Ads spend" connected={conn.google?.connected} lastSync={conn.google?.last_sync} steps={conn.google?.connected ? null : GOOGLE_STEPS}
+            connectUrl={`/.netlify/functions/google-ads-auth?t=${encodeURIComponent(token || "")}`} connectLabel={conn.google?.connected ? "Reconnect Google Ads" : "Connect Google Ads"}
+            note={conn.google?.last_result?.ok === false ? `Last sync failed: ${conn.google.last_result.error}` : conn.google?.connected ? null : "Google Ads leads show up here automatically once they arrive in GHL with Google's tracking."}/>
           <ChannelTiles ch={ch.google} paid/>
           <DailyBars title="Google Ads leads per day" days={days} value={x => x.leads?.google || 0}/>
         </>)}
 
         {sub === "lsa" && (<>
-          <ConnectionCard title="Local Services Ads" connected={conn.lsa?.connected} steps={LSA_STEPS}/>
+          <ConnectionCard title="Local Services Ads" connected={conn.lsa?.connected} lastSync={conn.lsa?.last_sync} steps={conn.lsa?.connected ? null : LSA_STEPS}
+            note={conn.lsa?.connected ? "LSA spend comes through the Google Ads connection (Local Services campaigns)." : "Connect Google Ads (Google Ads tab) — LSA spend comes through that same connection."}/>
           <ChannelTiles ch={ch.lsa} paid/>
         </>)}
 

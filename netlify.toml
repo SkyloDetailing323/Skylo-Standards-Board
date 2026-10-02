@@ -49,3 +49,9 @@
 [functions."hcp-sales-sync-cron"]
   # Hourly HCP jobs + customer contact sync for the Sales/Marketing revenue.
   schedule = "7 * * * *"
+
+[functions."google-ads-sync"]
+  # Google Ads + Local Services spend, last 7 days, every 4 hours.
+  # Does nothing until Google Ads is connected from the Marketing tab.
+  schedule = "25 */4 * * *"
+  timeout = 26
