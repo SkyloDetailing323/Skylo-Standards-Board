@@ -5204,6 +5204,7 @@ function FinalDayResults({ trainee, prog, tests, evals, evalResults, rubricItems
               <div style={{ fontSize:"10px", color:C.muted }}>Given by {t.administered_by_name || name(t.administered_by) || "—"}</div>
               {open && (
                 <div style={{ marginTop:"8px", display:"flex", flexDirection:"column", gap:"8px" }}>
+                  {(t.rounds || []).length > 0 && <div style={{ fontSize:"12px", color:C.black }}>{t.rounds.map(r => `${r.round === 1 ? "First try" : `Retake ${r.round - 1}`}: ${r.asked.length - r.wrong.length}/${r.asked.length}`).join("  →  ")}</div>}
                   {missed.length === 0 && <div style={{ fontSize:"12px", color:C.green }}>{t.first_try_correct != null ? "No misses on the first try." : "No answers submitted."}</div>}
                   {missed.map(w => {
                     const q = QUESTION_BY_ID[w.id];
