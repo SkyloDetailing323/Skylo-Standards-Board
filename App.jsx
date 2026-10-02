@@ -5267,6 +5267,16 @@ function FinalDayResults({ trainee, prog, tests, evals, evalResults, rubricItems
 }
 
 // ─── MARKETING & SALES (owners only) ─────────────────────────────────────────
+// Hidden while the numbers are being checked: owners can preview with
+// ?growth=1 on the URL (remembered on that device; ?growth=0 turns it off).
+const GROWTH_TABS_ON = (() => {
+  try {
+    const q = new URLSearchParams(window.location.search).get("growth");
+    if (q === "1") localStorage.setItem("skylo_growth", "1");
+    if (q === "0") localStorage.removeItem("skylo_growth");
+    return localStorage.getItem("skylo_growth") === "1";
+  } catch { return false; }
+})();
 // Both dashboards come from /.netlify/functions/reports, which reads the GHL
 // mirror and ad spend tables server-side (the browser can't read those) after
 // checking the login token is an owner's.
@@ -6757,7 +6767,7 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
       ["upsellaudit","🔍","Upsell Audit"],
       ["techmatch","🔗", unmatchedTechs.length > 0 ? `Tech Matching (${unmatchedTechs.length})` : "Tech Matching"],
     ]},
-    ...(isManager ? [] : [{ label:"Growth", items:[
+    ...(isManager || !GROWTH_TABS_ON ? [] : [{ label:"Growth", items:[
       ["marketing","📣","Marketing"],
       ["sales","🤝","Sales"],
     ]}]),
@@ -6832,8 +6842,8 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
           <TechMatchAdmin unmatchedTechs={unmatchedTechs} refreshAll={refreshAll} showToast={showToast}/>
         )}
 
-        {tab==="marketing"&&!isManager&&<MarketingTab token={currentUser?.token}/>}
-        {tab==="sales"&&!isManager&&<SalesTab token={currentUser?.token}/>}
+        {tab==="marketing"&&!isManager&&GROWTH_TABS_ON&&<MarketingTab token={currentUser?.token}/>}
+        {tab==="sales"&&!isManager&&GROWTH_TABS_ON&&<SalesTab token={currentUser?.token}/>}
         {tab==="training"&&<TrainingOverviewTab techs={techs} currentUser={currentUser} refreshAll={refreshAll}/>}
 
         {tab==="development"&&(
