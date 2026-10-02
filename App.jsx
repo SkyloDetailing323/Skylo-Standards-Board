@@ -4875,6 +4875,105 @@ function PerfectDayTrainingPanel({ tech=null, techs=[], admin=false, fixedSubjec
   );
 }
 
+// Owner / manager overview of every Detail Apprentice's training: progress
+// toward the 8 full Perfect Days + misc reps, who's training them, and their
+// latest day. Tap an apprentice to open their rubric (editable, notes shown).
+function TrainingOverviewTab({ techs }) {
+  const [items, setItems] = useState([]);
+  const [checks, setChecks] = useState([]);
+  const [notes, setNotes] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [openId, setOpenId] = useState(null);
+  const [trainerSel, setTrainerSel] = useState("");
+
+  async function load() {
+    try {
+      const [it, ck, nt] = await Promise.all([
+        sb("rubric_items?select=*&order=sort_order"),
+        sb("training_checks?select=trainee_id,day_date,rubric_item_id,status"),
+        sb("training_day_notes?select=trainee_id,day_date,overall_rating,pace,incident&order=day_date.desc"),
+      ]);
+      setItems(it || []); setChecks(ck || []); setNotes(nt || []);
+    } catch {}
+    setLoading(false);
+  }
+  useEffect(() => { load(); }, []);
+
+  const name = id => techs.find(t => t.id === id)?.name;
+  const trainerOf = t => t.assigned_trainer_id || t.team_lead_id;
+  const withChecks = new Set(checks.map(c => c.trainee_id));
+  const trainees = techs
+    .filter(t => t.is_active !== false && ((t.title || "detail_apprentice") === "detail_apprentice" || withChecks.has(t.id)))
+    .map(t => {
+      const mine = checks.filter(c => c.trainee_id === t.id);
+      const days = [...new Set([...mine.map(c => c.day_date), ...notes.filter(n => n.trainee_id === t.id).map(n => n.day_date)])].sort();
+      return { t, prog: trainingProgress(items, mine), days, lastNote: notes.find(n => n.trainee_id === t.id) };
+    })
+    .sort((a, b) => (a.prog.complete - b.prog.complete) || (b.prog.pct - a.prog.pct) || a.t.name.localeCompare(b.t.name));
+
+  const small = { fontSize:"10px", color:C.muted, letterSpacing:"1px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800" };
+  const open = trainees.find(x => x.t.id === openId);
+
+  if (loading) return <div style={{ color:C.muted, padding:"20px" }}>Loading training...</div>;
+
+  if (open) {
+    const trainers = techs.filter(t => t.is_active !== false && (t.is_lead || TRAINER_TITLES.includes(t.title)));
+    return (
+      <div style={{ display:"flex", flexDirection:"column", gap:"12px" }}>
+        <button onClick={() => { setOpenId(null); setTrainerSel(""); load(); }} style={{ alignSelf:"flex-start", background:"none", border:`1px solid ${C.border}`, color:C.blue, padding:"6px 14px", borderRadius:"16px", cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"13px" }}>← All apprentices</button>
+        <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"10px 14px", display:"flex", alignItems:"center", gap:"10px" }}>
+          <span style={{ ...small, whiteSpace:"nowrap" }}>CHECKING OFF AS</span>
+          <select value={trainerSel || trainerOf(open.t) || ""} onChange={e => setTrainerSel(e.target.value)} style={{ flex:1, background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"8px 10px", borderRadius:"8px", fontSize:"14px" }}>
+            <option value="">— No trainer —</option>
+            {trainers.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+          </select>
+        </div>
+        <PerfectDayTrainingPanel key={open.t.id} admin techs={techs} fixedSubject={open.t} adminTrainerId={trainerSel || trainerOf(open.t) || ""}/>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display:"flex", flexDirection:"column", gap:"10px" }}>
+      <div style={{ fontSize:"12px", color:C.muted, padding:"0 4px" }}>
+        Every Detail Apprentice's training. Done = {TRAINING_MIN_DAYS} full Perfect Days + every Miscellaneous item {MISC_REPS}×. Tap a name to open their rubric and notes.
+      </div>
+      {trainees.length === 0 && <div style={{ background:C.cardLt, border:`1px solid ${C.border}`, borderRadius:"10px", padding:"14px", fontSize:"13px", color:C.muted }}>No Detail Apprentices right now.</div>}
+      {trainees.map(({ t, prog, days, lastNote }) => (
+        <div key={t.id} onClick={() => setOpenId(t.id)} style={{ background:C.card, border:`1px solid ${prog.complete ? C.green : C.border}`, borderRadius:"12px", padding:"14px 16px", cursor:"pointer" }}>
+          <div style={{ display:"flex", alignItems:"baseline", justifyContent:"space-between", gap:"10px" }}>
+            <div>
+              <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"18px", color:C.black }}>{t.name}</div>
+              <div style={{ fontSize:"11px", color:C.muted }}>Trainer: {name(trainerOf(t)) || "not assigned"}{days.length ? ` · last trained ${fmtDay(days[days.length-1])}` : " · not started"}</div>
+            </div>
+            <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"26px", color:prog.complete ? C.green : C.purple }}>{prog.pct}%</div>
+          </div>
+          <div style={{ marginTop:"8px" }}><Bar pct={prog.pct} color={prog.complete ? C.green : C.purple} h={8}/></div>
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"12px", marginTop:"10px" }}>
+            <div>
+              <div style={small}>PERFECT DAYS {prog.fullDays}/{TRAINING_MIN_DAYS}</div>
+              <div style={{ display:"flex", gap:"3px", marginTop:"4px" }}>
+                {Array.from({ length:TRAINING_MIN_DAYS }, (_, i) => <div key={i} style={{ flex:1, height:"6px", borderRadius:"3px", background:i < prog.fullDays ? C.green : C.border }}/>)}
+              </div>
+            </div>
+            <div>
+              <div style={small}>MISC REPS {prog.miscDone}/{prog.miscMax}</div>
+              <div style={{ marginTop:"4px" }}><Bar pct={prog.miscMax ? (prog.miscDone/prog.miscMax)*100 : 0} color={C.gold} h={6}/></div>
+            </div>
+          </div>
+          <div style={{ display:"flex", gap:"10px", flexWrap:"wrap", marginTop:"8px", fontSize:"11px", color:C.muted }}>
+            <span>{days.length} day{days.length===1?"":"s"} logged</span>
+            {lastNote?.overall_rating ? <span style={{ color:C.gold }}>{"★".repeat(lastNote.overall_rating)}</span> : null}
+            {lastNote?.pace === "behind" && <span style={{ color:C.red }}>Behind pace</span>}
+            {notes.some(n => n.trainee_id === t.id && n.incident) && <span style={{ color:C.red }}>⚠️ Incident noted</span>}
+            {prog.complete && <span style={{ color:C.green, fontWeight:"700" }}>✅ Ready for cert</span>}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function DevelopmentTab({ techs, rideAlongs, refreshAll, showToast }) {
   const inp = { background:C.white, border:`1px solid ${C.border}`, color:C.black, padding:"10px 14px", borderRadius:"8px", fontSize:"14px", fontFamily:"'Barlow',sans-serif", width:"100%", boxSizing:"border-box" };
   const sel = (val) => ({...inp, color:val ? C.black : C.muted });
@@ -5905,6 +6004,7 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
       ["techmatch","🔗", unmatchedTechs.length > 0 ? `Tech Matching (${unmatchedTechs.length})` : "Tech Matching"],
     ]},
     { label:"Development", items:[
+      ["training","🎓","Detail Apprentice Training"],
       ["development","📋","Development"],
     ]},
     { label:"Management", items:[
@@ -5973,6 +6073,8 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
         {tab==="techmatch"&&(
           <TechMatchAdmin unmatchedTechs={unmatchedTechs} refreshAll={refreshAll} showToast={showToast}/>
         )}
+
+        {tab==="training"&&<TrainingOverviewTab techs={techs}/>}
 
         {tab==="development"&&(
           <DevelopmentTab techs={techs} rideAlongs={rideAlongs||[]} refreshAll={refreshAll} showToast={showToast}/>
