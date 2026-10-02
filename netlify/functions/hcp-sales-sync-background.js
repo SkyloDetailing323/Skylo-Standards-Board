@@ -89,6 +89,11 @@ exports.handler = async (event) => {
       const unscheduled = await pull([`work_status[]=${encodeURIComponent("needs scheduling")}`], deadline, stats);
       stats.complete = scheduled && unscheduled;
     }
+    // Re-match GHL leads to HCP jobs so the dashboards read precomputed matches.
+    const res = await fetch(`${process.env.SUPABASE_URL}/rest/v1/rpc/refresh_lead_job_matches`, {
+      method: "POST", headers: { "Content-Type": "application/json", apikey: process.env.SUPABASE_KEY, Authorization: `Bearer ${process.env.SUPABASE_KEY}` }, body: "{}",
+    });
+    stats.matches = res.ok ? await res.json() : `failed (HTTP ${res.status})`;
     stats.seconds = Math.round((Date.now() - started) / 1000);
     await saveState({ ok: true, ...stats });
     console.log("hcp-sales-sync:", JSON.stringify(stats));
