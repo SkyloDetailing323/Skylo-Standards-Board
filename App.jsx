@@ -5274,6 +5274,7 @@ function FinalDayResults({ trainee, prog, tests, evals, evalResults, rubricItems
 const usd = n => n == null ? "—" : `$${Math.round(Number(n)).toLocaleString()}`;
 const money2 = n => n == null || !isFinite(n) ? "—" : `$${Number(n).toFixed(2)}`;
 const pctOf = (a, b) => b ? `${Math.round((a / b) * 100)}%` : "—";
+const fmtSeconds = s => s == null ? "—" : s < 90 ? `${Math.round(s)} sec` : fmtMinutes(Math.round(s / 60));
 const fmtMinutes = m => m == null ? "—" : m < 60 ? `${m} min` : m < 1440 ? `${Math.floor(m / 60)}h ${m % 60}m` : `${(m / 1440).toFixed(1)} days`;
 
 function rangeFor(preset) {
@@ -5386,12 +5387,12 @@ const SubTabs = ({ tabs, active, setActive }) => (
 );
 const SectionTitle = ({ children }) => <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"16px", color:C.black, marginTop:"6px" }}>{children}</div>;
 const ReportState = ({ s }) => s.error ? <div style={{ background:`${C.red}10`, border:`1px solid ${C.red}`, borderRadius:"10px", padding:"12px", fontSize:"13px", color:C.red }}>Couldn't load: {s.error}</div> : s.loading && !s.data ? <div style={{ color:C.muted, padding:"16px" }}>Loading...</div> : null;
-const REVENUE_PENDING = "Needs HCP link";
-const REVENUE_NOTE = "Revenue and ROAS turn on once HCP customers are matched to these leads (next build).";
+const REVENUE_NOTE = "Revenue = HCP jobs these leads booked after coming in, matched by phone, email, or exact full name. Sold counts the job when it's booked; serviced counts it when it's completed.";
 
 function ChannelTiles({ ch, paid }) {
   const cpl = paid && ch.leads ? ch.spend / ch.leads : null;
   const cpb = paid && ch.booked ? ch.spend / ch.booked : null;
+  const roas = paid && Number(ch.spend) > 0 ? Number(ch.revenue_sold || 0) / Number(ch.spend) : null;
   return (
     <TileGrid>
       <StatTile label="Leads" value={ch.leads} sub="New customers in GHL"/>
@@ -5399,8 +5400,8 @@ function ChannelTiles({ ch, paid }) {
       {paid && <StatTile label="Cost per lead" value={ch.spend ? money2(cpl) : "—"}/>}
       <StatTile label="Booked" value={ch.booked} sub={`${pctOf(ch.booked, ch.leads)} of leads`}/>
       {paid && <StatTile label="Cost per booking" value={ch.spend ? money2(cpb) : "—"}/>}
-      <StatTile label="Revenue" value={REVENUE_PENDING} pending/>
-      {paid && <StatTile label="ROAS" value={REVENUE_PENDING} pending/>}
+      <StatTile label="Revenue sold" value={usd(ch.revenue_sold)} sub={`${ch.customers || 0} paying customers · ${usd(ch.revenue_serviced)} serviced`}/>
+      {paid && <StatTile label="ROAS" value={roas == null ? "—" : `${roas.toFixed(2)}x`} sub={roas == null ? "needs ad spend" : `${usd(ch.revenue_sold)} sold ÷ ${usd(ch.spend)} spent`}/>}
       {paid && ch.impressions > 0 && <StatTile label="Clicks" value={Number(ch.clicks).toLocaleString()} sub={`${pctOf(ch.clicks, ch.impressions)} CTR · ${Number(ch.impressions).toLocaleString()} impr.`}/>}
     </TileGrid>
   );
@@ -5411,14 +5412,15 @@ function MetaCampaigns({ campaigns }) {
   if (!campaigns.length) return <div style={{ fontSize:"13px", color:C.muted }}>No Meta campaigns in this range.</div>;
   const th = { textAlign:"right", padding:"6px 8px", fontSize:"10px", color:C.muted, letterSpacing:"1px", fontWeight:"800", whiteSpace:"nowrap" };
   const td = { textAlign:"right", padding:"8px", fontSize:"12px", color:C.black, whiteSpace:"nowrap", fontVariantNumeric:"tabular-nums" };
-  const row = (x, sub) => [
+  const row = x => [
     usd(x.spend), x.leads, x.spend && x.leads ? money2(x.spend / x.leads) : "—", x.booked, x.spend && x.booked ? money2(x.spend / x.booked) : "—",
+    usd(x.revenue_sold), Number(x.spend) > 0 ? `${(Number(x.revenue_sold || 0) / Number(x.spend)).toFixed(2)}x` : "—",
   ];
   return (
     <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", overflowX:"auto" }}>
-      <table style={{ width:"100%", borderCollapse:"collapse", minWidth:"520px" }}>
+      <table style={{ width:"100%", borderCollapse:"collapse", minWidth:"680px" }}>
         <thead><tr style={{ background:C.cardLt }}>
-          <th style={{ ...th, textAlign:"left" }}>CAMPAIGN / AD</th><th style={th}>SPEND</th><th style={th}>LEADS</th><th style={th}>CPL</th><th style={th}>BOOKED</th><th style={th}>$/BOOKING</th>
+          <th style={{ ...th, textAlign:"left" }}>CAMPAIGN / AD</th><th style={th}>SPEND</th><th style={th}>LEADS</th><th style={th}>CPL</th><th style={th}>BOOKED</th><th style={th}>$/BOOKING</th><th style={th}>REVENUE</th><th style={th}>ROAS</th>
         </tr></thead>
         <tbody>
           {campaigns.map(c => (<Fragment key={c.id}>
@@ -5469,7 +5471,8 @@ function MarketingTab({ token }) {
   const d = s.data;
   const ch = d?.channels || {};
   const conn = d?.connections || {};
-  const all = Object.values(ch).reduce((t, c) => ({ leads:t.leads + c.leads, booked:t.booked + c.booked, spend:t.spend + Number(c.spend) }), { leads:0, booked:0, spend:0 });
+  const all = Object.values(ch).reduce((t, c) => ({ leads:t.leads + c.leads, booked:t.booked + c.booked, spend:t.spend + Number(c.spend), sold:t.sold + Number(c.revenue_sold || 0) }), { leads:0, booked:0, spend:0, sold:0 });
+  const paidSold = ["meta","google","lsa"].reduce((s, k) => s + Number(ch[k]?.revenue_sold || 0), 0);
   const days = d?.daily || [];
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:"12px" }}>
@@ -5477,7 +5480,7 @@ function MarketingTab({ token }) {
       <ReportState s={s}/>
       {d && (<>
         <div style={{ background:C.black, borderRadius:"12px", padding:"14px 16px", display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(110px, 1fr))", gap:"10px", color:C.white }}>
-          {[["All leads", all.leads], ["Booked", `${all.booked} · ${pctOf(all.booked, all.leads)}`], ["Ad spend", usd(all.spend)], ["Blended CPL", all.spend ? money2(all.spend / all.leads) : "—"], ["Revenue / ROAS", "Soon"]].map(([l, v]) => (
+          {[["All leads", all.leads], ["Booked", `${all.booked} · ${pctOf(all.booked, all.leads)}`], ["Ad spend", usd(all.spend)], ["Blended CPL", all.spend ? money2(all.spend / all.leads) : "—"], ["Revenue sold", usd(all.sold)], ["Paid ROAS", all.spend ? `${(paidSold / all.spend).toFixed(2)}x` : "—"]].map(([l, v]) => (
             <div key={l}><div style={{ fontSize:"10px", opacity:0.7, letterSpacing:"1px", fontWeight:"800", fontFamily:"'Barlow Condensed',sans-serif" }}>{l.toUpperCase()}</div><div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"22px" }}>{v}</div></div>
           ))}
         </div>
@@ -5515,7 +5518,7 @@ function MarketingTab({ token }) {
             {(d.website_sources || []).map(w => (
               <div key={w.source} style={{ display:"flex", justifyContent:"space-between", padding:"8px 0", borderBottom:`1px solid ${C.border}40`, fontSize:"13px" }}>
                 <span style={{ color:C.black }}>{w.source === "Social media" ? "Social media (organic / link in bio)" : w.source}</span>
-                <span style={{ color:C.muted }}><b style={{ color:C.black }}>{w.leads}</b> leads · {w.booked} booked</span>
+                <span style={{ color:C.muted }}><b style={{ color:C.black }}>{w.leads}</b> leads · {w.booked} booked · {usd(w.revenue_sold)}</span>
               </div>
             ))}
           </div>
@@ -5536,16 +5539,19 @@ function MarketingTab({ token }) {
   );
 }
 
-function FunnelBlock({ k, label }) {
+function FunnelBlock({ k, label, revenue }) {
   if (!k) return null;
   return (
     <TileGrid>
       <StatTile label={`${label} leads`} value={k.leads} sub="New customers in range"/>
       <StatTile label="Contacted" value={k.contacted} sub={`${pctOf(k.contacted, k.leads)} of leads`}/>
-      <StatTile label="Time to first contact" value={fmtMinutes(k.median_minutes_to_contact)} sub="median"/>
+      <StatTile label="Speed to lead" value={fmtSeconds(k.median_seconds_to_contact)} sub={`median · ${k.in_hours_leads} leads in work hours`}/>
+      <StatTile label="Contacted within 60 sec" value={pctOf(k.within_60s, k.in_hours_leads)} sub={`${k.within_60s} of ${k.in_hours_leads} · ${k.within_5m} within 5 min`}/>
+      <StatTile label="After-hours leads" value={k.after_hours_leads} sub={`${pctOf(k.after_hours_auto_replied, k.after_hours_leads)} got an auto-text within 15 min`}/>
       {k.demos > 0 && <StatTile label="Demo details set" value={k.demos}/>}
       <StatTile label="Jobs booked" value={k.booked_in_period} sub="booked in this range"/>
       <StatTile label="Booking rate" value={pctOf(k.booked_from_leads, k.leads)} sub={`${k.booked_from_leads} of these leads booked`}/>
+      {revenue && <StatTile label={`${label} revenue sold`} value={usd(revenue.sold)} sub={`${usd(revenue.serviced)} serviced`}/>}
     </TileGrid>
   );
 }
@@ -5564,8 +5570,8 @@ function SalesTab({ token }) {
         {!d.ghl_user_found && <div style={{ fontSize:"12px", color:C.red }}>Couldn't find {d.rep} as a GHL user.</div>}
         <SectionTitle>Revenue</SectionTitle>
         <TileGrid>
-          <StatTile label="Revenue sold" value={REVENUE_PENDING} pending/>
-          <StatTile label="Revenue serviced" value={REVENUE_PENDING} pending/>
+          <StatTile label="Revenue sold" value={usd(d.revenue?.sold)} sub={`${d.revenue?.sold_jobs || 0} jobs booked from these leads`}/>
+          <StatTile label="Revenue serviced" value={usd(d.revenue?.serviced)} sub={`${d.revenue?.serviced_jobs || 0} of those jobs completed`}/>
           <StatTile label="Recurring plans sold" value={d.plans?.sold ?? 0} sub={Object.entries(d.plans?.by_plan || {}).map(([p, n]) => `${n} ${p}`).join(" · ") || "none in range"}/>
           {d.plans?.cancelled > 0 && <StatTile label="Plans cancelled" value={d.plans.cancelled}/>}
         </TileGrid>
@@ -5586,13 +5592,13 @@ function SalesTab({ token }) {
           <FunnelBlock k={d.by_kind?.all} label="Inbound"/>
         </>) : (<>
           <SectionTitle>Warm inbound</SectionTitle>
-          <FunnelBlock k={d.by_kind?.warm} label="Inbound"/>
+          <FunnelBlock k={d.by_kind?.warm} label="Inbound" revenue={d.revenue?.by_kind?.warm}/>
           <SectionTitle>Cold outreach</SectionTitle>
-          <FunnelBlock k={d.by_kind?.cold} label="Cold"/>
-          <div style={{ fontSize:"11px", color:C.muted }}>Cold = commercial deals that started in "Outbound - Uncontacted" or came from Apollo / personal research.</div>
+          <FunnelBlock k={d.by_kind?.cold} label="Cold" revenue={d.revenue?.by_kind?.cold}/>
+          <div style={{ fontSize:"11px", color:C.muted }}>Speed to lead only counts leads that came in 8am–5pm Mountain, Mon–Thu, or on a weekend day the rep worked. Cold = commercial deals that started in "Outbound - Uncontacted" or came from Apollo / personal research.</div>
         </>)}
         <DailyBars title="Jobs booked per day" days={d.daily || []} value={x => x.booked} color={C.green}/>
-        <div style={{ fontSize:"11px", color:C.muted }}>From GHL pipelines: {(d.pipelines || []).join(", ")}. Calls and texts are the ones {d.rep} made in GHL.</div>
+        <div style={{ fontSize:"11px", color:C.muted }}>From GHL pipelines: {(d.pipelines || []).join(", ")}. Calls and texts are the ones {d.rep} made in GHL. Speed to lead = time from the lead landing in GHL to the first call or text by a person, for leads that came in 8am–5pm Mountain Mon–Thu (or a weekend day {d.rep} worked).</div>
         {s.loading && <div style={{ fontSize:"11px", color:C.muted }}>Refreshing...</div>}
       </>)}
     </div>
