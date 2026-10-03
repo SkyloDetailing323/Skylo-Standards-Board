@@ -5419,6 +5419,7 @@ function ChannelTiles({ ch, paid }) {
       {paid && <StatTile label="Cost per booking" value={ch.spend ? money2(cpb) : "—"}/>}
       <StatTile label="Revenue sold" value={usd(ch.revenue_sold)} sub={`${ch.customers || 0} paying customers · ${usd(ch.revenue_serviced)} serviced`}/>
       {paid && <StatTile label="ROAS" value={roas == null ? "—" : `${roas.toFixed(2)}x`} sub={roas == null ? "needs ad spend" : `${usd(ch.revenue_sold)} sold ÷ ${usd(ch.spend)} spent`}/>}
+      {paid && Number(ch.platform_leads) > 0 && <StatTile label="Conversions (ad platform)" value={Math.round(ch.platform_leads)} sub={`${Number(ch.spend) ? money2(Number(ch.spend) / Number(ch.platform_leads)) : "—"} each · as counted by the ad platform`}/>}
       {paid && ch.impressions > 0 && <StatTile label="Clicks" value={Number(ch.clicks).toLocaleString()} sub={`${pctOf(ch.clicks, ch.impressions)} CTR · ${Number(ch.impressions).toLocaleString()} impr.`}/>}
     </TileGrid>
   );
@@ -5458,6 +5459,27 @@ function MetaCampaigns({ campaigns }) {
   );
 }
 
+function SpendCampaigns({ rows }) {
+  if (!rows?.length) return <div style={{ fontSize:"13px", color:C.muted }}>No spend in this range.</div>;
+  const th = { textAlign:"right", padding:"6px 8px", fontSize:"10px", color:C.muted, letterSpacing:"1px", fontWeight:"800", whiteSpace:"nowrap" };
+  const td = { textAlign:"right", padding:"8px", fontSize:"12px", color:C.black, whiteSpace:"nowrap", fontVariantNumeric:"tabular-nums" };
+  return (
+    <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", overflowX:"auto" }}>
+      <table style={{ width:"100%", borderCollapse:"collapse", minWidth:"520px" }}>
+        <thead><tr style={{ background:C.cardLt }}><th style={{ ...th, textAlign:"left" }}>CAMPAIGN</th><th style={th}>SPEND</th><th style={th}>CLICKS</th><th style={th}>CPC</th><th style={th}>CONV.</th><th style={th}>$/CONV.</th></tr></thead>
+        <tbody>{rows.map(r => (
+          <tr key={r.id} style={{ borderTop:`1px solid ${C.border}` }}>
+            <td style={{ ...td, textAlign:"left", whiteSpace:"normal", fontWeight:"700" }}>{/^LocalServicesCampaign/.test(r.name) ? "Local Services Ads" : r.name}</td>
+            <td style={td}>{usd(r.spend)}</td><td style={td}>{Number(r.clicks).toLocaleString()}</td>
+            <td style={td}>{r.clicks ? money2(r.spend / r.clicks) : "—"}</td>
+            <td style={td}>{Math.round(r.conversions)}</td><td style={td}>{r.conversions ? money2(r.spend / r.conversions) : "—"}</td>
+          </tr>))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 const META_STEPS = [
   "developers.facebook.com → My Apps → Create App → type Business → name it \"Skylo Reporting\".",
   "business.facebook.com → Settings → Users → System users → Add (Employee role).",
@@ -5490,7 +5512,12 @@ function MarketingTab({ token }) {
   const ch = d?.channels || {};
   const conn = d?.connections || {};
   const all = Object.values(ch).reduce((t, c) => ({ leads:t.leads + c.leads, booked:t.booked + c.booked, spend:t.spend + Number(c.spend), sold:t.sold + Number(c.revenue_sold || 0) }), { leads:0, booked:0, spend:0, sold:0 });
-  const paidSold = ["meta","google","lsa"].reduce((s, k) => s + Number(ch[k]?.revenue_sold || 0), 0);
+  // Cost per lead and ROAS only count channels whose spend is connected, so a
+  // channel with leads but no spend data doesn't make the numbers look great.
+  const withSpend = ["meta","google","lsa"].filter(k => Number(ch[k]?.spend) > 0);
+  const paidSpend = withSpend.reduce((s, k) => s + Number(ch[k].spend), 0);
+  const paidSold = withSpend.reduce((s, k) => s + Number(ch[k].revenue_sold || 0), 0);
+  const paidLeads = withSpend.reduce((s, k) => s + Number(ch[k].leads || 0), 0);
   const days = d?.daily || [];
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:"12px" }}>
@@ -5498,7 +5525,7 @@ function MarketingTab({ token }) {
       <ReportState s={s}/>
       {d && (<>
         <div style={{ background:C.black, borderRadius:"12px", padding:"14px 16px", display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(110px, 1fr))", gap:"10px", color:C.white }}>
-          {[["All leads", all.leads], ["Booked", `${all.booked} · ${pctOf(all.booked, all.leads)}`], ["Ad spend", usd(all.spend)], ["Blended CPL", all.spend ? money2(all.spend / all.leads) : "—"], ["Revenue sold", usd(all.sold)], ["Paid ROAS", all.spend ? `${(paidSold / all.spend).toFixed(2)}x` : "—"]].map(([l, v]) => (
+          {[["All leads", all.leads], ["Booked", `${all.booked} · ${pctOf(all.booked, all.leads)}`], ["Ad spend", usd(all.spend)], ["Paid cost / lead", paidSpend && paidLeads ? money2(paidSpend / paidLeads) : "—"], ["Revenue sold", usd(all.sold)], ["Paid ROAS", paidSpend ? `${(paidSold / paidSpend).toFixed(2)}x` : "—"]].map(([l, v]) => (
             <div key={l}><div style={{ fontSize:"10px", opacity:0.7, letterSpacing:"1px", fontWeight:"800", fontFamily:"'Barlow Condensed',sans-serif" }}>{l.toUpperCase()}</div><div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"22px" }}>{v}</div></div>
           ))}
         </div>
@@ -5521,13 +5548,18 @@ function MarketingTab({ token }) {
             syncFn="google-ads-sync" token={token} onSynced={() => setBump(b => b + 1)}
             note={conn.google?.last_result?.ok === false ? `Last sync failed: ${conn.google.last_result.error}` : conn.google?.connected ? null : "Google Ads leads show up here automatically once they arrive in GHL with Google's tracking."}/>
           <ChannelTiles ch={ch.google} paid/>
-          <DailyBars title="Google Ads leads per day" days={days} value={x => x.leads?.google || 0}/>
+          {Number(ch.google.spend) > 0 && ch.google.leads === 0 && <div style={{ background:`${C.gold}12`, border:`1px solid ${C.gold}`, borderRadius:"10px", padding:"10px 12px", fontSize:"12px", color:C.black }}>Google is reporting conversions, but none of your GHL leads are tagged as coming from Google yet — so leads, bookings and revenue for Google show 0 here. Those leads are landing in GHL as website / direct leads. Fix: turn on GHL tracking for Google (see setup notes) so each lead keeps its Google click ID.</div>}
+          <DailyBars title="Google Ads spend per day" days={days} value={x => Number(x.spend?.google || 0)} fmt={usd}/>
+          <SectionTitle>Campaigns</SectionTitle>
+          <SpendCampaigns rows={d.ad_campaigns?.google}/>
         </>)}
 
         {sub === "lsa" && (<>
           <ConnectionCard title="Local Services Ads" connected={conn.lsa?.connected} lastSync={conn.lsa?.last_sync} steps={conn.lsa?.connected ? null : LSA_STEPS}
             note={conn.lsa?.connected ? "LSA spend comes through the Google Ads connection (Local Services campaigns)." : "Connect Google Ads (Google Ads tab) — LSA spend comes through that same connection."}/>
           <ChannelTiles ch={ch.lsa} paid/>
+          <DailyBars title="Local Services spend per day" days={days} value={x => Number(x.spend?.lsa || 0)} fmt={usd}/>
+          <SpendCampaigns rows={d.ad_campaigns?.lsa}/>
         </>)}
 
         {sub === "website" && (<>

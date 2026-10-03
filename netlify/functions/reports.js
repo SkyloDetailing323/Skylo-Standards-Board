@@ -51,7 +51,7 @@ exports.handler = async (event) => {
 
   try {
     if (q.type === "marketing") {
-      const [report, ghl, meta, gads, gtoken] = await Promise.all([
+      const [report, ghl, meta, gads, gtoken, adCampaigns] = await Promise.all([
         rpc("marketing_report", { p_from: q.from, p_to: q.to }),
         syncState("last_run"),
         syncState("meta_ads_last_run"),
@@ -59,9 +59,11 @@ exports.handler = async (event) => {
         fetch(`${process.env.SUPABASE_URL}/rest/v1/integration_tokens?key=eq.google_ads_refresh_token&select=updated_at`, {
           headers: { apikey: process.env.SUPABASE_KEY, Authorization: `Bearer ${process.env.SUPABASE_KEY}` },
         }).then(r => r.ok ? r.json() : []).then(r => r[0] || null).catch(() => null),
+        rpc("ad_campaigns_report", { p_from: q.from, p_to: q.to }).catch(() => ({})),
       ]);
       return json(200, {
         ...report,
+        ad_campaigns: adCampaigns || {},
         connections: {
           ghl: { connected: true, last_sync: ghl?.updated_at || null },
           meta: { connected: !!process.env.META_ADS_TOKEN && !!process.env.META_AD_ACCOUNT_ID, last_sync: meta?.updated_at || null, last_result: meta?.value || null },
