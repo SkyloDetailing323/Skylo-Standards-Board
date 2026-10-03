@@ -5267,16 +5267,8 @@ function FinalDayResults({ trainee, prog, tests, evals, evalResults, rubricItems
 }
 
 // ─── MARKETING & SALES (owners only) ─────────────────────────────────────────
-// Hidden while the numbers are being checked: owners can preview with
-// ?growth=1 on the URL (remembered on that device; ?growth=0 turns it off).
-const GROWTH_TABS_ON = (() => {
-  try {
-    const q = new URLSearchParams(window.location.search).get("growth");
-    if (q === "1") localStorage.setItem("skylo_growth", "1");
-    if (q === "0") localStorage.removeItem("skylo_growth");
-    return localStorage.getItem("skylo_growth") === "1";
-  } catch { return false; }
-})();
+// Marketing & Sales are on for owners (managers never see them).
+const GROWTH_TABS_ON = true;
 // Both dashboards come from /.netlify/functions/reports, which reads the GHL
 // mirror and ad spend tables server-side (the browser can't read those) after
 // checking the login token is an owner's.
