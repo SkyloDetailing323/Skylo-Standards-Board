@@ -58,11 +58,19 @@ exports.handler = async (event) => {
       metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions, metrics.conversions_value
       FROM campaign WHERE segments.date BETWEEN '${since}' AND '${until}'`;
 
-    let results, used;
-    for (const v of VERSIONS) {
-      try { results = await search(v, token, customerId, loginId, query); used = v; break; }
-      catch (e) { if (!e.version) throw e; }
+    // Try through the manager account first (if set), then direct access --
+    // team@skylod.com is also a user on the ad account itself, and a manager
+    // that isn't linked yet makes Google refuse the request.
+    let results, used, via;
+    const routes = loginId && loginId !== customerId ? [loginId, null] : [null];
+    let lastErr;
+    outer: for (const route of routes) {
+      for (const v of VERSIONS) {
+        try { results = await search(v, token, customerId, route, query); used = v; via = route ? "manager" : "direct"; break outer; }
+        catch (e) { if (e.version) continue; lastErr = e; if (/HTTP 403/.test(e.message)) continue outer; throw e; }
+      }
     }
+    if (!results && lastErr) throw lastErr;
     if (!results) throw new Error(`No supported Google Ads API version among ${VERSIONS.join(", ")} — set GOOGLE_ADS_API_VERSION`);
 
     const rows = results.map(r => {
@@ -82,8 +90,8 @@ exports.handler = async (event) => {
       await sb("ad_spend_daily?on_conflict=platform,day,ad_id", { method: "POST", prefer: "resolution=merge-duplicates,return=minimal", body: JSON.stringify(rows.slice(i, i + 500)) });
     }
     const spend = Math.round(rows.reduce((s, r) => s + r.spend, 0) * 100) / 100;
-    await saveState({ ok: true, version: used, since, until, rows: rows.length, spend });
-    return { statusCode: 200, body: JSON.stringify({ ok: true, version: used, since, until, rows: rows.length, spend }) };
+    await saveState({ ok: true, version: used, via, since, until, rows: rows.length, spend });
+    return { statusCode: 200, body: JSON.stringify({ ok: true, version: used, via, since, until, rows: rows.length, spend }) };
   } catch (e) {
     console.error("google-ads-sync:", e.message);
     await saveState({ ok: false, since, until, error: e.message });
