@@ -5366,8 +5366,20 @@ function DailyBars({ title, days, value, color = C.blue, fmt = v => v }) {
   );
 }
 
-function ConnectionCard({ title, connected, lastSync, steps, note, connectUrl, connectLabel }) {
+function ConnectionCard({ title, connected, lastSync, steps, note, connectUrl, connectLabel, syncFn, token, onSynced }) {
   const [open, setOpen] = useState(!connected);
+  const [syncing, setSyncing] = useState(false);
+  const [syncMsg, setSyncMsg] = useState(null);
+  async function syncNow() {
+    setSyncing(true); setSyncMsg(null);
+    try {
+      const r = await fetch(`/.netlify/functions/${syncFn}?days=90`, { headers:{ Authorization:`Bearer ${token || ""}` } });
+      const j = await r.json().catch(() => ({}));
+      setSyncMsg(j.ok ? `✅ Pulled ${j.rows} rows · $${Math.round(j.spend || 0).toLocaleString()} spend (${j.since} → ${j.until})` : `⚠️ ${j.error || j.skipped || `HTTP ${r.status}`}`);
+      if (j.ok && onSynced) onSynced();
+    } catch(e) { setSyncMsg(`⚠️ ${e.message}`); }
+    setSyncing(false);
+  }
   return (
     <div style={{ background:connected ? `${C.green}10` : `${C.gold}12`, border:`1px solid ${connected ? C.green : C.gold}`, borderRadius:"12px", padding:"12px 14px" }}>
       <div onClick={() => setOpen(o => !o)} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", cursor:"pointer", gap:"8px" }}>
@@ -5376,6 +5388,8 @@ function ConnectionCard({ title, connected, lastSync, steps, note, connectUrl, c
       </div>
       {note && <div style={{ fontSize:"12px", color:C.muted, marginTop:"4px" }}>{note}</div>}
       {open && steps && <ol style={{ margin:"8px 0 0", paddingLeft:"20px", fontSize:"12px", color:C.black, lineHeight:1.6 }}>{steps.map((s, i) => <li key={i}>{s}</li>)}</ol>}
+      {connected && syncFn && <button onClick={syncNow} disabled={syncing} style={{ marginTop:"10px", marginRight:"8px", background:C.green, color:C.white, border:"none", padding:"8px 16px", borderRadius:"18px", fontSize:"12px", fontWeight:"900", cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:"1px", textTransform:"uppercase" }}>{syncing ? "Syncing..." : "Sync now"}</button>}
+      {syncMsg && <div style={{ fontSize:"12px", color:C.black, marginTop:"6px" }}>{syncMsg}</div>}
       {connectUrl && <a href={connectUrl} style={{ display:"inline-block", marginTop:"10px", background:C.blue, color:C.white, padding:"8px 16px", borderRadius:"18px", fontSize:"12px", fontWeight:"900", textDecoration:"none", fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:"1px", textTransform:"uppercase" }}>{connectLabel || "Connect"}</a>}
     </div>
   );
@@ -5470,7 +5484,8 @@ const GA4_STEPS = [
 function MarketingTab({ token }) {
   const [range, setRange] = useState(() => rangeFor("month"));
   const [sub, setSub] = useState("meta");
-  const s = useGrowthReport({ type:"marketing", ...range }, token);
+  const [bump, setBump] = useState(0);
+  const s = useGrowthReport({ type:"marketing", ...range, r:bump }, token);
   const d = s.data;
   const ch = d?.channels || {};
   const conn = d?.connections || {};
@@ -5490,7 +5505,7 @@ function MarketingTab({ token }) {
         <SubTabs tabs={[["meta","Meta Ads"],["google","Google Ads"],["lsa","Local Services"],["website","Website"]]} active={sub} setActive={setSub}/>
 
         {sub === "meta" && (<>
-          <ConnectionCard title="Meta Ads spend" connected={conn.meta?.connected} lastSync={conn.meta?.last_sync} steps={conn.meta?.connected ? null : META_STEPS}
+          <ConnectionCard title="Meta Ads spend" connected={conn.meta?.connected} lastSync={conn.meta?.last_sync} steps={conn.meta?.connected ? null : META_STEPS} syncFn="meta-ads-sync" token={token} onSynced={() => setBump(b => b + 1)}
             note={conn.meta?.connected ? (conn.meta?.last_result?.ok === false ? `Last sync failed: ${conn.meta.last_result.error}` : null) : "Leads below are already live from GHL (Facebook/Instagram ads). Connect Meta to add spend, cost per lead, and cost per booking per ad."}/>
           <ChannelTiles ch={ch.meta} paid/>
           <DailyBars title="Meta leads per day" days={days} value={x => x.leads?.meta || 0}/>
@@ -5503,6 +5518,7 @@ function MarketingTab({ token }) {
         {sub === "google" && (<>
           <ConnectionCard title="Google Ads spend" connected={conn.google?.connected} lastSync={conn.google?.last_sync} steps={conn.google?.connected ? null : GOOGLE_STEPS}
             connectUrl={`/.netlify/functions/google-ads-auth?t=${encodeURIComponent(token || "")}`} connectLabel={conn.google?.connected ? "Reconnect Google Ads" : "Connect Google Ads"}
+            syncFn="google-ads-sync" token={token} onSynced={() => setBump(b => b + 1)}
             note={conn.google?.last_result?.ok === false ? `Last sync failed: ${conn.google.last_result.error}` : conn.google?.connected ? null : "Google Ads leads show up here automatically once they arrive in GHL with Google's tracking."}/>
           <ChannelTiles ch={ch.google} paid/>
           <DailyBars title="Google Ads leads per day" days={days} value={x => x.leads?.google || 0}/>

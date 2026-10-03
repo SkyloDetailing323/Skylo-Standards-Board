@@ -36,7 +36,5 @@ exports.handler = async (event) => {
   }
   await saveRefreshToken(data.refresh_token, { scope: data.scope, connected_at: new Date().toISOString() });
 
-  // Kick off a first pull (last 90 days) without waiting for it.
-  fetch(`${SITE}/.netlify/functions/google-ads-sync?days=90`).catch(() => {});
-  return page("Google Ads connected", "Spend is pulling in now and will refresh every few hours. It can take a minute to show up in the Marketing tab.", true);
+  return page("Google Ads connected", "Back in the app, open Marketing → Google Ads and tap <b>Sync now</b> to pull your history. After that it refreshes every 4 hours on its own.", true);
 };

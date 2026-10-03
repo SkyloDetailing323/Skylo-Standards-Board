@@ -1,11 +1,13 @@
 // netlify/functions/meta-ads-sync.js
 // Pulls daily ad spend, impressions, clicks and leads per ad from the Meta
-// Marketing API into ad_spend_daily. Runs every morning for the last 7 days
+// Marketing API into ad_spend_daily. Started every morning by meta-ads-sync-cron for the last 7 days
 // (Meta revises recent numbers for a few days); visit with ?days=120 once to
 // backfill history.
 //
 // Needs (Netlify env, secret): META_ADS_TOKEN (system user token, ads_read)
 // and META_AD_ACCOUNT_ID (the number after act=). Optional META_API_VERSION.
+
+const { canRunSync } = require("./lib/authToken");
 
 const VERSION = process.env.META_API_VERSION || "v23.0";
 const LEAD_ACTIONS = ["lead", "onsite_conversion.lead_grouped", "leadgen_grouped", "offsite_conversion.fb_pixel_lead"];
@@ -29,6 +31,7 @@ async function saveState(value) {
 }
 
 exports.handler = async (event) => {
+  if (!canRunSync(event)) return { statusCode: 403, body: JSON.stringify({ ok: false, error: "Owners only — use Sync now in the Marketing tab." }) };
   const token = process.env.META_ADS_TOKEN, account = (process.env.META_AD_ACCOUNT_ID || "").replace(/^act_/, "");
   if (!token || !account) return { statusCode: 200, body: JSON.stringify({ ok: false, skipped: "META_ADS_TOKEN / META_AD_ACCOUNT_ID not set yet" }) };
 

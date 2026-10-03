@@ -41,6 +41,9 @@
   schedule = "*/15 * * * *"
 
 [functions."meta-ads-sync"]
+  timeout = 26
+
+[functions."meta-ads-sync-cron"]
   # Daily Meta ad spend pull (last 7 days). 13:20 UTC = early morning MT.
   # Does nothing until META_ADS_TOKEN and META_AD_ACCOUNT_ID are set.
   schedule = "20 13 * * *"
@@ -51,6 +54,9 @@
   schedule = "7 * * * *"
 
 [functions."google-ads-sync"]
+  timeout = 26
+
+[functions."google-ads-sync-cron"]
   # Google Ads + Local Services spend, last 7 days, every 4 hours.
   # Does nothing until Google Ads is connected from the Marketing tab.
   schedule = "25 */4 * * *"

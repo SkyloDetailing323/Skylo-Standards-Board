@@ -1,7 +1,7 @@
 // netlify/functions/google-ads-sync.js
 // Pulls daily cost, impressions, clicks and conversions per campaign from
 // the Google Ads API into ad_spend_daily. Local Services campaigns are saved
-// as platform "lsa", everything else as "google". Runs every 4 hours for the
+// as platform "lsa", everything else as "google". Started every 4 hours by google-ads-sync-cron for the
 // last 7 days (Google revises recent numbers); ?days=90 backfills.
 //
 // Needs: the stored refresh token (Connect Google Ads button),
@@ -10,6 +10,7 @@
 // issued one. Optional GOOGLE_ADS_API_VERSION.
 
 const { sb, getRefreshToken, accessToken } = require("./lib/googleAds");
+const { canRunSync } = require("./lib/authToken");
 
 const VERSIONS = process.env.GOOGLE_ADS_API_VERSION ? [process.env.GOOGLE_ADS_API_VERSION] : ["v24", "v23", "v22", "v21"];
 const digits = s => String(s || "").replace(/\D/g, "");
@@ -44,6 +45,7 @@ async function search(version, token, customerId, loginId, query) {
 }
 
 exports.handler = async (event) => {
+  if (!canRunSync(event)) return { statusCode: 403, body: JSON.stringify({ ok: false, error: "Owners only — use Sync now in the Marketing tab." }) };
   const days = Math.min(Math.max(parseInt(event?.queryStringParameters?.days, 10) || 7, 1), 400);
   const since = mtDay(days - 1), until = mtDay(0);
   const customerId = digits(process.env.GOOGLE_ADS_CUSTOMER_ID), loginId = digits(process.env.GOOGLE_ADS_LOGIN_CUSTOMER_ID);

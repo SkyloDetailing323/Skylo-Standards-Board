@@ -23,4 +23,19 @@ function tokenFrom(event) {
   return auth.startsWith("Bearer ") ? auth.slice(7) : null;
 }
 
-module.exports = { verifyToken, tokenFrom };
+// Key that scheduled wrappers pass to the sync functions they start, so
+// those functions can refuse random visitors but accept the timer.
+function internalKey() {
+  return process.env.AUTH_SECRET ? crypto.createHmac("sha256", process.env.AUTH_SECRET).update("internal-sync").digest("base64url") : null;
+}
+
+// Allowed to run a sync: the timer (internal key header) or an owner (?t=token).
+function canRunSync(event) {
+  const h = event?.headers || {};
+  const key = internalKey();
+  if (key && (h["x-internal-key"] || h["X-Internal-Key"]) === key) return true;
+  const who = verifyToken(event?.queryStringParameters?.t || tokenFrom(event || {}));
+  return !!who && who.role === "owner";
+}
+
+module.exports = { verifyToken, tokenFrom, internalKey, canRunSync };
