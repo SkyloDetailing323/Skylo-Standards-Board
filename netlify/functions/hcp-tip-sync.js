@@ -229,9 +229,11 @@ async function writeTipForJob(id, msg, parsed, job, techByName) {
 // HCP sends a payment receipt ("You just got paid!") when a job is paid, and
 // a separate updated receipt ("You just got a tip from <customer>") when a
 // customer adds a tip afterwards, e.g. after a card-on-file charge. Both carry
-// the job's full Tip line; everything else HCP sends from this address
+// the job's full Tip line. Some payments (e.g. one taken in person) only come
+// through as a "COPY OF CUSTOMER RECEIPT" email instead -- same receipt
+// layout, same Tip line. Everything else HCP sends from this address
 // (appointment reminders, review requests, etc.) is skipped.
-const PAYMENT_OR_TIP_EMAIL = /you\s+just\s+got\s+(?:paid|a\s+tip)/i;
+const PAYMENT_OR_TIP_EMAIL = /you\s+just\s+got\s+(?:paid|a\s+tip)|copy\s+of\s+customer\s+receipt/i;
 
 // Classifies one fetched email, writes its tip if it has one, and records the
 // outcome in processed_tip_emails. Returns the status it recorded. Used by the

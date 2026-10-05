@@ -262,6 +262,12 @@ exports.handler = async () => {
             body: JSON.stringify({ tech_id: tech.id, week_key: weekKey, amount: upsells, hcp_job_id: jobId, note }),
           });
           console.log(`UPSELL: ${split.skyloName} | ${note}`);
+        } else if (inv) {
+          // Upgrade removed from the invoice -- clear the stale upsell row so
+          // it can't disagree with jobs.upsell_amount (same as the webhook).
+          await sbFetch(`upsells?hcp_job_id=eq.${jobId}&tech_id=eq.${tech.id}`, {
+            method: "DELETE", prefer: "return=minimal",
+          });
         }
       } catch (err) {
         console.log(`Failed to write upsell for job ${jobId} tech ${tech.id}:`, err.message);
