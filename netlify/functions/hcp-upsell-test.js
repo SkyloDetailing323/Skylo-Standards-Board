@@ -17,7 +17,7 @@ const { matchTechName } = require('./lib/matchTech');
 function getWeekKey() {
   const mt = new Date(Date.now() - 6 * 60 * 60 * 1000);
   const day = mt.getDay();
-  const daysBack = day === 0 ? 6 : day - 1;
+  const daysBack = day; // weeks run Sun–Sat (same as HCP)
   const monday = new Date(mt);
   monday.setDate(mt.getDate() - daysBack);
   const y = monday.getFullYear();

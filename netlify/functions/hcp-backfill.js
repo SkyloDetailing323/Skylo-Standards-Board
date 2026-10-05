@@ -13,7 +13,7 @@ const { matchTechName } = require('./lib/matchTech');
 function getWeekKey(dateStr) {
   const d = new Date(dateStr + "T12:00:00Z");
   const day = d.getUTCDay();
-  const daysBack = day === 0 ? 6 : day - 1;
+  const daysBack = day; // weeks run Sun–Sat (same as HCP)
   const monday = new Date(d);
   monday.setUTCDate(d.getUTCDate() - daysBack);
   const y = monday.getUTCFullYear();

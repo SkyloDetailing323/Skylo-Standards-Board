@@ -196,12 +196,12 @@ const calcBadgePts = (badges) => (badges||[]).reduce((s,id) => s+(BADGE_MAP[id]?
 const medal = (i) => i===0?"🥇":i===1?"🥈":i===2?"🥉":`#${i+1}`;
 
 function getWeekKey() {
-  // Week runs Mon–Sun, resets at Monday 12:00am MT (UTC-6 MDT)
+  // Week runs Sun–Sat (same as HCP's reports), resets Sunday 12:00am MT
   const mtOffset = 6 * 60 * 60 * 1000;
   const mt = new Date(Date.now() - mtOffset);
   const day = mt.getDay(); // 0=Sun,1=Mon,2=Tue...6=Sat
-  // Days since last Monday (Sunday counts as 6 days after Monday)
-  const daysBack = day === 0 ? 6 : day - 1;
+  // Days since last Sunday
+  const daysBack = day;
   const monday = new Date(mt);
   monday.setDate(mt.getDate() - daysBack);
   const y = monday.getFullYear();
@@ -209,12 +209,12 @@ function getWeekKey() {
   const d = String(monday.getDate()).padStart(2,"0");
   return `${y}-${m}-${d}`;
 }
-// Snaps an arbitrary YYYY-MM-DD date to that week's Monday (same Mon-Sun
+// Snaps an arbitrary YYYY-MM-DD date to that week's Sunday (same Sun-Sat
 // convention as getWeekKey, just for a picked date instead of "now").
 function dateToWeekKey(dateStr) {
   const d = new Date(dateStr + "T12:00:00Z");
   const day = d.getUTCDay();
-  const back = day === 0 ? 6 : day - 1;
+  const back = day;
   d.setUTCDate(d.getUTCDate() - back);
   return d.toISOString().split("T")[0];
 }
@@ -233,7 +233,7 @@ function getMonthKey() {
 // Real upsell $ for a tech (or team-wide if techId is falsy) over a job_date
 // range -- the same day-exact method ReportsTab uses (jobs.upsell_amount by
 // job_date), so quota/gamification views agree with Reports/personal logins
-// instead of the separate upsells table, whose week_key (a week's Monday)
+// instead of the separate upsells table, whose week_key (a week's Sunday)
 // month-prefix bucketing misattributes any week spanning a month boundary.
 function upsellAmountInRange(jobs, techId, start, end) {
   return (jobs||[]).filter(j => (!techId || j.tech_id===techId) && j.job_date && j.job_date>=start && j.job_date<=end).reduce((s,j)=>s+(j.upsell_amount||0),0);
@@ -935,9 +935,9 @@ function SwitchoverLeaderboard({ techs, switchovers, currentId }) {
 
   // Date range — same WTD/Last Week/MTD/Last Month/YTD/Custom control as
   // Revenue's Time Period panel (getDateRangeBounds). Entries are only
-  // logged with a week_key (Monday of the week), not an exact day, so range
+  // logged with a week_key (Sunday of the week), not an exact day, so range
   // filtering matches by week overlap: any switchover whose week starts
-  // on/after the Monday of the range start and on/before the range end.
+  // on/after the Sunday of the range start and on/before the range end.
   const [rangePreset, setRangePreset] = useState("wtd");
   const [cStart, setCStart] = useState("");
   const [cEnd, setCEnd] = useState("");
@@ -945,7 +945,7 @@ function SwitchoverLeaderboard({ techs, switchovers, currentId }) {
   function mondayOf(dateStr) {
     const d = new Date(dateStr + "T12:00:00Z");
     const day = d.getUTCDay();
-    const back = day === 0 ? 6 : day - 1;
+    const back = day; // week starts Sunday
     d.setUTCDate(d.getUTCDate() - back);
     return d.toISOString().split("T")[0];
   }
@@ -3173,7 +3173,7 @@ function TechDashboard({ tech, techs, upsells, switchovers, reviews, callbacks, 
               if (wkRevenue===0&&wkHours===0) return null;
               const mt = new Date(Date.now()-6*60*60*1000);
               const day = mt.getDay();
-              const daysElapsed = Math.max(day===0?6:day-1, 1);
+              const daysElapsed = Math.max(day, 1); // Sun–Sat week, Mon–Sat workdays
               const daysInWeek  = 6;
               const projRevenue = Math.round((wkRevenue/daysElapsed)*daysInWeek);
               const projHours   = Math.round((wkHours/daysElapsed)*daysInWeek*10)/10;
@@ -3517,13 +3517,13 @@ function AdminTimeSheetTab({ techs, timeEntries, refreshAll, showToast }) {
         const totalHours = parseFloat(hoursStr);
         if (isNaN(totalHours) || totalHours <= 0) { errors.push(`Line ${i+1}: invalid hours "${hoursStr}"`); return; }
         const weekStart = new Date(nowYear, monthIdx, parseInt(dayStr,10));
-        if (weekStart.getDay() !== 1) {
+        if (weekStart.getDay() !== 0) {
           const actualDay = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"][weekStart.getDay()];
-          errors.push(`Line ${i+1}: "${monthName} ${dayStr}" is a ${actualDay}, not a Monday — week start dates must be Mondays`);
+          errors.push(`Line ${i+1}: "${monthName} ${dayStr}" is a ${actualDay}, not a Sunday — week start dates must be Sundays`);
           return;
         }
         const perDayHours = totalHours / 4;
-        for (let d = 0; d < 4; d++) {
+        for (let d = 1; d <= 4; d++) {
           const dayDate = new Date(weekStart); dayDate.setDate(weekStart.getDate()+d);
           const dayStrFmt = `${dayDate.getFullYear()}-${String(dayDate.getMonth()+1).padStart(2,"0")}-${String(dayDate.getDate()).padStart(2,"0")}`;
           const clockIn = mtTimeToIso(dayStrFmt, "08:00");
@@ -3584,7 +3584,7 @@ function AdminTimeSheetTab({ techs, timeEntries, refreshAll, showToast }) {
         <div style={{ fontSize:"12px", color:C.muted, display:"flex", flexDirection:"column", gap:"4px" }}>
           <div>Two line formats, mix freely — one entry per line:</div>
           <div>• Per-session: <code>Tech Name, YYYY-MM-DD, HH:MM, HH:MM</code> (24-hour, Mountain Time). Same tech + date twice = two sessions that day (e.g. a lunch break).</div>
-          <div>• Weekly total (historical, no daily breakdown available): <code>Tech Name: Month Day TotalHours</code> — day must be a <strong>Monday</strong>. Spread evenly across 4 synthetic Mon–Thu sessions so daily numbers stay plausible while the weekly total still rolls up correctly.</div>
+          <div>• Weekly total (historical, no daily breakdown available): <code>Tech Name: Month Day TotalHours</code> — day must be a <strong>Sunday</strong> (weeks run Sun–Sat). Spread evenly across 4 synthetic Mon–Thu sessions so daily numbers stay plausible while the weekly total still rolls up correctly.</div>
         </div>
         <textarea value={bulkText} onChange={e=>setBulkText(e.target.value)} rows={8} placeholder={"Riley Lyon, 2026-06-02, 08:15, 16:30\nTom Lorenc, 2026-06-02, 07:30, 15:00\nJaMuar Hill: July 4 37.18"} style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"10px", borderRadius:"8px", fontSize:"12px", fontFamily:"monospace", width:"100%", boxSizing:"border-box", resize:"vertical" }}/>
         <button onClick={runImport} disabled={importing||!bulkText.trim()} style={{ background:importing?"#333":C.orange, border:"none", color:C.white, padding:"13px", borderRadius:"12px", cursor:(importing||!bulkText.trim())?"not-allowed":"pointer", fontSize:"13px", fontWeight:"700", letterSpacing:"2px", fontFamily:"'Barlow Condensed',sans-serif", width:"100%", textTransform:"uppercase" }}>

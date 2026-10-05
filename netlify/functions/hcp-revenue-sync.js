@@ -34,7 +34,7 @@ async function fetchWithTimeout(url, options = {}) {
 function getWeekKey(dateStr) {
   const d = new Date(dateStr + "T12:00:00Z");
   const day = d.getUTCDay();
-  const back = day === 0 ? 6 : day - 1;
+  const back = day; // weeks run Sun–Sat (same as HCP)
   d.setUTCDate(d.getUTCDate() - back);
   return d.toISOString().split("T")[0];
 }
