@@ -242,7 +242,7 @@ async function processMessage(id, msg) {
     return "sender_mismatch";
   }
   if (!PAYMENT_OR_TIP_EMAIL.test(msg.bodyText)) {
-    await markProcessed(id, null, "not_payment_email");
+    await markProcessed(id, null, "not_payment_email", JSON.stringify({ subject: msg.subject || null, bodySnippet: msg.bodyText.slice(0, 400) }));
     return "not_payment_email";
   }
 
