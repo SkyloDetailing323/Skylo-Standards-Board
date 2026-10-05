@@ -92,12 +92,15 @@ exports.handler = async () => {
   // job's real completion date ourselves — matching hcp-revenue-repair.js so
   // the two can't drift out of sync with each other.
   const PAD_DAYS = 5;
+  // Jobs can be closed out well after their scheduled day (one scheduled
+  // 9/24 was completed 10/1 and got missed), so look further back.
+  const BACK_PAD_DAYS = 21;
   function addDays(dateStr, days) {
     const d = new Date(dateStr + "T12:00:00Z");
     d.setUTCDate(d.getUTCDate() + days);
     return d.toISOString().split("T")[0];
   }
-  const fetchFrom = addDays(todayStr, -PAD_DAYS);
+  const fetchFrom = addDays(todayStr, -BACK_PAD_DAYS);
   const fetchTo   = addDays(todayStr, PAD_DAYS);
   const start = `${fetchFrom}T00:00:00-06:00`;
   const end   = `${fetchTo}T23:59:59-06:00`;

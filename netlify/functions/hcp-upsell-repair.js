@@ -126,12 +126,15 @@ exports.handler = async (event) => {
   // scheduled_start and then bucket + filter by each job's real completion
   // date ourselves — same fix already proven in hcp-revenue-repair.js.
   const PAD_DAYS = 5;
+  // Jobs can be closed out well after their scheduled day (one scheduled
+  // 9/24 was completed 10/1 and got missed), so look further back.
+  const BACK_PAD_DAYS = 21;
   function addDays(dateStr, days) {
     const d = new Date(dateStr + "T12:00:00Z");
     d.setUTCDate(d.getUTCDate() + days);
     return d.toISOString().split("T")[0];
   }
-  const fetchFrom = addDays(from, -PAD_DAYS);
+  const fetchFrom = addDays(from, -BACK_PAD_DAYS);
   const fetchTo   = addDays(to, PAD_DAYS);
   const start = `${fetchFrom}T00:00:00Z`;
   const end   = `${fetchTo}T23:59:59Z`;

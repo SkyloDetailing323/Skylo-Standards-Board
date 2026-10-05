@@ -94,6 +94,12 @@ exports.handler = async (event) => {
       method: "POST", headers: { "Content-Type": "application/json", apikey: process.env.SUPABASE_KEY, Authorization: `Bearer ${process.env.SUPABASE_KEY}` }, body: "{}",
     });
     stats.matches = res.ok ? await res.json() : `failed (HTTP ${res.status})`;
+    // Jobs canceled in HCP after they were synced as completed come out of the
+    // revenue numbers, so the app keeps matching HCP's reports.
+    const cres = await fetch(`${process.env.SUPABASE_URL}/rest/v1/rpc/remove_canceled_hcp_jobs`, {
+      method: "POST", headers: { "Content-Type": "application/json", apikey: process.env.SUPABASE_KEY, Authorization: `Bearer ${process.env.SUPABASE_KEY}` }, body: "{}",
+    });
+    stats.canceled_removed = cres.ok ? await cres.json() : `failed (HTTP ${cres.status})`;
     stats.seconds = Math.round((Date.now() - started) / 1000);
     await saveState({ ok: true, ...stats });
     console.log("hcp-sales-sync:", JSON.stringify(stats));
