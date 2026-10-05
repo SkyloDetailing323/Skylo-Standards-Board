@@ -255,7 +255,9 @@ async function processMessage(id, msg) {
     return "parse_error";
   }
   if (!parsed.tipAmount || parsed.tipAmount <= 0) {
-    await markProcessed(id, null, "zero_tip");
+    // Snippet kept so a tip the parser missed can be diagnosed from
+    // processed_tip_emails.detail alone (same as parse_error above).
+    await markProcessed(id, null, "zero_tip", JSON.stringify({ ...parsed, bodySnippet: msg.bodyText.slice(0, 2000) }));
     return "zero_tip";
   }
 
