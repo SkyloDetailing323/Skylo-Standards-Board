@@ -61,3 +61,11 @@
   # Does nothing until Google Ads is connected from the Marketing tab.
   schedule = "25 */4 * * *"
   timeout = 26
+
+[functions."ga4-sync"]
+  timeout = 26
+
+[functions."ga4-sync-cron"]
+  # Website visitors from Google Analytics, last 7 days, every morning.
+  # Does nothing until Google is reconnected with Analytics access.
+  schedule = "35 13 * * *"

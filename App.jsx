@@ -5562,8 +5562,10 @@ const LSA_STEPS = [
   "LSA leads that come in by phone also need to land in GHL (call forwarding or the LSA → GHL integration) so we can follow them to bookings.",
 ];
 const GA4_STEPS = [
-  "Google Analytics → Admin → Property access management → add a service account Claude will give you (Viewer).",
-  "Send Claude the GA4 Property ID (Admin → Property settings).",
+  "Google Cloud (project Skylo Tip Sync) → APIs & Services → Library → enable \"Google Analytics Data API\" and \"Google Analytics Admin API\".",
+  "Make sure team@skylod.com can see the site in Google Analytics (GA4 → Admin → Property access management → Viewer or higher).",
+  "Tap Reconnect Google below, sign in as team@skylod.com, and allow Analytics access.",
+  "Tap Sync now — it finds the GA4 property and pulls 90 days of visitors.",
 ];
 
 function MarketingTab({ token }) {
@@ -5644,7 +5646,41 @@ function MarketingTab({ token }) {
         </>)}
 
         {sub === "website" && (<>
-          <ConnectionCard title="Google Analytics (visitors)" connected={conn.ga4?.connected} steps={GA4_STEPS} note="Form leads from skylod.com are live from GHL below. Connecting Analytics adds visitors and the form conversion rate."/>
+          <ConnectionCard title="Google Analytics (visitors)" connected={conn.ga4?.connected} lastSync={conn.ga4?.last_sync} steps={conn.ga4?.connected ? null : GA4_STEPS}
+            connectUrl={`/.netlify/functions/google-ads-auth?t=${encodeURIComponent(token || "")}`} connectLabel={conn.ga4?.connected ? "Reconnect Google" : "Reconnect Google (adds Analytics)"}
+            syncFn={conn.ga4?.connected ? "ga4-sync" : null} token={token} onSynced={() => setBump(b => b + 1)}
+            note={conn.ga4?.last_result?.ok === false ? `Last sync failed: ${conn.ga4.last_result.error}`
+              : conn.ga4?.connected ? (conn.ga4?.last_result?.property ? `Reading GA4 property ${conn.ga4.last_result.property_name || ""} (${conn.ga4.last_result.property}).` : "Tap Sync now to pull the last 90 days.")
+              : "Form leads from skylod.com are live from GHL below. Reconnecting Google adds visitors and the form conversion rate (same sign-in as Google Ads)."}/>
+          {d.ga4?.has_data && (() => {
+            const g = d.ga4, formLeads = ch.website.leads + ch.social.leads;
+            return (<>
+              <TileGrid>
+                <StatTile label="Visitors" value={Number(g.users).toLocaleString()} sub={`${Number(g.sessions).toLocaleString()} visits`}/>
+                <StatTile label="Engaged visits" value={pctOf(g.engaged, g.sessions)} sub="stayed 10s+, 2+ pages, or converted"/>
+                <StatTile label="Form lead rate" value={g.sessions ? `${(100 * formLeads / g.sessions).toFixed(2)}%` : "—"} sub={`${formLeads} GHL form leads ÷ visits`}/>
+                <StatTile label="Key events (GA4)" value={Math.round(g.key_events)} sub="as counted by Google Analytics"/>
+              </TileGrid>
+              <SectionTitle>Visits by channel</SectionTitle>
+              <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"6px 14px" }}>
+                {g.by_channel.map(c => (
+                  <div key={c.channel} style={{ display:"flex", justifyContent:"space-between", padding:"8px 0", borderBottom:`1px solid ${C.border}40`, fontSize:"13px" }}>
+                    <span style={{ color:C.black }}>{c.channel}</span>
+                    <span style={{ color:C.muted }}><b style={{ color:C.black }}>{Number(c.sessions).toLocaleString()}</b> visits · {Number(c.users).toLocaleString()} visitors · {Math.round(c.key_events)} key events</span>
+                  </div>
+                ))}
+              </div>
+              <SectionTitle>Top landing pages</SectionTitle>
+              <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"6px 14px" }}>
+                {g.pages.map(pg => (
+                  <div key={pg.page} style={{ display:"flex", justifyContent:"space-between", gap:"8px", padding:"8px 0", borderBottom:`1px solid ${C.border}40`, fontSize:"12px" }}>
+                    <span style={{ color:C.black, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{pg.page}</span>
+                    <span style={{ color:C.muted, whiteSpace:"nowrap" }}><b style={{ color:C.black }}>{Number(pg.sessions).toLocaleString()}</b> visits · {Math.round(pg.key_events)} events</span>
+                  </div>
+                ))}
+              </div>
+            </>);
+          })()}
           <ChannelTiles att={att} ch={{ ...ch.website, leads:ch.website.leads + ch.social.leads, booked:ch.website.booked + ch.social.booked,
             customers:ch.website.customers + ch.social.customers, plans_sold:(ch.website.plans_sold || 0) + (ch.social.plans_sold || 0),
             revenue_upfront:Number(ch.website.revenue_upfront || 0) + Number(ch.social.revenue_upfront || 0), revenue_sold:Number(ch.website.revenue_sold || 0) + Number(ch.social.revenue_sold || 0),

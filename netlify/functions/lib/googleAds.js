@@ -3,7 +3,9 @@
 
 const SITE = "https://main--skylotechleaderboard.netlify.app";
 const REDIRECT_URI = `${SITE}/.netlify/functions/google-ads-auth-callback`;
-const SCOPE = "https://www.googleapis.com/auth/adwords";
+// One Google sign-in covers Ads (incl. Local Services) and Analytics (website
+// visitors). Read-only for Analytics.
+const SCOPE = "https://www.googleapis.com/auth/adwords https://www.googleapis.com/auth/analytics.readonly";
 
 // A dedicated web OAuth client can be set; otherwise reuse the Gmail one
 // (same Google Cloud project, "Skylo Tip Sync").
