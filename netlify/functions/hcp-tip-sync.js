@@ -235,6 +235,19 @@ async function writeTipForJob(id, msg, parsed, job, techByName) {
 // (appointment reminders, review requests, etc.) is skipped.
 const PAYMENT_OR_TIP_EMAIL = /you\s+just\s+got\s+(?:paid|a\s+tip)|copy\s+of\s+customer\s+receipt/i;
 
+// Wording-independent backstop so a future HCP rewording can't silently drop
+// tips again: a "<Customer> - $123.45" subject is HCP's payment-receipt
+// subject, and a body with a Job Number plus a Tip line is a receipt whatever
+// its header says. Reminders/review requests have neither.
+const RECEIPT_SUBJECT = /\s-\s\$[\d,]+\.\d{2}\s*$/;
+function looksLikeReceipt(msg) {
+  const body = msg.bodyText || "";
+  if (PAYMENT_OR_TIP_EMAIL.test(body)) return true;
+  if (RECEIPT_SUBJECT.test(msg.subject || "")) return true;
+  const jobIdx = body.search(/Job\s*Number/i);
+  return jobIdx >= 0 && /(?:^|\n)[ \t]*Tip\b/i.test(body.slice(jobIdx));
+}
+
 // Classifies one fetched email, writes its tip if it has one, and records the
 // outcome in processed_tip_emails. Returns the status it recorded. Used by the
 // main pass and by the retry/recheck pass so both behave identically.
@@ -243,7 +256,7 @@ async function processMessage(id, msg) {
     await markProcessed(id, null, "sender_mismatch", msg.fromEmail);
     return "sender_mismatch";
   }
-  if (!PAYMENT_OR_TIP_EMAIL.test(msg.bodyText)) {
+  if (!looksLikeReceipt(msg)) {
     await markProcessed(id, null, "not_payment_email", JSON.stringify({ subject: msg.subject || null, bodySnippet: msg.bodyText.slice(0, 400) }));
     return "not_payment_email";
   }
