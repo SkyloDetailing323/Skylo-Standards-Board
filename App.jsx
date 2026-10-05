@@ -218,6 +218,14 @@ function dateToWeekKey(dateStr) {
   d.setUTCDate(d.getUTCDate() - back);
   return d.toISOString().split("T")[0];
 }
+// Sunday that starts the current reporting week (Sun–Sat, Mountain Time) --
+// matches HCP's weekly reports. Used by the WTD / Last Week date presets.
+function getSundayWeekStart() {
+  const mt = new Date(Date.now() - 6 * 60 * 60 * 1000);
+  const sun = new Date(mt);
+  sun.setDate(mt.getDate() - mt.getDay());
+  return `${sun.getFullYear()}-${String(sun.getMonth()+1).padStart(2,"0")}-${String(sun.getDate()).padStart(2,"0")}`;
+}
 function getMonthKey() {
   const now = new Date();
   return `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`;
@@ -368,9 +376,9 @@ function getDateRangeBounds(preset, customStart="", customEnd="") {
   if (preset==="today")     return { start:today, end:today };
   if (preset==="yesterday") { const y = new Date(now); y.setDate(now.getDate()-1); const ys = fmt(y); return { start:ys, end:ys }; }
   if (preset==="custom") return { start:customStart||today, end:customEnd||today };
-  if (preset==="wtd")    return { start:getWeekKey(), end:today };
+  if (preset==="wtd")    return { start:getSundayWeekStart(), end:today };
   if (preset==="last_week") {
-    const wkDate = new Date(getWeekKey()+"T00:00:00");
+    const wkDate = new Date(getSundayWeekStart()+"T00:00:00");
     const s = new Date(wkDate); s.setDate(wkDate.getDate()-7);
     const e = new Date(s); e.setDate(s.getDate()+6);
     return { start:fmt(s), end:fmt(e) };
