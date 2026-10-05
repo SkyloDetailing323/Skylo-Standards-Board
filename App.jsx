@@ -5412,12 +5412,16 @@ const SubTabs = ({ tabs, active, setActive }) => (
 );
 const SectionTitle = ({ children }) => <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"16px", color:C.black, marginTop:"6px" }}>{children}</div>;
 const ReportState = ({ s }) => s.error ? <div style={{ background:`${C.red}10`, border:`1px solid ${C.red}`, borderRadius:"10px", padding:"12px", fontSize:"13px", color:C.red }}>Couldn't load: {s.error}</div> : s.loading && !s.data ? <div style={{ color:C.muted, padding:"16px" }}>Loading...</div> : null;
-const REVENUE_NOTE = "Revenue = HCP jobs these leads booked after coming in, matched by phone, email, or exact full name. Sold counts the job when it's booked; serviced counts it when it's completed.";
+const REVENUE_NOTE = "Revenue = HCP jobs these leads booked after coming in (matched by phone, email, or exact full name). Upfront = the first visit only — one-time jobs count once. Committed = first visit + the rest of the plan's minimum visits, when the plan was sold with that booking (weekly 8, bi-weekly 7, monthly 6, bi-monthly 5, quarterly 4). Anything after that — repeat jobs, plan visits past the minimum, plans a tech sells later — is kept by operations and not credited to ads or sales.";
 
-function ChannelTiles({ ch, paid }) {
+function ChannelTiles({ ch, paid, att }) {
   const cpl = paid && ch.leads ? ch.spend / ch.leads : null;
   const cpb = paid && ch.booked ? ch.spend / ch.booked : null;
-  const roas = paid && Number(ch.spend) > 0 ? Number(ch.revenue_sold || 0) / Number(ch.spend) : null;
+  const spend = Number(ch.spend) || 0;
+  const roasUp = paid && spend > 0 ? Number(ch.revenue_upfront || 0) / spend : null;
+  const roas = paid && spend > 0 ? Number(ch.revenue_sold || 0) / spend : null;
+  const margin = Number(att?.gross_margin) || 0;
+  const breakeven = margin > 0 ? 1 / margin : null;
   return (
     <TileGrid>
       <StatTile label="Leads" value={ch.leads} sub="New customers in GHL"/>
@@ -5425,11 +5429,61 @@ function ChannelTiles({ ch, paid }) {
       {paid && <StatTile label="Cost per lead" value={ch.spend ? money2(cpl) : "—"}/>}
       <StatTile label="Booked" value={ch.booked} sub={`${pctOf(ch.booked, ch.leads)} of leads`}/>
       {paid && <StatTile label="Cost per booking" value={ch.spend ? money2(cpb) : "—"}/>}
-      <StatTile label="Revenue sold" value={usd(ch.revenue_sold)} sub={`${ch.customers || 0} paying customers · ${usd(ch.revenue_serviced)} serviced`}/>
-      {paid && <StatTile label="ROAS" value={roas == null ? "—" : `${roas.toFixed(2)}x`} sub={roas == null ? "needs ad spend" : `${usd(ch.revenue_sold)} sold ÷ ${usd(ch.spend)} spent`}/>}
+      {paid && <StatTile label="Cost per new customer" value={spend && ch.customers ? money2(spend / ch.customers) : "—"} sub={`${ch.customers || 0} new paying customers`}/>}
+      <StatTile label="Upfront revenue" value={usd(ch.revenue_upfront)} sub={`first visits · ${ch.customers || 0} customers`}/>
+      <StatTile label="Committed revenue" value={usd(ch.revenue_sold)} sub={`first visit + plan minimums · ${ch.plans_sold || 0} plans sold`}/>
+      {paid && <StatTile label="Upfront ROAS" value={roasUp == null ? "—" : `${roasUp.toFixed(2)}x`} sub={roasUp == null ? "needs ad spend" : breakeven ? `break-even ${breakeven.toFixed(2)}x at ${Math.round(margin * 1000) / 10}% margin` : null}/>}
+      {paid && <StatTile label="Committed ROAS" value={roas == null ? "—" : `${roas.toFixed(2)}x`} sub={roas == null ? "needs ad spend" : `${usd(ch.revenue_sold)} ÷ ${usd(spend)} spent`}/>}
+      {Number(ch.revenue_beyond) > 0 && <StatTile label="Kept by operations" value={usd(ch.revenue_beyond)} sub="later jobs + plan visits past the minimum — not credited to ads"/>}
       {paid && Number(ch.platform_leads) > 0 && <StatTile label="Conversions (ad platform)" value={Math.round(ch.platform_leads)} sub={`${Number(ch.spend) ? money2(Number(ch.spend) / Number(ch.platform_leads)) : "—"} each · as counted by the ad platform`}/>}
       {paid && ch.impressions > 0 && <StatTile label="Clicks" value={Number(ch.clicks).toLocaleString()} sub={`${pctOf(ch.clicks, ch.impressions)} CTR · ${Number(ch.impressions).toLocaleString()} impr.`}/>}
     </TileGrid>
+  );
+}
+
+// Owner-editable credit rules (report_settings.attribution): how many plan
+// visits count toward the ad/sale, and the margin used for break-even ROAS.
+function AttributionSettings({ att, token, onSaved }) {
+  const [open, setOpen] = useState(false);
+  const [f, setF] = useState(null);
+  const [msg, setMsg] = useState("");
+  const PLANS = [["weekly","Weekly"],["biweekly","Bi-weekly"],["monthly","Monthly"],["bimonthly","Bi-monthly"],["quarterly","Quarterly"]];
+  if (!att) return null;
+  const start = () => { setF({ mins:{ ...att.plan_minimums }, gm:Math.round(att.gross_margin * 1000) / 10, tm:Math.round(att.target_margin * 1000) / 10 }); setMsg(""); setOpen(true); };
+  const save = async () => {
+    setMsg("Saving...");
+    const r = await fetch(`/.netlify/functions/reports?type=attribution`, { method:"POST", headers:{ "Content-Type":"application/json", Authorization:`Bearer ${token || ""}` },
+      body:JSON.stringify({ plan_minimums:f.mins, gross_margin:Number(f.gm) / 100, target_margin:Number(f.tm) / 100 }) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) { setMsg(j.error || "Couldn't save"); return; }
+    setOpen(false); onSaved && onSaved();
+  };
+  const inp = { width:"64px", padding:"6px 8px", border:`1px solid ${C.border}`, borderRadius:"8px", fontSize:"13px" };
+  return (
+    <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"10px 14px", fontSize:"12px", color:C.muted }}>
+      {!open ? (
+        <div style={{ display:"flex", justifyContent:"space-between", gap:"8px", flexWrap:"wrap", alignItems:"center" }}>
+          <span>Credit rules: plan minimums {PLANS.map(([k, l]) => `${l.toLowerCase()} ${att.plan_minimums?.[k]}`).join(" · ")} · margin {Math.round(att.gross_margin * 1000) / 10}% (target {Math.round(att.target_margin * 1000) / 10}%)</span>
+          <button onClick={start} style={{ background:"none", border:`1px solid ${C.border}`, borderRadius:"14px", padding:"4px 12px", fontSize:"11px", fontWeight:"800", cursor:"pointer", color:C.black }}>Edit</button>
+        </div>
+      ) : (
+        <div style={{ display:"flex", flexDirection:"column", gap:"8px", color:C.black }}>
+          <div style={{ fontWeight:"800" }}>Plan minimum visits (credited to the ad / sale)</div>
+          <div style={{ display:"flex", gap:"10px", flexWrap:"wrap" }}>
+            {PLANS.map(([k, l]) => <label key={k} style={{ display:"flex", flexDirection:"column", gap:"2px" }}>{l}<input type="number" min="1" max="52" value={f.mins[k]} onChange={e => setF({ ...f, mins:{ ...f.mins, [k]:e.target.value } })} style={inp}/></label>)}
+          </div>
+          <div style={{ display:"flex", gap:"10px", flexWrap:"wrap" }}>
+            <label style={{ display:"flex", flexDirection:"column", gap:"2px" }}>Gross margin %<input type="number" step="0.1" value={f.gm} onChange={e => setF({ ...f, gm:e.target.value })} style={inp}/></label>
+            <label style={{ display:"flex", flexDirection:"column", gap:"2px" }}>Target margin %<input type="number" step="0.1" value={f.tm} onChange={e => setF({ ...f, tm:e.target.value })} style={inp}/></label>
+          </div>
+          <div style={{ display:"flex", gap:"8px", alignItems:"center" }}>
+            <button onClick={save} style={{ background:C.green, color:C.white, border:"none", borderRadius:"14px", padding:"6px 14px", fontWeight:"900", cursor:"pointer" }}>Save</button>
+            <button onClick={() => setOpen(false)} style={{ background:"none", border:`1px solid ${C.border}`, borderRadius:"14px", padding:"6px 14px", cursor:"pointer" }}>Cancel</button>
+            <span style={{ color:C.muted }}>{msg}</span>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -5440,13 +5494,14 @@ function MetaCampaigns({ campaigns }) {
   const td = { textAlign:"right", padding:"8px", fontSize:"12px", color:C.black, whiteSpace:"nowrap", fontVariantNumeric:"tabular-nums" };
   const row = x => [
     usd(x.spend), x.leads, x.spend && x.leads ? money2(x.spend / x.leads) : "—", x.booked, x.spend && x.booked ? money2(x.spend / x.booked) : "—",
-    usd(x.revenue_sold), Number(x.spend) > 0 ? `${(Number(x.revenue_sold || 0) / Number(x.spend)).toFixed(2)}x` : "—",
+    usd(x.revenue_upfront), usd(x.revenue_sold),
+    Number(x.spend) > 0 ? `${(Number(x.revenue_upfront || 0) / Number(x.spend)).toFixed(2)}x / ${(Number(x.revenue_sold || 0) / Number(x.spend)).toFixed(2)}x` : "—",
   ];
   return (
     <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", overflowX:"auto" }}>
-      <table style={{ width:"100%", borderCollapse:"collapse", minWidth:"680px" }}>
+      <table style={{ width:"100%", borderCollapse:"collapse", minWidth:"760px" }}>
         <thead><tr style={{ background:C.cardLt }}>
-          <th style={{ ...th, textAlign:"left" }}>CAMPAIGN / AD</th><th style={th}>SPEND</th><th style={th}>LEADS</th><th style={th}>CPL</th><th style={th}>BOOKED</th><th style={th}>$/BOOKING</th><th style={th}>REVENUE</th><th style={th}>ROAS</th>
+          <th style={{ ...th, textAlign:"left" }}>CAMPAIGN / AD</th><th style={th}>SPEND</th><th style={th}>LEADS</th><th style={th}>CPL</th><th style={th}>BOOKED</th><th style={th}>$/BOOKING</th><th style={th}>UPFRONT</th><th style={th}>COMMITTED</th><th style={th}>ROAS UP / COMM.</th>
         </tr></thead>
         <tbody>
           {campaigns.map(c => (<Fragment key={c.id}>
@@ -5519,12 +5574,14 @@ function MarketingTab({ token }) {
   const d = s.data;
   const ch = d?.channels || {};
   const conn = d?.connections || {};
-  const all = Object.values(ch).reduce((t, c) => ({ leads:t.leads + c.leads, booked:t.booked + c.booked, spend:t.spend + Number(c.spend), sold:t.sold + Number(c.revenue_sold || 0) }), { leads:0, booked:0, spend:0, sold:0 });
+  const all = Object.values(ch).reduce((t, c) => ({ leads:t.leads + c.leads, booked:t.booked + c.booked, spend:t.spend + Number(c.spend), sold:t.sold + Number(c.revenue_sold || 0), up:t.up + Number(c.revenue_upfront || 0) }), { leads:0, booked:0, spend:0, sold:0, up:0 });
   // Cost per lead and ROAS only count channels whose spend is connected, so a
   // channel with leads but no spend data doesn't make the numbers look great.
   const withSpend = ["meta","google","lsa"].filter(k => Number(ch[k]?.spend) > 0);
   const paidSpend = withSpend.reduce((s, k) => s + Number(ch[k].spend), 0);
   const paidSold = withSpend.reduce((s, k) => s + Number(ch[k].revenue_sold || 0), 0);
+  const paidUp = withSpend.reduce((s, k) => s + Number(ch[k].revenue_upfront || 0), 0);
+  const att = d?.attribution;
   const paidLeads = withSpend.reduce((s, k) => s + Number(ch[k].leads || 0), 0);
   const days = d?.daily || [];
   return (
@@ -5533,16 +5590,18 @@ function MarketingTab({ token }) {
       <ReportState s={s}/>
       {d && (<>
         <div style={{ background:C.black, borderRadius:"12px", padding:"14px 16px", display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(110px, 1fr))", gap:"10px", color:C.white }}>
-          {[["All leads", all.leads], ["Booked", `${all.booked} · ${pctOf(all.booked, all.leads)}`], ["Ad spend", usd(all.spend)], ["Paid cost / lead", paidSpend && paidLeads ? money2(paidSpend / paidLeads) : "—"], ["Revenue sold", usd(all.sold)], ["Paid ROAS", paidSpend ? `${(paidSold / paidSpend).toFixed(2)}x` : "—"]].map(([l, v]) => (
+          {[["All leads", all.leads], ["Booked", `${all.booked} · ${pctOf(all.booked, all.leads)}`], ["Ad spend", usd(all.spend)], ["Paid cost / lead", paidSpend && paidLeads ? money2(paidSpend / paidLeads) : "—"], ["Upfront revenue", usd(all.up)], ["Committed revenue", usd(all.sold)], ["Paid ROAS up / comm.", paidSpend ? `${(paidUp / paidSpend).toFixed(1)}x / ${(paidSold / paidSpend).toFixed(1)}x` : "—"]].map(([l, v]) => (
             <div key={l}><div style={{ fontSize:"10px", opacity:0.7, letterSpacing:"1px", fontWeight:"800", fontFamily:"'Barlow Condensed',sans-serif" }}>{l.toUpperCase()}</div><div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"22px" }}>{v}</div></div>
           ))}
         </div>
+        <AttributionSettings att={att} token={token} onSaved={() => setBump(b => b + 1)}/>
+        <div style={{ fontSize:"11px", color:C.muted }}>{REVENUE_NOTE}</div>
         <SubTabs tabs={[["meta","Meta Ads"],["google","Google Ads"],["lsa","Local Services"],["website","Website"]]} active={sub} setActive={setSub}/>
 
         {sub === "meta" && (<>
           <ConnectionCard title="Meta Ads spend" connected={conn.meta?.connected} lastSync={conn.meta?.last_sync} steps={conn.meta?.connected ? null : META_STEPS} syncFn="meta-ads-sync" token={token} onSynced={() => setBump(b => b + 1)}
             note={conn.meta?.connected ? (conn.meta?.last_result?.ok === false ? `Last sync failed: ${conn.meta.last_result.error}` : null) : "Leads below are already live from GHL (Facebook/Instagram ads). Connect Meta to add spend, cost per lead, and cost per booking per ad."}/>
-          <ChannelTiles ch={ch.meta} paid/>
+          <ChannelTiles ch={ch.meta} paid att={att}/>
           <DailyBars title="Meta leads per day" days={days} value={x => x.leads?.meta || 0}/>
           {Number(ch.meta.spend) > 0 && <DailyBars title="Meta spend per day" days={days} value={x => Number(x.spend?.meta || 0)} fmt={usd}/>}
           <SectionTitle>Campaigns & ads</SectionTitle>
@@ -5555,7 +5614,7 @@ function MarketingTab({ token }) {
             connectUrl={`/.netlify/functions/google-ads-auth?t=${encodeURIComponent(token || "")}`} connectLabel={conn.google?.connected ? "Reconnect Google Ads" : "Connect Google Ads"}
             syncFn="google-ads-sync" token={token} onSynced={() => setBump(b => b + 1)}
             note={conn.google?.last_result?.ok === false ? `Last sync failed: ${conn.google.last_result.error}` : conn.google?.connected ? null : "Google Ads leads show up here automatically once they arrive in GHL with Google's tracking."}/>
-          <ChannelTiles ch={ch.google} paid/>
+          <ChannelTiles ch={ch.google} paid att={att}/>
           {Number(ch.google.spend) > 0 && ch.google.leads === 0 && <div style={{ background:`${C.gold}12`, border:`1px solid ${C.gold}`, borderRadius:"10px", padding:"10px 12px", fontSize:"12px", color:C.black }}>Google is reporting conversions, but none of your GHL leads are tagged as coming from Google yet — so leads, bookings and revenue for Google show 0 here. Those leads are landing in GHL as website / direct leads. Fix: turn on GHL tracking for Google (see setup notes) so each lead keeps its Google click ID.</div>}
           <DailyBars title="Google Ads spend per day" days={days} value={x => Number(x.spend?.google || 0)} fmt={usd}/>
           <SectionTitle>Campaigns</SectionTitle>
@@ -5567,7 +5626,7 @@ function MarketingTab({ token }) {
             syncFn={conn.lsa?.connected ? "google-ads-sync" : null} token={token} onSynced={() => setBump(b => b + 1)}
             note={conn.google?.last_result?.lsa?.ok === false ? `LSA leads didn't sync: ${conn.google.last_result.lsa.error}`
               : conn.lsa?.connected ? "Spend and every LSA lead (name + phone) come through the Google Ads connection. Leads are matched to HCP jobs by phone/email for bookings and revenue." : "Connect Google Ads (Google Ads tab) — LSA spend and leads come through that same connection."}/>
-          <ChannelTiles ch={ch.lsa} paid/>
+          <ChannelTiles ch={ch.lsa} paid att={att}/>
           {ch.lsa?.lsa_detail && Number(ch.lsa.lsa_detail.leads) > 0 && (() => {
             const x = ch.lsa.lsa_detail;
             const label = { PHONE_CALL:"Calls", MESSAGE:"Messages", BOOKING:"Bookings", UNKNOWN:"Other" };
@@ -5586,7 +5645,10 @@ function MarketingTab({ token }) {
 
         {sub === "website" && (<>
           <ConnectionCard title="Google Analytics (visitors)" connected={conn.ga4?.connected} steps={GA4_STEPS} note="Form leads from skylod.com are live from GHL below. Connecting Analytics adds visitors and the form conversion rate."/>
-          <ChannelTiles ch={{ ...ch.website, leads:ch.website.leads + ch.social.leads, booked:ch.website.booked + ch.social.booked }}/>
+          <ChannelTiles att={att} ch={{ ...ch.website, leads:ch.website.leads + ch.social.leads, booked:ch.website.booked + ch.social.booked,
+            customers:ch.website.customers + ch.social.customers, plans_sold:(ch.website.plans_sold || 0) + (ch.social.plans_sold || 0),
+            revenue_upfront:Number(ch.website.revenue_upfront || 0) + Number(ch.social.revenue_upfront || 0), revenue_sold:Number(ch.website.revenue_sold || 0) + Number(ch.social.revenue_sold || 0),
+            revenue_beyond:Number(ch.website.revenue_beyond || 0) + Number(ch.social.revenue_beyond || 0) }}/>
           <DailyBars title="Website form leads per day" days={days} value={x => (x.leads?.website || 0) + (x.leads?.social || 0)}/>
           <SectionTitle>Where website leads came from</SectionTitle>
           <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"6px 14px" }}>
@@ -5627,7 +5689,7 @@ function FunnelBlock({ k, label, revenue }) {
       {k.demos > 0 && <StatTile label="Demo details set" value={k.demos}/>}
       <StatTile label="Jobs booked" value={k.booked_in_period} sub="booked in this range"/>
       <StatTile label="Booking rate" value={pctOf(k.booked_from_leads, k.leads)} sub={`${k.booked_from_leads} of these leads booked`}/>
-      {revenue && <StatTile label={`${label} revenue sold`} value={usd(revenue.sold)} sub={`${usd(revenue.serviced)} serviced`}/>}
+      {revenue && <StatTile label={`${label} committed revenue`} value={usd(revenue.sold)} sub={`${usd(revenue.serviced)} serviced`}/>}
     </TileGrid>
   );
 }
@@ -5646,7 +5708,8 @@ function SalesTab({ token }) {
         {!d.ghl_user_found && <div style={{ fontSize:"12px", color:C.red }}>Couldn't find {d.rep} as a GHL user.</div>}
         <SectionTitle>Revenue</SectionTitle>
         <TileGrid>
-          <StatTile label="Revenue sold" value={usd(d.revenue?.sold)} sub={`${d.revenue?.sold_jobs || 0} jobs booked from these leads`}/>
+          <StatTile label="Upfront revenue" value={usd(d.revenue?.upfront)} sub={`${d.revenue?.sold_jobs || 0} first visits booked`}/>
+          <StatTile label="Committed revenue" value={usd(d.revenue?.sold)} sub={`incl. ${usd(d.revenue?.plan_committed)} of plan minimums`}/>
           <StatTile label="Revenue serviced" value={usd(d.revenue?.serviced)} sub={`${d.revenue?.serviced_jobs || 0} of those jobs completed`}/>
           <StatTile label="Recurring plans sold" value={d.plans?.sold ?? 0} sub={Object.entries(d.plans?.by_plan || {}).map(([p, n]) => `${n} ${p}`).join(" · ") || "none in range"}/>
           {d.plans?.cancelled > 0 && <StatTile label="Plans cancelled" value={d.plans.cancelled}/>}

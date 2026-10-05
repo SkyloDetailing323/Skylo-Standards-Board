@@ -47,6 +47,29 @@ exports.handler = async (event) => {
   if (who.role !== "owner") return json(403, { error: "Owners only" });
 
   const q = event.queryStringParameters || {};
+
+  // POST ?type=attribution  body: { plan_minimums:{weekly,biweekly,monthly,bimonthly,quarterly}, gross_margin, target_margin }
+  if (event.httpMethod === "POST" && q.type === "attribution") {
+    let b; try { b = JSON.parse(event.body || "{}"); } catch { return json(400, { error: "Bad JSON" }); }
+    const PLANS = ["weekly", "biweekly", "monthly", "bimonthly", "quarterly"];
+    const mins = {};
+    for (const k of PLANS) {
+      const n = parseInt(b.plan_minimums?.[k], 10);
+      if (!(n >= 1 && n <= 52)) return json(400, { error: `${k} minimum must be 1-52 visits` });
+      mins[k] = n;
+    }
+    const pct = v => { const n = Number(v); return n > 0 && n < 1 ? Math.round(n * 1000) / 1000 : null; };
+    const value = { plan_minimums: mins, gross_margin: pct(b.gross_margin), target_margin: pct(b.target_margin) };
+    if (!value.gross_margin || !value.target_margin) return json(400, { error: "Margins must be between 0% and 100%" });
+    const res = await fetch(`${process.env.SUPABASE_URL}/rest/v1/report_settings?on_conflict=key`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", apikey: process.env.SUPABASE_KEY, Authorization: `Bearer ${process.env.SUPABASE_KEY}`, Prefer: "resolution=merge-duplicates,return=minimal" },
+      body: JSON.stringify({ key: "attribution", value, updated_at: new Date().toISOString() }),
+    });
+    if (!res.ok) return json(500, { error: `Couldn't save (HTTP ${res.status})` });
+    return json(200, { ok: true, attribution: value });
+  }
+
   if (!isDate(q.from) || !isDate(q.to)) return json(400, { error: "from and to dates are required" });
 
   try {
