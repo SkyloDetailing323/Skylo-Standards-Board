@@ -69,3 +69,8 @@
   # Website visitors from Google Analytics, last 7 days, every morning.
   # Does nothing until Google is reconnected with Analytics access.
   schedule = "35 13 * * *"
+
+[functions."ghl-forms-sync-cron"]
+  # Tote Checks + Tech Audits (GHL forms) -> ghl_form_submissions, every 15 min.
+  schedule = "*/15 * * * *"
+  timeout = 26
