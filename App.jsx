@@ -5564,8 +5564,22 @@ function MarketingTab({ token }) {
 
         {sub === "lsa" && (<>
           <ConnectionCard title="Local Services Ads" connected={conn.lsa?.connected} lastSync={conn.lsa?.last_sync} steps={conn.lsa?.connected ? null : LSA_STEPS}
-            note={conn.lsa?.connected ? "LSA spend comes through the Google Ads connection (Local Services campaigns)." : "Connect Google Ads (Google Ads tab) — LSA spend comes through that same connection."}/>
+            syncFn={conn.lsa?.connected ? "google-ads-sync" : null} token={token} onSynced={() => setBump(b => b + 1)}
+            note={conn.google?.last_result?.lsa?.ok === false ? `LSA leads didn't sync: ${conn.google.last_result.lsa.error}`
+              : conn.lsa?.connected ? "Spend and every LSA lead (name + phone) come through the Google Ads connection. Leads are matched to HCP jobs by phone/email for bookings and revenue." : "Connect Google Ads (Google Ads tab) — LSA spend and leads come through that same connection."}/>
           <ChannelTiles ch={ch.lsa} paid/>
+          {ch.lsa?.lsa_detail && Number(ch.lsa.lsa_detail.leads) > 0 && (() => {
+            const x = ch.lsa.lsa_detail;
+            const label = { PHONE_CALL:"Calls", MESSAGE:"Messages", BOOKING:"Bookings", UNKNOWN:"Other" };
+            return (
+              <TileGrid>
+                <StatTile label="LSA leads" value={x.leads} sub={`${x.people} people`}/>
+                <StatTile label="Charged by Google" value={x.charged} sub={Number(x.spend || ch.lsa.spend) > 0 && x.charged ? `${usd(Number(ch.lsa.spend) / x.charged)} each` : null}/>
+                <StatTile label="Matched to HCP jobs" value={x.customers} sub={x.people ? `${Math.round(100 * x.customers / x.people)}% of people · ${x.jobs} jobs` : null}/>
+                {Object.entries(x.by_type || {}).map(([k, n]) => <StatTile key={k} label={label[k] || k.replace(/_/g, " ").toLowerCase()} value={n}/>)}
+              </TileGrid>
+            );
+          })()}
           <DailyBars title="Local Services spend per day" days={days} value={x => Number(x.spend?.lsa || 0)} fmt={usd}/>
           <SpendCampaigns rows={d.ad_campaigns?.lsa}/>
         </>)}
