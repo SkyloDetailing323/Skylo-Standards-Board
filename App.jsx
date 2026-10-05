@@ -5383,7 +5383,7 @@ function ConnectionCard({ title, connected, lastSync, steps, note, connectUrl, c
     try {
       const r = await fetch(`/.netlify/functions/${syncFn}?days=90`, { headers:{ Authorization:`Bearer ${token || ""}` } });
       const j = await r.json().catch(() => ({}));
-      setSyncMsg(j.ok ? `✅ Pulled ${j.rows} rows · $${Math.round(j.spend || 0).toLocaleString()} spend (${j.since} → ${j.until})` : `⚠️ ${j.error || j.skipped || `HTTP ${r.status}`}`);
+      setSyncMsg(j.ok ? `✅ Pulled ${j.rows} rows · ${j.sessions != null ? `${Number(j.sessions).toLocaleString()} visits` : `$${Math.round(j.spend || 0).toLocaleString()} spend`}${j.lsa?.ok ? ` · ${j.lsa.leads} LSA leads` : ""} (${j.since} → ${j.until})` : `⚠️ ${j.error || j.skipped || `HTTP ${r.status}`}`);
       if (j.ok && onSynced) onSynced();
     } catch(e) { setSyncMsg(`⚠️ ${e.message}`); }
     setSyncing(false);
