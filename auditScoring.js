@@ -173,8 +173,19 @@ export function formKind(formId) {
 // fields: the submission's raw answers keyed by GHL field id (raw.others).
 export function techNameOf(formId, answers, fields) {
   const kind = formKind(formId);
-  if (kind === "audit") return firstText(fieldValue(fields, AUDIT_CONFIG.audit.fields.tech)) || null;
-  return kind ? firstText(findAnswer(answers, AUDIT_CONFIG[kind].techLabels)) || null : null;
+  if (!kind) return null;
+  const picked = kind === "audit"
+    ? firstText(fieldValue(fields, AUDIT_CONFIG.audit.fields.tech))
+    : firstText(findAnswer(answers, AUDIT_CONFIG[kind].techLabels));
+  return picked || nameFromContactFields(fields || answers) || null;
+}
+// The app's Forms tab opens each form with the tech being checked filled in
+// as the form's First/Last Name (?first_name=&last_name=), so that's the
+// fallback when there's no Tech / Detail Tech answer.
+export function nameFromContactFields(f) {
+  const full = String((f && f.full_name) || "").trim();
+  const name = full || [f && f.first_name, f && f.last_name].map(v => String(v || "").trim()).filter(Boolean).join(" ");
+  return name.replace(/\s+/g, " ") || null;
 }
 // A question's answer: the first of its ids that has one.
 function fieldValue(fields, q) {

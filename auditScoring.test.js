@@ -131,3 +131,9 @@ test("Audit Scores weeks run Sunday-Saturday", () => {
   assert.equal(auditWeekStart("2026-10-11"), "2026-10-11");   // next Sunday
   assert.equal(auditWeekStart("2026-10-05", 1), "2026-10-05"); // Monday option still works
 });
+
+test("Tech name falls back to the form's First/Last Name (Forms tab prefill)", () => {
+  assert.equal(techNameOf(AUDIT_CONFIG.tote.formId, {}, { first_name: "Brett", last_name: "Buhler" }), "Brett Buhler");
+  assert.equal(techNameOf(AUDIT_CONFIG.audit.formId, {}, { first_name: " Landon ", last_name: "Bliss" }), "Landon Bliss");
+  assert.equal(techNameOf(AUDIT_CONFIG.tote.formId, { Tech: "Kyle Reiff" }, { first_name: "X", last_name: "Y" }), "Kyle Reiff");
+});
