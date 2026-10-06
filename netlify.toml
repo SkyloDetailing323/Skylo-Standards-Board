@@ -70,6 +70,10 @@
   # Does nothing until Google is reconnected with Analytics access.
   schedule = "35 13 * * *"
 
+[functions."ghl-forms-sync"]
+  # Pulls for up to ~20s (TIME_BUDGET_MS); the default 10s limit would cut it off.
+  timeout = 26
+
 [functions."ghl-forms-sync-cron"]
   # Tote Checks + Tech Audits (GHL forms) -> ghl_form_submissions, every 15 min.
   schedule = "*/15 * * * *"
