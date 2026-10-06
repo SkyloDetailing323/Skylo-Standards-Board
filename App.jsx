@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, Fragment } from "react";
 import { TEST_QUESTIONS, shuffle } from "./trainingTest.js";
 import { computeOpsMonth, monthRange, mountainDate, CALLBACK_TIERS, QUOTA_TIERS, RETENTION_TIERS, NON_ROUTE_VEHICLES, OPS_EXCLUDED_TITLES } from "./opsBonus.js";
-import { formKind, scoreToteCheck, scoreTechAudit, latestPerDay, auditDays, weeklyAuditPct } from "./auditScoring.js";
+import { formKind, scoreToteCheck, scoreTechAudit, latestPerDay, auditDays, weeklyAuditPct, auditWeekStart } from "./auditScoring.js";
 
 // ─── SUPABASE CONFIG ──────────────────────────────────────────────────────────
 const SUPABASE_URL = "https://mjmwxxvqcsptrocwucis.supabase.co";
@@ -6655,6 +6655,9 @@ function TechMatchAdmin({ unmatchedTechs, refreshAll, showToast }) {
 // every tech; a tech (techId set) sees only their own checks and misses.
 const fmtCents = c => `$${(c/100).toFixed(2)}`;
 const fmtPct = p => p==null ? "—" : `${(Math.round(p*10)/10).toFixed(1)}%`;
+// This tab's weeks run Monday-Sunday (AUDIT_CONFIG.weekStartsOn), not the
+// app's Sun-Sat pay/HCP week.
+const auditThisWeek = () => auditWeekStart(mtDateStr(Date.now()));
 const shiftWeek = (wk, weeks) => { const d = new Date(wk+"T12:00:00Z"); d.setUTCDate(d.getUTCDate()+weeks*7); return d.toISOString().split("T")[0]; };
 
 function scoreTechWeek(subs) {
@@ -6699,8 +6702,9 @@ function AuditTechDetail({ week }) {
             <div style={{ fontSize:"13px", color:C.black, fontWeight:"700" }}>{fmtShortDate(d.date)}</div>
             <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"16px", color:scoreColor(d.pct??0) }}>Day {fmtPct(d.pct)}</div>
           </div>
-          {d.audits.flatMap(a => a.jobs.map(j => (
-            <div key={a.id+j.slot} style={{ borderTop:`1px solid ${C.border}`, marginTop:"6px", paddingTop:"6px" }}>
+          <div style={{ fontSize:"12px", color:C.muted, marginTop:"2px" }}>{d.audit.lead ? `Tech lead: ${d.audit.lead}` : ""}{d.replaced ? `${d.audit.lead ? " · " : ""}latest of ${d.replaced+1} submissions for this day` : ""}</div>
+          {d.audit.jobs.map(j => (
+            <div key={d.audit.id+j.slot} style={{ borderTop:`1px solid ${C.border}`, marginTop:"6px", paddingTop:"6px" }}>
               <div style={{ display:"flex", justifyContent:"space-between", fontSize:"12px", color:C.black }}>
                 <span style={{ fontWeight:"700" }}>{j.label} job</span>
                 <span>{j.skipped ? <span style={{ color:C.muted }}>{j.skipReason} — skipped</span> : `${(Math.round(j.points*100)/100)}/${j.max} · ${fmtPct(j.pct)}`}</span>
@@ -6708,8 +6712,9 @@ function AuditTechDetail({ week }) {
               {!j.skipped && j.missed.length>0 && <div style={{ fontSize:"12px", color:C.red, marginTop:"2px" }}>Missed: {j.missed.join(" · ")}</div>}
               {flagList(j.flags)}
             </div>
-          )))}
-          {d.audits.flatMap(a => a.flags).length>0 && flagList(d.audits.flatMap(a => a.flags))}
+          ))}
+          {d.audit.notes && <div style={{ fontSize:"12px", color:C.black, marginTop:"6px" }}>📝 {d.audit.notes}</div>}
+          {flagList(d.audit.flags)}
         </div>
       ))}
     </div>
@@ -6717,7 +6722,7 @@ function AuditTechDetail({ week }) {
 }
 
 function AuditScoresTab({ techs, token, techId=null, canSync=false }) {
-  const [wk, setWk] = useState(getSundayWeekStart());
+  const [wk, setWk] = useState(auditThisWeek());
   const [state, setState] = useState({ loading:true, error:null, data:null });
   const [open, setOpen] = useState(null);
   const [bump, setBump] = useState(0);
@@ -6750,9 +6755,13 @@ function AuditScoresTab({ techs, token, techId=null, canSync=false }) {
   const byTech = {};
   subs.forEach(s => { if (s.tech_id) (byTech[s.tech_id] = byTech[s.tech_id] || []).push(s); });
   const unmatched = [...new Set(subs.filter(s => !s.tech_id).map(s => s.tech_name || "(no Tech answer)"))].sort();
+  // Answers and question ids on the Tech Audit form that AUDIT_CONFIG can't map.
+  const auditScored = subs.filter(s => formKind(s.form_id)==="audit").map(s => scoreTechAudit(s));
+  const unmappedAnswers = [...new Set(auditScored.flatMap(a => a.unmapped))].sort();
+  const unmappedIds = [...new Set(auditScored.flatMap(a => a.unmappedFieldIds))].sort();
   const last = state.data?.last_run;
   const arrow = { background:C.white, border:`1px solid ${C.border}`, borderRadius:"8px", padding:"6px 12px", cursor:"pointer", fontSize:"14px", color:C.black };
-  const thisWeek = getSundayWeekStart();
+  const thisWeek = auditThisWeek();
 
   const weekPicker = (
     <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:"8px", marginBottom:"12px" }}>
@@ -6789,7 +6798,7 @@ function AuditScoresTab({ techs, token, techId=null, canSync=false }) {
   return (
     <div>
       <div style={{ fontSize:"13px", color:C.muted, marginBottom:"12px", lineHeight:"1.5" }}>
-        Scores from the Tote Check and Tech Audit forms in GoHighLevel. Tote: $7.00 or less missing passes (95%). Audit: average of each day's job scores. Display only — not tied to pay.
+        Scores from the Tote Check and Tech Audit forms in GoHighLevel. Weeks run Monday–Sunday. Tote: $7.00 or less missing passes (95%). Audit: each day is the average of its scheduled jobs, and the week is the average of the days. Display only — not tied to pay.
       </div>
       <div style={{ background:C.cardLt, border:`1px solid ${C.border}`, borderRadius:"10px", padding:"10px 12px", marginBottom:"12px", fontSize:"12px", color:C.black }}>
         {last ? <>Last GHL form sync: {new Date(last.finished_at || last.updated_at).toLocaleString("en-US", { month:"short", day:"numeric", hour:"numeric", minute:"2-digit", timeZone:"America/Denver" })}{last.errors?.length ? <span style={{ color:C.red }}> · {last.errors.join("; ")}</span> : ""}{last.labels?.source==="raw_keys" ? <div style={{ color:C.gold, marginTop:"4px" }}>⚠ Couldn't read the form's question labels from GHL ({last.labels.error}). The token may need the locations/customFields.readonly scope.</div> : null}</> : "Not synced yet."}
@@ -6802,6 +6811,13 @@ function AuditScoresTab({ techs, token, techId=null, canSync=false }) {
         <div style={{ background:"rgba(239,68,68,0.08)", border:"1px solid #ef4444", borderRadius:"10px", padding:"10px 12px", marginBottom:"12px", fontSize:"12px", color:C.black }}>
           <div style={{ fontWeight:"700", color:C.red }}>⚠ Forms this week with a Tech name that doesn't exactly match the roster — not shown below:</div>
           {unmatched.join(", ")}
+        </div>
+      )}
+      {state.data && (unmappedAnswers.length>0 || unmappedIds.length>0) && (
+        <div style={{ background:`${C.gold}12`, border:`1px solid ${C.gold}`, borderRadius:"10px", padding:"10px 12px", marginBottom:"12px", fontSize:"12px", color:C.black }}>
+          <div style={{ fontWeight:"700" }}>⚠ Tech Audit answers the scoring doesn't recognize (fix the form or AUDIT_CONFIG):</div>
+          {unmappedAnswers.map(u => <div key={u}>• {u}</div>)}
+          {unmappedIds.length>0 && <div>• Question id(s) not in AUDIT_CONFIG: {unmappedIds.join(", ")}</div>}
         </div>
       )}
       {state.data && rows.map(({ tech, week }) => {

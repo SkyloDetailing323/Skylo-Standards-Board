@@ -9,15 +9,16 @@
 //   /.netlify/functions/ghl-forms-sync?t=<login token>            last few days
 //   /.netlify/functions/ghl-forms-sync?t=<login token>&mode=full  everything
 //
-// Each answer is saved under its question label (looked up from the
-// location's custom fields) so the scoring in auditScoring.js can find it by
-// name. The "Tech" answer is matched to techs.name exactly; names that don't
-// match are listed in forms_last_run and on the Audit Scores tab.
+// Tote check answers are saved under their question label (looked up from
+// the location's custom fields); Tech Audits are scored by GHL field id from
+// the raw submission. The tech's name is matched to techs.name exactly;
+// names that don't match are listed in forms_last_run and on the Audit
+// Scores tab.
 //
 // Uses auditScoring.js (same file the app uses) for form ids and labels.
 
 import auth from "./lib/authToken.js";
-import { AUDIT_CONFIG, formKind, techNameOf, workDateOf } from "../../auditScoring.js";
+import { AUDIT_CONFIG, formKind, techNameOf, workDateOf, auditJobDate } from "../../auditScoring.js";
 
 const BASE = "https://services.leadconnectorhq.com";
 const TIME_BUDGET_MS = 20 * 1000;
@@ -131,12 +132,16 @@ export default async (req) => {
         const rows = list.map(s => {
           const answers = answersOf(s, labels.map);
           const submittedAt = s.createdAt || s.dateAdded || null;
-          const techName = techNameOf(form.formId, answers);
+          const techName = techNameOf(form.formId, answers, s.others);
           const techId = techName ? techByName[techName] || null : null;
           if (techName && !techId) unmatched.add(techName);
           return {
             id: s.id, form_id: s.formId || form.formId, contact_id: s.contactId || null,
-            submitted_at: submittedAt, work_date: workDateOf(answers, submittedAt, AUDIT_CONFIG[formKind(form.formId)].dateLabels),
+            submitted_at: submittedAt,
+            // Audits: the Job Date question (by field id). Tote checks: the Date question.
+            work_date: formKind(form.formId) === "audit"
+              ? auditJobDate(s.others) || workDateOf({}, submittedAt, [])
+              : workDateOf(answers, submittedAt, AUDIT_CONFIG.tote.dateLabels),
             tech_name: techName, tech_id: techId, answers, raw: s, synced_at: new Date().toISOString(),
           };
         });

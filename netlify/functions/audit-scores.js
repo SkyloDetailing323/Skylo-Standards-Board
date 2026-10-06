@@ -12,6 +12,8 @@ const { verifyToken, tokenFrom } = require("./lib/authToken");
 
 const PAGE = 1000;
 const isDate = s => /^\d{4}-\d{2}-\d{2}$/.test(s || "");
+// GHL bookkeeping in a submission's raw answers -- never sent to the browser.
+const PRIVATE_KEYS = ["signatureHash", "ip", "sessionId", "submissionId", "location_id", "eventData", "Timezone", "formId"];
 
 function json(statusCode, body) {
   return { statusCode, headers: { "Content-Type": "application/json", "Cache-Control": "no-store" }, body: JSON.stringify(body) };
@@ -40,7 +42,13 @@ exports.handler = async (event) => {
   if (!admin && !who.techId) return json(403, { error: "No tech on this login" });
   const techFilter = admin ? "" : `&tech_id=eq.${encodeURIComponent(who.techId)}`;
   try {
-    const submissions = await sbGetAll(`ghl_form_submissions?select=id,form_id,submitted_at,work_date,tech_name,tech_id,answers&work_date=gte.${q.from}&work_date=lte.${q.to}${techFilter}&order=work_date.desc,submitted_at.desc`);
+    const rows = await sbGetAll(`ghl_form_submissions?select=id,form_id,submitted_at,work_date,tech_name,tech_id,answers,fields:raw->others&work_date=gte.${q.from}&work_date=lte.${q.to}${techFilter}&order=work_date.desc,submitted_at.desc`);
+    // Tech Audits are scored by GHL field id, so they get the raw answers.
+    const submissions = rows.map(r => {
+      const fields = { ...(r.fields || {}) };
+      PRIVATE_KEYS.forEach(k => delete fields[k]);
+      return { ...r, fields };
+    });
     let lastRun = null;
     if (admin) {
       const s = await sbGetAll("ghl_sync_state?key=eq.forms_last_run&select=value,updated_at").catch(() => []);
