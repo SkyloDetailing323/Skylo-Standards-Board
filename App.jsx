@@ -3345,7 +3345,7 @@ function TechDashboard({ tech, techs, upsells, switchovers, reviews, callbacks, 
           <TeamLeadPanel tech={tech} techs={techs} upsells={upsells} switchovers={switchovers} reviews={reviews} callbacks={callbacks||[]} quota={q} jobs={jobs}/>
         )}
         {tab==="training"&&<PerfectDayTrainingPanel tech={tech} techs={techs}/>}
-        {tab==="forms"&&<FormsTab me={tech} techs={techs} role="tech"/>}
+        {tab==="forms"&&<FormsTab me={tech} role="tech"/>}
         {tab==="auditscores"&&<AuditScoresTab techs={techs} token={token} techId={tech.id}/>}
       </div>
       {toast&&(
@@ -5417,75 +5417,47 @@ const SubTabs = ({ tabs, active, setActive }) => (
 );
 
 // ─── FORMS ────────────────────────────────────────────────────────────────────
-// Links to the GHL forms each person fills out from their phone. The app
-// fills in who the form is about as the form's First/Last Name, so the
-// submission lands under the right tech (ghl-forms-sync reads it back).
-//   Truck Check: everyone except Detail Apprentices, about themselves.
-//   Tote Check + Tech Audit: Lead Detail Pros for their own crew
-//   (team_lead_id), the Field Supervisor (Will) for the Lead Detail Pros,
-//   owners for anyone.
+// Links to the GHL forms people fill out from their phone.
+//   Truck Check: everyone except Detail Apprentices. Opens with their own name
+//   as the form's First/Last Name (GHL fills typed fields from the link).
+//   Tote Check + Tech Audit: Lead Detail Pros, the Field Supervisor (Will) and
+//   owners. They pick the tech and themselves from the form's own dropdowns
+//   (GHL can't pre-select a dropdown from a link).
 const GHL_FORMS = {
-  truck: { id:"70rs6amtoR9LiP9BDY7E", icon:"🚚", label:"Truck Check",  desc:"End-of-day truck photos" },
-  tote:  { id:"xU7BPLPkUCLiefCvawVx", icon:"🧰", label:"Tote Check",   desc:"What's in the tech's tote" },
-  audit: { id:"6bvUQqmnOb3auzX0hw9W", icon:"📋", label:"Tech Audit",   desc:"9 AM / 12 PM / 3 PM job audit" },
+  truck: { id:"70rs6amtoR9LiP9BDY7E", icon:"🚚", label:"Truck Check", desc:"End-of-day truck photos" },
+  tote:  { id:"xU7BPLPkUCLiefCvawVx", icon:"🧰", label:"Tote Check",  desc:"Pick whose tote you're checking and your name" },
+  audit: { id:"6bvUQqmnOb3auzX0hw9W", icon:"📋", label:"Tech Audit",  desc:"Pick the tech you're auditing and your name" },
 };
 const isLeadTech = t => !!t && (t.is_lead || t.title === "lead_detail_pro");
 const isApprenticeTech = t => !!t && (t.title || "detail_apprentice") === "detail_apprentice";
 function ghlFormUrl(formId, name) {
-  const parts = String(name || "").trim().split(/\s+/);
-  const q = new URLSearchParams({ first_name: parts[0] || "", last_name: parts.slice(1).join(" ") });
-  return `https://api.leadconnectorhq.com/widget/form/${formId}?${q.toString()}`;
+  const base = `https://api.leadconnectorhq.com/widget/form/${formId}`;
+  if (!name) return base;
+  const parts = String(name).trim().split(/\s+/);
+  return `${base}?${new URLSearchParams({ first_name: parts[0] || "", last_name: parts.slice(1).join(" ") }).toString()}`;
 }
 
 // me: the logged-in tech row (null for owners). role: "tech" | "manager" | "owner".
-function FormsTab({ me, techs, role }) {
-  const [form, setForm] = useState(null);   // form key being started (tote/audit)
-  const active = (techs || []).filter(t => t.is_active !== false && t.title !== "owner");
-  const subjects = role === "owner" ? active
-    : role === "manager" ? active.filter(isLeadTech)
-    : isLeadTech(me) ? active.filter(t => t.team_lead_id === me.id && t.id !== me.id)
-    : [];
+function FormsTab({ me, role }) {
   const canCheckOthers = role === "owner" || role === "manager" || isLeadTech(me);
-  const card = { display:"flex", alignItems:"center", gap:"12px", width:"100%", textAlign:"left", background:C.white, border:`1px solid ${C.border}`, borderRadius:"14px", padding:"14px 16px", marginBottom:"10px", cursor:"pointer", textDecoration:"none", color:C.black, boxSizing:"border-box" };
-  const big = { fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"18px", color:C.black };
-  const FormCard = ({ k, children }) => (
-    <div style={{ display:"flex", alignItems:"center", gap:"12px", flex:1 }}>
+  const card = { display:"flex", alignItems:"center", gap:"12px", background:C.white, border:`1px solid ${C.border}`, borderRadius:"14px", padding:"14px 16px", marginBottom:"10px", textDecoration:"none", color:C.black };
+  const link = (k, href, sub) => (
+    <a key={k} href={href} target="_blank" rel="noopener noreferrer" style={card}>
       <div style={{ fontSize:"28px" }}>{GHL_FORMS[k].icon}</div>
-      <div style={{ flex:1 }}><div style={big}>{GHL_FORMS[k].label}</div><div style={{ fontSize:"12px", color:C.muted }}>{children || GHL_FORMS[k].desc}</div></div>
-      <div style={{ fontSize:"18px", color:C.muted }}>›</div>
-    </div>
-  );
-
-  if (form) {
-    const f = GHL_FORMS[form];
-    return (
-      <div>
-        <button onClick={() => setForm(null)} style={{ background:"none", border:"none", color:C.blue, fontWeight:"800", cursor:"pointer", padding:"0 0 12px", fontSize:"13px" }}>‹ Back to forms</button>
-        <div style={{ ...big, marginBottom:"4px" }}>{f.icon} {f.label}: who are you checking?</div>
-        <div style={{ fontSize:"12px", color:C.muted, marginBottom:"12px" }}>{role === "manager" ? "Your Lead Detail Pros" : role === "owner" ? "Anyone on the team" : "Your crew"} — tap a name and the form opens with them filled in.</div>
-        {subjects.length === 0 && <div style={{ fontSize:"13px", color:C.muted }}>{role === "manager" ? "No Lead Detail Pros set up yet." : "No one is assigned to your crew yet — ask an owner to set Team Lead on your techs."}</div>}
-        {[...subjects].sort((a,b) => a.name.localeCompare(b.name)).map(t => (
-          <a key={t.id} href={ghlFormUrl(f.id, t.name)} target="_blank" rel="noopener noreferrer" style={card}>
-            <div style={{ flex:1 }}><div style={big}>{t.name}</div><div style={{ fontSize:"12px", color:C.muted }}>{TITLE_LABELS[t.title] || "Detail Apprentice"}</div></div>
-            <div style={{ fontSize:"18px", color:C.muted }}>›</div>
-          </a>
-        ))}
+      <div style={{ flex:1 }}>
+        <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"18px" }}>{GHL_FORMS[k].label}</div>
+        <div style={{ fontSize:"12px", color:C.muted }}>{sub || GHL_FORMS[k].desc}</div>
       </div>
-    );
-  }
-
+      <div style={{ fontSize:"18px", color:C.muted }}>›</div>
+    </a>
+  );
   return (
     <div>
-      <div style={{ fontSize:"13px", color:C.muted, marginBottom:"12px", lineHeight:1.5 }}>Tap a form to open it. Your name (or the tech you pick) is filled in for you.</div>
-      {me && !isApprenticeTech(me) && (
-        <a href={ghlFormUrl(GHL_FORMS.truck.id, me.name)} target="_blank" rel="noopener noreferrer" style={card}>
-          <FormCard k="truck">End-of-day truck photos · sent as {me.name}</FormCard>
-        </a>
-      )}
-      {canCheckOthers && ["tote","audit"].map(k => (
-        <button key={k} onClick={() => setForm(k)} style={card}><FormCard k={k}/></button>
-      ))}
-      {!me && !canCheckOthers && <div style={{ fontSize:"13px", color:C.muted }}>No forms for this login.</div>}
+      <div style={{ fontSize:"13px", color:C.muted, marginBottom:"12px", lineHeight:1.5 }}>Tap a form to open it. Submissions show up in the app within about 15 minutes.</div>
+      {me && !isApprenticeTech(me) && link("truck", ghlFormUrl(GHL_FORMS.truck.id, me.name), `End-of-day truck photos · sent as ${me.name}`)}
+      {canCheckOthers && link("tote", ghlFormUrl(GHL_FORMS.tote.id))}
+      {canCheckOthers && link("audit", ghlFormUrl(GHL_FORMS.audit.id))}
+      {!(me && !isApprenticeTech(me)) && !canCheckOthers && <div style={{ fontSize:"13px", color:C.muted }}>No forms for this login.</div>}
     </div>
   );
 }
@@ -7264,7 +7236,7 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
         )}
 
         {tab==="forms"&&(
-          <FormsTab me={isManager ? techs.find(t => t.id===currentUser?.techId) || null : null} techs={techs} role={isManager ? "manager" : "owner"}/>
+          <FormsTab me={isManager ? techs.find(t => t.id===currentUser?.techId) || null : null} role={isManager ? "manager" : "owner"}/>
         )}
 
         {tab==="auditscores"&&(
