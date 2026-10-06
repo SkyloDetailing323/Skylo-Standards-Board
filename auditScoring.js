@@ -128,9 +128,9 @@ export const AUDIT_CONFIG = {
       "6ac42d177ce1d36fe8bbadf5",   // Brock Morrow, Job Date 2026-10-08
     ],
   },
-  // The Audit Scores tab's week. 1 = Monday (Mon-Sun), 0 = Sunday (Sun-Sat,
-  // like the rest of the app).
-  weekStartsOn: 1,
+  // The Audit Scores tab's week. 0 = Sunday (Sun-Sat, same as the rest of
+  // the app and HCP -- owner's call), 1 = Monday (Mon-Sun).
+  weekStartsOn: 0,
 };
 
 // ─── matching helpers ──────────────────────────────────────────────────────

@@ -6655,8 +6655,8 @@ function TechMatchAdmin({ unmatchedTechs, refreshAll, showToast }) {
 // every tech; a tech (techId set) sees only their own checks and misses.
 const fmtCents = c => `$${(c/100).toFixed(2)}`;
 const fmtPct = p => p==null ? "—" : `${(Math.round(p*10)/10).toFixed(1)}%`;
-// This tab's weeks run Monday-Sunday (AUDIT_CONFIG.weekStartsOn), not the
-// app's Sun-Sat pay/HCP week.
+// This tab's week start comes from AUDIT_CONFIG.weekStartsOn (Sun-Sat, same
+// as the rest of the app).
 const auditThisWeek = () => auditWeekStart(mtDateStr(Date.now()));
 const shiftWeek = (wk, weeks) => { const d = new Date(wk+"T12:00:00Z"); d.setUTCDate(d.getUTCDate()+weeks*7); return d.toISOString().split("T")[0]; };
 
@@ -6798,7 +6798,7 @@ function AuditScoresTab({ techs, token, techId=null, canSync=false }) {
   return (
     <div>
       <div style={{ fontSize:"13px", color:C.muted, marginBottom:"12px", lineHeight:"1.5" }}>
-        Scores from the Tote Check and Tech Audit forms in GoHighLevel. Weeks run Monday–Sunday. Tote: $7.00 or less missing passes (95%). Audit: each day is the average of its scheduled jobs, and the week is the average of the days. Display only — not tied to pay.
+        Scores from the Tote Check and Tech Audit forms in GoHighLevel. Weeks run Sunday–Saturday. Tote: $7.00 or less missing passes (95%). Audit: each day is the average of its scheduled jobs, and the week is the average of the days. Display only — not tied to pay.
       </div>
       <div style={{ background:C.cardLt, border:`1px solid ${C.border}`, borderRadius:"10px", padding:"10px 12px", marginBottom:"12px", fontSize:"12px", color:C.black }}>
         {last ? <>Last GHL form sync: {new Date(last.finished_at || last.updated_at).toLocaleString("en-US", { month:"short", day:"numeric", hour:"numeric", minute:"2-digit", timeZone:"America/Denver" })}{last.errors?.length ? <span style={{ color:C.red }}> · {last.errors.join("; ")}</span> : ""}{last.labels?.source==="raw_keys" ? <div style={{ color:C.gold, marginTop:"4px" }}>⚠ Couldn't read the form's question labels from GHL ({last.labels.error}). The token may need the locations/customFields.readonly scope.</div> : null}</> : "Not synced yet."}

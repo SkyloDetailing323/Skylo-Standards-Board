@@ -125,8 +125,9 @@ test("same Job Date twice keeps the latest; job count never hurts; week = averag
   assert.equal(weeklyAuditPct([{ pct: 81.1 }, { pct: 100 }, { pct: null }]), 90.55);
 });
 
-test("Audit Scores weeks run Monday-Sunday", () => {
-  assert.equal(auditWeekStart("2026-10-05"), "2026-10-05");   // Monday
-  assert.equal(auditWeekStart("2026-10-11"), "2026-10-05");   // Sunday
-  assert.equal(auditWeekStart("2026-10-04"), "2026-09-28");
+test("Audit Scores weeks run Sunday-Saturday", () => {
+  assert.equal(auditWeekStart("2026-10-04"), "2026-10-04");   // Sunday
+  assert.equal(auditWeekStart("2026-10-10"), "2026-10-04");   // Saturday
+  assert.equal(auditWeekStart("2026-10-11"), "2026-10-11");   // next Sunday
+  assert.equal(auditWeekStart("2026-10-05", 1), "2026-10-05"); // Monday option still works
 });
