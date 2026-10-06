@@ -119,6 +119,8 @@ export default async (req) => {
     // Field keys (and dropdown options) of the questions on these forms, so
     // the app's Forms tab can pre-fill the Tech / Checked by dropdowns.
     result.form_fields = {};
+    for (const id of knownAuditFieldIds())
+      if (labels.fields && labels.fields[id]) result.form_fields[id] = { form: "audit", ...labels.fields[id] };
 
     const prev = full ? null : await getState("forms_last_run");
     const since = prev && prev.finished_at && !prev.incomplete
