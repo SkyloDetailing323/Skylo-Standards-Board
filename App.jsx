@@ -7140,7 +7140,7 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
       <style>{GS}</style>
       <SideNav sections={adminNavSections} active={tab} setActive={setTab} open={menuOpen} onClose={()=>setMenuOpen(false)} name="Admin Panel" role="Skylo Standard Board"/>
       <Header left={<HamburgerBtn onClick={()=>setMenuOpen(true)}/>} title={adminTabLabel} right={<LogoutBtn onLogout={onLogout}/>}/>
-      <div style={{ padding:"20px", maxWidth:"700px", margin:"0 auto" }}>
+      <div style={{ padding:"20px", maxWidth:(tab==="marketing"||tab==="sales") ? "1100px" : "700px", margin:"0 auto" }}>
 
         {pendingSplits.length > 0 && tab !== "splits" && (()=>{
           const count = new Set(pendingSplits.map(r => r.hcp_job_id)).size;
