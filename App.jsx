@@ -3071,6 +3071,7 @@ function TechDashboard({ tech, techs, upsells, switchovers, reviews, callbacks, 
       ["reviews","⭐","Reviews"],
       ...(tech.is_lead?[["myteam","👥","My Team"]]:[]),
     ]},
+    ...(!isApprenticeTech(tech)?[{ label:"Forms", items:[["forms","📝","Forms"]] }]:[]),
     { label:"Training", items:[
       ["training","📋","Perfect Day Training"],
       ["auditscores","🧰","My Audit Scores"],
@@ -3344,6 +3345,7 @@ function TechDashboard({ tech, techs, upsells, switchovers, reviews, callbacks, 
           <TeamLeadPanel tech={tech} techs={techs} upsells={upsells} switchovers={switchovers} reviews={reviews} callbacks={callbacks||[]} quota={q} jobs={jobs}/>
         )}
         {tab==="training"&&<PerfectDayTrainingPanel tech={tech} techs={techs}/>}
+        {tab==="forms"&&<FormsTab me={tech} techs={techs} role="tech"/>}
         {tab==="auditscores"&&<AuditScoresTab techs={techs} token={token} techId={tech.id}/>}
       </div>
       {toast&&(
@@ -5413,6 +5415,81 @@ const SubTabs = ({ tabs, active, setActive }) => (
     ))}
   </div>
 );
+
+// ─── FORMS ────────────────────────────────────────────────────────────────────
+// Links to the GHL forms each person fills out from their phone. The app
+// fills in who the form is about as the form's First/Last Name, so the
+// submission lands under the right tech (ghl-forms-sync reads it back).
+//   Truck Check: everyone except Detail Apprentices, about themselves.
+//   Tote Check + Tech Audit: Lead Detail Pros for their own crew
+//   (team_lead_id), the Field Supervisor (Will) for the Lead Detail Pros,
+//   owners for anyone.
+const GHL_FORMS = {
+  truck: { id:"70rs6amtoR9LiP9BDY7E", icon:"🚚", label:"Truck Check",  desc:"End-of-day truck photos" },
+  tote:  { id:"xU7BPLPkUCLiefCvawVx", icon:"🧰", label:"Tote Check",   desc:"What's in the tech's tote" },
+  audit: { id:"6bvUQqmnOb3auzX0hw9W", icon:"📋", label:"Tech Audit",   desc:"9 AM / 12 PM / 3 PM job audit" },
+};
+const isLeadTech = t => !!t && (t.is_lead || t.title === "lead_detail_pro");
+const isApprenticeTech = t => !!t && (t.title || "detail_apprentice") === "detail_apprentice";
+function ghlFormUrl(formId, name) {
+  const parts = String(name || "").trim().split(/\s+/);
+  const q = new URLSearchParams({ first_name: parts[0] || "", last_name: parts.slice(1).join(" ") });
+  return `https://api.leadconnectorhq.com/widget/form/${formId}?${q.toString()}`;
+}
+
+// me: the logged-in tech row (null for owners). role: "tech" | "manager" | "owner".
+function FormsTab({ me, techs, role }) {
+  const [form, setForm] = useState(null);   // form key being started (tote/audit)
+  const active = (techs || []).filter(t => t.is_active !== false && t.title !== "owner");
+  const subjects = role === "owner" ? active
+    : role === "manager" ? active.filter(isLeadTech)
+    : isLeadTech(me) ? active.filter(t => t.team_lead_id === me.id && t.id !== me.id)
+    : [];
+  const canCheckOthers = role === "owner" || role === "manager" || isLeadTech(me);
+  const card = { display:"flex", alignItems:"center", gap:"12px", width:"100%", textAlign:"left", background:C.white, border:`1px solid ${C.border}`, borderRadius:"14px", padding:"14px 16px", marginBottom:"10px", cursor:"pointer", textDecoration:"none", color:C.black, boxSizing:"border-box" };
+  const big = { fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"18px", color:C.black };
+  const FormCard = ({ k, children }) => (
+    <div style={{ display:"flex", alignItems:"center", gap:"12px", flex:1 }}>
+      <div style={{ fontSize:"28px" }}>{GHL_FORMS[k].icon}</div>
+      <div style={{ flex:1 }}><div style={big}>{GHL_FORMS[k].label}</div><div style={{ fontSize:"12px", color:C.muted }}>{children || GHL_FORMS[k].desc}</div></div>
+      <div style={{ fontSize:"18px", color:C.muted }}>›</div>
+    </div>
+  );
+
+  if (form) {
+    const f = GHL_FORMS[form];
+    return (
+      <div>
+        <button onClick={() => setForm(null)} style={{ background:"none", border:"none", color:C.blue, fontWeight:"800", cursor:"pointer", padding:"0 0 12px", fontSize:"13px" }}>‹ Back to forms</button>
+        <div style={{ ...big, marginBottom:"4px" }}>{f.icon} {f.label}: who are you checking?</div>
+        <div style={{ fontSize:"12px", color:C.muted, marginBottom:"12px" }}>{role === "manager" ? "Your Lead Detail Pros" : role === "owner" ? "Anyone on the team" : "Your crew"} — tap a name and the form opens with them filled in.</div>
+        {subjects.length === 0 && <div style={{ fontSize:"13px", color:C.muted }}>{role === "manager" ? "No Lead Detail Pros set up yet." : "No one is assigned to your crew yet — ask an owner to set Team Lead on your techs."}</div>}
+        {[...subjects].sort((a,b) => a.name.localeCompare(b.name)).map(t => (
+          <a key={t.id} href={ghlFormUrl(f.id, t.name)} target="_blank" rel="noopener noreferrer" style={card}>
+            <div style={{ flex:1 }}><div style={big}>{t.name}</div><div style={{ fontSize:"12px", color:C.muted }}>{TITLE_LABELS[t.title] || "Detail Apprentice"}</div></div>
+            <div style={{ fontSize:"18px", color:C.muted }}>›</div>
+          </a>
+        ))}
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <div style={{ fontSize:"13px", color:C.muted, marginBottom:"12px", lineHeight:1.5 }}>Tap a form to open it. Your name (or the tech you pick) is filled in for you.</div>
+      {me && !isApprenticeTech(me) && (
+        <a href={ghlFormUrl(GHL_FORMS.truck.id, me.name)} target="_blank" rel="noopener noreferrer" style={card}>
+          <FormCard k="truck">End-of-day truck photos · sent as {me.name}</FormCard>
+        </a>
+      )}
+      {canCheckOthers && ["tote","audit"].map(k => (
+        <button key={k} onClick={() => setForm(k)} style={card}><FormCard k={k}/></button>
+      ))}
+      {!me && !canCheckOthers && <div style={{ fontSize:"13px", color:C.muted }}>No forms for this login.</div>}
+    </div>
+  );
+}
+
 const SectionTitle = ({ children }) => <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"16px", color:C.black, marginTop:"6px" }}>{children}</div>;
 const ReportState = ({ s }) => s.error ? <div style={{ background:`${C.red}10`, border:`1px solid ${C.red}`, borderRadius:"10px", padding:"12px", fontSize:"13px", color:C.red }}>Couldn't load: {s.error}</div> : s.loading && !s.data ? <div style={{ color:C.muted, padding:"16px" }}>Loading...</div> : null;
 const REVENUE_NOTE = "Revenue = HCP jobs these leads booked after coming in (matched by phone, email, or exact full name). Upfront = the first visit only — one-time jobs count once. Committed = first visit + the rest of the plan's minimum visits, when the plan was sold with that booking (weekly 8, bi-weekly 7, monthly 6, bi-monthly 5, quarterly 4). Completed so far = the part of that revenue whose HCP jobs the tech has marked complete. Anything after that — repeat jobs, plan visits past the minimum, plans a tech sells later — is kept by operations and not credited to ads or sales.";
@@ -7107,6 +7184,7 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
       ["callbacks","📞","Callbacks"],
       ["ridealong","🚗","Ride-Alongs"],
       ["auditscores","🧰","Audit Scores"],
+      ["forms","📝","Forms"],
     ]},
     { label:"Journey", items:[
       ["journey","🗺️","Journey Map"],
@@ -7183,6 +7261,10 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
 
         {tab==="splits"&&(
           <SplitJobsAdmin techs={techs} pendingSplits={pendingSplits} refreshAll={refreshAll} showToast={showToast}/>
+        )}
+
+        {tab==="forms"&&(
+          <FormsTab me={isManager ? techs.find(t => t.id===currentUser?.techId) || null : null} techs={techs} role={isManager ? "manager" : "owner"}/>
         )}
 
         {tab==="auditscores"&&(
