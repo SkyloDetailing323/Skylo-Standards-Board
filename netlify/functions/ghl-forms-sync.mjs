@@ -18,7 +18,7 @@
 // Uses auditScoring.js (same file the app uses) for form ids and labels.
 
 import auth from "./lib/authToken.js";
-import { AUDIT_CONFIG, formKind, techNameOf, workDateOf, auditJobDate } from "../../auditScoring.js";
+import { AUDIT_CONFIG, formKind, techNameOf, workDateOf, auditJobDate, knownAuditFieldIds } from "../../auditScoring.js";
 
 const BASE = "https://services.leadconnectorhq.com";
 const TIME_BUDGET_MS = 20 * 1000;
@@ -120,6 +120,10 @@ export default async (req) => {
       ? new Date(Date.parse(prev.finished_at) - LOOKBACK_DAYS * 864e5).toISOString().slice(0, 10)
       : null;
     const unmatched = new Set();
+    // Current GHL label of every Tech Audit question id AUDIT_CONFIG doesn't
+    // know, so a renamed question that got a new id shows up by name.
+    const knownIds = knownAuditFieldIds();
+    const unmappedAuditFields = {};
 
     for (const form of [AUDIT_CONFIG.tote, AUDIT_CONFIG.audit]) {
       let saved = 0;
@@ -135,6 +139,9 @@ export default async (req) => {
           const techName = techNameOf(form.formId, answers, s.others);
           const techId = techName ? techByName[techName] || null : null;
           if (techName && !techId) unmatched.add(techName);
+          if (formKind(form.formId) === "audit")
+            for (const id of (s.others && s.others.fieldsOriSequance) || [])
+              if (!knownIds.has(id)) unmappedAuditFields[id] = labels.map[id] || null;
           return {
             id: s.id, form_id: s.formId || form.formId, contact_id: s.contactId || null,
             submitted_at: submittedAt,
@@ -153,6 +160,8 @@ export default async (req) => {
       result.forms[formKind(form.formId)] = saved;
     }
     result.unmatched_techs = [...unmatched].sort();
+    result.unmapped_audit_fields = unmappedAuditFields;
+    if (Object.keys(unmappedAuditFields).length) console.warn("ghl-forms-sync: Tech Audit question ids not in AUDIT_CONFIG:", JSON.stringify(unmappedAuditFields));
     if (unmatched.size) console.warn("ghl-forms-sync: tech names with no exact match in techs:", result.unmatched_techs.join(", "));
   } catch (e) {
     result.errors.push(e.message);

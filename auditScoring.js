@@ -60,60 +60,72 @@ export const AUDIT_CONFIG = {
   },
   // Tech Audit Form. Matched by GHL FIELD ID, not label: labels were renamed
   // while the form was being set up, so older submissions carry old labels.
+  // Each question lists every id it has had (a rename that created a new id
+  // goes in the same list) plus its current and old labels, for reference.
   // Ids marked "inferred" have only ever been answered "Yes" (or never
   // answered) in the test submissions, so they were placed by their position
-  // in the form -- confirm them if a score looks off.
+  // in the form -- confirm them with a test submission.
   audit: {
     formId: "6bvUQqmnOb3auzX0hw9W",
     fields: {
-      tech:    "Ga8aYHKmIy2SQ9KGqqEf",   // Detail Tech
-      lead:    "FY37nOA0b0rDZZaxRqAM",   // Tech Lead
-      jobDate: "Vub4DsjU4dfJlgUzfq67",   // Job Date
-      notes:   "EJJQZ19dNUswO6Kwuodj",   // Notes (Optional) -- inferred
+      tech:    { ids: ["Ga8aYHKmIy2SQ9KGqqEf"], label: "Detail Tech" },
+      lead:    { ids: ["FY37nOA0b0rDZZaxRqAM"], label: "Tech Lead" },
+      jobDate: { ids: ["Vub4DsjU4dfJlgUzfq67"], label: "Job Date", oldLabels: ["Date"] },
+      notes:   { ids: ["EJJQZ19dNUswO6Kwuodj"], label: "Notes (Optional)", inferred: true },
     },
-    // GHL bookkeeping in each submission that isn't a form question.
+    // GHL bookkeeping in each submission's question list, not form questions.
     ignoreFieldIds: ["button", "header"],
     slots: [
       { key: "9am", label: "9 AM", fields: {
-        scheduled: "05OLtXaKM8pSHVkhOqgd",  // "Job 9 am." Not Scheduled / Yes
-        flow:      "wWEni4JJVpTdbpRFzZRu",  // "9 am" job flow checkbox
-        card:      "AqH3PL6wI1TROYl86C3M",  // "9 am. Customer Satisfaction Card"
-        marketing: "h6JuR4LttlIbf6lRV9aU",  // "9 am. Tech Marketing" -- inferred (never answered yet)
-        nightText: "ndftAbwlEYb1VE4OfCPO",  // "9 am. Night Before"
-        arrival:   "zRIHBlKBZT8KrcY6l7rI",  // "9 am. Arrival on time"
+        scheduled: { ids: ["05OLtXaKM8pSHVkhOqgd"], label: "Job 9 am." },
+        flow:      { ids: ["wWEni4JJVpTdbpRFzZRu"], label: "9 am. Job Flow", oldLabels: ["9 am"] },
+        card:      { ids: ["AqH3PL6wI1TROYl86C3M"], label: "9 am. Customer Satisfaction Card" },
+        marketing: { ids: ["h6JuR4LttlIbf6lRV9aU"], label: "9 am. Tech Marketing", inferred: true },
+        arrival:   { ids: ["zRIHBlKBZT8KrcY6l7rI"], label: "9 am. Arrival time", oldLabels: ["9 am. Arrival on time"] },
+        nightText: { ids: ["ndftAbwlEYb1VE4OfCPO"], label: "9 am. Night Before" },
       } },
       { key: "12pm", label: "12 PM", fields: {
-        scheduled: "XukjjfMrjTfLU5avtVwq",  // "Job 12 pm." -- inferred (never answered yet)
-        flow:      "6ku5mwXQIpIahX7JvcT9",  // "12 pm. Audits"
-        card:      "8oM3PJ48QtcrbxzeYLuQ",  // "12 pm. Customer Satisfaction Card" -- inferred
-        marketing: "VlUP3BVq7XSNgrIX63H4",  // "12 pm. Tech Marketing"
-        nightText: "tpZsIalOFoFkBIWMtyua",  // "12 pm. Night Before Text" -- inferred
+        scheduled: { ids: ["XukjjfMrjTfLU5avtVwq"], label: "Job 12 pm.", inferred: true },
+        flow:      { ids: ["6ku5mwXQIpIahX7JvcT9"], label: "12 pm. Job Flow", oldLabels: ["12 pm. Audits"] },
+        card:      { ids: ["8oM3PJ48QtcrbxzeYLuQ"], label: "12 pm. Customer Satisfaction Card", inferred: true },
+        marketing: { ids: ["VlUP3BVq7XSNgrIX63H4"], label: "12 pm. Tech Marketing" },
+        nightText: { ids: ["tpZsIalOFoFkBIWMtyua"], label: "12 pm. Night Before Text", inferred: true },
       } },
       { key: "3pm", label: "3 PM", fields: {
-        scheduled: "0lqU9nNMrhT2lXo4vonS",  // "Job 3 pm."
-        flow:      "XDlSPqE6ZBuHAgYr1oSE",  // "3 pm. Audits"
-        card:      "KUQsapPszHcamVVGyTKU",  // "3 pm. Customer Satifaction Card" -- inferred
-        marketing: "1QLMckw9gCJckKg1pUA4",  // "3 pm. Tech Marketing"
-        nightText: "V7gx9O3Tjuyt4hvIbrkm",  // "3 pm. Night Before Text" -- inferred
+        scheduled: { ids: ["0lqU9nNMrhT2lXo4vonS"], label: "Job 3 pm." },
+        flow:      { ids: ["XDlSPqE6ZBuHAgYr1oSE"], label: "3 pm. Job Flow", oldLabels: ["3 pm. Audits"] },
+        card:      { ids: ["KUQsapPszHcamVVGyTKU"], label: "3 pm. Customer Satisfaction Card", oldLabels: ["3 pm. Customer Satifaction Card"], inferred: true },
+        marketing: { ids: ["1QLMckw9gCJckKg1pUA4"], label: "3 pm. Tech Marketing" },
+        nightText: { ids: ["V7gx9O3Tjuyt4hvIbrkm"], label: "3 pm. Night Before Text", inferred: true },
       } },
     ],
+    // "Job <time>." answers.
+    gateAnswers: { notScheduled: "Not Scheduled", scheduled: "Yes" },
     // Job flow: 1 point total, 1/7 per step.
     flowSteps: ["On my Way", "Start Job", "Before Pictures", "Workflow Checklist", "After Pictures", "Finish", "Send Invoice"],
     notScheduled: "Not Scheduled",
     ignoreOptions: ["Type an Option", "Other", "Not Scheduled"],
-    // Yes = 1, No = 0.
+    // Card / Tech Marketing (3 flyers) / Night Before Text.
+    yesNoAnswers: { Yes: 1, No: 0 },
     yesNo: [
       { key: "card",      name: "Customer Satisfaction Card", missed: "No satisfaction card" },
       { key: "marketing", name: "Tech Marketing (3 flyers)",  missed: "No flyers" },
       { key: "nightText", name: "Night Before Text",          missed: "No night-before text" },
     ],
-    // 9 AM only. "5 min or more" is the form's current wording until it's
-    // changed to "1-10 min late".
+    // 9 AM only. The form currently offers "On time" / "5 min or more"; the
+    // other two are the planned answers.
     arrivalOptions: [
       { answer: "On time",               points: 1 },
-      { answer: "1-10 min late",         points: 0.5 },
       { answer: "5 min or more",         points: 0.5 },
+      { answer: "1-10 min late",         points: 0.5 },
       { answer: "More than 10 min late", points: 0 },
+    ],
+    // Submissions made while the form was being built. Shown with a TEST tag;
+    // delete them in GHL and in ghl_form_submissions once testing is done.
+    testSubmissionIds: [
+      "6ac42710879e3cd4e4b1bf4a",   // Landon Bliss, Job Date 2026-10-01
+      "6ac4289100db83258b8a2c3c",   // Brock Morrow, Job Date 2026-10-03
+      "6ac42d177ce1d36fe8bbadf5",   // Brock Morrow, Job Date 2026-10-08
     ],
   },
   // The Audit Scores tab's week. 1 = Monday (Mon-Sun), 0 = Sunday (Sun-Sat,
@@ -161,11 +173,22 @@ export function formKind(formId) {
 // fields: the submission's raw answers keyed by GHL field id (raw.others).
 export function techNameOf(formId, answers, fields) {
   const kind = formKind(formId);
-  if (kind === "audit") return firstText((fields || {})[AUDIT_CONFIG.audit.fields.tech]) || null;
+  if (kind === "audit") return firstText(fieldValue(fields, AUDIT_CONFIG.audit.fields.tech)) || null;
   return kind ? firstText(findAnswer(answers, AUDIT_CONFIG[kind].techLabels)) || null : null;
 }
+// A question's answer: the first of its ids that has one.
+function fieldValue(fields, q) {
+  if (!q) return undefined;
+  const f = fields || {};
+  const id = q.ids.find(i => toList(f[i]).length) || q.ids.find(i => i in f);
+  return id ? f[id] : undefined;
+}
+// Every GHL field id AUDIT_CONFIG.audit knows about.
+export function knownAuditFieldIds(cfg = AUDIT_CONFIG.audit) {
+  return new Set([...Object.values(cfg.fields), ...cfg.slots.flatMap(s => Object.values(s.fields))].flatMap(q => q.ids).concat(cfg.ignoreFieldIds));
+}
 export function auditJobDate(fields) {
-  const d = firstText((fields || {})[AUDIT_CONFIG.audit.fields.jobDate]);
+  const d = firstText(fieldValue(fields, AUDIT_CONFIG.audit.fields.jobDate));
   return /^\d{4}-\d{2}-\d{2}/.test(d) ? d.slice(0, 10) : null;
 }
 
@@ -229,9 +252,12 @@ export function latestPerDay(scored) {
 export function scoreTechAudit(sub, cfg = AUDIT_CONFIG.audit) {
   const f = sub.fields || {};
   const seq = Array.isArray(f.fieldsOriSequance) ? f.fieldsOriSequance : null;
-  const onForm = id => !seq || seq.includes(id);
+  const onForm = q => !!q && (!seq || q.ids.some(id => seq.includes(id)));
+  const val = q => fieldValue(f, q);
   const blank = v => toList(v).length === 0;
   const ns = norm(cfg.notScheduled);
+  const gateNo = norm(cfg.gateAnswers.notScheduled), gateYes = norm(cfg.gateAnswers.scheduled);
+  const ynPoints = Object.fromEntries(Object.entries(cfg.yesNoAnswers).map(([a, p]) => [norm(a), p]));
   const ignore = cfg.ignoreOptions.map(norm);
   const stepByNorm = Object.fromEntries(cfg.flowSteps.map(s => [norm(s), s]));
   const unmapped = [];   // answers the config doesn't know: fix the form or AUDIT_CONFIG
@@ -240,16 +266,16 @@ export function scoreTechAudit(sub, cfg = AUDIT_CONFIG.audit) {
   for (const slot of cfg.slots) {
     const q = slot.fields;
     const job = { slot: slot.key, label: slot.label, skipped: false, points: 0, max: 0, pct: 0, missed: [], flags: [] };
-    const flowRaw = toList(f[q.flow]);
+    const flowRaw = toList(val(q.flow));
     const flowNotSched = flowRaw.some(v => norm(v) === ns);
-    const answered = ["flow", "card", "marketing", "nightText", "arrival"].some(k => q[k] && !blank(f[q[k]]));
+    const answered = ["flow", "card", "marketing", "nightText", "arrival"].some(k => q[k] && !blank(val(q[k])));
 
-    if (q.scheduled && onForm(q.scheduled)) {
-      const gate = firstText(f[q.scheduled]);
-      if (norm(gate) === ns) { jobs.push({ ...job, skipped: true, skipReason: "Not scheduled" }); continue; }
+    if (onForm(q.scheduled)) {
+      const gate = firstText(val(q.scheduled));
+      if (norm(gate) === gateNo) { jobs.push({ ...job, skipped: true, skipReason: "Not scheduled" }); continue; }
       if (!gate && !answered) { jobs.push({ ...job, skipped: true, skipReason: "No answers" }); continue; }
       if (!gate) job.flags.push(`"Job ${slot.label.toLowerCase()}." question left blank — scored because the job has answers`);
-      else if (norm(gate) !== "yes") { job.flags.push(`Unrecognized answer "${gate}" on "Job ${slot.label.toLowerCase()}."`); unmapped.push(`Job ${slot.label}: "${gate}"`); }
+      else if (norm(gate) !== gateYes) { job.flags.push(`Unrecognized answer "${gate}" on "Job ${slot.label.toLowerCase()}."`); unmapped.push(`Job ${slot.label}: "${gate}"`); }
     } else {
       // Older submissions had no "Job <time>." question: "Not Scheduled"
       // alone in the job flow means skip.
@@ -275,19 +301,18 @@ export function scoreTechAudit(sub, cfg = AUDIT_CONFIG.audit) {
     }
     // Yes / No questions
     for (const yn of cfg.yesNo) {
-      const id = q[yn.key];
-      if (!id || !onForm(id)) continue;
+      if (!onForm(q[yn.key])) continue;
       job.max += 1;
-      const v = firstText(f[id]);
-      if (norm(v) === "yes") job.points += 1;
-      else if (norm(v) === "no") job.missed.push(yn.missed);
+      const v = firstText(val(q[yn.key]));
+      const pts = ynPoints[norm(v)];
+      if (pts !== undefined) { job.points += pts; if (pts < 1) job.missed.push(yn.missed); }
       else if (!v) { job.missed.push(`${yn.name}: no answer`); job.flags.push(`${yn.name} left blank — incomplete`); }
       else { job.missed.push(`${yn.name}: "${v}"`); job.flags.push(`Unrecognized answer "${v}" on ${yn.name}`); unmapped.push(`${slot.label} ${yn.name}: "${v}"`); }
     }
     // Arrival (9 AM only)
-    if (q.arrival && onForm(q.arrival)) {
+    if (onForm(q.arrival)) {
       job.max += 1;
-      const v = firstText(f[q.arrival]);
+      const v = firstText(val(q.arrival));
       const opt = cfg.arrivalOptions.find(o => norm(o.answer) === norm(v));
       if (opt) { job.points += opt.points; if (opt.points < 1) job.missed.push(`Late: ${v}`); }
       else if (!v) { job.missed.push("Arrival: no answer"); job.flags.push("Arrival on time left blank — incomplete"); }
@@ -298,14 +323,15 @@ export function scoreTechAudit(sub, cfg = AUDIT_CONFIG.audit) {
   }
 
   // Questions on the form that AUDIT_CONFIG doesn't know about.
-  const known = new Set([...Object.values(cfg.fields), ...cfg.slots.flatMap(s => Object.values(s.fields)), ...cfg.ignoreFieldIds]);
+  const known = knownAuditFieldIds(cfg);
   const unmappedFieldIds = (seq || []).filter(id => !known.has(id));
   const scoredJobs = jobs.filter(j => !j.skipped);
   const flags = [];
   if (!scoredJobs.length) flags.push("No jobs scored on this audit — every job blank or Not Scheduled");
   if (unmappedFieldIds.length) flags.push(`Form has question id(s) not in AUDIT_CONFIG: ${unmappedFieldIds.join(", ")}`);
   return { kind: "audit", id: sub.id, work_date: sub.work_date, submitted_at: sub.submitted_at,
-    lead: firstText(f[cfg.fields.lead]) || null, notes: firstText(f[cfg.fields.notes]) || null,
+    lead: firstText(val(cfg.fields.lead)) || null, notes: firstText(val(cfg.fields.notes)) || null,
+    test: cfg.testSubmissionIds.includes(sub.id),
     jobs, dayPct: scoredJobs.length ? scoredJobs.reduce((s, j) => s + j.pct, 0) / scoredJobs.length : null,
     flags, unmapped, unmappedFieldIds };
 }

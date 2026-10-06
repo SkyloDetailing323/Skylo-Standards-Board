@@ -6699,7 +6699,7 @@ function AuditTechDetail({ week }) {
       {week.days.map(d => (
         <div key={d.date} style={box}>
           <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-            <div style={{ fontSize:"13px", color:C.black, fontWeight:"700" }}>{fmtShortDate(d.date)}</div>
+            <div style={{ fontSize:"13px", color:C.black, fontWeight:"700" }}>{fmtShortDate(d.date)} {d.audit.test && <Pill color={C.purple}>TEST</Pill>}</div>
             <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"16px", color:scoreColor(d.pct??0) }}>Day {fmtPct(d.pct)}</div>
           </div>
           <div style={{ fontSize:"12px", color:C.muted, marginTop:"2px" }}>{d.audit.lead ? `Tech lead: ${d.audit.lead}` : ""}{d.replaced ? `${d.audit.lead ? " · " : ""}latest of ${d.replaced+1} submissions for this day` : ""}</div>
@@ -6817,7 +6817,7 @@ function AuditScoresTab({ techs, token, techId=null, canSync=false }) {
         <div style={{ background:`${C.gold}12`, border:`1px solid ${C.gold}`, borderRadius:"10px", padding:"10px 12px", marginBottom:"12px", fontSize:"12px", color:C.black }}>
           <div style={{ fontWeight:"700" }}>⚠ Tech Audit answers the scoring doesn't recognize (fix the form or AUDIT_CONFIG):</div>
           {unmappedAnswers.map(u => <div key={u}>• {u}</div>)}
-          {unmappedIds.length>0 && <div>• Question id(s) not in AUDIT_CONFIG: {unmappedIds.join(", ")}</div>}
+          {unmappedIds.map(id => <div key={id}>• Question id <code>{id}</code>{last?.unmapped_audit_fields?.[id] ? ` = "${last.unmapped_audit_fields[id].trim()}"` : ""} isn't in AUDIT_CONFIG — if it's a renamed question, add the id to that question's list</div>)}
         </div>
       )}
       {state.data && rows.map(({ tech, week }) => {
