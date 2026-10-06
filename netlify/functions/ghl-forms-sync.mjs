@@ -9,15 +9,16 @@
 //   /.netlify/functions/ghl-forms-sync?t=<login token>            last few days
 //   /.netlify/functions/ghl-forms-sync?t=<login token>&mode=full  everything
 //
-// Each answer is saved under its question label (looked up from the
-// location's custom fields) so the scoring in auditScoring.js can find it by
-// name. The "Tech" answer is matched to techs.name exactly; names that don't
-// match are listed in forms_last_run and on the Audit Scores tab.
+// Tote check answers are saved under their question label (looked up from
+// the location's custom fields); Tech Audits are scored by GHL field id from
+// the raw submission. The tech's name is matched to techs.name exactly;
+// names that don't match are listed in forms_last_run and on the Audit
+// Scores tab.
 //
 // Uses auditScoring.js (same file the app uses) for form ids and labels.
 
 import auth from "./lib/authToken.js";
-import { AUDIT_CONFIG, formKind, techNameOf, workDateOf } from "../../auditScoring.js";
+import { AUDIT_CONFIG, formKind, techNameOf, workDateOf, auditJobDate, knownAuditFieldIds } from "../../auditScoring.js";
 
 const BASE = "https://services.leadconnectorhq.com";
 const TIME_BUDGET_MS = 20 * 1000;
@@ -60,14 +61,16 @@ async function setState(key, value) {
 // their raw keys and the Audit Scores tab says the labels couldn't be read.
 async function fieldLabels(loc) {
   const map = {};
+  const fields = {};   // id -> { name, key, options } for the form-prefill links
   try {
     const { customFields = [] } = await ghl(`/locations/${loc}/customFields`);
     for (const f of customFields) {
       if (!f.name) continue;
       if (f.id) map[f.id] = f.name;
       if (f.fieldKey) { map[f.fieldKey] = f.name; map[f.fieldKey.replace(/^contact\./, "")] = f.name; }
+      if (f.id) fields[f.id] = { name: f.name, key: f.fieldKey || null, options: f.picklistOptions || f.options || null };
     }
-    return { map, source: "custom_fields", count: customFields.length };
+    return { map, fields, source: "custom_fields", count: customFields.length };
   } catch (e) {
     return { map, source: "raw_keys", error: e.message };
   }
@@ -113,12 +116,21 @@ export default async (req) => {
     (techs || []).forEach(t => { if (t.name) techByName[t.name] = t.id; });
     const labels = await fieldLabels(loc);
     result.labels = { source: labels.source, count: labels.count, error: labels.error };
+    // Field keys (and dropdown options) of the questions on these forms, so
+    // the app's Forms tab can pre-fill the Tech / Checked by dropdowns.
+    result.form_fields = {};
+    for (const id of knownAuditFieldIds())
+      if (labels.fields && labels.fields[id]) result.form_fields[id] = { form: "audit", ...labels.fields[id] };
 
     const prev = full ? null : await getState("forms_last_run");
     const since = prev && prev.finished_at && !prev.incomplete
       ? new Date(Date.parse(prev.finished_at) - LOOKBACK_DAYS * 864e5).toISOString().slice(0, 10)
       : null;
     const unmatched = new Set();
+    // Current GHL label of every Tech Audit question id AUDIT_CONFIG doesn't
+    // know, so a renamed question that got a new id shows up by name.
+    const knownIds = knownAuditFieldIds();
+    const unmappedAuditFields = {};
 
     for (const form of [AUDIT_CONFIG.tote, AUDIT_CONFIG.audit]) {
       let saved = 0;
@@ -131,12 +143,21 @@ export default async (req) => {
         const rows = list.map(s => {
           const answers = answersOf(s, labels.map);
           const submittedAt = s.createdAt || s.dateAdded || null;
-          const techName = techNameOf(form.formId, answers);
+          const techName = techNameOf(form.formId, answers, s.others);
           const techId = techName ? techByName[techName] || null : null;
           if (techName && !techId) unmatched.add(techName);
+          for (const id of (s.others && s.others.fieldsOriSequance) || [])
+            if (labels.fields && labels.fields[id]) result.form_fields[id] = { form: formKind(form.formId), ...labels.fields[id] };
+          if (formKind(form.formId) === "audit")
+            for (const id of (s.others && s.others.fieldsOriSequance) || [])
+              if (!knownIds.has(id)) unmappedAuditFields[id] = labels.map[id] || null;
           return {
             id: s.id, form_id: s.formId || form.formId, contact_id: s.contactId || null,
-            submitted_at: submittedAt, work_date: workDateOf(answers, submittedAt, AUDIT_CONFIG[formKind(form.formId)].dateLabels),
+            submitted_at: submittedAt,
+            // Audits: the Job Date question (by field id). Tote checks: the Date question.
+            work_date: formKind(form.formId) === "audit"
+              ? auditJobDate(s.others) || workDateOf({}, submittedAt, [])
+              : workDateOf(answers, submittedAt, AUDIT_CONFIG.tote.dateLabels),
             tech_name: techName, tech_id: techId, answers, raw: s, synced_at: new Date().toISOString(),
           };
         });
@@ -148,6 +169,8 @@ export default async (req) => {
       result.forms[formKind(form.formId)] = saved;
     }
     result.unmatched_techs = [...unmatched].sort();
+    result.unmapped_audit_fields = unmappedAuditFields;
+    if (Object.keys(unmappedAuditFields).length) console.warn("ghl-forms-sync: Tech Audit question ids not in AUDIT_CONFIG:", JSON.stringify(unmappedAuditFields));
     if (unmatched.size) console.warn("ghl-forms-sync: tech names with no exact match in techs:", result.unmatched_techs.join(", "));
   } catch (e) {
     result.errors.push(e.message);
