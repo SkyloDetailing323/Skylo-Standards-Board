@@ -75,7 +75,8 @@ export const AUDIT_CONFIG = {
     ignoreOptions: ["Type an Option", "Other"],
     // Yes/No questions worth 1 point each.
     yesNo: [
-      { key: "card",      name: "Customer Satisfaction Card", labels: ["Customer Satisfaction Card", "Satisfaction Card"] },
+      // "Satifaction" is how the 3 pm question is spelled on the GHL form.
+      { key: "card",      name: "Customer Satisfaction Card", labels: ["Customer Satisfaction Card", "Satisfaction Card", "Satifaction Card"] },
       { key: "marketing", name: "Tech Marketing (3 flyers)",  labels: ["Tech Marketing", "Flyers"] },
       { key: "nightText", name: "Night Before Text",          labels: ["Night Before Text", "Night Before"] },
     ],
@@ -115,7 +116,15 @@ function findSlotAnswer(answers, prefixes, labels) {
 // if it has one, otherwise when it was submitted. Fixed -6h, same as the rest
 // of the app.
 export function workDateOf(answers, submittedAt, dateLabels) {
-  const d = firstText(findAnswer(answers, dateLabels));
+  // GHL can save the question with a suffix (e.g. "Date 84cb"), so a label
+  // that starts with one of dateLabels counts too.
+  let raw = findAnswer(answers, dateLabels);
+  if (raw === undefined) {
+    const want = dateLabels.map(norm);
+    const hit = Object.entries(answers || {}).find(([l]) => want.some(w => norm(l).startsWith(w)));
+    raw = hit ? hit[1] : undefined;
+  }
+  const d = firstText(raw);
   const m = d.match(/^(\d{4})-(\d{2})-(\d{2})/) || null;
   if (m) return `${m[1]}-${m[2]}-${m[3]}`;
   const us = d.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
@@ -184,7 +193,14 @@ export function scoreTechAudit(sub, cfg = AUDIT_CONFIG.audit) {
   const ns = norm(cfg.notScheduled);
   const jobs = [];
   for (const slot of cfg.slots) {
-    const flow = findSlotAnswer(answers, slot.prefixes, cfg.flowLabels);
+    // The job flow question is "12 pm. Audits", but the 9 am one is labelled
+    // just "9 am" on the form -- a label that's only the slot counts as flow.
+    let flow = findSlotAnswer(answers, slot.prefixes, cfg.flowLabels);
+    if (!flow.found) {
+      const pre = slot.prefixes.map(norm);
+      const hit = Object.entries(answers || {}).find(([l]) => pre.includes(norm(l)));
+      if (hit) flow = { found: true, value: hit[1] };
+    }
     const picked = toList(flow.value).filter(v => !ignore.includes(norm(v)));
     const notSched = picked.some(v => norm(v) === ns);
     const steps = picked.filter(v => norm(v) !== ns);
