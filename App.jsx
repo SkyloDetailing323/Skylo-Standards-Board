@@ -5494,16 +5494,18 @@ function AttributionSettings({ att, token, onSaved }) {
 function MetaCampaigns({ campaigns }) {
   const [open, setOpen] = useState(null);
   if (!campaigns.length) return <div style={{ fontSize:"13px", color:C.muted }}>No Meta campaigns in this range.</div>;
-  const th = { textAlign:"right", padding:"6px 8px", fontSize:"10px", color:C.muted, letterSpacing:"1px", fontWeight:"800", whiteSpace:"nowrap" };
-  const td = { textAlign:"right", padding:"8px", fontSize:"12px", color:C.black, whiteSpace:"nowrap", fontVariantNumeric:"tabular-nums" };
+  // Compact: headers wrap, cost columns rounded to whole dollars, so all
+  // columns fit on a laptop screen without sideways scrolling.
+  const th = { textAlign:"right", padding:"6px 5px", fontSize:"10px", color:C.muted, letterSpacing:"0.5px", fontWeight:"800", lineHeight:1.2, verticalAlign:"bottom" };
+  const td = { textAlign:"right", padding:"8px 5px", fontSize:"12px", color:C.black, whiteSpace:"nowrap", fontVariantNumeric:"tabular-nums" };
   const row = x => [
-    usd(x.spend), x.leads, x.spend && x.leads ? money2(x.spend / x.leads) : "—", x.booked, x.spend && x.booked ? money2(x.spend / x.booked) : "—",
+    usd(x.spend), x.leads, x.spend && x.leads ? usd(x.spend / x.leads) : "—", x.booked, x.spend && x.booked ? usd(x.spend / x.booked) : "—",
     usd(x.revenue_upfront), usd(x.revenue_sold), usd(x.revenue_serviced),
     Number(x.spend) > 0 ? `${(Number(x.revenue_upfront || 0) / Number(x.spend)).toFixed(2)}x / ${(Number(x.revenue_sold || 0) / Number(x.spend)).toFixed(2)}x` : "—",
   ];
   return (
     <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", overflowX:"auto" }}>
-      <table style={{ width:"100%", borderCollapse:"collapse", minWidth:"840px" }}>
+      <table style={{ width:"100%", borderCollapse:"collapse", minWidth:"700px" }}>
         <thead><tr style={{ background:C.cardLt }}>
           <th style={{ ...th, textAlign:"left" }}>CAMPAIGN / AD</th><th style={th}>SPEND</th><th style={th}>LEADS</th><th style={th}>CPL</th><th style={th}>BOOKED</th><th style={th}>$/BOOKING</th><th style={th}>UPFRONT</th><th style={th}>COMMITTED</th><th style={th}>COMPLETED</th><th style={th}>ROAS UP / COMM.</th>
         </tr></thead>
@@ -7140,7 +7142,7 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
       <style>{GS}</style>
       <SideNav sections={adminNavSections} active={tab} setActive={setTab} open={menuOpen} onClose={()=>setMenuOpen(false)} name="Admin Panel" role="Skylo Standard Board"/>
       <Header left={<HamburgerBtn onClick={()=>setMenuOpen(true)}/>} title={adminTabLabel} right={<LogoutBtn onLogout={onLogout}/>}/>
-      <div style={{ padding:"20px", maxWidth:(tab==="marketing"||tab==="sales") ? "1100px" : "700px", margin:"0 auto" }}>
+      <div style={{ padding:"20px", maxWidth:(tab==="marketing"||tab==="sales") ? "1280px" : "700px", margin:"0 auto" }}>
 
         {pendingSplits.length > 0 && tab !== "splits" && (()=>{
           const count = new Set(pendingSplits.map(r => r.hcp_job_id)).size;
