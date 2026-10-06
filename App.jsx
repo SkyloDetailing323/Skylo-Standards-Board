@@ -5415,7 +5415,7 @@ const SubTabs = ({ tabs, active, setActive }) => (
 );
 const SectionTitle = ({ children }) => <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"16px", color:C.black, marginTop:"6px" }}>{children}</div>;
 const ReportState = ({ s }) => s.error ? <div style={{ background:`${C.red}10`, border:`1px solid ${C.red}`, borderRadius:"10px", padding:"12px", fontSize:"13px", color:C.red }}>Couldn't load: {s.error}</div> : s.loading && !s.data ? <div style={{ color:C.muted, padding:"16px" }}>Loading...</div> : null;
-const REVENUE_NOTE = "Revenue = HCP jobs these leads booked after coming in (matched by phone, email, or exact full name). Upfront = the first visit only — one-time jobs count once. Committed = first visit + the rest of the plan's minimum visits, when the plan was sold with that booking (weekly 8, bi-weekly 7, monthly 6, bi-monthly 5, quarterly 4). Anything after that — repeat jobs, plan visits past the minimum, plans a tech sells later — is kept by operations and not credited to ads or sales.";
+const REVENUE_NOTE = "Revenue = HCP jobs these leads booked after coming in (matched by phone, email, or exact full name). Upfront = the first visit only — one-time jobs count once. Committed = first visit + the rest of the plan's minimum visits, when the plan was sold with that booking (weekly 8, bi-weekly 7, monthly 6, bi-monthly 5, quarterly 4). Completed so far = the part of that revenue whose HCP jobs the tech has marked complete. Anything after that — repeat jobs, plan visits past the minimum, plans a tech sells later — is kept by operations and not credited to ads or sales.";
 
 function ChannelTiles({ ch, paid, att }) {
   const cpl = paid && ch.leads ? ch.spend / ch.leads : null;
@@ -5435,6 +5435,7 @@ function ChannelTiles({ ch, paid, att }) {
       {paid && <StatTile label="Cost per new customer" value={spend && ch.customers ? money2(spend / ch.customers) : "—"} sub={`${ch.customers || 0} new paying customers`}/>}
       <StatTile label="Upfront revenue" value={usd(ch.revenue_upfront)} sub={`first visits · ${ch.customers || 0} customers`}/>
       <StatTile label="Committed revenue" value={usd(ch.revenue_sold)} sub={`first visit + plan minimums · ${ch.plans_sold || 0} plans sold`}/>
+      <StatTile label="Completed so far" value={usd(ch.revenue_serviced)} sub={`${pctOf(Number(ch.revenue_serviced || 0), Number(ch.revenue_sold || 0))} of committed · jobs marked complete in HCP${paid && spend > 0 ? ` · ${(Number(ch.revenue_serviced || 0) / spend).toFixed(2)}x ROAS` : ""}`}/>
       {paid && <StatTile label="Upfront ROAS" value={roasUp == null ? "—" : `${roasUp.toFixed(2)}x`} sub={roasUp == null ? "needs ad spend" : breakeven ? `break-even ${breakeven.toFixed(2)}x at ${Math.round(margin * 1000) / 10}% margin` : null}/>}
       {paid && <StatTile label="Committed ROAS" value={roas == null ? "—" : `${roas.toFixed(2)}x`} sub={roas == null ? "needs ad spend" : `${usd(ch.revenue_sold)} ÷ ${usd(spend)} spent`}/>}
       {Number(ch.revenue_beyond) > 0 && <StatTile label="Kept by operations" value={usd(ch.revenue_beyond)} sub="later jobs + plan visits past the minimum — not credited to ads"/>}
@@ -5497,14 +5498,14 @@ function MetaCampaigns({ campaigns }) {
   const td = { textAlign:"right", padding:"8px", fontSize:"12px", color:C.black, whiteSpace:"nowrap", fontVariantNumeric:"tabular-nums" };
   const row = x => [
     usd(x.spend), x.leads, x.spend && x.leads ? money2(x.spend / x.leads) : "—", x.booked, x.spend && x.booked ? money2(x.spend / x.booked) : "—",
-    usd(x.revenue_upfront), usd(x.revenue_sold),
+    usd(x.revenue_upfront), usd(x.revenue_sold), usd(x.revenue_serviced),
     Number(x.spend) > 0 ? `${(Number(x.revenue_upfront || 0) / Number(x.spend)).toFixed(2)}x / ${(Number(x.revenue_sold || 0) / Number(x.spend)).toFixed(2)}x` : "—",
   ];
   return (
     <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", overflowX:"auto" }}>
-      <table style={{ width:"100%", borderCollapse:"collapse", minWidth:"760px" }}>
+      <table style={{ width:"100%", borderCollapse:"collapse", minWidth:"840px" }}>
         <thead><tr style={{ background:C.cardLt }}>
-          <th style={{ ...th, textAlign:"left" }}>CAMPAIGN / AD</th><th style={th}>SPEND</th><th style={th}>LEADS</th><th style={th}>CPL</th><th style={th}>BOOKED</th><th style={th}>$/BOOKING</th><th style={th}>UPFRONT</th><th style={th}>COMMITTED</th><th style={th}>ROAS UP / COMM.</th>
+          <th style={{ ...th, textAlign:"left" }}>CAMPAIGN / AD</th><th style={th}>SPEND</th><th style={th}>LEADS</th><th style={th}>CPL</th><th style={th}>BOOKED</th><th style={th}>$/BOOKING</th><th style={th}>UPFRONT</th><th style={th}>COMMITTED</th><th style={th}>COMPLETED</th><th style={th}>ROAS UP / COMM.</th>
         </tr></thead>
         <tbody>
           {campaigns.map(c => (<Fragment key={c.id}>
@@ -5579,7 +5580,7 @@ function MarketingTab({ token }) {
   const d = s.data;
   const ch = d?.channels || {};
   const conn = d?.connections || {};
-  const all = Object.values(ch).reduce((t, c) => ({ leads:t.leads + c.leads, booked:t.booked + c.booked, spend:t.spend + Number(c.spend), sold:t.sold + Number(c.revenue_sold || 0), up:t.up + Number(c.revenue_upfront || 0) }), { leads:0, booked:0, spend:0, sold:0, up:0 });
+  const all = Object.values(ch).reduce((t, c) => ({ leads:t.leads + c.leads, booked:t.booked + c.booked, spend:t.spend + Number(c.spend), sold:t.sold + Number(c.revenue_sold || 0), up:t.up + Number(c.revenue_upfront || 0), done:t.done + Number(c.revenue_serviced || 0) }), { leads:0, booked:0, spend:0, sold:0, up:0, done:0 });
   // Cost per lead and ROAS only count channels whose spend is connected, so a
   // channel with leads but no spend data doesn't make the numbers look great.
   const withSpend = ["meta","google","lsa"].filter(k => Number(ch[k]?.spend) > 0);
@@ -5595,7 +5596,7 @@ function MarketingTab({ token }) {
       <ReportState s={s}/>
       {d && (<>
         <div style={{ background:C.black, borderRadius:"12px", padding:"14px 16px", display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(110px, 1fr))", gap:"10px", color:C.white }}>
-          {[["All leads", all.leads], ["Booked", `${all.booked} · ${pctOf(all.booked, all.leads)}`], ["Ad spend", usd(all.spend)], ["Paid cost / lead", paidSpend && paidLeads ? money2(paidSpend / paidLeads) : "—"], ["Upfront revenue", usd(all.up)], ["Committed revenue", usd(all.sold)], ["Paid ROAS up / comm.", paidSpend ? `${(paidUp / paidSpend).toFixed(1)}x / ${(paidSold / paidSpend).toFixed(1)}x` : "—"]].map(([l, v]) => (
+          {[["All leads", all.leads], ["Booked", `${all.booked} · ${pctOf(all.booked, all.leads)}`], ["Ad spend", usd(all.spend)], ["Paid cost / lead", paidSpend && paidLeads ? money2(paidSpend / paidLeads) : "—"], ["Upfront revenue", usd(all.up)], ["Committed revenue", usd(all.sold)], ["Completed so far", usd(all.done)], ["Paid ROAS up / comm.", paidSpend ? `${(paidUp / paidSpend).toFixed(1)}x / ${(paidSold / paidSpend).toFixed(1)}x` : "—"]].map(([l, v]) => (
             <div key={l}><div style={{ fontSize:"10px", opacity:0.7, letterSpacing:"1px", fontWeight:"800", fontFamily:"'Barlow Condensed',sans-serif" }}>{l.toUpperCase()}</div><div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"22px" }}>{v}</div></div>
           ))}
         </div>
@@ -5687,7 +5688,8 @@ function MarketingTab({ token }) {
           <ChannelTiles att={att} ch={{ ...ch.website, leads:ch.website.leads + ch.social.leads, booked:ch.website.booked + ch.social.booked,
             customers:ch.website.customers + ch.social.customers, plans_sold:(ch.website.plans_sold || 0) + (ch.social.plans_sold || 0),
             revenue_upfront:Number(ch.website.revenue_upfront || 0) + Number(ch.social.revenue_upfront || 0), revenue_sold:Number(ch.website.revenue_sold || 0) + Number(ch.social.revenue_sold || 0),
-            revenue_beyond:Number(ch.website.revenue_beyond || 0) + Number(ch.social.revenue_beyond || 0) }}/>
+            revenue_beyond:Number(ch.website.revenue_beyond || 0) + Number(ch.social.revenue_beyond || 0),
+            revenue_serviced:Number(ch.website.revenue_serviced || 0) + Number(ch.social.revenue_serviced || 0) }}/>
           <DailyBars title="Website form leads per day" days={days} value={x => (x.leads?.website || 0) + (x.leads?.social || 0)}/>
           <SectionTitle>Where website leads came from</SectionTitle>
           <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"6px 14px" }}>
