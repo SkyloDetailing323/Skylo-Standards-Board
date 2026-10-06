@@ -61,14 +61,16 @@ async function setState(key, value) {
 // their raw keys and the Audit Scores tab says the labels couldn't be read.
 async function fieldLabels(loc) {
   const map = {};
+  const fields = {};   // id -> { name, key, options } for the form-prefill links
   try {
     const { customFields = [] } = await ghl(`/locations/${loc}/customFields`);
     for (const f of customFields) {
       if (!f.name) continue;
       if (f.id) map[f.id] = f.name;
       if (f.fieldKey) { map[f.fieldKey] = f.name; map[f.fieldKey.replace(/^contact\./, "")] = f.name; }
+      if (f.id) fields[f.id] = { name: f.name, key: f.fieldKey || null, options: f.picklistOptions || f.options || null };
     }
-    return { map, source: "custom_fields", count: customFields.length };
+    return { map, fields, source: "custom_fields", count: customFields.length };
   } catch (e) {
     return { map, source: "raw_keys", error: e.message };
   }
@@ -114,6 +116,9 @@ export default async (req) => {
     (techs || []).forEach(t => { if (t.name) techByName[t.name] = t.id; });
     const labels = await fieldLabels(loc);
     result.labels = { source: labels.source, count: labels.count, error: labels.error };
+    // Field keys (and dropdown options) of the questions on these forms, so
+    // the app's Forms tab can pre-fill the Tech / Checked by dropdowns.
+    result.form_fields = {};
 
     const prev = full ? null : await getState("forms_last_run");
     const since = prev && prev.finished_at && !prev.incomplete
@@ -139,6 +144,8 @@ export default async (req) => {
           const techName = techNameOf(form.formId, answers, s.others);
           const techId = techName ? techByName[techName] || null : null;
           if (techName && !techId) unmatched.add(techName);
+          for (const id of (s.others && s.others.fieldsOriSequance) || [])
+            if (labels.fields && labels.fields[id]) result.form_fields[id] = { form: formKind(form.formId), ...labels.fields[id] };
           if (formKind(form.formId) === "audit")
             for (const id of (s.others && s.others.fieldsOriSequance) || [])
               if (!knownIds.has(id)) unmappedAuditFields[id] = labels.map[id] || null;
