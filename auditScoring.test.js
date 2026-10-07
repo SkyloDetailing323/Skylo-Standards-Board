@@ -4,7 +4,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { AUDIT_CONFIG, scoreTechAudit, auditDays, weeklyAuditPct, auditWeekStart, techNameOf, auditJobDate } from "./auditScoring.js";
+import { AUDIT_CONFIG, toteCharges, scoreTechAudit, auditDays, weeklyAuditPct, auditWeekStart, techNameOf, auditJobDate } from "./auditScoring.js";
 
 const ALL = ["On my Way", "Start Job", "Before Pictures", "Workflow Checklist", "After Pictures", "Finish", "Send Invoice"];
 const OLD_FORM = ["Ga8aYHKmIy2SQ9KGqqEf","FY37nOA0b0rDZZaxRqAM","Vub4DsjU4dfJlgUzfq67","wWEni4JJVpTdbpRFzZRu","AqH3PL6wI1TROYl86C3M","zRIHBlKBZT8KrcY6l7rI","ndftAbwlEYb1VE4OfCPO","6ku5mwXQIpIahX7JvcT9","8oM3PJ48QtcrbxzeYLuQ","tpZsIalOFoFkBIWMtyua","XDlSPqE6ZBuHAgYr1oSE","KUQsapPszHcamVVGyTKU","V7gx9O3Tjuyt4hvIbrkm","EJJQZ19dNUswO6Kwuodj","button","header"];
@@ -131,6 +131,23 @@ test("Audit Scores weeks run Wednesday-Tuesday", () => {
   assert.equal(auditWeekStart("2026-10-06"), "2026-09-30");   // Tuesday
   assert.equal(auditWeekStart("2026-10-07"), "2026-10-07");   // next Wednesday
   assert.equal(auditWeekStart("2026-10-10", 0), "2026-10-04"); // Sunday option still works
+});
+
+test("Tote deductions: failed checks only, each lost item charged once, waivers skip", () => {
+  const chk = (id, work_date, missing) => { const m = missing.map(name => ({ name, cents: AUDIT_CONFIG.tote.items.find(i => i.name === name).cents })); const cents = m.reduce((s, x) => s + x.cents, 0); return { id, work_date, submitted_at: work_date, missing: m, missingCents: cents, pass: cents <= AUDIT_CONFIG.tote.passMaxMissingCents }; };
+  const r = toteCharges([
+    chk("a", "2026-10-01", ["Tooth Brush"]),                       // $1 -- passes, not charged
+    chk("b", "2026-10-07", ["Tornador", "Tooth Brush"]),           // fails: both charged
+    chk("c", "2026-10-14", ["Tornador", "Wax"]),                   // Tornador still gone: already charged; Wax $3 charged
+    chk("d", "2026-10-21", []),                                    // everything back
+    chk("e", "2026-10-28", ["Tornador", "Foam Cannon"]),           // lost again: charged again; Foam Cannon waived
+  ], new Set(["e|Foam Cannon"]));
+  assert.deepEqual(r.map(x => x.check.id), ["b", "c", "e"]);
+  assert.equal(r[0].chargedCents, 6100);
+  assert.deepEqual(r[1].items.map(i => i.status), ["already", "charged"]);
+  assert.equal(r[1].chargedCents, 300);
+  assert.deepEqual(r[2].items.map(i => i.status), ["charged", "waived"]);
+  assert.equal(r[2].chargedCents, 6000);
 });
 
 test("Tech name falls back to the form's First/Last Name (Forms tab prefill)", () => {

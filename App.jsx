@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, Fragment } from "react";
 import { TEST_QUESTIONS, shuffle } from "./trainingTest.js";
 import { computeOpsMonth, monthRange, mountainDate, CALLBACK_TIERS, QUOTA_TIERS, RETENTION_TIERS, NON_ROUTE_VEHICLES, OPS_EXCLUDED_TITLES } from "./opsBonus.js";
-import { formKind, scoreToteCheck, scoreTechAudit, latestPerDay, auditDays, weeklyAuditPct, auditWeekStart } from "./auditScoring.js";
+import { formKind, scoreToteCheck, scoreTechAudit, latestPerDay, auditDays, weeklyAuditPct, auditWeekStart, toteCharges } from "./auditScoring.js";
 
 // ─── SUPABASE CONFIG ──────────────────────────────────────────────────────────
 const SUPABASE_URL = "https://mjmwxxvqcsptrocwucis.supabase.co";
@@ -1522,10 +1522,41 @@ function ReportsTab({ techs, jobs, upsells=[], timeEntries=[], tipEntries=[], te
 }
 
 // ─── PAYROLL TAB ──────────────────────────────────────────────────────────────
-function PayrollTab({ techs, jobs, tipEntries=[], switchovers=[] }) {
+function PayrollTab({ techs, jobs, tipEntries=[], switchovers=[], token=null, canWaive=false }) {
   const allPeriods = getPayPeriods();
   const activePeriods = allPeriods.filter(p=>jobs.some(j=>j.job_date>=p.start&&j.job_date<=p.end)||p.key===currentPPKey());
   const [selKey, setSelKey] = useState(currentPPKey());
+  // Tote Checks since the 10th/25th schedule started: failed checks deduct
+  // the missing items (auditScoring.js toteCharges), minus owner waivers.
+  const [tote, setTote] = useState({ loading:true, error:null, subs:[], waivers:[] });
+  const [toteBump, setToteBump] = useState(0);
+  const [waiving, setWaiving] = useState(null);
+  useEffect(() => {
+    let live = true;
+    fetch(`/.netlify/functions/audit-scores?kind=tote&from=${PP_SEMI_MONTHLY_FROM}&to=${mtDateStr(Date.now())}`, { headers:{ Authorization:`Bearer ${token || ""}` } })
+      .then(async r => { const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`); return j; })
+      .then(j => live && setTote({ loading:false, error:null, subs:j.submissions||[], waivers:j.tote_waivers||[] }))
+      .catch(e => live && setTote(t => ({ ...t, loading:false, error:e.message })));
+    return () => { live = false; };
+  }, [token, toteBump]);
+  async function setWaived(checkId, item, waived) {
+    setWaiving(`${checkId}|${item}`);
+    try {
+      const r = await fetch("/.netlify/functions/audit-scores", { method:"POST", headers:{ Authorization:`Bearer ${token || ""}`, "Content-Type":"application/json" }, body:JSON.stringify({ submission_id:checkId, item, waived }) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+      setToteBump(b => b+1);
+    } catch(e) { window.alert("Couldn't save: "+e.message); }
+    setWaiving(null);
+  }
+  const toteByTech = (() => {
+    const waived = new Set(tote.waivers.map(w => `${w.submission_id}|${w.item}`));
+    const byTech = {};
+    tote.subs.filter(sb => sb.tech_id && formKind(sb.form_id)==="tote").forEach(sb => { (byTech[sb.tech_id] = byTech[sb.tech_id] || []).push(sb); });
+    const out = {};
+    for (const [id, subs] of Object.entries(byTech)) out[id] = toteCharges(latestPerDay(subs.map(sb => scoreToteCheck(sb)).filter(c => !c.excluded)), waived);
+    return out;
+  })();
   const period = allPeriods.find(p=>p.key===selKey) || allPeriods[0];
   if (!period) return null;
 
@@ -1546,7 +1577,11 @@ function PayrollTab({ techs, jobs, tipEntries=[], switchovers=[] }) {
     const sws = showBonuses ? switchovers.filter(sw=>sw.tech_id===t.id&&switchoverDate(sw)>=period.start&&switchoverDate(sw)<=period.end).sort((a,b)=>switchoverDate(a).localeCompare(switchoverDate(b))) : [];
     const switchPay = sws.reduce((s,sw)=>s+(switchoverPay(sw)||0),0);
     const switchUnpriced = sws.filter(sw=>switchoverPay(sw)==null).length;
-    const total   = commission+tips+upsellPay+switchPay;
+    const toteAll = showBonuses ? (toteByTech[t.id] || []) : [];
+    const toteHere = toteAll.filter(c=>c.check.work_date>=period.start&&c.check.work_date<=period.end);
+    const toteCents = toteHere.reduce((s,c)=>s+c.chargedCents,0);
+    const toteDeduct = toteCents/100;
+    const total   = commission+tips+upsellPay+switchPay-toteDeduct;
     const weeks   = wkKeys.map(wk=>{
       const wj=tj.filter(j=>j.week_key===wk);
       const wkEndDate = new Date(wk+"T12:00:00Z"); wkEndDate.setUTCDate(wkEndDate.getUTCDate()+6);
@@ -1554,13 +1589,13 @@ function PayrollTab({ techs, jobs, tipEntries=[], switchovers=[] }) {
       const wkTips = tipsRangeTotal(tipEntries, t.id, wk, wkEndStr);
       return { wk, rev:wj.reduce((s,j)=>s+(j.revenue||0),0), tips:wkTips, count:wj.length };
     }).filter(w=>w.rev>0||w.tips>0);
-    return { ...t, revenue, tips, rate, commission, upsellAmt, upsellPay, upsellRate, sws, switchPay, switchUnpriced, total, weeks };
-  }).filter(r=>r.revenue>0||r.tips>0||r.upsellAmt>0||r.sws.length>0).sort((a,b)=>b.total-a.total);
+    return { ...t, revenue, tips, rate, commission, upsellAmt, upsellPay, upsellRate, sws, switchPay, switchUnpriced, toteHere, toteDeduct, total, weeks };
+  }).filter(r=>r.revenue>0||r.tips>0||r.upsellAmt>0||r.sws.length>0||r.toteHere.length>0).sort((a,b)=>b.total-a.total);
 
   const teamTotal = rows.reduce((s,r)=>s+r.total,0);
 
   function exportCSV() {
-    const lines=["Tech,Revenue,Commission Rate,Commission,Tips,Upsells,Upsell Rate,Upsell Bonus,Switchovers,Switchover Bonus,Total Pay",...rows.map(r=>[r.name,`$${r.revenue.toFixed(2)}`,`${r.rate}%`,`$${r.commission.toFixed(2)}`,`$${r.tips.toFixed(2)}`,`$${r.upsellAmt.toFixed(2)}`,`${Math.round(r.upsellRate*100)}%`,`$${r.upsellPay.toFixed(2)}`,r.sws.length,`$${r.switchPay.toFixed(2)}`,`$${r.total.toFixed(2)}`].join(","))].join("\n");
+    const lines=["Tech,Revenue,Commission Rate,Commission,Tips,Upsells,Upsell Rate,Upsell Bonus,Switchovers,Switchover Bonus,Tote Deduction,Total Pay",...rows.map(r=>[r.name,`$${r.revenue.toFixed(2)}`,`${r.rate}%`,`$${r.commission.toFixed(2)}`,`$${r.tips.toFixed(2)}`,`$${r.upsellAmt.toFixed(2)}`,`${Math.round(r.upsellRate*100)}%`,`$${r.upsellPay.toFixed(2)}`,r.sws.length,`$${r.switchPay.toFixed(2)}`,`-$${r.toteDeduct.toFixed(2)}`,`$${r.total.toFixed(2)}`].join(","))].join("\n");
     const url=URL.createObjectURL(new Blob([lines],{type:"text/csv"}));
     const a=Object.assign(document.createElement("a"),{href:url,download:`skylo-payroll-${selKey}.csv`});
     a.click(); URL.revokeObjectURL(url);
@@ -1597,6 +1632,9 @@ function PayrollTab({ techs, jobs, tipEntries=[], switchovers=[] }) {
         <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"34px", color:C.black }}>${teamTotal.toFixed(2)}</div>
       </div>
 
+      {showBonuses&&tote.error&&(
+        <div style={{ background:`${C.red}10`, border:`1px solid ${C.red}`, borderRadius:"10px", padding:"12px", fontSize:"13px", color:C.red }}>Couldn't load tote checks, so tote deductions are NOT included below: {tote.error}</div>
+      )}
       {rows.length===0?(
         <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"32px", textAlign:"center", color:C.muted, fontSize:"13px" }}>
           No jobs synced for this pay period yet. HCP sync runs every 5 min.
@@ -1652,6 +1690,38 @@ function PayrollTab({ techs, jobs, tipEntries=[], switchovers=[] }) {
                     })}
                     {r.switchUnpriced>0&&<div style={{ fontSize:"11px", color:C.red, marginTop:"6px" }}>⚠ {r.switchUnpriced} switchover{r.switchUnpriced!==1?"s":""} on a plan with no pay amount set — not included in the total.</div>}
                   </div>
+                  {r.toteHere.length>0&&(
+                    <div style={{ background:`${C.red}0d`, border:`1px solid ${C.red}33`, borderRadius:"8px", padding:"10px 12px" }}>
+                      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:"10px" }}>
+                        <div>
+                          <div style={{ fontSize:"10px", color:C.red, letterSpacing:"1px", textTransform:"uppercase", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>🧰 Tote Losses (failed checks)</div>
+                          <div style={{ fontSize:"12px", color:C.muted, marginTop:"2px" }}>{r.toteHere.length} failed check{r.toteHere.length!==1?"s":""} {fmtShortDate(period.start)} – {fmtShortDate(period.end)}</div>
+                        </div>
+                        <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"18px", color:C.red }}>−${r.toteDeduct.toFixed(2)}</div>
+                      </div>
+                      {r.toteHere.map(c=>(
+                        <div key={c.check.id} style={{ borderTop:`1px solid ${C.red}22`, marginTop:"6px", paddingTop:"6px" }}>
+                          <div style={{ fontSize:"12px", color:C.black, fontWeight:"700" }}>{fmtShortDate(c.check.work_date)}{c.check.checkedBy?` · checked by ${c.check.checkedBy}`:""} · −{fmtCents(c.chargedCents)}</div>
+                          {c.check.notes&&<div style={{ fontSize:"11px", color:C.muted, fontStyle:"italic", marginTop:"2px" }}>📝 {c.check.notes}</div>}
+                          {c.items.map(it=>{
+                            const key = `${c.check.id}|${it.name}`;
+                            return (
+                              <div key={it.name} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:"8px", fontSize:"12px", marginTop:"3px" }}>
+                                <span style={{ color:it.status==="charged"?C.black:C.muted, textDecoration:it.status==="charged"?"none":"line-through" }}>{it.name} · {fmtCents(it.cents)}</span>
+                                <span style={{ display:"flex", alignItems:"center", gap:"6px", whiteSpace:"nowrap" }}>
+                                  {it.status==="already"&&<span style={{ fontSize:"11px", color:C.muted }}>already charged</span>}
+                                  {it.status==="waived"&&<span style={{ fontSize:"11px", color:C.muted }}>waived</span>}
+                                  {canWaive&&it.status!=="already"&&(
+                                    <button disabled={waiving===key} onClick={()=>setWaived(c.check.id, it.name, it.status!=="waived")} style={{ background:"none", border:`1px solid ${C.border}`, color:it.status==="waived"?C.blue:C.red, padding:"2px 8px", borderRadius:"4px", cursor:"pointer", fontSize:"11px", fontWeight:"700" }}>{waiving===key?"…":it.status==="waived"?"Undo":"Waive"}</button>
+                                  )}
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
               {r.weeks.length>1&&(
@@ -7977,7 +8047,7 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
           <Leaderboard techs={activeTechs} jobs={jobs||[]} upsells={upsells} reviews={reviews} callbacks={callbacks||[]} switchovers={switchovers} timeEntries={timeEntries}/>
         )}
         {tab==="payroll"&&(
-          <PayrollTab techs={techs} jobs={jobs||[]} upsells={upsells} tipEntries={tipEntries} switchovers={switchovers||[]}/>
+          <PayrollTab techs={techs} jobs={jobs||[]} upsells={upsells} tipEntries={tipEntries} switchovers={switchovers||[]} token={currentUser?.token} canWaive={!isManager}/>
         )}
 
         {tab==="ridealong"&&(
