@@ -3,7 +3,8 @@ import { TEST_QUESTIONS, shuffle } from "./trainingTest.js";
 import { computeOpsMonth, monthRange, mountainDate, CALLBACK_TIERS, QUOTA_TIERS, RETENTION_TIERS, NON_ROUTE_VEHICLES, OPS_EXCLUDED_TITLES } from "./opsBonus.js";
 import { techDriverDays, weeklyDriverScore, findUnassignedDriving, DRIVER_CONFIG } from "./driverScoring.js";
 import { buildFordImport } from "./fordReports.js";
-import { formKind, scoreToteCheck, scoreTechAudit, latestPerDay, auditDays, weeklyAuditPct, auditWeekStart } from "./auditScoring.js";
+import { techWeekScores, techScoreCard, teamSummary, TECH_SCORE_CONFIG } from "./techScores.js";
+import { formKind, scoreToteCheck, scoreTechAudit, latestPerDay, auditDays, weeklyAuditPct, auditWeekStart, toteCharges } from "./auditScoring.js";
 
 // ─── SUPABASE CONFIG ──────────────────────────────────────────────────────────
 const SUPABASE_URL = "https://mjmwxxvqcsptrocwucis.supabase.co";
@@ -69,7 +70,13 @@ const C = {
   red:     "#ef4444",
 };
 
-const PP_ANCHOR_END = "2026-06-13"; // known period end: pay date Jun 19, submit Jun 17
+const PP_ANCHOR_END = "2026-06-13"; // known bi-weekly period end: pay date Jun 19, submit Jun 17
+// Pay moved from every other week to the 10th and 25th (owner's call, Oct
+// 2026). Bi-weekly periods end Sep 19; Sep 20-30 is a one-off bridge period
+// paid Oct 7; then the 1st-15th is paid on the 25th and the 16th-month end is
+// paid on the 10th of the next month.
+const PP_SEMI_MONTHLY_FROM = "2026-09-20";
+const PP_BRIDGE = { start:"2026-09-20", end:"2026-09-30", submit:"2026-10-07", payout:"2026-10-07" };
 const UPSELL_PTS_PER_DOLLAR = 0.5; // $2 = 1 pt
 const REVIEW_PTS = 5;
 const REVIEW_BONUS_PTS = 20; // bonus at 10+ reviews in a month
@@ -287,14 +294,30 @@ function getPayPeriods() {
     const submit= new Date(end);  submit.setDate(end.getDate()+4);
     const payout= new Date(end);  payout.setDate(end.getDate()+6);
     const fmt = d=>d.toISOString().split("T")[0];
+    if (fmt(end) >= PP_SEMI_MONTHLY_FROM) break;
     periods.push({ key:fmt(end), start:fmt(start), end:fmt(end), submit:fmt(submit), payout:fmt(payout) });
+  }
+  periods.push({ key:PP_BRIDGE.end, ...PP_BRIDGE });
+  // Semi-monthly from October 2026 through two months past today. Submit By
+  // is two days before the pay date.
+  const ymd = (y,m,d) => new Date(Date.UTC(y,m,d,12)).toISOString().split("T")[0];
+  const minus2 = s => { const d = new Date(s+"T12:00:00Z"); d.setUTCDate(d.getUTCDate()-2); return d.toISOString().split("T")[0]; };
+  const today = new Date(todayMs);
+  const lastMonth = today.getUTCFullYear()*12 + today.getUTCMonth() + 2;
+  for (let mi = 2026*12+9; mi <= lastMonth; mi++) {
+    const y = Math.floor(mi/12), m = mi%12;
+    const first = { start:ymd(y,m,1), end:ymd(y,m,15), payout:ymd(y,m,25) };
+    const second = { start:ymd(y,m,16), end:ymd(y,m+1,0), payout:ymd(y,m+1,10) };
+    for (const p of [first, second]) periods.push({ key:p.end, ...p, submit:minus2(p.payout) });
   }
   return periods.sort((a,b)=>b.key.localeCompare(a.key));
 }
-function currentPPKey() {
+function currentPayPeriod() {
   const today = new Date(Date.now()-6*60*60*1000).toISOString().split("T")[0];
-  const p = getPayPeriods().find(p=>today>=p.start&&today<=p.end);
-  return p?.key || PP_ANCHOR_END;
+  return getPayPeriods().find(p=>today>=p.start&&today<=p.end) || null;
+}
+function currentPPKey() {
+  return currentPayPeriod()?.key || PP_ANCHOR_END;
 }
 function formatTenure(startDate) {
   if (!startDate) return null;
@@ -483,31 +506,42 @@ function calcTotals(tech, upsells, switchovers, reviews, callbacks=[], jobs=[]) 
   return { badgePts, upsellAmt, upsellPts, switchPts, reviewPts, callbackPts, callbackCount, total };
 }
 
-// ─── WEEKLY PAY CALCULATOR ────────────────────────────────────────────────────
-// Tiers reset each week. First $150 = 15%, then $300 = 20%, then $450 = 25%, then $700 = 30%
-const PAY_TIERS = [
-  { upTo: 150,  rate: 0.15, label: "0–$150",    color: C.green  },
-  { upTo: 300,  rate: 0.20, label: "$150–$300",  color: C.blue   },
-  { upTo: 450,  rate: 0.25, label: "$300–$450",  color: C.gold   },
-  { upTo: 700,  rate: 0.30, label: "$450–$700",  color: C.orange },
+// ─── UPSELL PAY ───────────────────────────────────────────────────────────────
+// Tiers run per pay period (same dates as Payroll), not per week. The rate a
+// tech reaches pays on ALL of that period's upsells: $650 → 25% × $650.
+const UPSELL_PAY_TIERS = [
+  { over:0,   rate:0.15, label:"$0–$300"   },
+  { over:300, rate:0.20, label:"$301–$600" },
+  { over:600, rate:0.25, label:"$601–$800" },
+  { over:800, rate:0.30, label:"$801+"     },
 ];
 
-function calcWeeklyPay(weeklyUpsellAmt) {
-  // Flat rate unlocks and backfills ALL upsells for the week
-  let rate;
-  if      (weeklyUpsellAmt >= 700) rate = 0.30;
-  else if (weeklyUpsellAmt >= 400) rate = 0.25;
-  else if (weeklyUpsellAmt >= 150) rate = 0.20;
-  else                              rate = 0.15;
-  const totalPay = weeklyUpsellAmt * rate;
-  return { totalPay, rate };
+function calcUpsellPay(upsellAmt) {
+  const tier = [...UPSELL_PAY_TIERS].reverse().find(t => upsellAmt > t.over) || UPSELL_PAY_TIERS[0];
+  return { totalPay: upsellAmt * tier.rate, rate: tier.rate };
 }
 
-function getNextPayTier(weeklyAmt) {
-  if (weeklyAmt < 150) return { amt: 150 - weeklyAmt, rate: 0.20, label: "20% on your whole week" };
-  if (weeklyAmt < 400) return { amt: 400 - weeklyAmt, rate: 0.25, label: "25% on your whole week" };
-  if (weeklyAmt < 700) return { amt: 700 - weeklyAmt, rate: 0.30, label: "30% on your whole week" };
-  return { amt: null, rate: 0.30, label: "MAX RATE — 30% on your whole week 🔥" };
+function getNextPayTier(amt) {
+  const next = UPSELL_PAY_TIERS.slice(1).find(t => amt <= t.over);
+  if (!next) return { amt: null, rate: 0.30, label: "MAX RATE — 30% on every upsell this pay period 🔥" };
+  return { amt: Math.max(1, Math.ceil(next.over + 1 - amt)), rate: next.rate, label: `${Math.round(next.rate*100)}% on every upsell this pay period` };
+}
+
+// ─── SWITCHOVER PAY ───────────────────────────────────────────────────────────
+// Per switchover, by plan, +$10 when an exterior was added. Plans with no
+// amount here show on Payroll as "rate not set" instead of a guessed number.
+const SWITCHOVER_PAY = { weekly:50, biweekly:45, monthly:40, bimonthly:35, quarterly:30, biannual:10 };
+const SWITCHOVER_EXTERIOR_PAY = 10;
+function switchoverPay(sw) {
+  const base = SWITCHOVER_PAY[sw.plan_id];
+  return base == null ? null : base + (sw.with_exterior ? SWITCHOVER_EXTERIOR_PAY : 0);
+}
+// Day the switchover counts for: the day it was logged (sold_date is set to
+// that day on entry; older rows fall back to created_at).
+function switchoverDate(sw) {
+  if (sw.sold_date) return sw.sold_date;
+  if (sw.created_at) return mtDateStr(new Date(sw.created_at).getTime());
+  return sw.week_key;
 }
 
 
@@ -1491,14 +1525,48 @@ function ReportsTab({ techs, jobs, upsells=[], timeEntries=[], tipEntries=[], te
 }
 
 // ─── PAYROLL TAB ──────────────────────────────────────────────────────────────
-function PayrollTab({ techs, jobs, tipEntries=[] }) {
+function PayrollTab({ techs, jobs, tipEntries=[], switchovers=[], token=null, canWaive=false }) {
   const allPeriods = getPayPeriods();
   const activePeriods = allPeriods.filter(p=>jobs.some(j=>j.job_date>=p.start&&j.job_date<=p.end)||p.key===currentPPKey());
   const [selKey, setSelKey] = useState(currentPPKey());
+  // Tote Checks since the 10th/25th schedule started: failed checks deduct
+  // the missing items (auditScoring.js toteCharges), minus owner waivers.
+  const [tote, setTote] = useState({ loading:true, error:null, subs:[], waivers:[] });
+  const [toteBump, setToteBump] = useState(0);
+  const [waiving, setWaiving] = useState(null);
+  useEffect(() => {
+    let live = true;
+    fetch(`/.netlify/functions/audit-scores?kind=tote&from=${PP_SEMI_MONTHLY_FROM}&to=${mtDateStr(Date.now())}`, { headers:{ Authorization:`Bearer ${token || ""}` } })
+      .then(async r => { const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`); return j; })
+      .then(j => live && setTote({ loading:false, error:null, subs:j.submissions||[], waivers:j.tote_waivers||[] }))
+      .catch(e => live && setTote(t => ({ ...t, loading:false, error:e.message })));
+    return () => { live = false; };
+  }, [token, toteBump]);
+  async function setWaived(checkId, item, waived) {
+    setWaiving(`${checkId}|${item}`);
+    try {
+      const r = await fetch("/.netlify/functions/audit-scores", { method:"POST", headers:{ Authorization:`Bearer ${token || ""}`, "Content-Type":"application/json" }, body:JSON.stringify({ submission_id:checkId, item, waived }) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+      setToteBump(b => b+1);
+    } catch(e) { window.alert("Couldn't save: "+e.message); }
+    setWaiving(null);
+  }
+  const toteByTech = (() => {
+    const waived = new Set(tote.waivers.map(w => `${w.submission_id}|${w.item}`));
+    const byTech = {};
+    tote.subs.filter(sb => sb.tech_id && formKind(sb.form_id)==="tote").forEach(sb => { (byTech[sb.tech_id] = byTech[sb.tech_id] || []).push(sb); });
+    const out = {};
+    for (const [id, subs] of Object.entries(byTech)) out[id] = toteCharges(latestPerDay(subs.map(sb => scoreToteCheck(sb)).filter(c => !c.excluded)), waived);
+    return out;
+  })();
   const period = allPeriods.find(p=>p.key===selKey) || allPeriods[0];
   if (!period) return null;
 
   const periodJobs = jobs.filter(j=>j.job_date>=period.start&&j.job_date<=period.end);
+  // Upsell and switchover bonuses ride on payroll from the 10th/25th schedule
+  // on; before that they were paid weekly and aren't shown here.
+  const showBonuses = period.start >= PP_SEMI_MONTHLY_FROM;
   const wkKeys = [...new Set(periodJobs.map(j=>j.week_key))].filter(Boolean).sort();
 
   const rows = techs.map(t=>{
@@ -1507,7 +1575,16 @@ function PayrollTab({ techs, jobs, tipEntries=[] }) {
     const tips    = tipsRangeTotal(tipEntries, t.id, period.start, period.end);
     const rate    = t.commission_rate||27;
     const commission = revenue*(rate/100);
-    const total   = commission+tips;
+    const upsellAmt = showBonuses ? upsellAmountInRange(periodJobs, t.id, period.start, period.end) : 0;
+    const { totalPay:upsellPay, rate:upsellRate } = calcUpsellPay(upsellAmt);
+    const sws = showBonuses ? switchovers.filter(sw=>sw.tech_id===t.id&&switchoverDate(sw)>=period.start&&switchoverDate(sw)<=period.end).sort((a,b)=>switchoverDate(a).localeCompare(switchoverDate(b))) : [];
+    const switchPay = sws.reduce((s,sw)=>s+(switchoverPay(sw)||0),0);
+    const switchUnpriced = sws.filter(sw=>switchoverPay(sw)==null).length;
+    const toteAll = showBonuses ? (toteByTech[t.id] || []) : [];
+    const toteHere = toteAll.filter(c=>c.check.work_date>=period.start&&c.check.work_date<=period.end);
+    const toteCents = toteHere.reduce((s,c)=>s+c.chargedCents,0);
+    const toteDeduct = toteCents/100;
+    const total   = commission+tips+upsellPay+switchPay-toteDeduct;
     const weeks   = wkKeys.map(wk=>{
       const wj=tj.filter(j=>j.week_key===wk);
       const wkEndDate = new Date(wk+"T12:00:00Z"); wkEndDate.setUTCDate(wkEndDate.getUTCDate()+6);
@@ -1515,13 +1592,13 @@ function PayrollTab({ techs, jobs, tipEntries=[] }) {
       const wkTips = tipsRangeTotal(tipEntries, t.id, wk, wkEndStr);
       return { wk, rev:wj.reduce((s,j)=>s+(j.revenue||0),0), tips:wkTips, count:wj.length };
     }).filter(w=>w.rev>0||w.tips>0);
-    return { ...t, revenue, tips, rate, commission, total, weeks };
-  }).filter(r=>r.revenue>0||r.tips>0).sort((a,b)=>b.total-a.total);
+    return { ...t, revenue, tips, rate, commission, upsellAmt, upsellPay, upsellRate, sws, switchPay, switchUnpriced, toteHere, toteDeduct, total, weeks };
+  }).filter(r=>r.revenue>0||r.tips>0||r.upsellAmt>0||r.sws.length>0||r.toteHere.length>0).sort((a,b)=>b.total-a.total);
 
   const teamTotal = rows.reduce((s,r)=>s+r.total,0);
 
   function exportCSV() {
-    const lines=["Tech,Revenue,Commission Rate,Commission,Tips,Total Pay",...rows.map(r=>[r.name,`$${r.revenue.toFixed(2)}`,`${r.rate}%`,`$${r.commission.toFixed(2)}`,`$${r.tips.toFixed(2)}`,`$${r.total.toFixed(2)}`].join(","))].join("\n");
+    const lines=["Tech,Revenue,Commission Rate,Commission,Tips,Upsells,Upsell Rate,Upsell Bonus,Switchovers,Switchover Bonus,Tote Deduction,Total Pay",...rows.map(r=>[r.name,`$${r.revenue.toFixed(2)}`,`${r.rate}%`,`$${r.commission.toFixed(2)}`,`$${r.tips.toFixed(2)}`,`$${r.upsellAmt.toFixed(2)}`,`${Math.round(r.upsellRate*100)}%`,`$${r.upsellPay.toFixed(2)}`,r.sws.length,`$${r.switchPay.toFixed(2)}`,`-$${r.toteDeduct.toFixed(2)}`,`$${r.total.toFixed(2)}`].join(","))].join("\n");
     const url=URL.createObjectURL(new Blob([lines],{type:"text/csv"}));
     const a=Object.assign(document.createElement("a"),{href:url,download:`skylo-payroll-${selKey}.csv`});
     a.click(); URL.revokeObjectURL(url);
@@ -1558,6 +1635,9 @@ function PayrollTab({ techs, jobs, tipEntries=[] }) {
         <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"34px", color:C.black }}>${teamTotal.toFixed(2)}</div>
       </div>
 
+      {showBonuses&&tote.error&&(
+        <div style={{ background:`${C.red}10`, border:`1px solid ${C.red}`, borderRadius:"10px", padding:"12px", fontSize:"13px", color:C.red }}>Couldn't load tote checks, so tote deductions are NOT included below: {tote.error}</div>
+      )}
       {rows.length===0?(
         <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"32px", textAlign:"center", color:C.muted, fontSize:"13px" }}>
           No jobs synced for this pay period yet. HCP sync runs every 5 min.
@@ -1585,6 +1665,68 @@ function PayrollTab({ techs, jobs, tipEntries=[] }) {
                   </div>
                 ))}
               </div>
+              {showBonuses&&(
+                <div style={{ display:"flex", flexDirection:"column", gap:"6px", marginTop:"8px", marginBottom:r.weeks.length>1?"10px":0 }}>
+                  <div style={{ background:C.cardLt, borderRadius:"8px", padding:"10px 12px", display:"flex", justifyContent:"space-between", alignItems:"center", gap:"10px" }}>
+                    <div>
+                      <div style={{ fontSize:"10px", color:C.muted, letterSpacing:"1px", textTransform:"uppercase", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>📈 Upsell Bonus</div>
+                      <div style={{ fontSize:"13px", color:C.black, marginTop:"2px" }}>{r.upsellAmt>0 ? <>${r.upsellAmt.toFixed(2)} of upsells, {Math.round(r.upsellRate*100)}% is <strong>${r.upsellPay.toFixed(2)}</strong></> : "No upsells this pay period"}</div>
+                    </div>
+                    <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"18px", color:C.purple }}>${r.upsellPay.toFixed(2)}</div>
+                  </div>
+                  <div style={{ background:C.cardLt, borderRadius:"8px", padding:"10px 12px" }}>
+                    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:"10px" }}>
+                      <div>
+                        <div style={{ fontSize:"10px", color:C.muted, letterSpacing:"1px", textTransform:"uppercase", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>🔄 Switchover Bonus</div>
+                        <div style={{ fontSize:"13px", color:C.black, marginTop:"2px" }}>{r.sws.length>0 ? `${r.sws.length} switchover${r.sws.length!==1?"s":""}` : "No switchovers this pay period"}</div>
+                      </div>
+                      <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"18px", color:C.purple }}>${r.switchPay.toFixed(2)}</div>
+                    </div>
+                    {r.sws.map(sw=>{
+                      const pay = switchoverPay(sw), base = SWITCHOVER_PAY[sw.plan_id];
+                      return (
+                        <div key={sw.id} style={{ display:"flex", justifyContent:"space-between", gap:"8px", fontSize:"12px", color:C.black, borderTop:`1px solid ${C.border}`, marginTop:"6px", paddingTop:"6px" }}>
+                          <span>{fmtShortDate(switchoverDate(sw))} · {PLAN_MAP[sw.plan_id]?.label||sw.plan_id} · {sw.with_exterior?"Interior + Exterior":"Interior only"}</span>
+                          <span style={{ fontWeight:"700", color:pay==null?C.red:C.black, whiteSpace:"nowrap" }}>{pay==null ? "rate not set" : sw.with_exterior ? `$${base} + $${SWITCHOVER_EXTERIOR_PAY} = $${pay}` : `$${pay}`}</span>
+                        </div>
+                      );
+                    })}
+                    {r.switchUnpriced>0&&<div style={{ fontSize:"11px", color:C.red, marginTop:"6px" }}>⚠ {r.switchUnpriced} switchover{r.switchUnpriced!==1?"s":""} on a plan with no pay amount set — not included in the total.</div>}
+                  </div>
+                  {r.toteHere.length>0&&(
+                    <div style={{ background:`${C.red}0d`, border:`1px solid ${C.red}33`, borderRadius:"8px", padding:"10px 12px" }}>
+                      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:"10px" }}>
+                        <div>
+                          <div style={{ fontSize:"10px", color:C.red, letterSpacing:"1px", textTransform:"uppercase", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>🧰 Tote Losses (failed checks)</div>
+                          <div style={{ fontSize:"12px", color:C.muted, marginTop:"2px" }}>{r.toteHere.length} failed check{r.toteHere.length!==1?"s":""} {fmtShortDate(period.start)} – {fmtShortDate(period.end)}</div>
+                        </div>
+                        <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"18px", color:C.red }}>−${r.toteDeduct.toFixed(2)}</div>
+                      </div>
+                      {r.toteHere.map(c=>(
+                        <div key={c.check.id} style={{ borderTop:`1px solid ${C.red}22`, marginTop:"6px", paddingTop:"6px" }}>
+                          <div style={{ fontSize:"12px", color:C.black, fontWeight:"700" }}>{fmtShortDate(c.check.work_date)}{c.check.checkedBy?` · checked by ${c.check.checkedBy}`:""} · −{fmtCents(c.chargedCents)}</div>
+                          {c.check.notes&&<div style={{ fontSize:"11px", color:C.muted, fontStyle:"italic", marginTop:"2px" }}>📝 {c.check.notes}</div>}
+                          {c.items.map(it=>{
+                            const key = `${c.check.id}|${it.name}`;
+                            return (
+                              <div key={it.name} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:"8px", fontSize:"12px", marginTop:"3px" }}>
+                                <span style={{ color:it.status==="charged"?C.black:C.muted, textDecoration:it.status==="charged"?"none":"line-through" }}>{it.name} · {fmtCents(it.cents)}</span>
+                                <span style={{ display:"flex", alignItems:"center", gap:"6px", whiteSpace:"nowrap" }}>
+                                  {it.status==="already"&&<span style={{ fontSize:"11px", color:C.muted }}>already charged</span>}
+                                  {it.status==="waived"&&<span style={{ fontSize:"11px", color:C.muted }}>waived</span>}
+                                  {canWaive&&it.status!=="already"&&(
+                                    <button disabled={waiving===key} onClick={()=>setWaived(c.check.id, it.name, it.status!=="waived")} style={{ background:"none", border:`1px solid ${C.border}`, color:it.status==="waived"?C.blue:C.red, padding:"2px 8px", borderRadius:"4px", cursor:"pointer", fontSize:"11px", fontWeight:"700" }}>{waiving===key?"…":it.status==="waived"?"Undo":"Waive"}</button>
+                                  )}
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
               {r.weeks.length>1&&(
                 <div style={{ borderTop:`1px solid ${C.border}`, paddingTop:"10px" }}>
                   <div style={{ fontSize:"10px", color:C.muted, letterSpacing:"1px", textTransform:"uppercase", marginBottom:"6px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>Week Breakdown</div>
@@ -1758,10 +1900,10 @@ function JourneyCard({ tech, rank, total, onClick, expanded, upsells, quota, job
   const earnedBadges = ALL_BADGE_DEFS.filter(b=>tech.badges?.includes(b.id));
   const q = quota || DEFAULT_QUOTA;
 
-  // Current week pay breakdown
-  const wk = getWeekKey();
-  const weekUpsellAmt = upsellAmountInRange(jobs, tech.id, wk, weekEndDate(wk));
-  const { totalPay, breakdown } = calcWeeklyPay(weekUpsellAmt);
+  // Current pay period upsell bonus (tiers reset each pay period)
+  const pp = currentPayPeriod();
+  const weekUpsellAmt = pp ? upsellAmountInRange(jobs, tech.id, pp.start, pp.end) : 0;
+  const { totalPay } = calcUpsellPay(weekUpsellAmt);
   const nextPayTier = getNextPayTier(weekUpsellAmt);
 
   // Month quota tracking
@@ -1856,25 +1998,21 @@ function JourneyCard({ tech, rank, total, onClick, expanded, upsells, quota, job
             
             {/* 💵 Weekly Pay Scale */}
             <div style={{ background:C.cardLt, borderRadius:"12px", padding:"12px 14px", border:`1px solid ${C.green}44` }}>
-              <div style={{ fontSize:"10px", color:C.green, letterSpacing:"2px", textTransform:"uppercase", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontStyle:"italic", marginBottom:"10px" }}>💵 This Week's Pay Scale</div>
+              <div style={{ fontSize:"10px", color:C.green, letterSpacing:"2px", textTransform:"uppercase", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontStyle:"italic", marginBottom:"10px" }}>💵 Upsell Pay Scale{pp ? ` · ${fmtShortDate(pp.start)}–${fmtShortDate(pp.end)}` : ""}</div>
               <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", marginBottom:"10px" }}>
-                <span style={{ fontSize:"12px", color:C.muted }}>Week upsells</span>
+                <span style={{ fontSize:"12px", color:C.muted }}>Pay period upsells</span>
                 <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"20px", color:C.black }}>${weekUpsellAmt.toLocaleString()}</span>
               </div>
               {/* Pay scale — backfill display */}
               <div style={{ display:"flex", flexDirection:"column", gap:"4px", marginBottom:"8px" }}>
                 {(()=>{
-                  const { rate } = calcWeeklyPay(weekUpsellAmt);
+                  const { rate } = calcUpsellPay(weekUpsellAmt);
                   const currentPct = Math.round(rate*100);
-                  return [
-                    { floor:0,   ceil:150,      baseRate:15, label:"$1–$149"    },
-                    { floor:150, ceil:400,       baseRate:20, label:"$150–$399" },
-                    { floor:400, ceil:700,       baseRate:25, label:"$400–$699" },
-                    { floor:700, ceil:Infinity,  baseRate:30, label:"$700+"      },
-                  ].map(b=>{
-                    const isCurrent    = weekUpsellAmt >= b.floor && (b.ceil===Infinity ? true : weekUpsellAmt < b.ceil);
-                    const isPast       = b.ceil !== Infinity && weekUpsellAmt >= b.ceil;
-                    const isLocked     = weekUpsellAmt < b.floor;
+                  return UPSELL_PAY_TIERS.map((t,i)=>{
+                    const b = { baseRate:Math.round(t.rate*100), label:t.label, ceil:UPSELL_PAY_TIERS[i+1]?.over ?? Infinity };
+                    const isCurrent    = (i===0 || weekUpsellAmt > t.over) && (b.ceil===Infinity || weekUpsellAmt <= b.ceil);
+                    const isPast       = b.ceil !== Infinity && weekUpsellAmt > b.ceil;
+                    const isLocked     = i>0 && weekUpsellAmt <= t.over;
                     const backfilled   = isPast && currentPct > b.baseRate;
                     const displayRate  = isLocked ? b.baseRate : currentPct;
                     return (
@@ -1894,7 +2032,7 @@ function JourneyCard({ tech, rank, total, onClick, expanded, upsells, quota, job
                 })()}
               </div>
               <div style={{ borderTop:`1px solid ${C.green}33`, paddingTop:"8px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-                <span style={{ fontSize:"12px", color:C.muted }}>Est. upsell bonus <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", color:C.black }}>({Math.round(calcWeeklyPay(weekUpsellAmt).rate*100)}% × ${weekUpsellAmt})</span></span>
+                <span style={{ fontSize:"12px", color:C.muted }}>Est. upsell bonus <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", color:C.black }}>({Math.round(calcUpsellPay(weekUpsellAmt).rate*100)}% × ${weekUpsellAmt})</span></span>
                 <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"22px", color:C.green }}>${totalPay.toFixed(2)}</span>
               </div>
               {nextPayTier&&(
@@ -3147,9 +3285,11 @@ function TechDashboard({ tech, techs, upsells, switchovers, reviews, callbacks, 
       ["reviews","⭐","Reviews"],
       ...(tech.is_lead?[["myteam","👥","My Team"]]:[]),
     ]},
+    ...(SALES_SELF_VIEW[tech.id]?[{ label:"Sales", items:[["mysales","🤝","My Sales"]] }]:[]),
+    ...(!isApprenticeTech(tech)?[{ label:"Forms", items:[["forms","📝","Forms"]] }]:[]),
     { label:"Training", items:[
       ["training","📋","Perfect Day Training"],
-      ["auditscores","🧰","My Audit Scores"],
+      ["auditscores","📊","My Audits"],
     ]},
   ];
 
@@ -3256,7 +3396,8 @@ function TechDashboard({ tech, techs, upsells, switchovers, reviews, callbacks, 
               const projRevenue = Math.round((wkRevenue/daysElapsed)*daysInWeek);
               const projHours   = Math.round((wkHours/daysElapsed)*daysInWeek*10)/10;
               const projMonthly = Math.round(projRevenue*(52/12));
-              const { totalPay:projBonus } = calcWeeklyPay(Math.round((weekUpsell/daysElapsed)*daysInWeek));
+              const curPP = currentPayPeriod();
+              const { totalPay:projBonus } = calcUpsellPay(curPP ? upsellAmountInRange(jobs, tech.id, curPP.start, curPP.end) : 0);
               return (
                 <div style={{ background:C.white, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.purple}`, borderRadius:"12px", padding:"16px 18px", boxShadow:"0 2px 8px rgba(43,156,240,0.08)" }}>
                   <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontStyle:"italic", fontSize:"12px", color:C.purple, letterSpacing:"2px", marginBottom:"12px" }}>
@@ -3267,7 +3408,7 @@ function TechDashboard({ tech, techs, upsells, switchovers, reviews, callbacks, 
                       { l:"Proj. Revenue",      v:`$${projRevenue.toLocaleString()}`,   c:C.green  },
                       { l:"Proj. Hours",         v:`${projHours}h`,                      c:C.blue   },
                       { l:"Proj. Monthly Rev",   v:`$${projMonthly.toLocaleString()}`,   c:C.purple },
-                      { l:"Proj. Upsell Bonus",  v:`$${projBonus.toFixed(2)}`,           c:C.gold   },
+                      { l:"Upsell Bonus (pay period so far)",  v:`$${projBonus.toFixed(2)}`,           c:C.gold   },
                     ].map(s=>(
                       <div key={s.l} style={{ background:C.cardLt, borderRadius:"8px", padding:"10px", textAlign:"center" }}>
                         <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"20px", color:s.c }}>{s.v}</div>
@@ -3420,7 +3561,9 @@ function TechDashboard({ tech, techs, upsells, switchovers, reviews, callbacks, 
           <TeamLeadPanel tech={tech} techs={techs} upsells={upsells} switchovers={switchovers} reviews={reviews} callbacks={callbacks||[]} quota={q} jobs={jobs}/>
         )}
         {tab==="training"&&<PerfectDayTrainingPanel tech={tech} techs={techs}/>}
+        {tab==="forms"&&<FormsTab me={tech} role="tech"/>}
         {tab==="auditscores"&&<AuditScoresTab techs={techs} token={token} techId={tech.id}/>}
+        {tab==="mysales"&&SALES_SELF_VIEW[tech.id]&&<SalesTab token={token} onlyRep={SALES_SELF_VIEW[tech.id]}/>}
       </div>
       {toast&&(
         <div style={{ position:"fixed", bottom:"24px", left:"50%", transform:"translateX(-50%)", background:toast.ok?C.green:"#ef4444", color:C.white, padding:"12px 28px", borderRadius:"24px", fontSize:"14px", fontWeight:"900", zIndex:999, whiteSpace:"nowrap", fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:"1px", fontStyle:"italic", boxShadow:"0 4px 20px rgba(0,0,0,0.15)" }}>
@@ -5489,6 +5632,53 @@ const SubTabs = ({ tabs, active, setActive }) => (
     ))}
   </div>
 );
+
+// ─── FORMS ────────────────────────────────────────────────────────────────────
+// Links to the GHL forms people fill out from their phone.
+//   Truck Check: everyone except Detail Apprentices. Opens with their own name
+//   as the form's First/Last Name (GHL fills typed fields from the link).
+//   Tote Check + Tech Audit: Lead Detail Pros, the Field Supervisor (Will) and
+//   owners. They pick the tech and themselves from the form's own dropdowns
+//   (GHL can't pre-select a dropdown from a link).
+const GHL_FORMS = {
+  truck: { id:"70rs6amtoR9LiP9BDY7E", icon:"🚚", label:"Truck Check", desc:"End-of-day truck photos" },
+  tote:  { id:"xU7BPLPkUCLiefCvawVx", icon:"🧰", label:"Tote Check",  desc:"Pick whose tote you're checking and your name" },
+  audit: { id:"6bvUQqmnOb3auzX0hw9W", icon:"📋", label:"Tech Audit",  desc:"Pick the tech you're auditing and your name" },
+};
+const isLeadTech = t => !!t && (t.is_lead || t.title === "lead_detail_pro");
+const isApprenticeTech = t => !!t && (t.title || "detail_apprentice") === "detail_apprentice";
+function ghlFormUrl(formId, name) {
+  const base = `https://api.leadconnectorhq.com/widget/form/${formId}`;
+  if (!name) return base;
+  const parts = String(name).trim().split(/\s+/);
+  return `${base}?${new URLSearchParams({ first_name: parts[0] || "", last_name: parts.slice(1).join(" ") }).toString()}`;
+}
+
+// me: the logged-in tech row (null for owners). role: "tech" | "manager" | "owner".
+function FormsTab({ me, role }) {
+  const canCheckOthers = role === "owner" || role === "manager" || isLeadTech(me);
+  const card = { display:"flex", alignItems:"center", gap:"12px", background:C.white, border:`1px solid ${C.border}`, borderRadius:"14px", padding:"14px 16px", marginBottom:"10px", textDecoration:"none", color:C.black };
+  const link = (k, href, sub) => (
+    <a key={k} href={href} target="_blank" rel="noopener noreferrer" style={card}>
+      <div style={{ fontSize:"28px" }}>{GHL_FORMS[k].icon}</div>
+      <div style={{ flex:1 }}>
+        <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"18px" }}>{GHL_FORMS[k].label}</div>
+        <div style={{ fontSize:"12px", color:C.muted }}>{sub || GHL_FORMS[k].desc}</div>
+      </div>
+      <div style={{ fontSize:"18px", color:C.muted }}>›</div>
+    </a>
+  );
+  return (
+    <div>
+      <div style={{ fontSize:"13px", color:C.muted, marginBottom:"12px", lineHeight:1.5 }}>Tap a form to open it. Submissions show up in the app within about 15 minutes.</div>
+      {me && !isApprenticeTech(me) && link("truck", ghlFormUrl(GHL_FORMS.truck.id, me.name), `End-of-day truck photos · sent as ${me.name}`)}
+      {canCheckOthers && link("tote", ghlFormUrl(GHL_FORMS.tote.id))}
+      {canCheckOthers && link("audit", ghlFormUrl(GHL_FORMS.audit.id))}
+      {!(me && !isApprenticeTech(me)) && !canCheckOthers && <div style={{ fontSize:"13px", color:C.muted }}>No forms for this login.</div>}
+    </div>
+  );
+}
+
 const SectionTitle = ({ children }) => <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"16px", color:C.black, marginTop:"6px" }}>{children}</div>;
 const ReportState = ({ s }) => s.error ? <div style={{ background:`${C.red}10`, border:`1px solid ${C.red}`, borderRadius:"10px", padding:"12px", fontSize:"13px", color:C.red }}>Couldn't load: {s.error}</div> : s.loading && !s.data ? <div style={{ color:C.muted, padding:"16px" }}>Loading...</div> : null;
 const REVENUE_NOTE = "Revenue = HCP jobs these leads booked after coming in (matched by phone, email, or exact full name). Upfront = the first visit only — one-time jobs count once. Committed = first visit + the rest of the plan's minimum visits, when the plan was sold with that booking (weekly 8, bi-weekly 7, monthly 6, bi-monthly 5, quarterly 4). Completed so far = the part of that revenue whose HCP jobs the tech has marked complete. Anything after that — repeat jobs, plan visits past the minimum, plans a tech sells later — is kept by operations and not credited to ads or sales.";
@@ -5813,14 +6003,18 @@ function FunnelBlock({ k, label, revenue }) {
   );
 }
 
-function SalesTab({ token }) {
+// Reps who can see their own Sales report from their tech login (tech id ->
+// rep key). reports.js enforces the same list (REPS[...].selfTechId).
+const SALES_SELF_VIEW = { "4641f4da-a16f-411b-8688-8b81ac06eda7": "trevor" };
+
+function SalesTab({ token, onlyRep=null }) {
   const [range, setRange] = useState(() => rangeFor("month"));
-  const [rep, setRep] = useState("trevor");
+  const [rep, setRep] = useState(onlyRep || "trevor");
   const s = useGrowthReport({ type:"sales", rep, ...range }, token);
   const d = s.data;
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:"12px" }}>
-      <SubTabs tabs={[["trevor","Trevor · Inbound"],["ethan","Ethan · Commercial"]]} active={rep} setActive={setRep}/>
+      {!onlyRep && <SubTabs tabs={[["trevor","Trevor · Inbound"],["ethan","Ethan · Commercial"]]} active={rep} setActive={setRep}/>}
       <GrowthRange range={range} setRange={setRange}/>
       <ReportState s={s}/>
       {d && d.rep?.toLowerCase() === rep && (<>
@@ -6731,27 +6925,23 @@ function TechMatchAdmin({ unmatchedTechs, refreshAll, showToast }) {
 // every tech; a tech (techId set) sees only their own checks and misses.
 const fmtCents = c => `$${(c/100).toFixed(2)}`;
 const fmtPct = p => p==null ? "—" : `${(Math.round(p*10)/10).toFixed(1)}%`;
-// This tab's week start comes from AUDIT_CONFIG.weekStartsOn (Sun-Sat, same
-// as the rest of the app).
+// This tab's week start comes from AUDIT_CONFIG.weekStartsOn (Wed-Tue, to
+// match the Wednesday team meeting; the rest of the app is Sun-Sat). The tab
+// opens on the week holding yesterday, so on meeting day it shows the week
+// that just ended instead of an empty new one.
 const auditThisWeek = () => auditWeekStart(mtDateStr(Date.now()));
+const auditDefaultWeek = () => auditWeekStart(mtDateStr(Date.now() - 864e5));
 const shiftWeek = (wk, weeks) => { const d = new Date(wk+"T12:00:00Z"); d.setUTCDate(d.getUTCDate()+weeks*7); return d.toISOString().split("T")[0]; };
 
-function scoreTechWeek(subs) {
-  const toteAll = subs.filter(s => formKind(s.form_id)==="tote").map(s => scoreToteCheck(s));
-  const totes = latestPerDay(toteAll.filter(t => !t.excluded));
-  const excluded = toteAll.filter(t => t.excluded);
-  const days = auditDays(subs.filter(s => formKind(s.form_id)==="audit").map(s => scoreTechAudit(s)));
-  return { totes, excluded, latestTote: totes[0] || null, days, auditPct: weeklyAuditPct(days) };
-}
+const scoreTechWeek = techWeekScores;
 
 // Ford Pro driver scorecard: one box per driving day -- truck(s), miles, and
 // each penalty with its count.
 function DriverDetail({ driver }) {
   const box = { background:C.white, border:`1px solid ${C.border}`, borderRadius:"10px", padding:"10px 12px", marginTop:"8px" };
-  const fmtScore = n => n==null ? "—" : (Math.round(n*10)/10).toFixed(1);
   return (
     <div>
-      <div style={{ marginTop:"14px" }}><SectionTitle>🚗 Driver Score</SectionTitle></div>
+      <div style={{ marginTop:"14px" }}><SectionTitle>🚗 Driving</SectionTitle></div>
       {driver.days.length===0 && <div style={{ fontSize:"13px", color:C.muted, marginTop:"4px" }}>No driving days this week.</div>}
       {driver.days.map(d => (
         <div key={d.date} style={box}>
@@ -6774,11 +6964,12 @@ function DriverDetail({ driver }) {
   );
 }
 
-function AuditTechDetail({ week, driver=null }) {
+function AuditTechDetail({ week, only="both" }) {
   const box = { background:C.white, border:`1px solid ${C.border}`, borderRadius:"10px", padding:"10px 12px", marginTop:"8px" };
   const flagList = flags => flags.map((f,i) => <div key={i} style={{ fontSize:"12px", color:C.gold, marginTop:"3px" }}>⚠ {f}</div>);
   return (
     <div>
+      {only!=="audit" && <>
       <SectionTitle>🧰 Tote Checks</SectionTitle>
       {week.totes.length===0 && week.excluded.length===0 && <div style={{ fontSize:"13px", color:C.muted, marginTop:"4px" }}>No tote check this week.</div>}
       {week.totes.map(t => (
@@ -6800,7 +6991,9 @@ function AuditTechDetail({ week, driver=null }) {
         </div>
       ))}
 
-      <div style={{ marginTop:"14px" }}><SectionTitle>📋 Tech Audits</SectionTitle></div>
+      </>}
+      {only!=="tote" && <>
+      <div style={{ marginTop:only==="audit"?0:"14px" }}><SectionTitle>📋 Tech Audits</SectionTitle></div>
       {week.days.length===0 && <div style={{ fontSize:"13px", color:C.muted, marginTop:"4px" }}>No audits this week.</div>}
       {week.days.map(d => (
         <div key={d.date} style={box}>
@@ -6823,28 +7016,38 @@ function AuditTechDetail({ week, driver=null }) {
           {flagList(d.audit.flags)}
         </div>
       ))}
-      {driver && <DriverDetail driver={driver}/>}
+      </>}
     </div>
   );
 }
 
-function AuditScoresTab({ techs, token, techId=null, canSync=false }) {
-  const [wk, setWk] = useState(auditThisWeek());
+// view: which section opens first -- "overview" (default), "tote", "audit"
+// or "driver". Admins see every tech plus team scores; a tech (techId set)
+// sees only their own scores plus the team averages.
+const AUDIT_SECTIONS = [["overview","📊 Overview"],["tote","🧰 Tote Checks"],["audit","📋 Tech Audits"],["driver","🚗 Driving"]];
+const fmtScore = n => n==null ? "—" : (Math.round(n*10)/10).toFixed(1);
+const passColor = (score, pass) => score==null ? C.muted : pass ? C.green : C.red;
+
+function AuditScoresTab({ techs, token, techId=null, canSync=false, view="overview" }) {
+  const [section, setSection] = useState(view==="both" ? "overview" : view);
+  const [wk, setWk] = useState(auditDefaultWeek());
   const [state, setState] = useState({ loading:true, error:null, data:null });
   const [open, setOpen] = useState(null);
   const [bump, setBump] = useState(0);
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState(null);
   const end = weekEndDate(wk);
+  const getJson = url => fetch(url, { headers:{ Authorization:`Bearer ${token || ""}` } })
+    .then(async r => { const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`); return j; });
 
   useEffect(() => {
     let live = true;
     setState(s => ({ ...s, loading:true, error:null }));
-    fetch(`/.netlify/functions/audit-scores?from=${wk}&to=${end}`, { headers:{ Authorization:`Bearer ${token || ""}` } })
-      .then(async r => { const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`); return j; })
+    getJson(`/.netlify/functions/audit-scores?from=${wk}&to=${end}`)
       .then(data => live && setState({ loading:false, error:null, data }))
       .catch(e => live && setState({ loading:false, error:e.message, data:null }));
     return () => { live = false; };
+    // eslint-disable-next-line
   }, [wk, end, token, bump]);
 
   // Ford Pro driver scorecard for the same week (separate so a Ford problem
@@ -6853,21 +7056,26 @@ function AuditScoresTab({ techs, token, techId=null, canSync=false }) {
   useEffect(() => {
     let live = true;
     setDrive(s => ({ ...s, loading:true, error:null }));
-    fetch(`/.netlify/functions/driver-scores?from=${wk}&to=${end}`, { headers:{ Authorization:`Bearer ${token || ""}` } })
-      .then(async r => { const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`); return j; })
+    getJson(`/.netlify/functions/driver-scores?from=${wk}&to=${end}`)
       .then(data => live && setDrive({ loading:false, error:null, data }))
       .catch(e => live && setDrive({ loading:false, error:e.message, data:null }));
     return () => { live = false; };
+    // eslint-disable-next-line
   }, [wk, end, token, bump]);
-  const driverFor = id => {
-    if (!drive.data) return null;
-    const days = techDriverDays(id, drive.data);
-    return { days, ...weeklyDriverScore(days) };
-  };
-  const driverPill = dr => !dr || dr.score==null
-    ? <Pill color={C.muted}>🚗 —</Pill>
-    : <Pill color={dr.pass?C.green:C.red}>🚗 {(Math.round(dr.score*10)/10).toFixed(1)} {dr.pass?"PASS":"FAIL"}</Pill>;
-  const driveNote = drive.error ? `Driver scores unavailable: ${drive.error}` : drive.data && !drive.data.daily.length ? "No Ford Pro data for this week yet — an admin uploads Ford's daily reports on the Trucks tab." : null;
+
+  // A tech can't load everyone's checks, so their team scores come from the
+  // server as averages only. Admins compute them from the full data below.
+  const [teamState, setTeamState] = useState({ loading:false, error:null, data:null });
+  useEffect(() => {
+    if (!techId) return;
+    let live = true;
+    setTeamState({ loading:true, error:null, data:null });
+    getJson(`/.netlify/functions/tech-team-scores?from=${wk}&to=${end}`)
+      .then(data => live && setTeamState({ loading:false, error:null, data }))
+      .catch(e => live && setTeamState({ loading:false, error:e.message, data:null }));
+    return () => { live = false; };
+    // eslint-disable-next-line
+  }, [techId, wk, end, token]);
 
   async function syncNow() {
     setSyncing(true); setSyncMsg(null);
@@ -6883,7 +7091,8 @@ function AuditScoresTab({ techs, token, techId=null, canSync=false }) {
   const subs = state.data?.submissions || [];
   const byTech = {};
   subs.forEach(s => { if (s.tech_id) (byTech[s.tech_id] = byTech[s.tech_id] || []).push(s); });
-  const unmatched = [...new Set(subs.filter(s => !s.tech_id).map(s => s.tech_name || "(no Tech answer)"))].sort();
+  const cardFor = id => techScoreCard(byTech[id] || [], drive.data, id);
+  const unmatched = [...new Set(subs.filter(s => !s.tech_id && (section==="overview" || formKind(s.form_id)===section)).map(s => s.tech_name || "(no Tech answer)"))].sort();
   // Answers and question ids on the Tech Audit form that AUDIT_CONFIG can't map.
   const auditScored = subs.filter(s => formKind(s.form_id)==="audit").map(s => scoreTechAudit(s));
   const unmappedAnswers = [...new Set(auditScored.flatMap(a => a.unmapped))].sort();
@@ -6891,97 +7100,160 @@ function AuditScoresTab({ techs, token, techId=null, canSync=false }) {
   const last = state.data?.last_run;
   const arrow = { background:C.white, border:`1px solid ${C.border}`, borderRadius:"8px", padding:"6px 12px", cursor:"pointer", fontSize:"14px", color:C.black };
   const thisWeek = auditThisWeek();
+  const driveNote = drive.error ? `Driving scores unavailable: ${drive.error}` : drive.data && !drive.data.daily.length ? "No Ford Pro data for this week yet — an admin uploads Ford's daily reports on the Trucks tab." : null;
+  const big = (text, color, size=20) => <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:`${size}px`, color, lineHeight:1, textAlign:"right" }}>{text}</div>;
+  const small = text => <div style={{ fontSize:"11px", color:C.muted, marginTop:"3px", textAlign:"right" }}>{text}</div>;
+  const sectionLine = sec => TECH_SCORE_CONFIG.sections.map(s => `${s.icon} ${fmtScore(sec[s.key])}`).join("  ·  ");
 
-  const weekPicker = (
-    <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:"8px", marginBottom:"12px" }}>
-      <button style={arrow} onClick={() => setWk(shiftWeek(wk,-1))}>◀</button>
-      <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"16px", color:C.black }}>{formatWeekLabel(wk)}{wk===thisWeek ? " · this week" : ""}</div>
-      <button style={{ ...arrow, opacity:wk>=thisWeek?0.4:1 }} disabled={wk>=thisWeek} onClick={() => setWk(shiftWeek(wk,1))}>▶</button>
+  const header = (
+    <>
+      <div style={{ marginBottom:"10px" }}><SubTabs tabs={AUDIT_SECTIONS} active={section} setActive={s => { setSection(s); setOpen(null); }}/></div>
+      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:"8px", marginBottom:"12px" }}>
+        <button style={arrow} onClick={() => setWk(shiftWeek(wk,-1))}>◀</button>
+        <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"16px", color:C.black }}>{formatWeekLabel(wk)}{wk===thisWeek ? " · this week" : ""}</div>
+        <button style={{ ...arrow, opacity:wk>=thisWeek?0.4:1 }} disabled={wk>=thisWeek} onClick={() => setWk(shiftWeek(wk,1))}>▶</button>
+      </div>
+      {state.error && <div style={{ background:`${C.red}10`, border:`1px solid ${C.red}`, borderRadius:"10px", padding:"12px", fontSize:"13px", color:C.red, marginBottom:"10px" }}>Couldn't load: {state.error}</div>}
+      {state.loading && !state.data && <div style={{ color:C.muted, padding:"16px" }}>Loading...</div>}
+    </>
+  );
+  const intro = {
+    overview: `Full score = the average of the week's Tote Check, Tech Audit and Driving scores (a section with no score that week is left out). Pass at ${TECH_SCORE_CONFIG.passLine}. Team score = the average of its members' full scores.`,
+    tote: "Tote Checks from the GHL form. $7.00 or less missing passes (95%). Items missing on a FAILED check come off that tech's pay on the Payroll tab.",
+    audit: "Tech Audits from the GHL form. Each day is the average of its scheduled jobs; the week is the average of the days.",
+    driver: `From Ford Pro data on the truck picked at clock-in. Speeding is scored by minutes over the limit per 100 miles; the week is the average of the days. Pass at ${DRIVER_CONFIG.passLine}.`,
+  }[section];
+  const teamCard = (title, t, highlight=false) => (
+    <div key={title} style={{ background:highlight?C.blueXlt:C.white, border:`1px solid ${highlight?C.blue:C.border}`, borderRadius:"12px", padding:"12px 14px", marginBottom:"8px", display:"flex", justifyContent:"space-between", alignItems:"center", gap:"10px" }}>
+      <div>
+        <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"16px", color:C.black }}>{title}</div>
+        <div style={{ fontSize:"12px", color:C.muted, marginTop:"2px" }}>{sectionLine(t)}</div>
+      </div>
+      <div>{big(t.score==null ? "—" : `${fmtScore(t.score)}`, passColor(t.score, t.pass), 24)}{small(t.score==null ? "no scores yet" : `${t.pass?"PASS":"FAIL"} · ${t.scored} of ${t.members} scored`)}</div>
     </div>
   );
-  const status = state.error
-    ? <div style={{ background:`${C.red}10`, border:`1px solid ${C.red}`, borderRadius:"10px", padding:"12px", fontSize:"13px", color:C.red }}>Couldn't load: {state.error}</div>
-    : state.loading && !state.data ? <div style={{ color:C.muted, padding:"16px" }}>Loading...</div> : null;
 
+  // ─── tech's own view ───
   if (techId) {
-    const week = scoreTechWeek(byTech[techId] || []);
-    const driver = driverFor(techId);
+    const me = cardFor(techId);
+    const team = teamState.data;
     return (
       <div>
-        {weekPicker}
-        {status}
+        {header}
         {state.data && (<>
-          <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(140px, 1fr))", gap:"8px", marginBottom:"12px" }}>
-            <StatBlock label="Tote Check" value={week.latestTote ? fmtPct(week.latestTote.score) : "—"} color={week.latestTote ? (week.latestTote.pass?C.green:C.red) : C.muted} sub={week.latestTote ? (week.latestTote.pass?"PASS":"FAIL") : "none this week"}/>
-            <StatBlock label="Audit Score" value={fmtPct(week.auditPct)} color={week.auditPct==null?C.muted:scoreColor(week.auditPct)} sub={`${week.days.length} day${week.days.length!==1?"s":""} audited`}/>
-            <StatBlock label="Driver Score" value={driver?.score==null ? "—" : (Math.round(driver.score*10)/10).toFixed(1)} color={driver?.score==null ? C.muted : driver.pass?C.green:C.red} sub={driver?.score==null ? "no scored driving days" : `${driver.pass?"PASS":"FAIL"} · ${driver.scoredDays} day${driver.scoredDays!==1?"s":""}, pass ${DRIVER_CONFIG.passLine}`}/>
-          </div>
-          {driveNote && <div style={{ fontSize:"12px", color:C.muted, marginBottom:"8px" }}>{driveNote}</div>}
-          <AuditTechDetail week={week} driver={driver}/>
+          {section==="overview" && (<>
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(140px, 1fr))", gap:"8px", marginBottom:"12px" }}>
+              <StatBlock label="My Full Score" value={fmtScore(me.overall.score)} color={passColor(me.overall.score, me.overall.pass)} sub={me.overall.score==null ? "no scores this week" : `${me.overall.pass?"PASS":"FAIL"} · pass ${TECH_SCORE_CONFIG.passLine}`}/>
+              {TECH_SCORE_CONFIG.sections.map(s => {
+                const v = me.sections[s.key];
+                const pass = s.key==="tote" ? me.week.latestTote?.pass : s.key==="driver" ? me.driver?.pass : v!=null && v>=TECH_SCORE_CONFIG.passLine;
+                return <StatBlock key={s.key} label={`${s.icon} ${s.label}`} value={fmtScore(v)} color={passColor(v, pass)} sub={v==null ? "none this week" : pass?"PASS":"FAIL"}/>;
+              })}
+            </div>
+            <SectionTitle>👥 Team Scores</SectionTitle>
+            <div style={{ marginTop:"8px" }}>
+              {teamState.error && <div style={{ fontSize:"12px", color:C.red }}>Couldn't load team scores: {teamState.error}</div>}
+              {teamState.loading && <div style={{ fontSize:"12px", color:C.muted }}>Loading…</div>}
+              {team && (<>
+                {team.my_team && team.teams.filter(t => t.name===team.my_team).map(t => teamCard(`My team · ${t.name}`, t, true))}
+                {teamCard("Whole company", team.company)}
+                {team.teams.filter(t => t.name!==team.my_team).map(t => teamCard(t.name, t))}
+              </>)}
+            </div>
+          </>)}
+          {section==="tote" && <AuditTechDetail week={me.week} only="tote"/>}
+          {section==="audit" && <AuditTechDetail week={me.week} only="audit"/>}
+          {section==="driver" && (<>
+            {driveNote && <div style={{ fontSize:"12px", color:C.muted, marginBottom:"8px" }}>{driveNote}</div>}
+            {me.driver && <DriverDetail driver={me.driver}/>}
+          </>)}
         </>)}
       </div>
     );
   }
 
-  const rows = techs.filter(t => (t.is_active!==false && t.title!=="owner") || byTech[t.id])
-    .map(t => ({ tech:t, week:scoreTechWeek(byTech[t.id] || []), driver:driverFor(t.id) }))
-    .sort((a,b) => (b.week.latestTote||b.week.days.length||b.driver?.days.length?1:0) - (a.week.latestTote||a.week.days.length||a.driver?.days.length?1:0) || a.tech.name.localeCompare(b.tech.name));
-  // Driving nobody picked a truck for, and Ford event types the config doesn't map.
+  // ─── admin view ───
+  const cards = techs.filter(t => (t.is_active!==false && t.title!=="owner") || byTech[t.id]).map(t => ({ tech:t, ...cardFor(t.id) }));
+  const teams = teamSummary(cards.filter(c => c.tech.is_active!==false && c.tech.title!=="owner"), techs);
   const unassignedCount = drive.data ? findUnassignedDriving(drive.data).filter(f => !drive.data.unassigned.some(u => u.vin===f.vin && u.work_date===f.work_date && (u.assigned_tech_id || u.dismissed))).length : 0;
-  const unknownFordTypes = [...new Set(rows.flatMap(r => r.driver ? r.driver.days.flatMap(d => d.unknownTypes) : []))];
+  const unknownFordTypes = [...new Set(cards.flatMap(c => c.driver ? c.driver.days.flatMap(d => d.unknownTypes) : []))];
+  const has = c => section==="overview" ? c.overall.score!=null : section==="tote" ? !!(c.week.latestTote || c.week.excluded.length) : section==="audit" ? c.week.days.length>0 : !!c.driver?.days.length;
+  const sortVal = c => section==="overview" ? c.overall.score : section==="tote" ? c.sections.tote : section==="audit" ? c.sections.audit : c.sections.driver;
+  const rows = cards.map(c => ({ ...c, has:has(c) }))
+    .sort((a,b) => (b.has?1:0) - (a.has?1:0) || ((sortVal(b) ?? -1) - (sortVal(a) ?? -1)) || a.tech.name.localeCompare(b.tech.name));
 
   return (
     <div>
-      <div style={{ fontSize:"13px", color:C.muted, marginBottom:"12px", lineHeight:"1.5" }}>
-        Scores from the Tote Check and Tech Audit forms in GoHighLevel. Weeks run Sunday–Saturday. Tote: $7.00 or less missing passes (95%). Audit: each day is the average of its scheduled jobs, and the week is the average of the days. Driver: Ford Pro events per 100 miles on the truck the tech picked at clock-in; the week is the average of the days, pass at {DRIVER_CONFIG.passLine}. Display only — not tied to pay.
-      </div>
-      <div style={{ background:C.cardLt, border:`1px solid ${C.border}`, borderRadius:"10px", padding:"10px 12px", marginBottom:"12px", fontSize:"12px", color:C.black }}>
-        {last ? <>Last GHL form sync: {new Date(last.finished_at || last.updated_at).toLocaleString("en-US", { month:"short", day:"numeric", hour:"numeric", minute:"2-digit", timeZone:"America/Denver" })}{last.errors?.length ? <span style={{ color:C.red }}> · {last.errors.join("; ")}</span> : ""}{last.labels?.source==="raw_keys" ? <div style={{ color:C.gold, marginTop:"4px" }}>⚠ Couldn't read the form's question labels from GHL ({last.labels.error}). The token may need the locations/customFields.readonly scope.</div> : null}</> : "Not synced yet."}
-        {canSync && <div><button onClick={syncNow} disabled={syncing} style={{ marginTop:"8px", background:C.green, color:C.white, border:"none", padding:"6px 14px", borderRadius:"18px", fontSize:"12px", fontWeight:"900", cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:"1px", textTransform:"uppercase" }}>{syncing ? "Syncing..." : "Sync now"}</button></div>}
-        {syncMsg && <div style={{ marginTop:"6px" }}>{syncMsg}</div>}
-      </div>
-      {weekPicker}
-      {status}
-      {state.data && unmatched.length>0 && (
+      {header}
+      <div style={{ fontSize:"13px", color:C.muted, marginBottom:"12px", lineHeight:"1.5" }}>{intro} Weeks run Wednesday–Tuesday. Display only — not tied to pay{section==="tote" ? " (except the Payroll tote deduction above)" : ""}.</div>
+      {(section==="tote" || section==="audit") && (
+        <div style={{ background:C.cardLt, border:`1px solid ${C.border}`, borderRadius:"10px", padding:"10px 12px", marginBottom:"12px", fontSize:"12px", color:C.black }}>
+          {last ? <>Last GHL form sync: {new Date(last.finished_at || last.updated_at).toLocaleString("en-US", { month:"short", day:"numeric", hour:"numeric", minute:"2-digit", timeZone:"America/Denver" })}{last.errors?.length ? <span style={{ color:C.red }}> · {last.errors.join("; ")}</span> : ""}{last.labels?.source==="raw_keys" ? <div style={{ color:C.gold, marginTop:"4px" }}>⚠ Couldn't read the form's question labels from GHL ({last.labels.error}). The token may need the locations/customFields.readonly scope.</div> : null}</> : "Not synced yet."}
+          {canSync && <div><button onClick={syncNow} disabled={syncing} style={{ marginTop:"8px", background:C.green, color:C.white, border:"none", padding:"6px 14px", borderRadius:"18px", fontSize:"12px", fontWeight:"900", cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:"1px", textTransform:"uppercase" }}>{syncing ? "Syncing..." : "Sync now"}</button></div>}
+          {syncMsg && <div style={{ marginTop:"6px" }}>{syncMsg}</div>}
+        </div>
+      )}
+      {state.data && section!=="driver" && unmatched.length>0 && (
         <div style={{ background:"rgba(239,68,68,0.08)", border:"1px solid #ef4444", borderRadius:"10px", padding:"10px 12px", marginBottom:"12px", fontSize:"12px", color:C.black }}>
           <div style={{ fontWeight:"700", color:C.red }}>⚠ Forms this week with a Tech name that doesn't exactly match the roster — not shown below:</div>
           {unmatched.join(", ")}
         </div>
       )}
-      {state.data && (unmappedAnswers.length>0 || unmappedIds.length>0) && (
+      {state.data && section==="audit" && (unmappedAnswers.length>0 || unmappedIds.length>0) && (
         <div style={{ background:`${C.gold}12`, border:`1px solid ${C.gold}`, borderRadius:"10px", padding:"10px 12px", marginBottom:"12px", fontSize:"12px", color:C.black }}>
           <div style={{ fontWeight:"700" }}>⚠ Tech Audit answers the scoring doesn't recognize (fix the form or AUDIT_CONFIG):</div>
           {unmappedAnswers.map(u => <div key={u}>• {u}</div>)}
           {unmappedIds.map(id => <div key={id}>• Question id <code>{id}</code>{last?.unmapped_audit_fields?.[id] ? ` = "${last.unmapped_audit_fields[id].trim()}"` : ""} isn't in AUDIT_CONFIG — if it's a renamed question, add the id to that question's list</div>)}
         </div>
       )}
-      {driveNote && <div style={{ fontSize:"12px", color:C.muted, marginBottom:"10px" }}>🚗 {driveNote}</div>}
-      {unassignedCount>0 && (
-        <div style={{ background:"rgba(239,68,68,0.08)", border:"1px solid #ef4444", borderRadius:"10px", padding:"10px 12px", marginBottom:"12px", fontSize:"12px", color:C.black }}>
-          🚨 <strong>{unassignedCount} day{unassignedCount!==1?"s":""} of unassigned driving</strong> this week (a truck drove with no tech's pick on it). Assign or dismiss them in Team Activity → 🚚 Trucks.
+      {(section==="driver" || section==="overview") && (<>
+        {driveNote && <div style={{ fontSize:"12px", color:C.muted, marginBottom:"10px" }}>🚗 {driveNote}</div>}
+        {unassignedCount>0 && (
+          <div style={{ background:"rgba(239,68,68,0.08)", border:"1px solid #ef4444", borderRadius:"10px", padding:"10px 12px", marginBottom:"12px", fontSize:"12px", color:C.black }}>
+            🚨 <strong>{unassignedCount} day{unassignedCount!==1?"s":""} of unassigned driving</strong> this week (a truck drove with no tech's pick on it). Assign or dismiss them in Team Activity → 🚚 Trucks.
+          </div>
+        )}
+        {section==="driver" && unknownFordTypes.length>0 && (
+          <div style={{ background:`${C.gold}12`, border:`1px solid ${C.gold}`, borderRadius:"10px", padding:"10px 12px", marginBottom:"12px", fontSize:"12px", color:C.black }}>
+            ⚠ Ford event types not in DRIVER_CONFIG (scored 0 until mapped): {unknownFordTypes.join(", ")}
+          </div>
+        )}
+      </>)}
+      {state.data && section==="overview" && (<>
+        <SectionTitle>👥 Team Scores</SectionTitle>
+        <div style={{ marginTop:"8px", marginBottom:"14px" }}>
+          {teamCard("Whole company", teams.company, true)}
+          {[...teams.teams].sort((a,b) => (b.score ?? -1) - (a.score ?? -1)).map(t => teamCard(`${t.name} · ${t.lead}`, t))}
         </div>
-      )}
-      {unknownFordTypes.length>0 && (
-        <div style={{ background:`${C.gold}12`, border:`1px solid ${C.gold}`, borderRadius:"10px", padding:"10px 12px", marginBottom:"12px", fontSize:"12px", color:C.black }}>
-          ⚠ Ford event types not in DRIVER_CONFIG (scored 0 until mapped): {unknownFordTypes.join(", ")}
-        </div>
-      )}
-      {state.data && rows.map(({ tech, week, driver }) => {
-        const t = week.latestTote, isOpen = open===tech.id;
-        const empty = !t && !week.days.length && !week.excluded.length && !driver?.days.length;
+        <SectionTitle>🧑‍🔧 Individual Scores</SectionTitle>
+        <div style={{ height:"8px" }}/>
+      </>)}
+      {state.data && rows.map(c => {
+        const { tech, week, driver, sections, overall, has:canOpen } = c;
+        const isOpen = open===tech.id, t = week.latestTote;
+        let summary;
+        if (section==="overview") summary = overall.score==null
+          ? big("No scores", C.muted)
+          : <>{big(`${fmtScore(overall.score)} ${overall.pass?"PASS":"FAIL"}`, passColor(overall.score, overall.pass))}{small(sectionLine(sections))}</>;
+        else if (section==="tote") summary = t
+          ? <>{big(`${fmtPct(t.score)} ${t.pass?"PASS":"FAIL"}`, t.pass?C.green:C.red)}{small(t.missingCents ? `${fmtCents(t.missingCents)} missing · ${fmtShortDate(t.work_date)}` : `Nothing missing · ${fmtShortDate(t.work_date)}`)}</>
+          : <>{big("No check", C.muted)}{week.excluded.length>0 && small(`${week.excluded.length} not counted (wrong checker)`)}</>;
+        else if (section==="audit") summary = week.days.length
+          ? <>{big(fmtPct(week.auditPct), scoreColor(week.auditPct??0))}{small(`${week.days.length} day${week.days.length!==1?"s":""} audited`)}</>
+          : big("No audits", C.muted);
+        else summary = driver?.score!=null
+          ? <>{big(`${fmtScore(driver.score)} ${driver.pass?"PASS":"FAIL"}`, passColor(driver.score, driver.pass))}{small(`${driver.scoredDays} day${driver.scoredDays!==1?"s":""} · ${Math.round(driver.days.reduce((s,d)=>s+d.miles,0))} mi`)}</>
+          : big(driver?.days.length ? "No score" : "No driving", C.muted);
         return (
-          <div key={tech.id} style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"12px 14px", marginBottom:"8px", opacity:empty?0.6:1 }}>
-            <div onClick={() => !empty && setOpen(isOpen?null:tech.id)} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:"10px", cursor:empty?"default":"pointer" }}>
-              <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"16px", color:C.black }}>{tech.name}</div>
-              <div style={{ display:"flex", gap:"6px", alignItems:"center", flexWrap:"wrap", justifyContent:"flex-end" }}>
-                {t ? <Pill color={t.pass?C.green:C.red}>🧰 {fmtPct(t.score)} {t.pass?"PASS":"FAIL"}</Pill> : <Pill color={C.muted}>🧰 —</Pill>}
-                <Pill color={week.auditPct==null?C.muted:scoreColor(week.auditPct)}>📋 {fmtPct(week.auditPct)}</Pill>
-                {driverPill(driver)}
-                {week.excluded.length>0 && <Pill color={C.gold}>⚠ {week.excluded.length}</Pill>}
-                {!empty && <span style={{ fontSize:"12px", color:C.muted }}>{isOpen?"▲":"▼"}</span>}
-              </div>
+          <div key={tech.id} style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"12px 14px", marginBottom:"8px", opacity:canOpen?1:0.6 }}>
+            <div onClick={() => canOpen && setOpen(isOpen?null:tech.id)} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:"10px", cursor:canOpen?"pointer":"default" }}>
+              <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"17px", color:C.black }}>{tech.name} {canOpen && <span style={{ fontSize:"12px", color:C.muted }}>{isOpen?"▲":"▼"}</span>}</div>
+              <div>{summary}</div>
             </div>
-            {isOpen && <div style={{ marginTop:"8px" }}><AuditTechDetail week={week} driver={driver}/></div>}
+            {isOpen && <div style={{ marginTop:"8px" }}>
+              {section==="driver" ? <DriverDetail driver={driver}/> : <AuditTechDetail week={week} only={section==="overview" ? "both" : section}/>}
+              {section==="overview" && driver && <DriverDetail driver={driver}/>}
+            </div>}
           </div>
         );
       })}
@@ -7256,9 +7528,9 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
   const [menuOpen, setMenuOpen] = useState(false);
   const [awardForm, setAwardForm] = useState({techId:"",badgeId:""});
   const [addForm, setAddForm] = useState({name:"",pin:"",avatar:"",start_date:"",commission_rate:27});
-  const [swForm, setSwForm] = useState({techId:"",planId:""});
+  const [swForm, setSwForm] = useState({techId:"",planId:"",exterior:null});
   const [editingSwId, setEditingSwId] = useState(null);
-  const [editSwForm, setEditSwForm] = useState({date:"",planId:""});
+  const [editSwForm, setEditSwForm] = useState({date:"",planId:"",exterior:false});
   const [swRangePreset, setSwRangePreset] = useState("wtd");
   const [swCStart, setSwCStart] = useState("");
   const [swCEnd, setSwCEnd] = useState("");
@@ -7378,20 +7650,22 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
   }
   async function logSwitchover() {
     if (!swForm.techId||!swForm.planId) return showToast("Select a tech and plan",false);
+    if (swForm.exterior===null) return showToast("Pick Interior only or Interior + Exterior",false);
     setSaving(true);
-    try { await sb("switchovers",{method:"POST",body:JSON.stringify({tech_id:swForm.techId,week_key:getWeekKey(),plan_id:swForm.planId})}); await refreshAll(); showToast(`✅ Switchover logged!`); setSwForm({techId:"",planId:""}); }
+    const date = mtDateStr(Date.now());   // counts the day it's entered
+    try { await sb("switchovers",{method:"POST",body:JSON.stringify({tech_id:swForm.techId,week_key:dateToWeekKey(date),sold_date:date,plan_id:swForm.planId,with_exterior:!!swForm.exterior})}); await refreshAll(); showToast(`✅ Switchover logged!`); setSwForm({techId:"",planId:"",exterior:null}); }
     catch(e){ showToast("Error: "+e.message,false); }
     setSaving(false);
   }
   function startEditSwitchover(s) {
     setEditingSwId(s.id);
-    setEditSwForm({ date: s.week_key, planId: s.plan_id });
+    setEditSwForm({ date: switchoverDate(s), planId: s.plan_id, exterior: !!s.with_exterior });
   }
   async function saveEditSwitchover() {
     if (!editSwForm.date) return showToast("Pick a date",false);
     setSaving(true);
     try {
-      const body = { week_key: dateToWeekKey(editSwForm.date), plan_id: editSwForm.planId };
+      const body = { week_key: dateToWeekKey(editSwForm.date), sold_date: editSwForm.date, plan_id: editSwForm.planId, with_exterior: !!editSwForm.exterior };
       await sb(`switchovers?id=eq.${editingSwId}`,{method:"PATCH",body:JSON.stringify(body),prefer:"return=minimal"});
       await refreshAll();
       setEditingSwId(null);
@@ -7519,7 +7793,11 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
       ["tips","💵","Log Tips"],
       ["callbacks","📞","Callbacks"],
       ["ridealong","🚗","Ride-Alongs"],
-      ["auditscores","🧰","Audit Scores"],
+      ["forms","📝","Forms"],
+    ]},
+    { label:"Tech Scores", items:[
+      ["auditscores","📊","Audits"],
+      ["truckinspections","🚚","Truck Inspections"],
     ]},
     { label:"Journey", items:[
       ["journey","🗺️","Journey Map"],
@@ -7602,8 +7880,18 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
           <TrucksAdminTab techs={techs} vehicles={vehicles} timeEntries={timeEntries} token={currentUser?.token} refreshAll={refreshAll} showToast={showToast}/>
         )}
 
+        {tab==="forms"&&(
+          <FormsTab me={isManager ? techs.find(t => t.id===currentUser?.techId) || null : null} role={isManager ? "manager" : "owner"}/>
+        )}
+
         {tab==="auditscores"&&(
           <AuditScoresTab techs={techs} token={currentUser?.token} canSync={!isManager}/>
+        )}
+        {tab==="truckinspections"&&(
+          <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"20px", fontSize:"14px", color:C.black, lineHeight:"1.6" }}>
+            <Label color={C.blue}>🚚 Truck Inspections</Label>
+            Coming soon.
+          </div>
         )}
 
         {tab==="upsellaudit"&&(
@@ -7631,7 +7919,7 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
         )}
         {tab==="switchovers"&&(
           <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"20px", display:"flex", flexDirection:"column", gap:"12px" }}>
-            <Label color={C.purple}>Log a Switchover · {formatWeekLabel(wk)}</Label>
+            <Label color={C.purple}>Log a Switchover</Label>
             <div style={{ background:C.cardLt, borderRadius:"8px", padding:"8px 12px", fontSize:"12px", color:C.muted }}>
               {formatLastEntered(mostRecentTimestamp(switchovers)) ? (
                 <>Last entered: <strong style={{ color:C.black }}>{formatLastEntered(mostRecentTimestamp(switchovers))}</strong> — everything before that is already logged.</>
@@ -7645,6 +7933,15 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
               <option value="">— Select Plan —</option>
               {SERVICE_PLANS.map(p=><option key={p.id} value={p.id}>{p.label} ({p.freq}) · +{p.pts}pts · ${p.ltv.toLocaleString()}/yr LTV</option>)}
             </select>
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"8px" }}>
+              {[[false,"Interior only"],[true,"Interior + Exterior"]].map(([ext,label])=>{
+                const on = swForm.exterior===ext;
+                return <button key={label} onClick={()=>setSwForm(f=>({...f,exterior:ext}))} style={{ background:on?C.purple:C.cardLt, border:`1px solid ${on?C.purple:C.border}`, color:on?C.white:C.black, padding:"10px", borderRadius:"8px", cursor:"pointer", fontSize:"13px", fontWeight:"700" }}>{label}</button>;
+              })}
+            </div>
+            {swForm.planId&&swForm.exterior!==null&&SWITCHOVER_PAY[swForm.planId]!=null&&(
+              <div style={{ fontSize:"12px", color:C.muted }}>Pays ${switchoverPay({plan_id:swForm.planId,with_exterior:swForm.exterior})} · counts today ({fmtShortDate(mtDateStr(Date.now()))}) on payroll</div>
+            )}
             <button onClick={logSwitchover} disabled={saving} style={btn(C.purple)}>{saving?"Saving...":"Log Switchover"}</button>
           </div>
         )}
@@ -7719,7 +8016,7 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
                             <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"14px", color:C.black }}>{tech?.name}</div>
                             <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"8px" }}>
                               <div>
-                                <div style={{ fontSize:"10px", color:C.muted, marginBottom:"4px" }}>Week (pick any day in it)</div>
+                                <div style={{ fontSize:"10px", color:C.muted, marginBottom:"4px" }}>Date sold</div>
                                 <input type="date" value={editSwForm.date} onChange={e=>setEditSwForm(f=>({...f,date:e.target.value}))} style={{ background:C.card, border:`1px solid ${C.border}`, color:C.black, padding:"8px", borderRadius:"8px", fontSize:"13px", width:"100%", boxSizing:"border-box" }}/>
                               </div>
                               <div>
@@ -7729,6 +8026,10 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
                                 </select>
                               </div>
                             </div>
+                            <label style={{ display:"flex", alignItems:"center", gap:"6px", fontSize:"13px", color:C.black, cursor:"pointer" }}>
+                              <input type="checkbox" checked={!!editSwForm.exterior} onChange={e=>setEditSwForm(f=>({...f,exterior:e.target.checked}))} style={{ width:"16px", height:"16px" }}/>
+                              Added exterior (+${SWITCHOVER_EXTERIOR_PAY})
+                            </label>
                             <div style={{ fontSize:"11px", color:C.muted }}>Will be attributed to the week of {formatWeekLabel(dateToWeekKey(editSwForm.date||s.week_key))}</div>
                             <div style={{ display:"flex", gap:"8px" }}>
                               <button onClick={saveEditSwitchover} disabled={saving} style={{ flex:1, background:C.purple, border:"none", color:C.white, padding:"8px", borderRadius:"8px", cursor:"pointer", fontWeight:"700", fontSize:"12px" }}>Save</button>
@@ -7740,7 +8041,7 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
                           <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:"12px" }}>
                             <div>
                               <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"15px", color:C.black }}>{tech?.name}</div>
-                              <div style={{ fontSize:"12px", color:C.muted }}>{formatWeekLabel(s.week_key)} · <span style={{ color:pc, fontWeight:"700" }}>{plan?.label||s.plan_id} · +{plan?.pts||0}pts</span></div>
+                              <div style={{ fontSize:"12px", color:C.muted }}>{s.sold_date ? fmtShortDate(s.sold_date) : formatWeekLabel(s.week_key)} · <span style={{ color:pc, fontWeight:"700" }}>{plan?.label||s.plan_id}{s.with_exterior?" + Ext":""} · +{plan?.pts||0}pts</span></div>
                             </div>
                             <button onClick={()=>startEditSwitchover(s)} style={{ background:"none", border:`1px solid ${C.border}`, color:C.purple, padding:"4px 10px", borderRadius:"4px", cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", fontSize:"11px", flexShrink:0 }}>Edit</button>
                           </div>
@@ -8238,7 +8539,7 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
           <Leaderboard techs={activeTechs} jobs={jobs||[]} upsells={upsells} reviews={reviews} callbacks={callbacks||[]} switchovers={switchovers} timeEntries={timeEntries}/>
         )}
         {tab==="payroll"&&(
-          <PayrollTab techs={techs} jobs={jobs||[]} upsells={upsells} tipEntries={tipEntries}/>
+          <PayrollTab techs={techs} jobs={jobs||[]} upsells={upsells} tipEntries={tipEntries} switchovers={switchovers||[]} token={currentUser?.token} canWaive={!isManager}/>
         )}
 
         {tab==="ridealong"&&(

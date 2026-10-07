@@ -6,7 +6,8 @@
 // Audit Scores page and the sync function (netlify/functions/ghl-forms-sync.mjs)
 // read the forms exactly the same way.
 //
-// Display only -- nothing here feeds pay or bonuses.
+// Tech Audits are display only. Tote Checks also feed Payroll: items missing
+// on a FAILED check are deducted from the tech's pay (toteCharges below).
 //
 // Every form label, option name and price lives in AUDIT_CONFIG below. The
 // audit form is still being finalized: when a question is renamed in GHL,
@@ -18,6 +19,7 @@ export const AUDIT_CONFIG = {
     formId: "xU7BPLPkUCLiefCvawVx",
     techLabels: ["Tech", "Detail Tech"],
     checkedByLabels: ["Checked by", "Checked By", "Team Lead", "Inspector"],
+    notesLabels: ["What are they missing?", "Notes"],
     dateLabels: ["Date"],
     // The checkbox question(s) listing what IS in the tote. If none of these
     // labels match, every checkbox answer on the form is read instead.
@@ -128,9 +130,11 @@ export const AUDIT_CONFIG = {
       "6ac42d177ce1d36fe8bbadf5",   // Brock Morrow, Job Date 2026-10-08
     ],
   },
-  // The Audit Scores tab's week. 0 = Sunday (Sun-Sat, same as the rest of
-  // the app and HCP -- owner's call), 1 = Monday (Mon-Sun).
-  weekStartsOn: 0,
+  // The Audit Scores tab's week. 3 = Wednesday (Wed-Tue): audits are
+  // reviewed at the Wednesday team meeting, so one week holds everything
+  // since the last meeting -- owner's call. Only this tab; the rest of the
+  // app (pay, HCP) stays Sun-Sat.
+  weekStartsOn: 3,
 };
 
 // ─── matching helpers ──────────────────────────────────────────────────────
@@ -203,8 +207,7 @@ export function auditJobDate(fields) {
   return /^\d{4}-\d{2}-\d{2}/.test(d) ? d.slice(0, 10) : null;
 }
 
-// Monday (or Sunday, per weekStartsOn) that starts the week holding a
-// YYYY-MM-DD date.
+// The day (per weekStartsOn) that starts the week holding a YYYY-MM-DD date.
 export function auditWeekStart(dateStr, startsOn = AUDIT_CONFIG.weekStartsOn) {
   const d = new Date(dateStr + "T12:00:00Z");
   d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() - startsOn + 7) % 7));
@@ -240,7 +243,8 @@ export function scoreToteCheck(sub, cfg = AUDIT_CONFIG.tote) {
     excluded = true;
     flags.push(`Checked by ${checkedBy || "(blank)"} — ${sub.tech_name}'s tote must be checked by ${cfg.allowedCheckers.join(" or ")}. Not counted.`);
   }
-  return { kind: "tote", id: sub.id, work_date: sub.work_date, submitted_at: sub.submitted_at, checkedBy,
+  const notes = firstText(findAnswer(answers, cfg.notesLabels || [])).trim() || null;
+  return { kind: "tote", id: sub.id, work_date: sub.work_date, submitted_at: sub.submitted_at, checkedBy, notes,
     missing, missingCents, score, pass: missingCents <= cfg.passMaxMissingCents, excluded, flags };
 }
 
@@ -252,6 +256,32 @@ export function latestPerDay(scored) {
     if (!byDay[k] || (s.submitted_at || "") > (byDay[k].submitted_at || "")) byDay[k] = s;
   }
   return Object.values(byDay).sort((a, b) => (b.work_date || "").localeCompare(a.work_date || ""));
+}
+
+// ─── tote deductions (Payroll) ──────────────────────────────────────────────
+// One tech's counted tote checks (scored, not excluded, one per day) ->
+// what to deduct. Only FAILED checks charge. An item is charged once: if it
+// was charged before and hasn't shown up on any check since, it's "already"
+// charged, not charged again. An owner can waive an item on a check (e.g.
+// the tech never received it); waived is a Set of "<checkId>|<item name>".
+// Returns oldest first: [{ check, items:[{name,cents,status}], chargedCents }]
+// with status "charged" | "already" | "waived".
+export function toteCharges(checks, waived = new Set()) {
+  const outstanding = new Set();
+  const out = [];
+  for (const c of [...checks].sort((a, b) => (a.work_date || "").localeCompare(b.work_date || "") || (a.submitted_at || "").localeCompare(b.submitted_at || ""))) {
+    const missingNames = new Set(c.missing.map(m => m.name));
+    for (const name of [...outstanding]) if (!missingNames.has(name)) outstanding.delete(name);   // it's back
+    if (c.pass) continue;
+    const items = c.missing.map(m => {
+      if (waived.has(`${c.id}|${m.name}`)) return { ...m, status: "waived" };
+      if (outstanding.has(m.name)) return { ...m, status: "already" };
+      outstanding.add(m.name);
+      return { ...m, status: "charged" };
+    });
+    out.push({ check: c, items, chargedCents: items.filter(i => i.status === "charged").reduce((s, i) => s + i.cents, 0) });
+  }
+  return out;
 }
 
 // ─── tech audits ───────────────────────────────────────────────────────────

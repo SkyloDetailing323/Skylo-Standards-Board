@@ -6,13 +6,15 @@
 //
 // GET ?type=marketing&from=YYYY-MM-DD&to=YYYY-MM-DD
 // GET ?type=sales&rep=trevor|ethan&from=...&to=...
+//   A rep with selfTechId can also open their own sales report from their
+//   tech login (rep is forced to theirs; nothing else is allowed).
 // Header: Authorization: Bearer <login token>
 
 const { verifyToken, tokenFrom } = require("./lib/authToken");
 
 // Which GHL pipelines belong to each rep's report.
 const REPS = {
-  trevor: { name: "Trevor", pipelines: ["Residential Leads", "Residential Estimates"] },
+  trevor: { name: "Trevor", pipelines: ["Residential Leads", "Residential Estimates"], selfTechId: "4641f4da-a16f-411b-8688-8b81ac06eda7" },
   ethan:  { name: "Ethan",  pipelines: ["Commercial Sales"] },
 };
 
@@ -44,9 +46,12 @@ const isDate = s => /^\d{4}-\d{2}-\d{2}$/.test(s || "");
 exports.handler = async (event) => {
   const who = verifyToken(tokenFrom(event));
   if (!who) return json(401, { error: "Log in again" });
-  if (who.role !== "owner") return json(403, { error: "Owners only" });
-
   const q = event.queryStringParameters || {};
+  if (who.role !== "owner") {
+    const own = who.techId && Object.keys(REPS).find(k => REPS[k].selfTechId === who.techId);
+    if (!own || event.httpMethod === "POST" || q.type !== "sales") return json(403, { error: "Owners only" });
+    q.rep = own;
+  }
 
   // POST ?type=attribution  body: { plan_minimums:{weekly,biweekly,monthly,bimonthly,quarterly}, gross_margin, target_margin }
   if (event.httpMethod === "POST" && q.type === "attribution") {
