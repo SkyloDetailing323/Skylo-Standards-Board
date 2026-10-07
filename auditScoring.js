@@ -128,9 +128,11 @@ export const AUDIT_CONFIG = {
       "6ac42d177ce1d36fe8bbadf5",   // Brock Morrow, Job Date 2026-10-08
     ],
   },
-  // The Audit Scores tab's week. 0 = Sunday (Sun-Sat, same as the rest of
-  // the app and HCP -- owner's call), 1 = Monday (Mon-Sun).
-  weekStartsOn: 0,
+  // The Audit Scores tab's week. 3 = Wednesday (Wed-Tue): audits are
+  // reviewed at the Wednesday team meeting, so one week holds everything
+  // since the last meeting -- owner's call. Only this tab; the rest of the
+  // app (pay, HCP) stays Sun-Sat.
+  weekStartsOn: 3,
 };
 
 // ─── matching helpers ──────────────────────────────────────────────────────
@@ -203,8 +205,7 @@ export function auditJobDate(fields) {
   return /^\d{4}-\d{2}-\d{2}/.test(d) ? d.slice(0, 10) : null;
 }
 
-// Monday (or Sunday, per weekStartsOn) that starts the week holding a
-// YYYY-MM-DD date.
+// The day (per weekStartsOn) that starts the week holding a YYYY-MM-DD date.
 export function auditWeekStart(dateStr, startsOn = AUDIT_CONFIG.weekStartsOn) {
   const d = new Date(dateStr + "T12:00:00Z");
   d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() - startsOn + 7) % 7));

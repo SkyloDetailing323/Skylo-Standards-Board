@@ -125,11 +125,12 @@ test("same Job Date twice keeps the latest; job count never hurts; week = averag
   assert.equal(weeklyAuditPct([{ pct: 81.1 }, { pct: 100 }, { pct: null }]), 90.55);
 });
 
-test("Audit Scores weeks run Sunday-Saturday", () => {
-  assert.equal(auditWeekStart("2026-10-04"), "2026-10-04");   // Sunday
-  assert.equal(auditWeekStart("2026-10-10"), "2026-10-04");   // Saturday
-  assert.equal(auditWeekStart("2026-10-11"), "2026-10-11");   // next Sunday
-  assert.equal(auditWeekStart("2026-10-05", 1), "2026-10-05"); // Monday option still works
+test("Audit Scores weeks run Wednesday-Tuesday", () => {
+  assert.equal(auditWeekStart("2026-09-30"), "2026-09-30");   // Wednesday
+  assert.equal(auditWeekStart("2026-10-04"), "2026-09-30");   // Sunday
+  assert.equal(auditWeekStart("2026-10-06"), "2026-09-30");   // Tuesday
+  assert.equal(auditWeekStart("2026-10-07"), "2026-10-07");   // next Wednesday
+  assert.equal(auditWeekStart("2026-10-10", 0), "2026-10-04"); // Sunday option still works
 });
 
 test("Tech name falls back to the form's First/Last Name (Forms tab prefill)", () => {

@@ -6704,9 +6704,12 @@ function TechMatchAdmin({ unmatchedTechs, refreshAll, showToast }) {
 // every tech; a tech (techId set) sees only their own checks and misses.
 const fmtCents = c => `$${(c/100).toFixed(2)}`;
 const fmtPct = p => p==null ? "—" : `${(Math.round(p*10)/10).toFixed(1)}%`;
-// This tab's week start comes from AUDIT_CONFIG.weekStartsOn (Sun-Sat, same
-// as the rest of the app).
+// This tab's week start comes from AUDIT_CONFIG.weekStartsOn (Wed-Tue, to
+// match the Wednesday team meeting; the rest of the app is Sun-Sat). The tab
+// opens on the week holding yesterday, so on meeting day it shows the week
+// that just ended instead of an empty new one.
 const auditThisWeek = () => auditWeekStart(mtDateStr(Date.now()));
+const auditDefaultWeek = () => auditWeekStart(mtDateStr(Date.now() - 864e5));
 const shiftWeek = (wk, weeks) => { const d = new Date(wk+"T12:00:00Z"); d.setUTCDate(d.getUTCDate()+weeks*7); return d.toISOString().split("T")[0]; };
 
 function scoreTechWeek(subs) {
@@ -6771,7 +6774,7 @@ function AuditTechDetail({ week }) {
 }
 
 function AuditScoresTab({ techs, token, techId=null, canSync=false }) {
-  const [wk, setWk] = useState(auditThisWeek());
+  const [wk, setWk] = useState(auditDefaultWeek());
   const [state, setState] = useState({ loading:true, error:null, data:null });
   const [open, setOpen] = useState(null);
   const [bump, setBump] = useState(0);
