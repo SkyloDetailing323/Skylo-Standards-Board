@@ -82,13 +82,16 @@ create policy "allow anon insert and read" on public.truck_assignment_log for al
 grant select, insert on public.truck_assignment_log to anon, authenticated;
 
 -- ─── Ford telematics (server only) ───────────────────────────────────────────
--- Miles per vehicle per Mountain-time day.
+-- Miles, idle time and speeding minutes per vehicle per Mountain-time day
+-- (from Ford's daily Fleet Activity Summary). No locations are stored.
 create table if not exists public.ford_vehicle_daily (
   vin           text not null,
   work_date     date not null,
   miles         numeric not null default 0,
   trips         integer,
   idle_minutes  numeric,
+  speeding_minutes numeric,                -- minutes over the posted limit (+5 mph buffer) that day
+  source        text,                      -- 'report_upload' | 'api'
   raw           jsonb,
   synced_at     timestamptz not null default now(),
   primary key (vin, work_date)
@@ -96,9 +99,9 @@ create table if not exists public.ford_vehicle_daily (
 alter table public.ford_vehicle_daily enable row level security;
 revoke all on public.ford_vehicle_daily from anon, authenticated;
 
--- One row per Ford driving event (harsh brake, speeding, ...). id is Ford's
--- event id, or a hash of vin+time+type when Ford doesn't send one, so a
--- re-pull of the same day upserts instead of duplicating.
+-- One row per Ford driving event (harsh brake, speeding, ...). id is built
+-- from vin + time + type, so importing the same day again upserts instead of
+-- duplicating. Ford's latitude/longitude/address columns are not stored.
 create table if not exists public.ford_vehicle_events (
   id            text primary key,
   vin           text not null,

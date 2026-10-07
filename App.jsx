@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, Fragment } from "react";
 import { TEST_QUESTIONS, shuffle } from "./trainingTest.js";
 import { computeOpsMonth, monthRange, mountainDate, CALLBACK_TIERS, QUOTA_TIERS, RETENTION_TIERS, NON_ROUTE_VEHICLES, OPS_EXCLUDED_TITLES } from "./opsBonus.js";
 import { techDriverDays, weeklyDriverScore, findUnassignedDriving, DRIVER_CONFIG } from "./driverScoring.js";
+import { buildFordImport } from "./fordReports.js";
 import { formKind, scoreToteCheck, scoreTechAudit, latestPerDay, auditDays, weeklyAuditPct, auditWeekStart } from "./auditScoring.js";
 
 // ─── SUPABASE CONFIG ──────────────────────────────────────────────────────────
@@ -6866,7 +6867,7 @@ function AuditScoresTab({ techs, token, techId=null, canSync=false }) {
   const driverPill = dr => !dr || dr.score==null
     ? <Pill color={C.muted}>🚗 —</Pill>
     : <Pill color={dr.pass?C.green:C.red}>🚗 {(Math.round(dr.score*10)/10).toFixed(1)} {dr.pass?"PASS":"FAIL"}</Pill>;
-  const driveNote = drive.error ? `Driver scores unavailable: ${drive.error}` : drive.data && !drive.data.daily.length ? "Driver scores start once the nightly Ford Pro pull is connected." : null;
+  const driveNote = drive.error ? `Driver scores unavailable: ${drive.error}` : drive.data && !drive.data.daily.length ? "No Ford Pro data for this week yet — an admin uploads Ford's daily reports on the Trucks tab." : null;
 
   async function syncNow() {
     setSyncing(true); setSyncMsg(null);
@@ -7002,6 +7003,9 @@ function TrucksAdminTab({ techs, vehicles, timeEntries=[], token, refreshAll, sh
   const [edits, setEdits] = useState({});
   const [newV, setNewV] = useState({ name:"", model:"", plate:"", vin:"" });
   const [bump, setBump] = useState(0);
+  const [imp, setImp] = useState(null);         // parsed Ford report upload, before import
+  const [impDate, setImpDate] = useState("");
+  const [fileKey, setFileKey] = useState(0);
   const techName = id => techs.find(t=>t.id===id)?.name || "Unknown tech";
   const inp = { background:C.white, border:`1px solid ${C.border}`, color:C.black, padding:"7px 9px", borderRadius:"6px", fontSize:"13px", width:"100%", boxSizing:"border-box" };
   const smallBtn = (color) => ({ background:color, border:"none", color:C.white, padding:"6px 12px", borderRadius:"6px", cursor:busy?"not-allowed":"pointer", fontSize:"12px", fontWeight:"700", whiteSpace:"nowrap" });
@@ -7047,6 +7051,29 @@ function TrucksAdminTab({ techs, vehicles, timeEntries=[], token, refreshAll, sh
     } catch(e) { showToast("Error: "+e.message, false); }
     setBusy(false);
   }
+  // Ford's daily "Driver score" email -> download its CSVs -> drop them here.
+  async function readFordFiles(fileList) {
+    try {
+      const files = await Promise.all([...fileList].map(f => f.text().then(text => ({ name:f.name, text }))));
+      const r = buildFordImport(files, vehicles);
+      const yesterday = mtDateStr(Date.now() - 864e5);
+      setImp(r); setImpDate(r.workDate || yesterday);
+    } catch(e) { showToast("Couldn't read those files: "+e.message, false); }
+  }
+  async function importFord() {
+    if (!imp || !impDate) return;
+    setBusy(true);
+    try {
+      const r = await fetch(`/.netlify/functions/driver-scores?action=import`, { method:"POST", headers:{ "Content-Type":"application/json", Authorization:`Bearer ${token||""}` },
+        body:JSON.stringify({ work_date:impDate, daily:imp.daily, events:imp.events }) });
+      const j = await r.json().catch(()=>({}));
+      if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+      showToast(`✅ Imported ${j.trucks} trucks and ${j.events} events for ${fmtShortDate(impDate)}`);
+      setImp(null); setFileKey(k=>k+1); setBump(b=>b+1);
+    } catch(e) { showToast("Import failed: "+e.message, false); }
+    setBusy(false);
+  }
+
   async function saveVehicle(v) {
     const e = { ...v, ...edits[v.id] };
     if (!e.name?.trim() || !/^[A-HJ-NPR-Z0-9]{17}$/i.test(e.vin||"")) return showToast("Name and a 17-character VIN are required", false);
@@ -7118,11 +7145,43 @@ function TrucksAdminTab({ techs, vehicles, timeEntries=[], token, refreshAll, sh
       </div>
 
       <div style={card}>
+        <Label color={C.green}>📥 Upload Ford reports</Label>
+        <div style={{ fontSize:"12px", color:C.muted, margin:"6px 0 10px", lineHeight:1.5 }}>
+          Each morning Ford emails Equipment@skylod.com a "Ford Pro™ Telematics Report Delivered" email (the <strong>Driver score</strong> schedule) covering the day before. Download these from it and drop them here: <strong>Fleet Activity Summary</strong> (required — miles, idle and speeding minutes), <strong>Vehicle Speeding Events Enhanced</strong>, <strong>Vehicle Harsh Events Enhanced</strong>, <strong>Vehicle Seat Belt Violations Enhanced</strong> and <strong>Vehicle Excessive Idling Enhanced</strong>. Other files are skipped. Locations and addresses are never saved. Uploading the same day again replaces it.
+          {drive.data?.last_pull && <div style={{ marginTop:"4px", color:C.black }}>Last import: {fmtShortDate(drive.data.last_pull.work_date)} — {drive.data.last_pull.trucks} trucks, {drive.data.last_pull.events} events{drive.data.last_pull.by ? ` (by ${drive.data.last_pull.by})` : ""}</div>}
+        </div>
+        <input key={fileKey} type="file" accept=".csv,text/csv" multiple onChange={e => e.target.files?.length && readFordFiles(e.target.files)} style={{ fontSize:"13px", color:C.black }}/>
+        {imp && (
+          <div style={{ marginTop:"10px", background:C.cardLt, border:`1px solid ${C.border}`, borderRadius:"8px", padding:"10px 12px", fontSize:"12px", color:C.black }}>
+            <div style={{ display:"flex", alignItems:"center", gap:"8px", flexWrap:"wrap", marginBottom:"6px" }}>
+              <strong>Day these reports cover:</strong>
+              <input type="date" value={impDate} max={today} onChange={e=>setImpDate(e.target.value)} style={{ ...inp, width:"auto" }}/>
+            </div>
+            {imp.used.map(u => <div key={u}>✓ {u}</div>)}
+            {imp.skipped.length>0 && <div style={{ color:C.muted }}>Skipped: {imp.skipped.join(", ")}</div>}
+            {imp.daily.length>0 && (
+              <div style={{ marginTop:"6px" }}>
+                {imp.daily.map(r => {
+                  const n = imp.events.filter(e => e.vin===r.vin).length;
+                  return <div key={r.vin}>{vehicles.find(v=>v.vin===r.vin)?.name || r.vehicle} — {Math.round(r.miles)} mi, {Math.round(r.speeding_minutes||0)} min speeding, {Math.round(r.idle_minutes||0)} min idle, {n} event{n!==1?"s":""}</div>;
+                })}
+              </div>
+            )}
+            {imp.warnings.map((w,i) => <div key={i} style={{ color:C.gold, marginTop:"4px" }}>⚠ {w}</div>)}
+            <div style={{ display:"flex", gap:"8px", marginTop:"10px" }}>
+              <button disabled={busy || (!imp.daily.length && !imp.events.length)} onClick={importFord} style={smallBtn(C.green)}>Import {impDate ? fmtShortDate(impDate) : ""}</button>
+              <button disabled={busy} onClick={()=>{ setImp(null); setFileKey(k=>k+1); }} style={smallBtn(C.muted)}>Cancel</button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div style={card}>
         <Label color={C.red}>🚨 Unassigned driving (last 14 days)</Label>
         <div style={{ fontSize:"12px", color:C.muted, margin:"6px 0 10px" }}>A truck drove but nobody picked it that day. It doesn't count against anyone until you assign it. Assigning adds −10 ("drove without picking a truck") plus that day's driving events to the tech's driver score.</div>
         {drive.error && <div style={{ fontSize:"12px", color:C.red }}>Couldn't load Ford data: {drive.error}</div>}
         {drive.loading && <div style={{ fontSize:"12px", color:C.muted }}>Loading…</div>}
-        {d && !d.daily.length && <div style={{ fontSize:"12px", color:C.muted }}>No Ford Pro data yet — the nightly Ford pull isn't connected.</div>}
+        {d && !d.daily.length && <div style={{ fontSize:"12px", color:C.muted }}>No Ford Pro data for the last 14 days yet — upload the daily Ford reports above.</div>}
         {d && d.daily.length>0 && openRows.length===0 && <div style={{ fontSize:"12px", color:C.green }}>Nothing unassigned.</div>}
         {openRows.map(r => (
           <div key={r.vin+r.work_date} style={{ display:"flex", alignItems:"center", gap:"8px", flexWrap:"wrap", padding:"8px 0", borderBottom:`1px solid ${C.border}` }}>
