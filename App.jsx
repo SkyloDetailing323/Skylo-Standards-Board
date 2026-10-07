@@ -3208,6 +3208,7 @@ function TechDashboard({ tech, techs, upsells, switchovers, reviews, callbacks, 
       ["reviews","⭐","Reviews"],
       ...(tech.is_lead?[["myteam","👥","My Team"]]:[]),
     ]},
+    ...(SALES_SELF_VIEW[tech.id]?[{ label:"Sales", items:[["mysales","🤝","My Sales"]] }]:[]),
     ...(!isApprenticeTech(tech)?[{ label:"Forms", items:[["forms","📝","Forms"]] }]:[]),
     { label:"Training", items:[
       ["training","📋","Perfect Day Training"],
@@ -3485,6 +3486,7 @@ function TechDashboard({ tech, techs, upsells, switchovers, reviews, callbacks, 
         {tab==="training"&&<PerfectDayTrainingPanel tech={tech} techs={techs}/>}
         {tab==="forms"&&<FormsTab me={tech} role="tech"/>}
         {tab==="auditscores"&&<AuditScoresTab techs={techs} token={token} techId={tech.id}/>}
+        {tab==="mysales"&&SALES_SELF_VIEW[tech.id]&&<SalesTab token={token} onlyRep={SALES_SELF_VIEW[tech.id]}/>}
       </div>
       {toast&&(
         <div style={{ position:"fixed", bottom:"24px", left:"50%", transform:"translateX(-50%)", background:toast.ok?C.green:"#ef4444", color:C.white, padding:"12px 28px", borderRadius:"24px", fontSize:"14px", fontWeight:"900", zIndex:999, whiteSpace:"nowrap", fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:"1px", fontStyle:"italic", boxShadow:"0 4px 20px rgba(0,0,0,0.15)" }}>
@@ -5924,14 +5926,18 @@ function FunnelBlock({ k, label, revenue }) {
   );
 }
 
-function SalesTab({ token }) {
+// Reps who can see their own Sales report from their tech login (tech id ->
+// rep key). reports.js enforces the same list (REPS[...].selfTechId).
+const SALES_SELF_VIEW = { "4641f4da-a16f-411b-8688-8b81ac06eda7": "trevor" };
+
+function SalesTab({ token, onlyRep=null }) {
   const [range, setRange] = useState(() => rangeFor("month"));
-  const [rep, setRep] = useState("trevor");
+  const [rep, setRep] = useState(onlyRep || "trevor");
   const s = useGrowthReport({ type:"sales", rep, ...range }, token);
   const d = s.data;
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:"12px" }}>
-      <SubTabs tabs={[["trevor","Trevor · Inbound"],["ethan","Ethan · Commercial"]]} active={rep} setActive={setRep}/>
+      {!onlyRep && <SubTabs tabs={[["trevor","Trevor · Inbound"],["ethan","Ethan · Commercial"]]} active={rep} setActive={setRep}/>}
       <GrowthRange range={range} setRange={setRange}/>
       <ReportState s={s}/>
       {d && d.rep?.toLowerCase() === rep && (<>
