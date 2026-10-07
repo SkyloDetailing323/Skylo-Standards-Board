@@ -527,14 +527,14 @@ function getNextPayTier(amt) {
 // ─── SWITCHOVER PAY ───────────────────────────────────────────────────────────
 // Per switchover, by plan, +$10 when an exterior was added. Plans with no
 // amount here show on Payroll as "rate not set" instead of a guessed number.
-const SWITCHOVER_PAY = { monthly:40, bimonthly:35, quarterly:30 };
+const SWITCHOVER_PAY = { weekly:50, biweekly:45, monthly:40, bimonthly:35, quarterly:30, biannual:10 };
 const SWITCHOVER_EXTERIOR_PAY = 10;
 function switchoverPay(sw) {
   const base = SWITCHOVER_PAY[sw.plan_id];
   return base == null ? null : base + (sw.with_exterior ? SWITCHOVER_EXTERIOR_PAY : 0);
 }
-// Day the switchover was sold: sold_date when set, else the day it was
-// logged (older rows only have a week).
+// Day the switchover counts for: the day it was logged (sold_date is set to
+// that day on entry; older rows fall back to created_at).
 function switchoverDate(sw) {
   if (sw.sold_date) return sw.sold_date;
   if (sw.created_at) return mtDateStr(new Date(sw.created_at).getTime());
@@ -6980,7 +6980,7 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
   const [menuOpen, setMenuOpen] = useState(false);
   const [awardForm, setAwardForm] = useState({techId:"",badgeId:""});
   const [addForm, setAddForm] = useState({name:"",pin:"",avatar:"",start_date:"",commission_rate:27});
-  const [swForm, setSwForm] = useState({techId:"",planId:"",date:mtDateStr(Date.now()),exterior:false});
+  const [swForm, setSwForm] = useState({techId:"",planId:"",exterior:null});
   const [editingSwId, setEditingSwId] = useState(null);
   const [editSwForm, setEditSwForm] = useState({date:"",planId:"",exterior:false});
   const [swRangePreset, setSwRangePreset] = useState("wtd");
@@ -7102,9 +7102,10 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
   }
   async function logSwitchover() {
     if (!swForm.techId||!swForm.planId) return showToast("Select a tech and plan",false);
+    if (swForm.exterior===null) return showToast("Pick Interior only or Interior + Exterior",false);
     setSaving(true);
-    const date = swForm.date || mtDateStr(Date.now());
-    try { await sb("switchovers",{method:"POST",body:JSON.stringify({tech_id:swForm.techId,week_key:dateToWeekKey(date),sold_date:date,plan_id:swForm.planId,with_exterior:!!swForm.exterior})}); await refreshAll(); showToast(`✅ Switchover logged!`); setSwForm({techId:"",planId:"",date:mtDateStr(Date.now()),exterior:false}); }
+    const date = mtDateStr(Date.now());   // counts the day it's entered
+    try { await sb("switchovers",{method:"POST",body:JSON.stringify({tech_id:swForm.techId,week_key:dateToWeekKey(date),sold_date:date,plan_id:swForm.planId,with_exterior:!!swForm.exterior})}); await refreshAll(); showToast(`✅ Switchover logged!`); setSwForm({techId:"",planId:"",exterior:null}); }
     catch(e){ showToast("Error: "+e.message,false); }
     setSaving(false);
   }
@@ -7370,14 +7371,15 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
               <option value="">— Select Plan —</option>
               {SERVICE_PLANS.map(p=><option key={p.id} value={p.id}>{p.label} ({p.freq}) · +{p.pts}pts · ${p.ltv.toLocaleString()}/yr LTV</option>)}
             </select>
-            <div style={{ display:"flex", alignItems:"center", gap:"10px", flexWrap:"wrap" }}>
-              <span style={{ fontSize:"12px", color:C.muted }}>Date sold</span>
-              <input type="date" value={swForm.date} onChange={e=>setSwForm(f=>({...f,date:e.target.value}))} style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"8px", borderRadius:"8px", fontSize:"13px" }}/>
-              <label style={{ display:"flex", alignItems:"center", gap:"6px", fontSize:"13px", color:C.black, cursor:"pointer" }}>
-                <input type="checkbox" checked={!!swForm.exterior} onChange={e=>setSwForm(f=>({...f,exterior:e.target.checked}))} style={{ width:"16px", height:"16px" }}/>
-                Added exterior (+${SWITCHOVER_EXTERIOR_PAY})
-              </label>
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"8px" }}>
+              {[[false,"Interior only"],[true,"Interior + Exterior"]].map(([ext,label])=>{
+                const on = swForm.exterior===ext;
+                return <button key={label} onClick={()=>setSwForm(f=>({...f,exterior:ext}))} style={{ background:on?C.purple:C.cardLt, border:`1px solid ${on?C.purple:C.border}`, color:on?C.white:C.black, padding:"10px", borderRadius:"8px", cursor:"pointer", fontSize:"13px", fontWeight:"700" }}>{label}</button>;
+              })}
             </div>
+            {swForm.planId&&swForm.exterior!==null&&SWITCHOVER_PAY[swForm.planId]!=null&&(
+              <div style={{ fontSize:"12px", color:C.muted }}>Pays ${switchoverPay({plan_id:swForm.planId,with_exterior:swForm.exterior})} · counts today ({fmtShortDate(mtDateStr(Date.now()))}) on payroll</div>
+            )}
             <button onClick={logSwitchover} disabled={saving} style={btn(C.purple)}>{saving?"Saving...":"Log Switchover"}</button>
           </div>
         )}
