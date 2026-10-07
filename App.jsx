@@ -6858,11 +6858,12 @@ function scoreTechWeek(subs) {
   return { totes, excluded, latestTote: totes[0] || null, days, auditPct: weeklyAuditPct(days) };
 }
 
-function AuditTechDetail({ week }) {
+function AuditTechDetail({ week, only="both" }) {
   const box = { background:C.white, border:`1px solid ${C.border}`, borderRadius:"10px", padding:"10px 12px", marginTop:"8px" };
   const flagList = flags => flags.map((f,i) => <div key={i} style={{ fontSize:"12px", color:C.gold, marginTop:"3px" }}>⚠ {f}</div>);
   return (
     <div>
+      {only!=="audit" && <>
       <SectionTitle>🧰 Tote Checks</SectionTitle>
       {week.totes.length===0 && week.excluded.length===0 && <div style={{ fontSize:"13px", color:C.muted, marginTop:"4px" }}>No tote check this week.</div>}
       {week.totes.map(t => (
@@ -6884,7 +6885,9 @@ function AuditTechDetail({ week }) {
         </div>
       ))}
 
-      <div style={{ marginTop:"14px" }}><SectionTitle>📋 Tech Audits</SectionTitle></div>
+      </>}
+      {only!=="tote" && <>
+      <div style={{ marginTop:only==="audit"?0:"14px" }}><SectionTitle>📋 Tech Audits</SectionTitle></div>
       {week.days.length===0 && <div style={{ fontSize:"13px", color:C.muted, marginTop:"4px" }}>No audits this week.</div>}
       {week.days.map(d => (
         <div key={d.date} style={box}>
@@ -6907,11 +6910,14 @@ function AuditTechDetail({ week }) {
           {flagList(d.audit.flags)}
         </div>
       ))}
+      </>}
     </div>
   );
 }
 
-function AuditScoresTab({ techs, token, techId=null, canSync=false }) {
+// view: "both" (a tech's own My Audit Scores), or one admin Tech Scores
+// page: "tote" or "audit".
+function AuditScoresTab({ techs, token, techId=null, canSync=false, view="both" }) {
   const [wk, setWk] = useState(auditDefaultWeek());
   const [state, setState] = useState({ loading:true, error:null, data:null });
   const [open, setOpen] = useState(null);
@@ -6944,7 +6950,7 @@ function AuditScoresTab({ techs, token, techId=null, canSync=false }) {
   const subs = state.data?.submissions || [];
   const byTech = {};
   subs.forEach(s => { if (s.tech_id) (byTech[s.tech_id] = byTech[s.tech_id] || []).push(s); });
-  const unmatched = [...new Set(subs.filter(s => !s.tech_id).map(s => s.tech_name || "(no Tech answer)"))].sort();
+  const unmatched = [...new Set(subs.filter(s => !s.tech_id && (view==="both" || formKind(s.form_id)===view)).map(s => s.tech_name || "(no Tech answer)"))].sort();
   // Answers and question ids on the Tech Audit form that AUDIT_CONFIG can't map.
   const auditScored = subs.filter(s => formKind(s.form_id)==="audit").map(s => scoreTechAudit(s));
   const unmappedAnswers = [...new Set(auditScored.flatMap(a => a.unmapped))].sort();
@@ -6982,13 +6988,23 @@ function AuditScoresTab({ techs, token, techId=null, canSync=false }) {
   }
 
   const rows = techs.filter(t => (t.is_active!==false && t.title!=="owner") || byTech[t.id])
-    .map(t => ({ tech:t, week:scoreTechWeek(byTech[t.id] || []) }))
-    .sort((a,b) => (b.week.latestTote||b.week.days.length?1:0) - (a.week.latestTote||a.week.days.length?1:0) || a.tech.name.localeCompare(b.tech.name));
+    .map(t => {
+      const week = scoreTechWeek(byTech[t.id] || []);
+      const has = view==="tote" ? !!(week.latestTote || week.excluded.length) : week.days.length>0;
+      return { tech:t, week, has };
+    })
+    .sort((a,b) => (b.has?1:0) - (a.has?1:0) || a.tech.name.localeCompare(b.tech.name));
+  const intro = {
+    tote: "Tote Checks from the GHL form. $7.00 or less missing passes (95%). Items missing on a FAILED check come off that tech's pay on the Payroll tab.",
+    audit: "Tech Audits from the GHL form. Each day is the average of its scheduled jobs; the week is the average of the days.",
+  }[view];
+  const big = (text, color) => <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"20px", color, lineHeight:1, textAlign:"right" }}>{text}</div>;
+  const small = text => <div style={{ fontSize:"11px", color:C.muted, marginTop:"3px", textAlign:"right" }}>{text}</div>;
 
   return (
     <div>
       <div style={{ fontSize:"13px", color:C.muted, marginBottom:"12px", lineHeight:"1.5" }}>
-        Scores from the Tote Check and Tech Audit forms in GoHighLevel. Weeks run Sunday–Saturday. Tote: $7.00 or less missing passes (95%). Audit: each day is the average of its scheduled jobs, and the week is the average of the days. Display only — not tied to pay.
+        {intro} Weeks run Wednesday–Tuesday.
       </div>
       <div style={{ background:C.cardLt, border:`1px solid ${C.border}`, borderRadius:"10px", padding:"10px 12px", marginBottom:"12px", fontSize:"12px", color:C.black }}>
         {last ? <>Last GHL form sync: {new Date(last.finished_at || last.updated_at).toLocaleString("en-US", { month:"short", day:"numeric", hour:"numeric", minute:"2-digit", timeZone:"America/Denver" })}{last.errors?.length ? <span style={{ color:C.red }}> · {last.errors.join("; ")}</span> : ""}{last.labels?.source==="raw_keys" ? <div style={{ color:C.gold, marginTop:"4px" }}>⚠ Couldn't read the form's question labels from GHL ({last.labels.error}). The token may need the locations/customFields.readonly scope.</div> : null}</> : "Not synced yet."}
@@ -7003,28 +7019,30 @@ function AuditScoresTab({ techs, token, techId=null, canSync=false }) {
           {unmatched.join(", ")}
         </div>
       )}
-      {state.data && (unmappedAnswers.length>0 || unmappedIds.length>0) && (
+      {state.data && view==="audit" && (unmappedAnswers.length>0 || unmappedIds.length>0) && (
         <div style={{ background:`${C.gold}12`, border:`1px solid ${C.gold}`, borderRadius:"10px", padding:"10px 12px", marginBottom:"12px", fontSize:"12px", color:C.black }}>
           <div style={{ fontWeight:"700" }}>⚠ Tech Audit answers the scoring doesn't recognize (fix the form or AUDIT_CONFIG):</div>
           {unmappedAnswers.map(u => <div key={u}>• {u}</div>)}
           {unmappedIds.map(id => <div key={id}>• Question id <code>{id}</code>{last?.unmapped_audit_fields?.[id] ? ` = "${last.unmapped_audit_fields[id].trim()}"` : ""} isn't in AUDIT_CONFIG — if it's a renamed question, add the id to that question's list</div>)}
         </div>
       )}
-      {state.data && rows.map(({ tech, week }) => {
+      {state.data && rows.map(({ tech, week, has }) => {
         const t = week.latestTote, isOpen = open===tech.id;
-        const empty = !t && !week.days.length && !week.excluded.length;
+        const canOpen = has;
+        let summary;
+        if (view==="tote") summary = t
+          ? <>{big(`${fmtPct(t.score)} ${t.pass?"PASS":"FAIL"}`, t.pass?C.green:C.red)}{small(t.missingCents ? `${fmtCents(t.missingCents)} missing · ${fmtShortDate(t.work_date)}` : `Nothing missing · ${fmtShortDate(t.work_date)}`)}</>
+          : <>{big("No check", C.muted)}{week.excluded.length>0 && small(`${week.excluded.length} not counted (wrong checker)`)}</>;
+        else summary = week.days.length
+          ? <>{big(fmtPct(week.auditPct), scoreColor(week.auditPct??0))}{small(`${week.days.length} day${week.days.length!==1?"s":""} audited`)}</>
+          : big("No audits", C.muted);
         return (
-          <div key={tech.id} style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"12px 14px", marginBottom:"8px", opacity:empty?0.6:1 }}>
-            <div onClick={() => !empty && setOpen(isOpen?null:tech.id)} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:"10px", cursor:empty?"default":"pointer" }}>
-              <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"16px", color:C.black }}>{tech.name}</div>
-              <div style={{ display:"flex", gap:"6px", alignItems:"center", flexWrap:"wrap", justifyContent:"flex-end" }}>
-                {t ? <Pill color={t.pass?C.green:C.red}>🧰 {fmtPct(t.score)} {t.pass?"PASS":"FAIL"}</Pill> : <Pill color={C.muted}>🧰 —</Pill>}
-                <Pill color={week.auditPct==null?C.muted:scoreColor(week.auditPct)}>📋 {fmtPct(week.auditPct)}</Pill>
-                {week.excluded.length>0 && <Pill color={C.gold}>⚠ {week.excluded.length}</Pill>}
-                {!empty && <span style={{ fontSize:"12px", color:C.muted }}>{isOpen?"▲":"▼"}</span>}
-              </div>
+          <div key={tech.id} style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"12px 14px", marginBottom:"8px", opacity:has?1:0.6 }}>
+            <div onClick={() => canOpen && setOpen(isOpen?null:tech.id)} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:"10px", cursor:canOpen?"pointer":"default" }}>
+              <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"17px", color:C.black }}>{tech.name} {canOpen && <span style={{ fontSize:"12px", color:C.muted }}>{isOpen?"▲":"▼"}</span>}</div>
+              <div>{summary}</div>
             </div>
-            {isOpen && <div style={{ marginTop:"8px" }}><AuditTechDetail week={week}/></div>}
+            {isOpen && <div style={{ marginTop:"8px" }}><AuditTechDetail week={week} only={view}/></div>}
           </div>
         );
       })}
@@ -7314,8 +7332,13 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
       ["tips","💵","Log Tips"],
       ["callbacks","📞","Callbacks"],
       ["ridealong","🚗","Ride-Alongs"],
-      ["auditscores","🧰","Audit Scores"],
       ["forms","📝","Forms"],
+    ]},
+    { label:"Tech Scores", items:[
+      ["totechecks","🧰","Tote Checks"],
+      ["auditscores","📋","Audit Scores"],
+      ["driving","🚗","Driving Scores"],
+      ["truckinspections","🚚","Truck Inspections"],
     ]},
     { label:"Journey", items:[
       ["journey","🗺️","Journey Map"],
@@ -7398,8 +7421,17 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
           <FormsTab me={isManager ? techs.find(t => t.id===currentUser?.techId) || null : null} role={isManager ? "manager" : "owner"}/>
         )}
 
+        {tab==="totechecks"&&(
+          <AuditScoresTab key="tote" view="tote" techs={techs} token={currentUser?.token} canSync={!isManager}/>
+        )}
         {tab==="auditscores"&&(
-          <AuditScoresTab techs={techs} token={currentUser?.token} canSync={!isManager}/>
+          <AuditScoresTab key="audit" view="audit" techs={techs} token={currentUser?.token} canSync={!isManager}/>
+        )}
+        {(tab==="driving"||tab==="truckinspections")&&(
+          <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"20px", fontSize:"14px", color:C.black, lineHeight:"1.6" }}>
+            <Label color={C.blue}>{tab==="driving"?"🚗 Driving Scores":"🚚 Truck Inspections"}</Label>
+            Coming in Zak's pull request (Ford Pro driver scorecard + truck picks). This page fills in once it's merged.
+          </div>
         )}
 
         {tab==="upsellaudit"&&(
