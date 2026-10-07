@@ -67,7 +67,13 @@ const C = {
   red:     "#ef4444",
 };
 
-const PP_ANCHOR_END = "2026-06-13"; // known period end: pay date Jun 19, submit Jun 17
+const PP_ANCHOR_END = "2026-06-13"; // known bi-weekly period end: pay date Jun 19, submit Jun 17
+// Pay moved from every other week to the 10th and 25th (owner's call, Oct
+// 2026). Bi-weekly periods end Sep 19; Sep 20-30 is a one-off bridge period
+// paid Oct 7; then the 1st-15th is paid on the 25th and the 16th-month end is
+// paid on the 10th of the next month.
+const PP_SEMI_MONTHLY_FROM = "2026-09-20";
+const PP_BRIDGE = { start:"2026-09-20", end:"2026-09-30", submit:"2026-10-07", payout:"2026-10-07" };
 const UPSELL_PTS_PER_DOLLAR = 0.5; // $2 = 1 pt
 const REVIEW_PTS = 5;
 const REVIEW_BONUS_PTS = 20; // bonus at 10+ reviews in a month
@@ -285,14 +291,30 @@ function getPayPeriods() {
     const submit= new Date(end);  submit.setDate(end.getDate()+4);
     const payout= new Date(end);  payout.setDate(end.getDate()+6);
     const fmt = d=>d.toISOString().split("T")[0];
+    if (fmt(end) >= PP_SEMI_MONTHLY_FROM) break;
     periods.push({ key:fmt(end), start:fmt(start), end:fmt(end), submit:fmt(submit), payout:fmt(payout) });
+  }
+  periods.push({ key:PP_BRIDGE.end, ...PP_BRIDGE });
+  // Semi-monthly from October 2026 through two months past today. Submit By
+  // is two days before the pay date.
+  const ymd = (y,m,d) => new Date(Date.UTC(y,m,d,12)).toISOString().split("T")[0];
+  const minus2 = s => { const d = new Date(s+"T12:00:00Z"); d.setUTCDate(d.getUTCDate()-2); return d.toISOString().split("T")[0]; };
+  const today = new Date(todayMs);
+  const lastMonth = today.getUTCFullYear()*12 + today.getUTCMonth() + 2;
+  for (let mi = 2026*12+9; mi <= lastMonth; mi++) {
+    const y = Math.floor(mi/12), m = mi%12;
+    const first = { start:ymd(y,m,1), end:ymd(y,m,15), payout:ymd(y,m,25) };
+    const second = { start:ymd(y,m,16), end:ymd(y,m+1,0), payout:ymd(y,m+1,10) };
+    for (const p of [first, second]) periods.push({ key:p.end, ...p, submit:minus2(p.payout) });
   }
   return periods.sort((a,b)=>b.key.localeCompare(a.key));
 }
-function currentPPKey() {
+function currentPayPeriod() {
   const today = new Date(Date.now()-6*60*60*1000).toISOString().split("T")[0];
-  const p = getPayPeriods().find(p=>today>=p.start&&today<=p.end);
-  return p?.key || PP_ANCHOR_END;
+  return getPayPeriods().find(p=>today>=p.start&&today<=p.end) || null;
+}
+function currentPPKey() {
+  return currentPayPeriod()?.key || PP_ANCHOR_END;
 }
 function formatTenure(startDate) {
   if (!startDate) return null;
@@ -481,31 +503,42 @@ function calcTotals(tech, upsells, switchovers, reviews, callbacks=[], jobs=[]) 
   return { badgePts, upsellAmt, upsellPts, switchPts, reviewPts, callbackPts, callbackCount, total };
 }
 
-// ─── WEEKLY PAY CALCULATOR ────────────────────────────────────────────────────
-// Tiers reset each week. First $150 = 15%, then $300 = 20%, then $450 = 25%, then $700 = 30%
-const PAY_TIERS = [
-  { upTo: 150,  rate: 0.15, label: "0–$150",    color: C.green  },
-  { upTo: 300,  rate: 0.20, label: "$150–$300",  color: C.blue   },
-  { upTo: 450,  rate: 0.25, label: "$300–$450",  color: C.gold   },
-  { upTo: 700,  rate: 0.30, label: "$450–$700",  color: C.orange },
+// ─── UPSELL PAY ───────────────────────────────────────────────────────────────
+// Tiers run per pay period (same dates as Payroll), not per week. The rate a
+// tech reaches pays on ALL of that period's upsells: $650 → 25% × $650.
+const UPSELL_PAY_TIERS = [
+  { over:0,   rate:0.15, label:"$0–$300"   },
+  { over:300, rate:0.20, label:"$301–$600" },
+  { over:600, rate:0.25, label:"$601–$800" },
+  { over:800, rate:0.30, label:"$801+"     },
 ];
 
-function calcWeeklyPay(weeklyUpsellAmt) {
-  // Flat rate unlocks and backfills ALL upsells for the week
-  let rate;
-  if      (weeklyUpsellAmt >= 700) rate = 0.30;
-  else if (weeklyUpsellAmt >= 400) rate = 0.25;
-  else if (weeklyUpsellAmt >= 150) rate = 0.20;
-  else                              rate = 0.15;
-  const totalPay = weeklyUpsellAmt * rate;
-  return { totalPay, rate };
+function calcUpsellPay(upsellAmt) {
+  const tier = [...UPSELL_PAY_TIERS].reverse().find(t => upsellAmt > t.over) || UPSELL_PAY_TIERS[0];
+  return { totalPay: upsellAmt * tier.rate, rate: tier.rate };
 }
 
-function getNextPayTier(weeklyAmt) {
-  if (weeklyAmt < 150) return { amt: 150 - weeklyAmt, rate: 0.20, label: "20% on your whole week" };
-  if (weeklyAmt < 400) return { amt: 400 - weeklyAmt, rate: 0.25, label: "25% on your whole week" };
-  if (weeklyAmt < 700) return { amt: 700 - weeklyAmt, rate: 0.30, label: "30% on your whole week" };
-  return { amt: null, rate: 0.30, label: "MAX RATE — 30% on your whole week 🔥" };
+function getNextPayTier(amt) {
+  const next = UPSELL_PAY_TIERS.slice(1).find(t => amt <= t.over);
+  if (!next) return { amt: null, rate: 0.30, label: "MAX RATE — 30% on every upsell this pay period 🔥" };
+  return { amt: Math.max(1, Math.ceil(next.over + 1 - amt)), rate: next.rate, label: `${Math.round(next.rate*100)}% on every upsell this pay period` };
+}
+
+// ─── SWITCHOVER PAY ───────────────────────────────────────────────────────────
+// Per switchover, by plan, +$10 when an exterior was added. Plans with no
+// amount here show on Payroll as "rate not set" instead of a guessed number.
+const SWITCHOVER_PAY = { monthly:40, bimonthly:35, quarterly:30 };
+const SWITCHOVER_EXTERIOR_PAY = 10;
+function switchoverPay(sw) {
+  const base = SWITCHOVER_PAY[sw.plan_id];
+  return base == null ? null : base + (sw.with_exterior ? SWITCHOVER_EXTERIOR_PAY : 0);
+}
+// Day the switchover was sold: sold_date when set, else the day it was
+// logged (older rows only have a week).
+function switchoverDate(sw) {
+  if (sw.sold_date) return sw.sold_date;
+  if (sw.created_at) return mtDateStr(new Date(sw.created_at).getTime());
+  return sw.week_key;
 }
 
 
@@ -1489,7 +1522,7 @@ function ReportsTab({ techs, jobs, upsells=[], timeEntries=[], tipEntries=[], te
 }
 
 // ─── PAYROLL TAB ──────────────────────────────────────────────────────────────
-function PayrollTab({ techs, jobs, tipEntries=[] }) {
+function PayrollTab({ techs, jobs, tipEntries=[], switchovers=[] }) {
   const allPeriods = getPayPeriods();
   const activePeriods = allPeriods.filter(p=>jobs.some(j=>j.job_date>=p.start&&j.job_date<=p.end)||p.key===currentPPKey());
   const [selKey, setSelKey] = useState(currentPPKey());
@@ -1497,6 +1530,9 @@ function PayrollTab({ techs, jobs, tipEntries=[] }) {
   if (!period) return null;
 
   const periodJobs = jobs.filter(j=>j.job_date>=period.start&&j.job_date<=period.end);
+  // Upsell and switchover bonuses ride on payroll from the 10th/25th schedule
+  // on; before that they were paid weekly and aren't shown here.
+  const showBonuses = period.start >= PP_SEMI_MONTHLY_FROM;
   const wkKeys = [...new Set(periodJobs.map(j=>j.week_key))].filter(Boolean).sort();
 
   const rows = techs.map(t=>{
@@ -1505,7 +1541,12 @@ function PayrollTab({ techs, jobs, tipEntries=[] }) {
     const tips    = tipsRangeTotal(tipEntries, t.id, period.start, period.end);
     const rate    = t.commission_rate||27;
     const commission = revenue*(rate/100);
-    const total   = commission+tips;
+    const upsellAmt = showBonuses ? upsellAmountInRange(periodJobs, t.id, period.start, period.end) : 0;
+    const { totalPay:upsellPay, rate:upsellRate } = calcUpsellPay(upsellAmt);
+    const sws = showBonuses ? switchovers.filter(sw=>sw.tech_id===t.id&&switchoverDate(sw)>=period.start&&switchoverDate(sw)<=period.end).sort((a,b)=>switchoverDate(a).localeCompare(switchoverDate(b))) : [];
+    const switchPay = sws.reduce((s,sw)=>s+(switchoverPay(sw)||0),0);
+    const switchUnpriced = sws.filter(sw=>switchoverPay(sw)==null).length;
+    const total   = commission+tips+upsellPay+switchPay;
     const weeks   = wkKeys.map(wk=>{
       const wj=tj.filter(j=>j.week_key===wk);
       const wkEndDate = new Date(wk+"T12:00:00Z"); wkEndDate.setUTCDate(wkEndDate.getUTCDate()+6);
@@ -1513,13 +1554,13 @@ function PayrollTab({ techs, jobs, tipEntries=[] }) {
       const wkTips = tipsRangeTotal(tipEntries, t.id, wk, wkEndStr);
       return { wk, rev:wj.reduce((s,j)=>s+(j.revenue||0),0), tips:wkTips, count:wj.length };
     }).filter(w=>w.rev>0||w.tips>0);
-    return { ...t, revenue, tips, rate, commission, total, weeks };
-  }).filter(r=>r.revenue>0||r.tips>0).sort((a,b)=>b.total-a.total);
+    return { ...t, revenue, tips, rate, commission, upsellAmt, upsellPay, upsellRate, sws, switchPay, switchUnpriced, total, weeks };
+  }).filter(r=>r.revenue>0||r.tips>0||r.upsellAmt>0||r.sws.length>0).sort((a,b)=>b.total-a.total);
 
   const teamTotal = rows.reduce((s,r)=>s+r.total,0);
 
   function exportCSV() {
-    const lines=["Tech,Revenue,Commission Rate,Commission,Tips,Total Pay",...rows.map(r=>[r.name,`$${r.revenue.toFixed(2)}`,`${r.rate}%`,`$${r.commission.toFixed(2)}`,`$${r.tips.toFixed(2)}`,`$${r.total.toFixed(2)}`].join(","))].join("\n");
+    const lines=["Tech,Revenue,Commission Rate,Commission,Tips,Upsells,Upsell Rate,Upsell Bonus,Switchovers,Switchover Bonus,Total Pay",...rows.map(r=>[r.name,`$${r.revenue.toFixed(2)}`,`${r.rate}%`,`$${r.commission.toFixed(2)}`,`$${r.tips.toFixed(2)}`,`$${r.upsellAmt.toFixed(2)}`,`${Math.round(r.upsellRate*100)}%`,`$${r.upsellPay.toFixed(2)}`,r.sws.length,`$${r.switchPay.toFixed(2)}`,`$${r.total.toFixed(2)}`].join(","))].join("\n");
     const url=URL.createObjectURL(new Blob([lines],{type:"text/csv"}));
     const a=Object.assign(document.createElement("a"),{href:url,download:`skylo-payroll-${selKey}.csv`});
     a.click(); URL.revokeObjectURL(url);
@@ -1583,6 +1624,36 @@ function PayrollTab({ techs, jobs, tipEntries=[] }) {
                   </div>
                 ))}
               </div>
+              {showBonuses&&(
+                <div style={{ display:"flex", flexDirection:"column", gap:"6px", marginTop:"8px", marginBottom:r.weeks.length>1?"10px":0 }}>
+                  <div style={{ background:C.cardLt, borderRadius:"8px", padding:"10px 12px", display:"flex", justifyContent:"space-between", alignItems:"center", gap:"10px" }}>
+                    <div>
+                      <div style={{ fontSize:"10px", color:C.muted, letterSpacing:"1px", textTransform:"uppercase", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>📈 Upsell Bonus</div>
+                      <div style={{ fontSize:"13px", color:C.black, marginTop:"2px" }}>{r.upsellAmt>0 ? <>${r.upsellAmt.toFixed(2)} of upsells, {Math.round(r.upsellRate*100)}% is <strong>${r.upsellPay.toFixed(2)}</strong></> : "No upsells this pay period"}</div>
+                    </div>
+                    <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"18px", color:C.purple }}>${r.upsellPay.toFixed(2)}</div>
+                  </div>
+                  <div style={{ background:C.cardLt, borderRadius:"8px", padding:"10px 12px" }}>
+                    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:"10px" }}>
+                      <div>
+                        <div style={{ fontSize:"10px", color:C.muted, letterSpacing:"1px", textTransform:"uppercase", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>🔄 Switchover Bonus</div>
+                        <div style={{ fontSize:"13px", color:C.black, marginTop:"2px" }}>{r.sws.length>0 ? `${r.sws.length} switchover${r.sws.length!==1?"s":""}` : "No switchovers this pay period"}</div>
+                      </div>
+                      <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"18px", color:C.purple }}>${r.switchPay.toFixed(2)}</div>
+                    </div>
+                    {r.sws.map(sw=>{
+                      const pay = switchoverPay(sw), base = SWITCHOVER_PAY[sw.plan_id];
+                      return (
+                        <div key={sw.id} style={{ display:"flex", justifyContent:"space-between", gap:"8px", fontSize:"12px", color:C.black, borderTop:`1px solid ${C.border}`, marginTop:"6px", paddingTop:"6px" }}>
+                          <span>{fmtShortDate(switchoverDate(sw))} · {PLAN_MAP[sw.plan_id]?.label||sw.plan_id} · {sw.with_exterior?"Interior + Exterior":"Interior only"}</span>
+                          <span style={{ fontWeight:"700", color:pay==null?C.red:C.black, whiteSpace:"nowrap" }}>{pay==null ? "rate not set" : sw.with_exterior ? `$${base} + $${SWITCHOVER_EXTERIOR_PAY} = $${pay}` : `$${pay}`}</span>
+                        </div>
+                      );
+                    })}
+                    {r.switchUnpriced>0&&<div style={{ fontSize:"11px", color:C.red, marginTop:"6px" }}>⚠ {r.switchUnpriced} switchover{r.switchUnpriced!==1?"s":""} on a plan with no pay amount set — not included in the total.</div>}
+                  </div>
+                </div>
+              )}
               {r.weeks.length>1&&(
                 <div style={{ borderTop:`1px solid ${C.border}`, paddingTop:"10px" }}>
                   <div style={{ fontSize:"10px", color:C.muted, letterSpacing:"1px", textTransform:"uppercase", marginBottom:"6px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>Week Breakdown</div>
@@ -1756,10 +1827,10 @@ function JourneyCard({ tech, rank, total, onClick, expanded, upsells, quota, job
   const earnedBadges = ALL_BADGE_DEFS.filter(b=>tech.badges?.includes(b.id));
   const q = quota || DEFAULT_QUOTA;
 
-  // Current week pay breakdown
-  const wk = getWeekKey();
-  const weekUpsellAmt = upsellAmountInRange(jobs, tech.id, wk, weekEndDate(wk));
-  const { totalPay, breakdown } = calcWeeklyPay(weekUpsellAmt);
+  // Current pay period upsell bonus (tiers reset each pay period)
+  const pp = currentPayPeriod();
+  const weekUpsellAmt = pp ? upsellAmountInRange(jobs, tech.id, pp.start, pp.end) : 0;
+  const { totalPay } = calcUpsellPay(weekUpsellAmt);
   const nextPayTier = getNextPayTier(weekUpsellAmt);
 
   // Month quota tracking
@@ -1854,25 +1925,21 @@ function JourneyCard({ tech, rank, total, onClick, expanded, upsells, quota, job
             
             {/* 💵 Weekly Pay Scale */}
             <div style={{ background:C.cardLt, borderRadius:"12px", padding:"12px 14px", border:`1px solid ${C.green}44` }}>
-              <div style={{ fontSize:"10px", color:C.green, letterSpacing:"2px", textTransform:"uppercase", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontStyle:"italic", marginBottom:"10px" }}>💵 This Week's Pay Scale</div>
+              <div style={{ fontSize:"10px", color:C.green, letterSpacing:"2px", textTransform:"uppercase", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontStyle:"italic", marginBottom:"10px" }}>💵 Upsell Pay Scale{pp ? ` · ${fmtShortDate(pp.start)}–${fmtShortDate(pp.end)}` : ""}</div>
               <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", marginBottom:"10px" }}>
-                <span style={{ fontSize:"12px", color:C.muted }}>Week upsells</span>
+                <span style={{ fontSize:"12px", color:C.muted }}>Pay period upsells</span>
                 <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"20px", color:C.black }}>${weekUpsellAmt.toLocaleString()}</span>
               </div>
               {/* Pay scale — backfill display */}
               <div style={{ display:"flex", flexDirection:"column", gap:"4px", marginBottom:"8px" }}>
                 {(()=>{
-                  const { rate } = calcWeeklyPay(weekUpsellAmt);
+                  const { rate } = calcUpsellPay(weekUpsellAmt);
                   const currentPct = Math.round(rate*100);
-                  return [
-                    { floor:0,   ceil:150,      baseRate:15, label:"$1–$149"    },
-                    { floor:150, ceil:400,       baseRate:20, label:"$150–$399" },
-                    { floor:400, ceil:700,       baseRate:25, label:"$400–$699" },
-                    { floor:700, ceil:Infinity,  baseRate:30, label:"$700+"      },
-                  ].map(b=>{
-                    const isCurrent    = weekUpsellAmt >= b.floor && (b.ceil===Infinity ? true : weekUpsellAmt < b.ceil);
-                    const isPast       = b.ceil !== Infinity && weekUpsellAmt >= b.ceil;
-                    const isLocked     = weekUpsellAmt < b.floor;
+                  return UPSELL_PAY_TIERS.map((t,i)=>{
+                    const b = { baseRate:Math.round(t.rate*100), label:t.label, ceil:UPSELL_PAY_TIERS[i+1]?.over ?? Infinity };
+                    const isCurrent    = (i===0 || weekUpsellAmt > t.over) && (b.ceil===Infinity || weekUpsellAmt <= b.ceil);
+                    const isPast       = b.ceil !== Infinity && weekUpsellAmt > b.ceil;
+                    const isLocked     = i>0 && weekUpsellAmt <= t.over;
                     const backfilled   = isPast && currentPct > b.baseRate;
                     const displayRate  = isLocked ? b.baseRate : currentPct;
                     return (
@@ -1892,7 +1959,7 @@ function JourneyCard({ tech, rank, total, onClick, expanded, upsells, quota, job
                 })()}
               </div>
               <div style={{ borderTop:`1px solid ${C.green}33`, paddingTop:"8px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-                <span style={{ fontSize:"12px", color:C.muted }}>Est. upsell bonus <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", color:C.black }}>({Math.round(calcWeeklyPay(weekUpsellAmt).rate*100)}% × ${weekUpsellAmt})</span></span>
+                <span style={{ fontSize:"12px", color:C.muted }}>Est. upsell bonus <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", color:C.black }}>({Math.round(calcUpsellPay(weekUpsellAmt).rate*100)}% × ${weekUpsellAmt})</span></span>
                 <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"22px", color:C.green }}>${totalPay.toFixed(2)}</span>
               </div>
               {nextPayTier&&(
@@ -3181,7 +3248,8 @@ function TechDashboard({ tech, techs, upsells, switchovers, reviews, callbacks, 
               const projRevenue = Math.round((wkRevenue/daysElapsed)*daysInWeek);
               const projHours   = Math.round((wkHours/daysElapsed)*daysInWeek*10)/10;
               const projMonthly = Math.round(projRevenue*(52/12));
-              const { totalPay:projBonus } = calcWeeklyPay(Math.round((weekUpsell/daysElapsed)*daysInWeek));
+              const curPP = currentPayPeriod();
+              const { totalPay:projBonus } = calcUpsellPay(curPP ? upsellAmountInRange(jobs, tech.id, curPP.start, curPP.end) : 0);
               return (
                 <div style={{ background:C.white, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.purple}`, borderRadius:"12px", padding:"16px 18px", boxShadow:"0 2px 8px rgba(43,156,240,0.08)" }}>
                   <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontStyle:"italic", fontSize:"12px", color:C.purple, letterSpacing:"2px", marginBottom:"12px" }}>
@@ -3192,7 +3260,7 @@ function TechDashboard({ tech, techs, upsells, switchovers, reviews, callbacks, 
                       { l:"Proj. Revenue",      v:`$${projRevenue.toLocaleString()}`,   c:C.green  },
                       { l:"Proj. Hours",         v:`${projHours}h`,                      c:C.blue   },
                       { l:"Proj. Monthly Rev",   v:`$${projMonthly.toLocaleString()}`,   c:C.purple },
-                      { l:"Proj. Upsell Bonus",  v:`$${projBonus.toFixed(2)}`,           c:C.gold   },
+                      { l:"Upsell Bonus (pay period so far)",  v:`$${projBonus.toFixed(2)}`,           c:C.gold   },
                     ].map(s=>(
                       <div key={s.l} style={{ background:C.cardLt, borderRadius:"8px", padding:"10px", textAlign:"center" }}>
                         <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"20px", color:s.c }}>{s.v}</div>
@@ -6912,9 +6980,9 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
   const [menuOpen, setMenuOpen] = useState(false);
   const [awardForm, setAwardForm] = useState({techId:"",badgeId:""});
   const [addForm, setAddForm] = useState({name:"",pin:"",avatar:"",start_date:"",commission_rate:27});
-  const [swForm, setSwForm] = useState({techId:"",planId:""});
+  const [swForm, setSwForm] = useState({techId:"",planId:"",date:mtDateStr(Date.now()),exterior:false});
   const [editingSwId, setEditingSwId] = useState(null);
-  const [editSwForm, setEditSwForm] = useState({date:"",planId:""});
+  const [editSwForm, setEditSwForm] = useState({date:"",planId:"",exterior:false});
   const [swRangePreset, setSwRangePreset] = useState("wtd");
   const [swCStart, setSwCStart] = useState("");
   const [swCEnd, setSwCEnd] = useState("");
@@ -7035,19 +7103,20 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
   async function logSwitchover() {
     if (!swForm.techId||!swForm.planId) return showToast("Select a tech and plan",false);
     setSaving(true);
-    try { await sb("switchovers",{method:"POST",body:JSON.stringify({tech_id:swForm.techId,week_key:getWeekKey(),plan_id:swForm.planId})}); await refreshAll(); showToast(`✅ Switchover logged!`); setSwForm({techId:"",planId:""}); }
+    const date = swForm.date || mtDateStr(Date.now());
+    try { await sb("switchovers",{method:"POST",body:JSON.stringify({tech_id:swForm.techId,week_key:dateToWeekKey(date),sold_date:date,plan_id:swForm.planId,with_exterior:!!swForm.exterior})}); await refreshAll(); showToast(`✅ Switchover logged!`); setSwForm({techId:"",planId:"",date:mtDateStr(Date.now()),exterior:false}); }
     catch(e){ showToast("Error: "+e.message,false); }
     setSaving(false);
   }
   function startEditSwitchover(s) {
     setEditingSwId(s.id);
-    setEditSwForm({ date: s.week_key, planId: s.plan_id });
+    setEditSwForm({ date: switchoverDate(s), planId: s.plan_id, exterior: !!s.with_exterior });
   }
   async function saveEditSwitchover() {
     if (!editSwForm.date) return showToast("Pick a date",false);
     setSaving(true);
     try {
-      const body = { week_key: dateToWeekKey(editSwForm.date), plan_id: editSwForm.planId };
+      const body = { week_key: dateToWeekKey(editSwForm.date), sold_date: editSwForm.date, plan_id: editSwForm.planId, with_exterior: !!editSwForm.exterior };
       await sb(`switchovers?id=eq.${editingSwId}`,{method:"PATCH",body:JSON.stringify(body),prefer:"return=minimal"});
       await refreshAll();
       setEditingSwId(null);
@@ -7287,7 +7356,7 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
         )}
         {tab==="switchovers"&&(
           <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"20px", display:"flex", flexDirection:"column", gap:"12px" }}>
-            <Label color={C.purple}>Log a Switchover · {formatWeekLabel(wk)}</Label>
+            <Label color={C.purple}>Log a Switchover</Label>
             <div style={{ background:C.cardLt, borderRadius:"8px", padding:"8px 12px", fontSize:"12px", color:C.muted }}>
               {formatLastEntered(mostRecentTimestamp(switchovers)) ? (
                 <>Last entered: <strong style={{ color:C.black }}>{formatLastEntered(mostRecentTimestamp(switchovers))}</strong> — everything before that is already logged.</>
@@ -7301,6 +7370,14 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
               <option value="">— Select Plan —</option>
               {SERVICE_PLANS.map(p=><option key={p.id} value={p.id}>{p.label} ({p.freq}) · +{p.pts}pts · ${p.ltv.toLocaleString()}/yr LTV</option>)}
             </select>
+            <div style={{ display:"flex", alignItems:"center", gap:"10px", flexWrap:"wrap" }}>
+              <span style={{ fontSize:"12px", color:C.muted }}>Date sold</span>
+              <input type="date" value={swForm.date} onChange={e=>setSwForm(f=>({...f,date:e.target.value}))} style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"8px", borderRadius:"8px", fontSize:"13px" }}/>
+              <label style={{ display:"flex", alignItems:"center", gap:"6px", fontSize:"13px", color:C.black, cursor:"pointer" }}>
+                <input type="checkbox" checked={!!swForm.exterior} onChange={e=>setSwForm(f=>({...f,exterior:e.target.checked}))} style={{ width:"16px", height:"16px" }}/>
+                Added exterior (+${SWITCHOVER_EXTERIOR_PAY})
+              </label>
+            </div>
             <button onClick={logSwitchover} disabled={saving} style={btn(C.purple)}>{saving?"Saving...":"Log Switchover"}</button>
           </div>
         )}
@@ -7375,7 +7452,7 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
                             <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"14px", color:C.black }}>{tech?.name}</div>
                             <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"8px" }}>
                               <div>
-                                <div style={{ fontSize:"10px", color:C.muted, marginBottom:"4px" }}>Week (pick any day in it)</div>
+                                <div style={{ fontSize:"10px", color:C.muted, marginBottom:"4px" }}>Date sold</div>
                                 <input type="date" value={editSwForm.date} onChange={e=>setEditSwForm(f=>({...f,date:e.target.value}))} style={{ background:C.card, border:`1px solid ${C.border}`, color:C.black, padding:"8px", borderRadius:"8px", fontSize:"13px", width:"100%", boxSizing:"border-box" }}/>
                               </div>
                               <div>
@@ -7385,6 +7462,10 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
                                 </select>
                               </div>
                             </div>
+                            <label style={{ display:"flex", alignItems:"center", gap:"6px", fontSize:"13px", color:C.black, cursor:"pointer" }}>
+                              <input type="checkbox" checked={!!editSwForm.exterior} onChange={e=>setEditSwForm(f=>({...f,exterior:e.target.checked}))} style={{ width:"16px", height:"16px" }}/>
+                              Added exterior (+${SWITCHOVER_EXTERIOR_PAY})
+                            </label>
                             <div style={{ fontSize:"11px", color:C.muted }}>Will be attributed to the week of {formatWeekLabel(dateToWeekKey(editSwForm.date||s.week_key))}</div>
                             <div style={{ display:"flex", gap:"8px" }}>
                               <button onClick={saveEditSwitchover} disabled={saving} style={{ flex:1, background:C.purple, border:"none", color:C.white, padding:"8px", borderRadius:"8px", cursor:"pointer", fontWeight:"700", fontSize:"12px" }}>Save</button>
@@ -7396,7 +7477,7 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
                           <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:"12px" }}>
                             <div>
                               <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"15px", color:C.black }}>{tech?.name}</div>
-                              <div style={{ fontSize:"12px", color:C.muted }}>{formatWeekLabel(s.week_key)} · <span style={{ color:pc, fontWeight:"700" }}>{plan?.label||s.plan_id} · +{plan?.pts||0}pts</span></div>
+                              <div style={{ fontSize:"12px", color:C.muted }}>{s.sold_date ? fmtShortDate(s.sold_date) : formatWeekLabel(s.week_key)} · <span style={{ color:pc, fontWeight:"700" }}>{plan?.label||s.plan_id}{s.with_exterior?" + Ext":""} · +{plan?.pts||0}pts</span></div>
                             </div>
                             <button onClick={()=>startEditSwitchover(s)} style={{ background:"none", border:`1px solid ${C.border}`, color:C.purple, padding:"4px 10px", borderRadius:"4px", cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", fontSize:"11px", flexShrink:0 }}>Edit</button>
                           </div>
@@ -7894,7 +7975,7 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
           <Leaderboard techs={activeTechs} jobs={jobs||[]} upsells={upsells} reviews={reviews} callbacks={callbacks||[]} switchovers={switchovers} timeEntries={timeEntries}/>
         )}
         {tab==="payroll"&&(
-          <PayrollTab techs={techs} jobs={jobs||[]} upsells={upsells} tipEntries={tipEntries}/>
+          <PayrollTab techs={techs} jobs={jobs||[]} upsells={upsells} tipEntries={tipEntries} switchovers={switchovers||[]}/>
         )}
 
         {tab==="ridealong"&&(
