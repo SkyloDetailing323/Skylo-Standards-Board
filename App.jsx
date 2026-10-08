@@ -3262,7 +3262,10 @@ function TechDashboard({ tech, techs, upsells, switchovers, reviews, callbacks, 
       ["reviews","⭐","Reviews"],
       ...(tech.is_lead?[["myteam","👥","My Team"]]:[]),
     ]},
-    ...(SALES_SELF_VIEW[tech.id]?[{ label:"Sales", items:[["mysales","🤝","My Sales"]] }]:[]),
+    ...(SALES_SELF_VIEW[tech.id]||CALLBACK_ENTRY_TECHS.has(tech.id)?[{ label:"Sales", items:[
+      ...(SALES_SELF_VIEW[tech.id]?[["mysales","🤝","My Sales"]]:[]),
+      ...(CALLBACK_ENTRY_TECHS.has(tech.id)?[["callbacks","📞","Callbacks"]]:[]),
+    ] }]:[]),
     ...(!isApprenticeTech(tech)?[{ label:"Forms", items:[["forms","📝","Forms"]] }]:[]),
     { label:"Training", items:[
       ["training","📋","Perfect Day Training"],
@@ -3541,6 +3544,7 @@ function TechDashboard({ tech, techs, upsells, switchovers, reviews, callbacks, 
         {tab==="forms"&&<FormsTab me={tech} role="tech"/>}
         {tab==="auditscores"&&<AuditScoresTab techs={techs} token={token} techId={tech.id}/>}
         {tab==="mysales"&&SALES_SELF_VIEW[tech.id]&&<SalesTab token={token} onlyRep={SALES_SELF_VIEW[tech.id]}/>}
+        {tab==="callbacks"&&CALLBACK_ENTRY_TECHS.has(tech.id)&&<CallbacksPanel techs={techs} jobs={jobs||[]} callbacks={callbacks||[]} refreshAll={refreshAll} showToast={showToast}/>}
       </div>
       {toast&&(
         <div style={{ position:"fixed", bottom:"24px", left:"50%", transform:"translateX(-50%)", background:toast.ok?C.green:"#ef4444", color:C.white, padding:"12px 28px", borderRadius:"24px", fontSize:"14px", fontWeight:"900", zIndex:999, whiteSpace:"nowrap", fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:"1px", fontStyle:"italic", boxShadow:"0 4px 20px rgba(0,0,0,0.15)" }}>
@@ -7215,6 +7219,260 @@ function AuditScoresTab({ techs, token, techId=null, canSync=false, view="both" 
   );
 }
 
+// ─── CALLBACKS (log + history) ───────────────────────────────────────────────
+// Used by the admin panel and by Trevor's login (CALLBACK_ENTRY_TECHS) --
+// he's the one who enters callbacks as they come in.
+const CALLBACK_ENTRY_TECHS = new Set(["4641f4da-a16f-411b-8688-8b81ac06eda7"]);   // Trevor Prince
+function CallbacksPanel({ techs, jobs, callbacks, refreshAll, showToast }) {
+  const CB_EMPTY = { techId:"", jobId:"", lookback:14, jobDate:"", customer:"", jobNumber:"", splitTechId:"", missed:[], severity:0, reason:"" };
+  const [cbForm, setCbForm] = useState(CB_EMPTY);
+  const [cbPreset, setCbPreset] = useState("mtd");
+  const [cbCStart, setCbCStart] = useState("");
+  const [cbCEnd, setCbCEnd] = useState("");
+  const [saving, setSaving] = useState(false);
+  const inp={ background:C.white, border:`1px solid ${C.border}`, color:C.black, padding:"10px 14px", borderRadius:"8px", fontSize:"14px", fontFamily:"'Barlow',sans-serif", width:"100%", boxSizing:"border-box" };
+  const sel=(val)=>({...inp, color:val?C.black:C.muted});
+  const btn=(color)=>({ background:saving?C.border:color||C.blue, border:"none", color:C.black, padding:"13px", borderRadius:"24px", cursor:saving?"not-allowed":"pointer", fontSize:"13px", fontWeight:"900", fontStyle:"italic", letterSpacing:"2px", fontFamily:"'Barlow Condensed',sans-serif", width:"100%", textTransform:"uppercase" });
+  // The jobs a tech did recently, newest first -- picking one fills in the
+  // date and client, and tells us who else was on it (split job).
+  function recentJobsFor(techId, days) {
+    if (!techId) return [];
+    const since = new Date(); since.setDate(since.getDate()-days);
+    const sinceStr = since.toLocaleDateString("en-CA",{timeZone:"America/Denver"});
+    const seen = new Set();
+    return (jobs||[]).filter(j=>j.tech_id===techId && j.job_date>=sinceStr && (j.revenue||0)>0 && !seen.has(j.hcp_job_id) && seen.add(j.hcp_job_id))
+      .sort((x,y)=>y.job_date.localeCompare(x.job_date));
+  }
+  function techsOnJob(hcpJobId) {
+    return [...new Set((jobs||[]).filter(j=>j.hcp_job_id===hcpJobId).map(j=>j.tech_id))];
+  }
+  async function logCallback() {
+    const f = cbForm;
+    if (!f.techId) return showToast("Select a tech",false);
+    const picked = f.jobId && f.jobId!=="manual" ? (jobs||[]).find(j=>j.hcp_job_id===f.jobId && j.tech_id===f.techId) : null;
+    if (!picked && f.jobId!=="manual") return showToast("Pick the job (or choose 'Job not listed')",false);
+    const jobDate = picked ? picked.job_date : f.jobDate;
+    if (!jobDate) return showToast("Enter the date the job was completed",false);
+    if (!f.missed.length) return showToast("Pick at least one thing that was missed",false);
+    if (!f.severity) return showToast("Pick the severity level",false);
+    const techIds = picked
+      ? techsOnJob(picked.hcp_job_id)
+      : [f.techId, ...(f.splitTechId && f.splitTechId!==f.techId ? [f.splitTechId] : [])];
+    const weight = Math.round(1/techIds.length*10000)/10000;
+    const group_id = crypto.randomUUID();
+    setSaving(true);
+    try {
+      const rows = techIds.map(id=>({
+        tech_id:id, weight, group_id,
+        job_date: jobDate,
+        customer_name: (picked?.customer_name || f.customer || "").trim() || null,
+        job_number: f.jobNumber.trim() || null,
+        hcp_job_id: picked ? picked.hcp_job_id : null,
+        missed_items: f.missed, severity: f.severity,
+        reason: f.reason || "",
+      }));
+      await sb("callbacks",{method:"POST",body:JSON.stringify(rows)});
+      await refreshAll();
+      const names = techIds.map(id=>techs.find(t=>t.id===id)?.name||"?").join(" & ");
+      const each = Math.round(CALLBACK_SEVERITY[f.severity].pts*weight);
+      showToast(`📞 Callback logged for ${names} — ${each} pts deducted${techIds.length>1?" each (split)":""}`);
+      setCbForm(CB_EMPTY);
+    } catch(e){ showToast("Error: "+e.message,false); }
+    setSaving(false);
+  }
+  async function deleteCallback(cb) {
+    const both = cb.group_id && callbacks.filter(c=>c.group_id===cb.group_id).length>1;
+    if (!window.confirm(both ? "Delete this callback for everyone on the job?" : "Delete this callback?")) return;
+    setSaving(true);
+    try { await sb(cb.group_id ? `callbacks?group_id=eq.${cb.group_id}` : `callbacks?id=eq.${cb.id}`,{method:"DELETE",prefer:"return=minimal"}); await refreshAll(); showToast("Callback removed"); }
+    catch(e){ showToast("Error: "+e.message,false); }
+    setSaving(false);
+  }
+          const f = cbForm;
+          const recent = recentJobsFor(f.techId, f.lookback);
+          const picked = f.jobId && f.jobId!=="manual" ? recent.find(j=>j.hcp_job_id===f.jobId) : null;
+          const crew = picked ? techsOnJob(picked.hcp_job_id) : [];
+          const toggleMissed = id => setCbForm(v=>({...v, missed: v.missed.includes(id) ? v.missed.filter(x=>x!==id) : [...v.missed, id]}));
+          // Date-filtered view: callbacks by the day the job was completed,
+          // grouped so a split job shows once.
+          const { start:cbStart, end:cbEnd } = getDateRangeBounds(cbPreset, cbCStart, cbCEnd);
+          const inRange = callbacks.filter(c=>{ const d=callbackDate(c); return d && d>=cbStart && d<=cbEnd; });
+          const groups = Object.values(inRange.reduce((acc,c)=>{ const k=c.group_id||c.id; (acc[k]=acc[k]||[]).push(c); return acc; },{}))
+            .sort((x,y)=>(callbackDate(y[0])||"").localeCompare(callbackDate(x[0])||""));
+          const cbCount = inRange.reduce((s,c)=>s+(c.weight==null?1:Number(c.weight)),0);
+          const jobCount = new Set((jobs||[]).filter(j=>j.job_date>=cbStart && j.job_date<=cbEnd && (j.revenue||0)>0).map(j=>j.hcp_job_id)).size;
+          const rate = jobCount>0 ? cbCount/jobCount*100 : 0;
+          const itemCounts = {};
+          groups.forEach(g=>(g[0].missed_items||[]).forEach(id=>{ itemCounts[id]=(itemCounts[id]||0)+1; }));
+          const topItems = Object.entries(itemCounts).sort((x,y)=>y[1]-x[1]);
+          const sevCounts = [1,2,3].map(l=>groups.filter(g=>g[0].severity===l).length);
+          const techSummary = techs.map(t=>{
+            const mine = inRange.filter(c=>c.tech_id===t.id);
+            return { t, count: mine.reduce((s,c)=>s+(c.weight==null?1:Number(c.weight)),0), pts: mine.reduce((s,c)=>s+callbackPoints(c),0) };
+          }).filter(x=>x.count>0).sort((x,y)=>y.count-x.count);
+          const fmtCount = n => Number.isInteger(n) ? String(n) : n.toFixed(1);
+          const chip = on => ({ display:"flex", alignItems:"flex-start", gap:"8px", padding:"6px 8px", borderRadius:"8px", border:`1px solid ${on?"#ef4444":C.border}`, background:on?"#ef444410":C.white, cursor:"pointer", fontSize:"13px", color:C.black });
+          return (
+          <div style={{ display:"flex", flexDirection:"column", gap:"16px" }}>
+            {/* Date range + rate */}
+            <DateRangePicker label="📅 Callbacks by job date" color="#ef4444" preset={cbPreset} setPreset={setCbPreset} customStart={cbCStart} setCustomStart={setCbCStart} customEnd={cbCEnd} setCustomEnd={setCbCEnd}>
+              <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:"8px", marginTop:"14px" }}>
+                {[
+                  { l:"Callback rate", v:`${rate.toFixed(2)}%`, c: rate>=2?"#ef4444":C.green },
+                  { l:"Callbacks", v:fmtCount(cbCount), c:C.black },
+                  { l:"Completed jobs", v:jobCount, c:C.black },
+                ].map(x=>(
+                  <div key={x.l} style={{ background:C.cardLt, borderRadius:"8px", padding:"10px", textAlign:"center" }}>
+                    <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"24px", color:x.c }}>{x.v}</div>
+                    <div style={{ fontSize:"9px", color:C.muted, textTransform:"uppercase", letterSpacing:"1px" }}>{x.l}</div>
+                  </div>
+                ))}
+              </div>
+              <div style={{ fontSize:"11px", color:C.muted, marginTop:"6px" }}>{cbStart} → {cbEnd} · Standard is under 2% · split-job callbacks count ½ per tech</div>
+            </DateRangePicker>
+
+            {/* Log a callback */}
+            <div style={{ background:C.white, border:`2px solid #ef444444`, borderTop:`3px solid #ef4444`, borderRadius:"12px", padding:"20px", display:"flex", flexDirection:"column", gap:"12px", boxShadow:"0 2px 8px rgba(239,68,68,0.08)" }}>
+              <Label color="#ef4444">📞 Log a Callback</Label>
+              <select value={f.techId} onChange={e=>setCbForm({...CB_EMPTY, techId:e.target.value, lookback:f.lookback})} style={sel(f.techId)}>
+                <option value="">— Select Tech —</option>
+                {techs.filter(t=>t.title!=="owner").map(t=><option key={t.id} value={t.id}>{t.name}{t.is_active===false?" (archived)":""}</option>)}
+              </select>
+              {f.techId&&(<>
+                <div style={{ display:"flex", gap:"8px", alignItems:"center" }}>
+                  <select value={f.jobId} onChange={e=>setCbForm(v=>({...v, jobId:e.target.value}))} style={{ ...sel(f.jobId), flex:1 }}>
+                    <option value="">— Pick the job —</option>
+                    {recent.map(j=><option key={j.hcp_job_id} value={j.hcp_job_id}>{fmtShortDate(j.job_date)} · {j.customer_name||"(no client name)"} · ${Math.round(j.revenue)}{techsOnJob(j.hcp_job_id).length>1?" · split":""}</option>)}
+                    <option value="manual">Job not listed — enter it by hand</option>
+                  </select>
+                  <select value={f.lookback} onChange={e=>setCbForm(v=>({...v, lookback:Number(e.target.value), jobId:""}))} style={{ ...sel(true), width:"auto" }}>
+                    {[14,30,60,90].map(d=><option key={d} value={d}>Last {d} days</option>)}
+                  </select>
+                </div>
+                {picked&&(
+                  <div style={{ fontSize:"12px", color:C.black, background:C.cardLt, borderRadius:"8px", padding:"8px 10px" }}>
+                    Completed <strong>{fmtShortDate(picked.job_date)}</strong> · {picked.customer_name||"no client name"}
+                    {crew.length>1 && <> · <strong style={{ color:"#ef4444" }}>Split job:</strong> {crew.map(id=>techs.find(t=>t.id===id)?.name||"?").join(" & ")} — each gets 1/{crew.length} of the callback and points</>}
+                  </div>
+                )}
+                {f.jobId==="manual"&&(
+                  <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"8px" }}>
+                    <div>
+                      <div style={{ fontSize:"10px", color:C.muted, marginBottom:"4px" }}>Date the job was completed</div>
+                      <input type="date" value={f.jobDate} onChange={e=>setCbForm(v=>({...v, jobDate:e.target.value}))} style={inp}/>
+                    </div>
+                    <div>
+                      <div style={{ fontSize:"10px", color:C.muted, marginBottom:"4px" }}>Client name</div>
+                      <input value={f.customer} onChange={e=>setCbForm(v=>({...v, customer:e.target.value}))} style={inp}/>
+                    </div>
+                    <select value={f.splitTechId} onChange={e=>setCbForm(v=>({...v, splitTechId:e.target.value}))} style={{ ...sel(f.splitTechId), gridColumn:"1 / -1" }}>
+                      <option value="">Split job? Pick the other tech (optional)</option>
+                      {techs.filter(t=>t.id!==f.techId && t.title!=="owner").map(t=><option key={t.id} value={t.id}>{t.name}</option>)}
+                    </select>
+                  </div>
+                )}
+                <input placeholder="HCP job # (optional)" value={f.jobNumber} onChange={e=>setCbForm(v=>({...v, jobNumber:e.target.value}))} style={inp}/>
+                <div>
+                  <div style={{ fontSize:"12px", color:C.muted, marginBottom:"6px" }}>What was missed? (pick all that apply)</div>
+                  {CALLBACK_AREAS.map(a=>(
+                    <div key={a.area} style={{ marginBottom:"8px" }}>
+                      <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"13px", color:C.black, marginBottom:"4px" }}>{a.area}</div>
+                      <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(220px,1fr))", gap:"6px" }}>
+                        {a.items.map(i=>{ const on=f.missed.includes(i.id); return (
+                          <label key={i.id} style={chip(on)}>
+                            <input type="checkbox" checked={on} onChange={()=>toggleMissed(i.id)} style={{ marginTop:"2px" }}/>
+                            <span><strong>{i.label}</strong>{i.hint&&<span style={{ display:"block", fontSize:"11px", color:C.muted }}>{i.hint}</span>}</span>
+                          </label>
+                        ); })}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div>
+                  <div style={{ fontSize:"12px", color:C.muted, marginBottom:"6px" }}>How bad was it?</div>
+                  <div style={{ display:"flex", flexDirection:"column", gap:"6px" }}>
+                    {[1,2,3].map(l=>{ const on=f.severity===l, sv=CALLBACK_SEVERITY[l]; return (
+                      <label key={l} style={chip(on)}>
+                        <input type="radio" name="cb-severity" checked={on} onChange={()=>setCbForm(v=>({...v, severity:l}))} style={{ marginTop:"2px" }}/>
+                        <span><strong>{sv.label}</strong> — {sv.desc} <strong style={{ color:"#ef4444" }}>(−{sv.pts} pts)</strong></span>
+                      </label>
+                    ); })}
+                  </div>
+                </div>
+                <input placeholder="Notes (optional)" value={f.reason} onChange={e=>setCbForm(v=>({...v, reason:e.target.value}))} style={inp}/>
+                <button onClick={logCallback} disabled={saving} style={{ ...btn("#ef4444"), color:C.white }}>{saving?"Saving...":"Log Callback — Deduct Points"}</button>
+              </>)}
+            </div>
+
+            {/* Breakdown for the range */}
+            {groups.length>0&&(
+              <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"16px 18px", boxShadow:"0 2px 8px rgba(43,156,240,0.08)", display:"flex", flexDirection:"column", gap:"12px" }}>
+                <Label color="#ef4444">📊 Breakdown</Label>
+                <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:"8px" }}>
+                  {[1,2,3].map((l,i)=>(
+                    <div key={l} style={{ background:C.cardLt, borderRadius:"8px", padding:"8px", textAlign:"center" }}>
+                      <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"20px", color:C.black }}>{sevCounts[i]}</div>
+                      <div style={{ fontSize:"9px", color:C.muted, textTransform:"uppercase", letterSpacing:"1px" }}>{CALLBACK_SEVERITY[l].label}</div>
+                    </div>
+                  ))}
+                </div>
+                {topItems.length>0&&(
+                  <div>
+                    <div style={{ fontSize:"12px", color:C.muted, marginBottom:"4px" }}>Most missed</div>
+                    {topItems.map(([id,n])=>(
+                      <div key={id} style={{ display:"flex", justifyContent:"space-between", fontSize:"13px", color:C.black, padding:"2px 0" }}><span>{CALLBACK_ITEM_LABEL[id]||id}</span><strong>{n}</strong></div>
+                    ))}
+                  </div>
+                )}
+                <div>
+                  <div style={{ fontSize:"12px", color:C.muted, marginBottom:"4px" }}>By tech</div>
+                  {techSummary.map(x=>(
+                    <div key={x.t.id} style={{ display:"flex", justifyContent:"space-between", fontSize:"13px", color:C.black, padding:"2px 0" }}>
+                      <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>{x.t.name}</span>
+                      <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", color:"#ef4444" }}>{fmtCount(x.count)} callback{x.count!==1?"s":""} · {x.pts} pts</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* History for the range */}
+            <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:"12px", overflow:"hidden", boxShadow:"0 2px 8px rgba(43,156,240,0.08)" }}>
+              <div style={{ padding:"14px 18px", borderBottom:`1px solid ${C.border}`, background:C.cardLt }}>
+                <Label color="#ef4444">📋 Callback History</Label>
+              </div>
+              <div style={{ padding:"14px 18px", display:"flex", flexDirection:"column", gap:"8px" }}>
+                {groups.length===0&&<div style={{ fontSize:"13px", color:C.muted }}>No callbacks for jobs in this date range. Keep it that way! 💪</div>}
+                {groups.map(g=>{
+                  const c = g[0];
+                  const names = g.map(r=>techs.find(t=>t.id===r.tech_id)?.name||"Unknown").join(" & ");
+                  return (
+                    <div key={c.group_id||c.id} style={{ background:`#ef444410`, border:`1px solid #ef444433`, borderLeft:`3px solid #ef4444`, borderRadius:"8px", padding:"12px 14px", display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:"12px" }}>
+                      <div>
+                        <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"15px", color:C.black }}>
+                          {names}{g.length>1&&<span style={{ fontSize:"11px", color:"#ef4444", marginLeft:"6px" }}>SPLIT</span>}
+                          {c.severity&&<span style={{ fontSize:"11px", color:C.white, background:"#ef4444", borderRadius:"8px", padding:"1px 7px", marginLeft:"6px" }}>{CALLBACK_SEVERITY[c.severity].label}</span>}
+                        </div>
+                        <div style={{ fontSize:"12px", color:C.black, marginTop:"3px" }}>
+                          Job {callbackDate(c)?fmtShortDate(callbackDate(c)):"?"}{c.customer_name?` · ${c.customer_name}`:""}{c.job_number?` · #${c.job_number}`:""}
+                        </div>
+                        {(c.missed_items||[]).length>0&&<div style={{ fontSize:"11px", color:C.muted, marginTop:"2px" }}>Missed: {c.missed_items.map(id=>CALLBACK_ITEM_LABEL[id]||id).join(", ")}</div>}
+                        {c.reason&&<div style={{ fontSize:"11px", color:C.muted, marginTop:"2px" }}>{c.reason}</div>}
+                        <div style={{ fontSize:"10px", color:C.muted, marginTop:"2px" }}>Logged {new Date(c.created_at).toLocaleDateString("en-US",{month:"short",day:"numeric"})}</div>
+                      </div>
+                      <div style={{ display:"flex", alignItems:"center", gap:"10px", flexShrink:0 }}>
+                        <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"15px", color:"#ef4444" }}>{callbackPoints(c)} pts{g.length>1?" each":""}</span>
+                        <button onClick={()=>deleteCallback(c)} disabled={saving} style={{ background:"none", border:`1px solid #ef4444`, color:"#ef4444", padding:"4px 10px", borderRadius:"6px", cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", fontSize:"11px" }}>DELETE</button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+          );
+}
+
 // ─── ADMIN PANEL ──────────────────────────────────────────────────────────────
 // isManager: logged in as the Field Supervisor. Same panel as the owners, but
 // read-only on anything that decides his own bonus (quota targets, trucks and
@@ -7240,11 +7498,6 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
   const [swCStart, setSwCStart] = useState("");
   const [swCEnd, setSwCEnd] = useState("");
   const [reviewForm, setReviewForm] = useState({});
-  const CB_EMPTY = { techId:"", jobId:"", lookback:14, jobDate:"", customer:"", jobNumber:"", splitTechId:"", missed:[], severity:0, reason:"" };
-  const [cbForm, setCbForm] = useState(CB_EMPTY);
-  const [cbPreset, setCbPreset] = useState("mtd");
-  const [cbCStart, setCbCStart] = useState("");
-  const [cbCEnd, setCbCEnd] = useState("");
   const [archivingId, setArchivingId] = useState(null);
   const [archiveForm, setArchiveForm] = useState({left_date:"",leave_reason:"",fire_category:"",fire_notes:""});
   const [toast, setToast] = useState(null);
@@ -7382,61 +7635,6 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
     if (!window.confirm("Delete this switchover?")) return;
     setSaving(true);
     try { await sb(`switchovers?id=eq.${id}`,{method:"DELETE",prefer:"return=minimal"}); await refreshAll(); setEditingSwId(null); showToast("Switchover deleted"); }
-    catch(e){ showToast("Error: "+e.message,false); }
-    setSaving(false);
-  }
-  // The jobs a tech did recently, newest first -- picking one fills in the
-  // date and client, and tells us who else was on it (split job).
-  function recentJobsFor(techId, days) {
-    if (!techId) return [];
-    const since = new Date(); since.setDate(since.getDate()-days);
-    const sinceStr = since.toLocaleDateString("en-CA",{timeZone:"America/Denver"});
-    const seen = new Set();
-    return (jobs||[]).filter(j=>j.tech_id===techId && j.job_date>=sinceStr && (j.revenue||0)>0 && !seen.has(j.hcp_job_id) && seen.add(j.hcp_job_id))
-      .sort((x,y)=>y.job_date.localeCompare(x.job_date));
-  }
-  function techsOnJob(hcpJobId) {
-    return [...new Set((jobs||[]).filter(j=>j.hcp_job_id===hcpJobId).map(j=>j.tech_id))];
-  }
-  async function logCallback() {
-    const f = cbForm;
-    if (!f.techId) return showToast("Select a tech",false);
-    const picked = f.jobId && f.jobId!=="manual" ? (jobs||[]).find(j=>j.hcp_job_id===f.jobId && j.tech_id===f.techId) : null;
-    if (!picked && f.jobId!=="manual") return showToast("Pick the job (or choose 'Job not listed')",false);
-    const jobDate = picked ? picked.job_date : f.jobDate;
-    if (!jobDate) return showToast("Enter the date the job was completed",false);
-    if (!f.missed.length) return showToast("Pick at least one thing that was missed",false);
-    if (!f.severity) return showToast("Pick the severity level",false);
-    const techIds = picked
-      ? techsOnJob(picked.hcp_job_id)
-      : [f.techId, ...(f.splitTechId && f.splitTechId!==f.techId ? [f.splitTechId] : [])];
-    const weight = Math.round(1/techIds.length*10000)/10000;
-    const group_id = crypto.randomUUID();
-    setSaving(true);
-    try {
-      const rows = techIds.map(id=>({
-        tech_id:id, weight, group_id,
-        job_date: jobDate,
-        customer_name: (picked?.customer_name || f.customer || "").trim() || null,
-        job_number: f.jobNumber.trim() || null,
-        hcp_job_id: picked ? picked.hcp_job_id : null,
-        missed_items: f.missed, severity: f.severity,
-        reason: f.reason || "",
-      }));
-      await sb("callbacks",{method:"POST",body:JSON.stringify(rows)});
-      await refreshAll();
-      const names = techIds.map(id=>techs.find(t=>t.id===id)?.name||"?").join(" & ");
-      const each = Math.round(CALLBACK_SEVERITY[f.severity].pts*weight);
-      showToast(`📞 Callback logged for ${names} — ${each} pts deducted${techIds.length>1?" each (split)":""}`);
-      setCbForm(CB_EMPTY);
-    } catch(e){ showToast("Error: "+e.message,false); }
-    setSaving(false);
-  }
-  async function deleteCallback(cb) {
-    const both = cb.group_id && callbacks.filter(c=>c.group_id===cb.group_id).length>1;
-    if (!window.confirm(both ? "Delete this callback for everyone on the job?" : "Delete this callback?")) return;
-    setSaving(true);
-    try { await sb(cb.group_id ? `callbacks?group_id=eq.${cb.group_id}` : `callbacks?id=eq.${cb.id}`,{method:"DELETE",prefer:"return=minimal"}); await refreshAll(); showToast("Callback removed"); }
     catch(e){ showToast("Error: "+e.message,false); }
     setSaving(false);
   }
@@ -7768,191 +7966,7 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
           <AdminTipEntry techs={techs} tipEntries={tipEntries} refreshAll={refreshAll} showToast={showToast}/>
         )}
 
-        {tab==="callbacks"&&(()=>{
-          const f = cbForm;
-          const recent = recentJobsFor(f.techId, f.lookback);
-          const picked = f.jobId && f.jobId!=="manual" ? recent.find(j=>j.hcp_job_id===f.jobId) : null;
-          const crew = picked ? techsOnJob(picked.hcp_job_id) : [];
-          const toggleMissed = id => setCbForm(v=>({...v, missed: v.missed.includes(id) ? v.missed.filter(x=>x!==id) : [...v.missed, id]}));
-          // Date-filtered view: callbacks by the day the job was completed,
-          // grouped so a split job shows once.
-          const { start:cbStart, end:cbEnd } = getDateRangeBounds(cbPreset, cbCStart, cbCEnd);
-          const inRange = callbacks.filter(c=>{ const d=callbackDate(c); return d && d>=cbStart && d<=cbEnd; });
-          const groups = Object.values(inRange.reduce((acc,c)=>{ const k=c.group_id||c.id; (acc[k]=acc[k]||[]).push(c); return acc; },{}))
-            .sort((x,y)=>(callbackDate(y[0])||"").localeCompare(callbackDate(x[0])||""));
-          const cbCount = inRange.reduce((s,c)=>s+(c.weight==null?1:Number(c.weight)),0);
-          const jobCount = new Set((jobs||[]).filter(j=>j.job_date>=cbStart && j.job_date<=cbEnd && (j.revenue||0)>0).map(j=>j.hcp_job_id)).size;
-          const rate = jobCount>0 ? cbCount/jobCount*100 : 0;
-          const itemCounts = {};
-          groups.forEach(g=>(g[0].missed_items||[]).forEach(id=>{ itemCounts[id]=(itemCounts[id]||0)+1; }));
-          const topItems = Object.entries(itemCounts).sort((x,y)=>y[1]-x[1]);
-          const sevCounts = [1,2,3].map(l=>groups.filter(g=>g[0].severity===l).length);
-          const techSummary = techs.map(t=>{
-            const mine = inRange.filter(c=>c.tech_id===t.id);
-            return { t, count: mine.reduce((s,c)=>s+(c.weight==null?1:Number(c.weight)),0), pts: mine.reduce((s,c)=>s+callbackPoints(c),0) };
-          }).filter(x=>x.count>0).sort((x,y)=>y.count-x.count);
-          const fmtCount = n => Number.isInteger(n) ? String(n) : n.toFixed(1);
-          const chip = on => ({ display:"flex", alignItems:"flex-start", gap:"8px", padding:"6px 8px", borderRadius:"8px", border:`1px solid ${on?"#ef4444":C.border}`, background:on?"#ef444410":C.white, cursor:"pointer", fontSize:"13px", color:C.black });
-          return (
-          <div style={{ display:"flex", flexDirection:"column", gap:"16px" }}>
-            {/* Date range + rate */}
-            <DateRangePicker label="📅 Callbacks by job date" color="#ef4444" preset={cbPreset} setPreset={setCbPreset} customStart={cbCStart} setCustomStart={setCbCStart} customEnd={cbCEnd} setCustomEnd={setCbCEnd}>
-              <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:"8px", marginTop:"14px" }}>
-                {[
-                  { l:"Callback rate", v:`${rate.toFixed(2)}%`, c: rate>=2?"#ef4444":C.green },
-                  { l:"Callbacks", v:fmtCount(cbCount), c:C.black },
-                  { l:"Completed jobs", v:jobCount, c:C.black },
-                ].map(x=>(
-                  <div key={x.l} style={{ background:C.cardLt, borderRadius:"8px", padding:"10px", textAlign:"center" }}>
-                    <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"24px", color:x.c }}>{x.v}</div>
-                    <div style={{ fontSize:"9px", color:C.muted, textTransform:"uppercase", letterSpacing:"1px" }}>{x.l}</div>
-                  </div>
-                ))}
-              </div>
-              <div style={{ fontSize:"11px", color:C.muted, marginTop:"6px" }}>{cbStart} → {cbEnd} · Standard is under 2% · split-job callbacks count ½ per tech</div>
-            </DateRangePicker>
-
-            {/* Log a callback */}
-            <div style={{ background:C.white, border:`2px solid #ef444444`, borderTop:`3px solid #ef4444`, borderRadius:"12px", padding:"20px", display:"flex", flexDirection:"column", gap:"12px", boxShadow:"0 2px 8px rgba(239,68,68,0.08)" }}>
-              <Label color="#ef4444">📞 Log a Callback</Label>
-              <select value={f.techId} onChange={e=>setCbForm({...CB_EMPTY, techId:e.target.value, lookback:f.lookback})} style={sel(f.techId)}>
-                <option value="">— Select Tech —</option>
-                {techs.filter(t=>t.title!=="owner").map(t=><option key={t.id} value={t.id}>{t.name}{t.is_active===false?" (archived)":""}</option>)}
-              </select>
-              {f.techId&&(<>
-                <div style={{ display:"flex", gap:"8px", alignItems:"center" }}>
-                  <select value={f.jobId} onChange={e=>setCbForm(v=>({...v, jobId:e.target.value}))} style={{ ...sel(f.jobId), flex:1 }}>
-                    <option value="">— Pick the job —</option>
-                    {recent.map(j=><option key={j.hcp_job_id} value={j.hcp_job_id}>{fmtShortDate(j.job_date)} · {j.customer_name||"(no client name)"} · ${Math.round(j.revenue)}{techsOnJob(j.hcp_job_id).length>1?" · split":""}</option>)}
-                    <option value="manual">Job not listed — enter it by hand</option>
-                  </select>
-                  <select value={f.lookback} onChange={e=>setCbForm(v=>({...v, lookback:Number(e.target.value), jobId:""}))} style={{ ...sel(true), width:"auto" }}>
-                    {[14,30,60,90].map(d=><option key={d} value={d}>Last {d} days</option>)}
-                  </select>
-                </div>
-                {picked&&(
-                  <div style={{ fontSize:"12px", color:C.black, background:C.cardLt, borderRadius:"8px", padding:"8px 10px" }}>
-                    Completed <strong>{fmtShortDate(picked.job_date)}</strong> · {picked.customer_name||"no client name"}
-                    {crew.length>1 && <> · <strong style={{ color:"#ef4444" }}>Split job:</strong> {crew.map(id=>techs.find(t=>t.id===id)?.name||"?").join(" & ")} — each gets 1/{crew.length} of the callback and points</>}
-                  </div>
-                )}
-                {f.jobId==="manual"&&(
-                  <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"8px" }}>
-                    <div>
-                      <div style={{ fontSize:"10px", color:C.muted, marginBottom:"4px" }}>Date the job was completed</div>
-                      <input type="date" value={f.jobDate} onChange={e=>setCbForm(v=>({...v, jobDate:e.target.value}))} style={inp}/>
-                    </div>
-                    <div>
-                      <div style={{ fontSize:"10px", color:C.muted, marginBottom:"4px" }}>Client name</div>
-                      <input value={f.customer} onChange={e=>setCbForm(v=>({...v, customer:e.target.value}))} style={inp}/>
-                    </div>
-                    <select value={f.splitTechId} onChange={e=>setCbForm(v=>({...v, splitTechId:e.target.value}))} style={{ ...sel(f.splitTechId), gridColumn:"1 / -1" }}>
-                      <option value="">Split job? Pick the other tech (optional)</option>
-                      {techs.filter(t=>t.id!==f.techId && t.title!=="owner").map(t=><option key={t.id} value={t.id}>{t.name}</option>)}
-                    </select>
-                  </div>
-                )}
-                <input placeholder="HCP job # (optional)" value={f.jobNumber} onChange={e=>setCbForm(v=>({...v, jobNumber:e.target.value}))} style={inp}/>
-                <div>
-                  <div style={{ fontSize:"12px", color:C.muted, marginBottom:"6px" }}>What was missed? (pick all that apply)</div>
-                  {CALLBACK_AREAS.map(a=>(
-                    <div key={a.area} style={{ marginBottom:"8px" }}>
-                      <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"13px", color:C.black, marginBottom:"4px" }}>{a.area}</div>
-                      <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(220px,1fr))", gap:"6px" }}>
-                        {a.items.map(i=>{ const on=f.missed.includes(i.id); return (
-                          <label key={i.id} style={chip(on)}>
-                            <input type="checkbox" checked={on} onChange={()=>toggleMissed(i.id)} style={{ marginTop:"2px" }}/>
-                            <span><strong>{i.label}</strong>{i.hint&&<span style={{ display:"block", fontSize:"11px", color:C.muted }}>{i.hint}</span>}</span>
-                          </label>
-                        ); })}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-                <div>
-                  <div style={{ fontSize:"12px", color:C.muted, marginBottom:"6px" }}>How bad was it?</div>
-                  <div style={{ display:"flex", flexDirection:"column", gap:"6px" }}>
-                    {[1,2,3].map(l=>{ const on=f.severity===l, sv=CALLBACK_SEVERITY[l]; return (
-                      <label key={l} style={chip(on)}>
-                        <input type="radio" name="cb-severity" checked={on} onChange={()=>setCbForm(v=>({...v, severity:l}))} style={{ marginTop:"2px" }}/>
-                        <span><strong>{sv.label}</strong> — {sv.desc} <strong style={{ color:"#ef4444" }}>(−{sv.pts} pts)</strong></span>
-                      </label>
-                    ); })}
-                  </div>
-                </div>
-                <input placeholder="Notes (optional)" value={f.reason} onChange={e=>setCbForm(v=>({...v, reason:e.target.value}))} style={inp}/>
-                <button onClick={logCallback} disabled={saving} style={{ ...btn("#ef4444"), color:C.white }}>{saving?"Saving...":"Log Callback — Deduct Points"}</button>
-              </>)}
-            </div>
-
-            {/* Breakdown for the range */}
-            {groups.length>0&&(
-              <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"16px 18px", boxShadow:"0 2px 8px rgba(43,156,240,0.08)", display:"flex", flexDirection:"column", gap:"12px" }}>
-                <Label color="#ef4444">📊 Breakdown</Label>
-                <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:"8px" }}>
-                  {[1,2,3].map((l,i)=>(
-                    <div key={l} style={{ background:C.cardLt, borderRadius:"8px", padding:"8px", textAlign:"center" }}>
-                      <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"20px", color:C.black }}>{sevCounts[i]}</div>
-                      <div style={{ fontSize:"9px", color:C.muted, textTransform:"uppercase", letterSpacing:"1px" }}>{CALLBACK_SEVERITY[l].label}</div>
-                    </div>
-                  ))}
-                </div>
-                {topItems.length>0&&(
-                  <div>
-                    <div style={{ fontSize:"12px", color:C.muted, marginBottom:"4px" }}>Most missed</div>
-                    {topItems.map(([id,n])=>(
-                      <div key={id} style={{ display:"flex", justifyContent:"space-between", fontSize:"13px", color:C.black, padding:"2px 0" }}><span>{CALLBACK_ITEM_LABEL[id]||id}</span><strong>{n}</strong></div>
-                    ))}
-                  </div>
-                )}
-                <div>
-                  <div style={{ fontSize:"12px", color:C.muted, marginBottom:"4px" }}>By tech</div>
-                  {techSummary.map(x=>(
-                    <div key={x.t.id} style={{ display:"flex", justifyContent:"space-between", fontSize:"13px", color:C.black, padding:"2px 0" }}>
-                      <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>{x.t.name}</span>
-                      <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", color:"#ef4444" }}>{fmtCount(x.count)} callback{x.count!==1?"s":""} · {x.pts} pts</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* History for the range */}
-            <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:"12px", overflow:"hidden", boxShadow:"0 2px 8px rgba(43,156,240,0.08)" }}>
-              <div style={{ padding:"14px 18px", borderBottom:`1px solid ${C.border}`, background:C.cardLt }}>
-                <Label color="#ef4444">📋 Callback History</Label>
-              </div>
-              <div style={{ padding:"14px 18px", display:"flex", flexDirection:"column", gap:"8px" }}>
-                {groups.length===0&&<div style={{ fontSize:"13px", color:C.muted }}>No callbacks for jobs in this date range. Keep it that way! 💪</div>}
-                {groups.map(g=>{
-                  const c = g[0];
-                  const names = g.map(r=>techs.find(t=>t.id===r.tech_id)?.name||"Unknown").join(" & ");
-                  return (
-                    <div key={c.group_id||c.id} style={{ background:`#ef444410`, border:`1px solid #ef444433`, borderLeft:`3px solid #ef4444`, borderRadius:"8px", padding:"12px 14px", display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:"12px" }}>
-                      <div>
-                        <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"15px", color:C.black }}>
-                          {names}{g.length>1&&<span style={{ fontSize:"11px", color:"#ef4444", marginLeft:"6px" }}>SPLIT</span>}
-                          {c.severity&&<span style={{ fontSize:"11px", color:C.white, background:"#ef4444", borderRadius:"8px", padding:"1px 7px", marginLeft:"6px" }}>{CALLBACK_SEVERITY[c.severity].label}</span>}
-                        </div>
-                        <div style={{ fontSize:"12px", color:C.black, marginTop:"3px" }}>
-                          Job {callbackDate(c)?fmtShortDate(callbackDate(c)):"?"}{c.customer_name?` · ${c.customer_name}`:""}{c.job_number?` · #${c.job_number}`:""}
-                        </div>
-                        {(c.missed_items||[]).length>0&&<div style={{ fontSize:"11px", color:C.muted, marginTop:"2px" }}>Missed: {c.missed_items.map(id=>CALLBACK_ITEM_LABEL[id]||id).join(", ")}</div>}
-                        {c.reason&&<div style={{ fontSize:"11px", color:C.muted, marginTop:"2px" }}>{c.reason}</div>}
-                        <div style={{ fontSize:"10px", color:C.muted, marginTop:"2px" }}>Logged {new Date(c.created_at).toLocaleDateString("en-US",{month:"short",day:"numeric"})}</div>
-                      </div>
-                      <div style={{ display:"flex", alignItems:"center", gap:"10px", flexShrink:0 }}>
-                        <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"15px", color:"#ef4444" }}>{callbackPoints(c)} pts{g.length>1?" each":""}</span>
-                        <button onClick={()=>deleteCallback(c)} disabled={saving} style={{ background:"none", border:`1px solid #ef4444`, color:"#ef4444", padding:"4px 10px", borderRadius:"6px", cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", fontSize:"11px" }}>DELETE</button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          </div>
-          );
-        })()}
+        {tab==="callbacks"&&<CallbacksPanel techs={techs} jobs={jobs} callbacks={callbacks} refreshAll={refreshAll} showToast={showToast}/>}
 
         {tab==="award"&&(
           <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"20px", display:"flex", flexDirection:"column", gap:"12px" }}>
