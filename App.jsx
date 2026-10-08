@@ -1525,6 +1525,8 @@ function ReportsTab({ techs, jobs, upsells=[], timeEntries=[], tipEntries=[], te
 // order as the payroll provider.
 const lastNameKey = n => { const p = String(n||"").trim().split(/\s+/); return `${p.slice(1).join(" ") || p[0]} ${p[0]}`.toLowerCase(); };
 const byLastName = (a,b) => lastNameKey(a.name).localeCompare(lastNameKey(b.name));
+const byFirstName = (a,b) => String(a.name||"").trim().toLowerCase().localeCompare(String(b.name||"").trim().toLowerCase());
+const PAYROLL_SORTS = { last:byLastName, first:byFirstName, revenue:(a,b) => b.revenue-a.revenue || byLastName(a,b) };
 
 // ─── PAYROLL TAB ──────────────────────────────────────────────────────────────
 function PayrollTab({ techs, jobs, tipEntries=[], switchovers=[], token=null, canWaive=false }) {
@@ -1536,6 +1538,7 @@ function PayrollTab({ techs, jobs, tipEntries=[], switchovers=[], token=null, ca
   const [tote, setTote] = useState({ loading:true, error:null, subs:[], waivers:[] });
   const [toteBump, setToteBump] = useState(0);
   const [waiving, setWaiving] = useState(null);
+  const [sortBy, setSortBy] = useState("last");
   useEffect(() => {
     let live = true;
     fetch(`/.netlify/functions/audit-scores?kind=tote&from=${PP_SEMI_MONTHLY_FROM}&to=${mtDateStr(Date.now())}`, { headers:{ Authorization:`Bearer ${token || ""}` } })
@@ -1595,7 +1598,7 @@ function PayrollTab({ techs, jobs, tipEntries=[], switchovers=[], token=null, ca
       return { wk, rev:wj.reduce((s,j)=>s+(j.revenue||0),0), tips:wkTips, count:wj.length };
     }).filter(w=>w.rev>0||w.tips>0);
     return { ...t, revenue, tips, rate, commission, upsellAmt, upsellPay, upsellRate, sws, switchPay, switchUnpriced, toteHere, toteDeduct, total, weeks };
-  }).filter(r=>r.revenue>0||r.tips>0||r.upsellAmt>0||r.sws.length>0||r.toteHere.length>0).sort(byLastName);
+  }).filter(r=>r.revenue>0||r.tips>0||r.upsellAmt>0||r.sws.length>0||r.toteHere.length>0).sort(PAYROLL_SORTS[sortBy] || byLastName);
 
   const teamTotal = rows.reduce((s,r)=>s+r.total,0);
 
@@ -1629,6 +1632,14 @@ function PayrollTab({ techs, jobs, tipEntries=[], switchovers=[], token=null, ca
             </div>
           ))}
         </div>
+      </div>
+
+      {/* Sort */}
+      <div style={{ display:"flex", alignItems:"center", gap:"8px", flexWrap:"wrap" }}>
+        <span style={{ fontSize:"11px", color:C.muted, letterSpacing:"1px", textTransform:"uppercase", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>Sort by</span>
+        {[["last","Last name"],["first","First name"],["revenue","Serviced revenue"]].map(([id,label])=>(
+          <button key={id} onClick={()=>setSortBy(id)} style={{ background:sortBy===id?C.blue:C.white, border:`1px solid ${sortBy===id?C.blue:C.border}`, color:sortBy===id?C.white:C.black, padding:"6px 12px", borderRadius:"16px", cursor:"pointer", fontSize:"12px", fontWeight:"700", fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:"1px", textTransform:"uppercase" }}>{label}</button>
+        ))}
       </div>
 
       {/* Team total */}
