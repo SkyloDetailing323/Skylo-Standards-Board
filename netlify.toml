@@ -78,3 +78,8 @@
   # Tote Checks + Tech Audits (GHL forms) -> ghl_form_submissions, every 15 min.
   schedule = "*/15 * * * *"
   timeout = 26
+
+[functions."hcp-nightly-recheck-cron"]
+  # Nightly ~1:52 AM Mountain (07:52 UTC): re-reads the open pay period(s)
+  # from HCP so edits made after a job first synced reach Payroll.
+  schedule = "52 7 * * *"
