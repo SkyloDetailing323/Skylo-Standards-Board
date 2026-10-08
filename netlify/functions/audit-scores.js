@@ -7,14 +7,19 @@
 //
 // GET ?from=YYYY-MM-DD&to=YYYY-MM-DD[&kind=tote]
 //   Admins also get tote_waivers (items waived from the Payroll deduction).
+//   Everyone gets truck_grades: the Truck Check grades for the returned
+//   submissions (so a tech only ever gets their own).
 // POST { submission_id, item, waived } -- owners only: waive (or un-waive) a
 //   Tote Check item so Payroll doesn't deduct it.
+// POST { action:"truck_grade", submission_id, score, notes } -- owners and the
+//   Field Supervisor: set or override a Truck Check grade (0-100).
 // Header: Authorization: Bearer <login token>
 
 const { verifyToken, tokenFrom } = require("./lib/authToken");
 
 const PAGE = 1000;
 const TOTE_FORM_ID = "xU7BPLPkUCLiefCvawVx";
+const TRUCK_FORM_ID = "70rs6amtoR9LiP9BDY7E";   // AUDIT_CONFIG.truck.formId
 const isDate = s => /^\d{4}-\d{2}-\d{2}$/.test(s || "");
 // GHL bookkeeping in a submission's raw answers -- never sent to the browser.
 const PRIVATE_KEYS = ["signatureHash", "ip", "sessionId", "submissionId", "location_id", "eventData", "Timezone", "formId"];
@@ -49,11 +54,47 @@ async function setWaiver(who, body) {
   return json(200, { ok: true });
 }
 
+// Owners and the Field Supervisor set (or override) a Truck Check grade.
+async function setTruckGrade(who, body) {
+  if (who.role !== "owner" && who.role !== "manager") return json(403, { error: "Only owners and the Field Supervisor can grade truck checks" });
+  const { submission_id, notes } = body || {};
+  const score = Number(body && body.score);
+  if (!submission_id || typeof submission_id !== "string") return json(400, { error: "submission_id is required" });
+  if (body.score === null || body.score === "" || !Number.isFinite(score) || score < 0 || score > 100) return json(400, { error: "Score must be a number from 0 to 100" });
+  if (notes != null && typeof notes !== "string") return json(400, { error: "notes must be text" });
+  const sub = await sbGetAll(`ghl_form_submissions?select=id,form_id&id=eq.${encodeURIComponent(submission_id)}`);
+  if (!sub.length || sub[0].form_id !== TRUCK_FORM_ID) return json(404, { error: "That Truck Check wasn't found" });
+  const res = await fetch(`${process.env.SUPABASE_URL}/rest/v1/truck_check_grades?on_conflict=submission_id`, {
+    method: "POST",
+    headers: { apikey: process.env.SUPABASE_KEY, Authorization: `Bearer ${process.env.SUPABASE_KEY}`, "Content-Type": "application/json", Prefer: "resolution=merge-duplicates,return=representation" },
+    body: JSON.stringify({ submission_id, score: Math.round(score * 10) / 10, notes: (notes || "").trim().slice(0, 2000) || null, graded_by: who.name || who.role, graded_at: new Date().toISOString() }),
+  });
+  if (!res.ok) return json(500, { error: `Couldn't save (HTTP ${res.status}): ${(await res.text()).slice(0, 200)}` });
+  const rows = await res.json().catch(() => []);
+  return json(200, { ok: true, grade: rows[0] || null });
+}
+
+// Grades for these submission ids. The table may not exist until its
+// migration is applied: no grades then.
+async function truckGradesFor(ids) {
+  const out = [];
+  for (let i = 0; i < ids.length; i += 100) {
+    const list = ids.slice(i, i + 100).map(id => `"${String(id).replace(/"/g, "")}"`).join(",");
+    try { out.push(...await sbGetAll(`truck_check_grades?select=submission_id,score,notes,graded_by,graded_at,checklist&submission_id=in.(${encodeURIComponent(list)})`)); }
+    catch (e) { if (/42P01|PGRST205|does not exist|Could not find the table/.test(e.message)) return out; throw e; }
+  }
+  return out;
+}
+
 exports.handler = async (event) => {
   const who = verifyToken(tokenFrom(event));
   if (!who) return json(401, { error: "Log in again" });
   if (event.httpMethod === "POST") {
     let body; try { body = JSON.parse(event.body || "{}"); } catch { return json(400, { error: "Bad JSON" }); }
+    // Tote waivers predate the action field: no action = a waiver.
+    if (body && body.action === "truck_grade") {
+      try { return await setTruckGrade(who, body); } catch (e) { return json(500, { error: e.message }); }
+    }
     return setWaiver(who, body);
   }
   const q = event.queryStringParameters || {};
@@ -77,7 +118,8 @@ exports.handler = async (event) => {
       const s = await sbGetAll("ghl_sync_state?key=eq.forms_last_run&select=value,updated_at").catch(() => []);
       lastRun = s[0] ? { ...s[0].value, updated_at: s[0].updated_at } : null;
     }
-    return json(200, { submissions, last_run: lastRun, tote_waivers: toteWaivers });
+    const truckGrades = await truckGradesFor(submissions.filter(s => s.form_id === TRUCK_FORM_ID).map(s => s.id));
+    return json(200, { submissions, last_run: lastRun, tote_waivers: toteWaivers, truck_grades: truckGrades });
   } catch (e) {
     return json(500, { error: /ghl_form_submissions/.test(e.message) && /42P01|does not exist/.test(e.message) ? "The ghl_form_submissions table hasn't been created yet (migration not applied)" : e.message });
   }
