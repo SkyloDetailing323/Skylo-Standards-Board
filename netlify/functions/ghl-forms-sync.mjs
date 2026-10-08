@@ -132,11 +132,17 @@ export default async (req) => {
     const knownIds = knownAuditFieldIds();
     const unmappedAuditFields = {};
 
-    for (const form of [AUDIT_CONFIG.tote, AUDIT_CONFIG.audit]) {
+    // Truck last: it's the biggest form, so tote checks and audits never wait on it.
+    for (const form of [AUDIT_CONFIG.tote, AUDIT_CONFIG.audit, AUDIT_CONFIG.truck]) {
       let saved = 0;
+      // A form with nothing stored yet (Truck Check when it was added)
+      // backfills its last 30 days instead of just the incremental window.
+      let formSince = since;
+      if (since && !(await sb(`ghl_form_submissions?select=id&form_id=eq.${form.formId}&limit=1`)).length)
+        formSince = new Date(Date.now() - 30 * 864e5).toISOString().slice(0, 10);
       for (let page = 1; page <= 200; page++) {
         if (Date.now() - started > TIME_BUDGET_MS) { result.incomplete = true; break; }
-        const q = `/forms/submissions?locationId=${loc}&formId=${form.formId}&limit=100&page=${page}${since ? `&startAt=${since}` : ""}`;
+        const q = `/forms/submissions?locationId=${loc}&formId=${form.formId}&limit=100&page=${page}${formSince ? `&startAt=${formSince}` : ""}`;
         const data = await ghl(q);
         const list = data.submissions || [];
         if (!list.length) break;
@@ -157,7 +163,7 @@ export default async (req) => {
             // Audits: the Job Date question (by field id). Tote checks: the Date question.
             work_date: formKind(form.formId) === "audit"
               ? auditJobDate(s.others) || workDateOf({}, submittedAt, [])
-              : workDateOf(answers, submittedAt, AUDIT_CONFIG.tote.dateLabels),
+              : workDateOf(answers, submittedAt, AUDIT_CONFIG[formKind(form.formId)].dateLabels),
             tech_name: techName, tech_id: techId, answers, raw: s, synced_at: new Date().toISOString(),
           };
         });

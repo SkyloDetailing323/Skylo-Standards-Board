@@ -15,6 +15,13 @@
 // "Drill - Battery - Charger" matches "Drill-Battery-Charger".
 
 export const AUDIT_CONFIG = {
+  // Nightly Truck Check (photos). Synced so the photos can be graded; the
+  // app's Forms tab opens it with the tech's First/Last Name filled in.
+  truck: {
+    formId: "70rs6amtoR9LiP9BDY7E",
+    techLabels: ["Tech", "Name"],
+    dateLabels: ["Date"],
+  },
   tote: {
     formId: "xU7BPLPkUCLiefCvawVx",
     techLabels: ["Tech", "Detail Tech"],
@@ -172,6 +179,7 @@ export function workDateOf(answers, submittedAt, dateLabels) {
 export function formKind(formId) {
   if (formId === AUDIT_CONFIG.tote.formId) return "tote";
   if (formId === AUDIT_CONFIG.audit.formId) return "audit";
+  if (formId === AUDIT_CONFIG.truck.formId) return "truck";
   return null;
 }
 // fields: the submission's raw answers keyed by GHL field id (raw.others).
