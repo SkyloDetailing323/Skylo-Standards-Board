@@ -3,8 +3,8 @@ import { TEST_QUESTIONS, TESTS, TEST_KEYS, questionsFor, shuffle } from "./train
 import { computeOpsMonth, monthRange, mountainDate, CALLBACK_TIERS, QUOTA_TIERS, RETENTION_TIERS, NON_ROUTE_VEHICLES, OPS_EXCLUDED_TITLES } from "./opsBonus.js";
 import { techDriverDays, weeklyDriverScore, findUnassignedDriving, DRIVER_CONFIG } from "./driverScoring.js";
 import { buildFordImport } from "./fordReports.js";
-import { techWeekCard, techScoreCard, teamSummary, scoreWindow, TECH_SCORE_CONFIG } from "./techScores.js";
-import { formKind, scoreToteCheck, scoreTechAudit, latestPerDay, auditDays, weeklyAuditPct, auditWeekStart, toteCharges } from "./auditScoring.js";
+import { techWeekCard, techScoreCard, teamSummary, scoreWindow, truckScore, isTruckExempt, TECH_SCORE_CONFIG } from "./techScores.js";
+import { formKind, scoreToteCheck, scoreTechAudit, latestPerDay, auditDays, weeklyAuditPct, auditWeekStart, toteCharges, submissionPhotoUrls } from "./auditScoring.js";
 
 // ─── SUPABASE CONFIG ──────────────────────────────────────────────────────────
 const SUPABASE_URL = "https://mjmwxxvqcsptrocwucis.supabase.co";
@@ -7843,6 +7843,154 @@ function AuditScoresTab({ techs, token, techId=null, canSync=false, view="overvi
 }
 
 
+// ─── TRUCK INSPECTIONS (admin) ────────────────────────────────────────────────
+// The nightly Truck Check (GHL form, photos), per tech per night worked (a
+// job with revenue). Graded nights use the grade; submitted but not graded
+// yet counts 100 for now; a night worked with no Truck Check counts 0.
+// Apprentices still in training aren't listed. Owners and the Field
+// Supervisor can set or override a grade. Feeds the Truck part of the
+// Equipment & Truck section of the Tech Score. Display only -- not tied to pay.
+function PhotoThumb({ url }) {
+  const [bad, setBad] = useState(false);
+  return (
+    <a href={url} target="_blank" rel="noopener noreferrer" style={{ display:"inline-flex", alignItems:"center", justifyContent:"center", width:"104px", height:"104px", borderRadius:"8px", border:`1px solid ${C.border}`, background:C.cardLt, overflow:"hidden", fontSize:"13px", color:C.blue, textDecoration:"none", textAlign:"center" }}>
+      {bad ? "📎 Open file" : <img src={url} alt="Truck Check photo" loading="lazy" onError={() => setBad(true)} style={{ width:"100%", height:"100%", objectFit:"cover" }}/>}
+    </a>
+  );
+}
+
+function TruckInspectionsTab({ techs, jobs=[], token, canGrade=false, showToast=()=>{} }) {
+  const [wk, setWk] = useState(auditDefaultWeek());
+  const [state, setState] = useState({ loading:true, error:null, data:null });
+  const [open, setOpen] = useState(null);          // tech id
+  const [openNight, setOpenNight] = useState(null); // "<techId>|<date>"
+  const [edit, setEdit] = useState({});            // submission id -> { score, notes }
+  const [saving, setSaving] = useState(null);
+  const end = weekEndDate(wk), today = mtDateStr(Date.now()), thisWeek = auditThisWeek();
+
+  useEffect(() => {
+    let live = true;
+    setState(s => ({ ...s, loading:true, error:null }));
+    fetch(`/.netlify/functions/audit-scores?from=${wk}&to=${end}&kind=truck`, { headers:{ Authorization:`Bearer ${token || ""}` } })
+      .then(async r => { const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`); return j; })
+      .then(data => live && setState({ loading:false, error:null, data }))
+      .catch(e => live && setState({ loading:false, error:e.message, data:null }));
+    return () => { live = false; };
+  }, [wk, end, token]);
+
+  const subs = (state.data?.submissions || []).filter(s => formKind(s.form_id)==="truck");
+  const grades = state.data?.truck_grades || [];
+  const unmatched = [...new Set(subs.filter(s => !s.tech_id).map(s => s.tech_name || "(no name)"))].sort();
+  const rows = techs.filter(t => t.is_active!==false && t.title!=="owner" && !isTruckExempt(t)).sort(byFirstName)
+    .map(t => ({ tech:t, ...truckScore({ techId:t.id, tech:t, jobs, truckSubs:subs.filter(s => s.tech_id===t.id), grades, from:wk, to:end, today }) }));
+  const arrow = { background:C.white, border:`1px solid ${C.border}`, borderRadius:"8px", padding:"6px 12px", cursor:"pointer", fontSize:"14px", color:C.black };
+  const inp = { background:C.white, border:`1px solid ${C.border}`, color:C.black, padding:"8px 10px", borderRadius:"8px", fontSize:"15px", boxSizing:"border-box" };
+
+  async function saveGrade(sub) {
+    const e = edit[sub.id] || {};
+    const score = Number(e.score);
+    if (e.score==null || e.score==="" || !Number.isFinite(score) || score<0 || score>100) return showToast("Grade must be a number from 0 to 100", false);
+    setSaving(sub.id);
+    try {
+      const r = await fetch(`/.netlify/functions/audit-scores`, { method:"POST", headers:{ "Content-Type":"application/json", Authorization:`Bearer ${token || ""}` },
+        body:JSON.stringify({ action:"truck_grade", submission_id:sub.id, score, notes:e.notes || "" }) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+      setState(st => ({ ...st, data:{ ...st.data, truck_grades:[...(st.data?.truck_grades || []).filter(g => g.submission_id!==sub.id), j.grade || { submission_id:sub.id, score, notes:e.notes || null, graded_at:new Date().toISOString() }] } }));
+      setEdit(x => { const n = { ...x }; delete n[sub.id]; return n; });
+      showToast("✅ Grade saved");
+    } catch(err) { showToast("Couldn't save: "+err.message, false); }
+    setSaving(null);
+  }
+
+  // One night: when it came in, its photos, its grade, and the override.
+  function nightDetail(n) {
+    const sub = n.sub, g = n.grade;
+    if (!sub) return <div style={{ fontSize:"14px", color:C.red, marginTop:"6px" }}>{n.status==="pending" ? "Not in yet tonight." : "No Truck Check was submitted for this night — counts 0."}</div>;
+    const photos = submissionPhotoUrls(sub);
+    const e = edit[sub.id] || { score: g?.score ?? "", notes: g?.notes ?? "" };
+    const set = (k, v) => setEdit(x => ({ ...x, [sub.id]: { ...e, [k]:v } }));
+    return (
+      <div style={{ marginTop:"8px" }}>
+        <div style={{ fontSize:"14px", color:C.black }}>Submitted {fmtShortDate(mtDateStr(Date.parse(sub.submitted_at)))} at {formatMTTime(sub.submitted_at)}</div>
+        {photos.length===0 ? <div style={{ fontSize:"13px", color:C.muted, marginTop:"6px" }}>No photos found on this submission.</div> : (
+          <div style={{ display:"flex", flexWrap:"wrap", gap:"6px", marginTop:"8px" }}>{photos.map(p => <PhotoThumb key={p.url} url={p.url}/>)}</div>
+        )}
+        <div style={{ fontSize:"14px", color:C.black, marginTop:"8px" }}>
+          {g ? <>Grade <strong>{fmtScore(Number(g.score))}</strong>{g.graded_by ? ` · by ${g.graded_by}` : ""}{g.graded_at ? ` · ${fmtShortDate(mtDateStr(Date.parse(g.graded_at)))}` : ""}</>
+            : <span style={{ color:C.gold }}>Not graded yet — counts {TECH_SCORE_CONFIG.truck.notGradedScore} for now</span>}
+        </div>
+        {g?.notes && <div style={{ fontSize:"14px", color:C.black, marginTop:"4px" }}>📝 {g.notes}</div>}
+        {canGrade && (
+          <div style={{ display:"flex", gap:"6px", flexWrap:"wrap", alignItems:"center", marginTop:"8px" }}>
+            <input type="number" min="0" max="100" inputMode="decimal" placeholder="0–100" value={e.score} onChange={ev => set("score", ev.target.value)} style={{ ...inp, width:"90px" }} aria-label="Grade"/>
+            <input placeholder="Notes (what was wrong)" value={e.notes} onChange={ev => set("notes", ev.target.value)} style={{ ...inp, flex:"1 1 180px" }} aria-label="Notes"/>
+            <button disabled={saving===sub.id} onClick={() => saveGrade(sub)} style={{ background:C.blue, border:"none", color:C.white, padding:"9px 16px", borderRadius:"8px", cursor:"pointer", fontSize:"14px", fontWeight:"700" }}>{saving===sub.id ? "Saving…" : g ? "Save override" : "Save grade"}</button>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:"8px", marginBottom:"12px" }}>
+        <button style={arrow} onClick={() => { setWk(shiftWeek(wk,-1)); setOpen(null); }}>◀</button>
+        <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"16px", color:C.black }}>{formatWeekLabel(wk)}{wk===thisWeek ? " · this week" : ""}</div>
+        <button style={{ ...arrow, opacity:wk>=thisWeek?0.4:1 }} disabled={wk>=thisWeek} onClick={() => { setWk(shiftWeek(wk,1)); setOpen(null); }}>▶</button>
+      </div>
+      <div style={{ fontSize:"13px", color:C.muted, marginBottom:"12px", lineHeight:"1.5" }}>
+        Nightly Truck Checks (GHL form) for every night a tech worked (a job with revenue). Graded = the grade; submitted but not graded yet counts {TECH_SCORE_CONFIG.truck.notGradedScore} for now; worked with no Truck Check counts 0. Apprentices in training aren't listed. Part of the Equipment &amp; Truck section of the Tech Score. Weeks run Wednesday–Tuesday. Display only — not tied to pay.
+      </div>
+      {state.error && <div style={{ background:`${C.red}10`, border:`1px solid ${C.red}`, borderRadius:"10px", padding:"12px", fontSize:"13px", color:C.red, marginBottom:"10px" }}>Couldn't load: {state.error}</div>}
+      {state.loading && !state.data && <div style={{ color:C.muted, padding:"16px" }}>Loading...</div>}
+      {state.data && unmatched.length>0 && (
+        <div style={{ background:"rgba(239,68,68,0.08)", border:"1px solid #ef4444", borderRadius:"10px", padding:"10px 12px", marginBottom:"12px", fontSize:"13px", color:C.black }}>
+          <div style={{ fontWeight:"700", color:C.red }}>⚠ Truck Checks this week with a name that doesn't match the roster — not counted:</div>
+          {unmatched.join(", ")}
+        </div>
+      )}
+      {state.data && rows.map(r => {
+        const isOpen = open===r.tech.id;
+        const missedNights = r.nights.filter(n => n.status==="missed");
+        const canOpen = r.nights.length>0 || r.extra.length>0;
+        return (
+          <div key={r.tech.id} style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"12px 14px", marginBottom:"8px", opacity:canOpen?1:0.6 }}>
+            <div onClick={() => canOpen && setOpen(isOpen ? null : r.tech.id)} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:"10px", cursor:canOpen?"pointer":"default" }}>
+              <div>
+                <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"18px", color:C.black }}>{r.tech.name} {canOpen && <span style={{ fontSize:"12px", color:C.muted }}>{isOpen?"▲":"▼"}</span>}</div>
+                <div style={{ fontSize:"14px", color:C.black, marginTop:"2px" }}>{r.worked ? `Submitted ${r.submitted} / ${r.worked} night${r.worked!==1?"s":""} worked` : r.nights.length ? "Worked tonight — Truck Check not in yet" : "No nights worked"}{r.notGraded ? <span style={{ color:C.gold }}> · {r.notGraded} not graded yet</span> : null}</div>
+                {missedNights.length>0 && <div style={{ fontSize:"14px", color:C.red, marginTop:"2px", fontWeight:"700" }}>Missing: {missedNights.map(n => fmtShortDate(n.date)).reverse().join(", ")}</div>}
+              </div>
+              <div style={{ textAlign:"right" }}>
+                <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"24px", color:sectionColor(r.score), lineHeight:1 }}>{fmtScore(r.score)}</div>
+                <div style={{ fontSize:"11px", color:C.muted, marginTop:"3px" }}>average grade</div>
+              </div>
+            </div>
+            {isOpen && (
+              <div style={{ marginTop:"8px" }}>
+                {[...r.nights.map(n => ({ ...n, counted:true })), ...r.extra.map(x => ({ ...x, status:"extra", score:null, counted:false }))].map(n => {
+                  const key = `${r.tech.id}|${n.date}`, nOpen = openNight===key;
+                  const st = n.status==="extra" ? { label:"No paid job this night — not counted", color:C.muted } : TRUCK_STATUS[n.status];
+                  return (
+                    <div key={key} style={{ borderTop:`1px solid ${C.border}`, padding:"8px 0" }}>
+                      <div onClick={() => setOpenNight(nOpen ? null : key)} style={{ display:"flex", justifyContent:"space-between", gap:"8px", cursor:"pointer", fontSize:"15px" }}>
+                        <span style={{ color:st.color || C.black, fontWeight:"700" }}>{fmtShortDate(n.date)} · {st.label} <span style={{ fontSize:"12px", color:C.muted }}>{nOpen?"▲":"▼"}</span></span>
+                        <span style={{ color:sectionColor(n.score), fontWeight:"900", fontFamily:"'Barlow Condensed',sans-serif", fontSize:"17px" }}>{n.score==null ? "—" : fmtScore(n.score)}</span>
+                      </div>
+                      {nOpen && nightDetail(n)}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 // ─── TRUCKS (admin) ───────────────────────────────────────────────────────────
 // Who picked which truck on a day (with history by date), driving nobody
 // picked a truck for (assign it to a tech or dismiss it), and the vehicle
@@ -8685,10 +8833,7 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
           <AuditScoresTab key={id} view={view} hideTabs techs={techs} token={currentUser?.token} canSync={!isManager} jobs={jobs||[]} callbacks={callbacks||[]} reviews={reviews||[]} switchovers={switchovers||[]} quota={quota}/>
         ))}
         {tab==="truckinspections"&&(
-          <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"20px", fontSize:"14px", color:C.black, lineHeight:"1.6" }}>
-            <Label color={C.blue}>🚚 Truck Inspections</Label>
-            Coming soon.
-          </div>
+          <TruckInspectionsTab techs={techs} jobs={jobs||[]} token={currentUser?.token} canGrade showToast={showToast}/>
         )}
 
         {tab==="upsellaudit"&&(

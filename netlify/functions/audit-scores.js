@@ -5,7 +5,7 @@
 // service key: owners and the Field Supervisor get every tech, a tech gets
 // only their own submissions. Scoring happens in the app (auditScoring.js).
 //
-// GET ?from=YYYY-MM-DD&to=YYYY-MM-DD[&kind=tote]
+// GET ?from=YYYY-MM-DD&to=YYYY-MM-DD[&kind=tote|truck]
 //   Admins also get tote_waivers (items waived from the Payroll deduction).
 //   Everyone gets truck_grades: the Truck Check grades for the returned
 //   submissions (so a tech only ever gets their own).
@@ -103,7 +103,7 @@ exports.handler = async (event) => {
   const admin = who.role === "owner" || who.role === "manager";
   if (!admin && !who.techId) return json(403, { error: "No tech on this login" });
   const techFilter = admin ? "" : `&tech_id=eq.${encodeURIComponent(who.techId)}`;
-  const kindFilter = q.kind === "tote" ? `&form_id=eq.${TOTE_FORM_ID}` : "";
+  const kindFilter = q.kind === "tote" ? `&form_id=eq.${TOTE_FORM_ID}` : q.kind === "truck" ? `&form_id=eq.${TRUCK_FORM_ID}` : "";
   try {
     const rows = await sbGetAll(`ghl_form_submissions?select=id,form_id,submitted_at,work_date,tech_name,tech_id,answers,fields:raw->others&work_date=gte.${q.from}&work_date=lte.${q.to}${techFilter}${kindFilter}&order=work_date.desc,submitted_at.desc`);
     // Tech Audits are scored by GHL field id, so they get the raw answers.

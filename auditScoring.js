@@ -396,3 +396,28 @@ export function weeklyAuditPct(days) {
   const scored = days.filter(d => d.pct != null);
   return scored.length ? scored.reduce((s, d) => s + d.pct, 0) / scored.length : null;
 }
+
+// ─── truck checks ──────────────────────────────────────────────────────────
+// Photo / file links anywhere in a submission -- its answers and its raw
+// fields (GHL keeps file uploads as nested objects there, which the answers
+// leave out). Any http(s) string that looks like an image or a GHL-hosted
+// file counts; tolerant on purpose, since the exact shape varies.
+const IMG_EXT = /\.(jpe?g|png|gif|webp|heic|heif|bmp|tiff?)(\?|#|$)/i;
+const FILE_HOST = /(msgsndr|leadconnectorhq|gohighlevel|highlevel|filesafe|storage\.googleapis\.com|firebasestorage|amazonaws\.com|cloudfront\.net)/i;
+export function submissionPhotoUrls(sub) {
+  const out = [], seen = new Set();
+  const walk = (v, depth) => {
+    if (v == null || depth > 10) return;
+    if (typeof v === "string") {
+      for (const part of v.split(/[\s,]+(?=https?:\/\/)/i)) {
+        const s = part.trim();
+        if (!/^https?:\/\/\S+$/i.test(s) || seen.has(s) || !(IMG_EXT.test(s) || FILE_HOST.test(s))) continue;
+        seen.add(s); out.push({ url: s, image: IMG_EXT.test(s) });
+      }
+    } else if (Array.isArray(v)) v.forEach(x => walk(x, depth + 1));
+    else if (typeof v === "object") Object.values(v).forEach(x => walk(x, depth + 1));
+  };
+  walk(sub && sub.answers, 0);
+  walk(sub && sub.fields, 0);
+  return out;
+}

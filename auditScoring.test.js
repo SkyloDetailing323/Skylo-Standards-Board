@@ -4,7 +4,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { AUDIT_CONFIG, toteCharges, scoreTechAudit, auditDays, weeklyAuditPct, auditWeekStart, techNameOf, auditJobDate } from "./auditScoring.js";
+import { AUDIT_CONFIG, toteCharges, scoreTechAudit, auditDays, weeklyAuditPct, auditWeekStart, techNameOf, auditJobDate, submissionPhotoUrls } from "./auditScoring.js";
 
 const ALL = ["On my Way", "Start Job", "Before Pictures", "Workflow Checklist", "After Pictures", "Finish", "Send Invoice"];
 const OLD_FORM = ["Ga8aYHKmIy2SQ9KGqqEf","FY37nOA0b0rDZZaxRqAM","Vub4DsjU4dfJlgUzfq67","wWEni4JJVpTdbpRFzZRu","AqH3PL6wI1TROYl86C3M","zRIHBlKBZT8KrcY6l7rI","ndftAbwlEYb1VE4OfCPO","6ku5mwXQIpIahX7JvcT9","8oM3PJ48QtcrbxzeYLuQ","tpZsIalOFoFkBIWMtyua","XDlSPqE6ZBuHAgYr1oSE","KUQsapPszHcamVVGyTKU","V7gx9O3Tjuyt4hvIbrkm","EJJQZ19dNUswO6Kwuodj","button","header"];
@@ -154,4 +154,23 @@ test("Tech name falls back to the form's First/Last Name (Forms tab prefill)", (
   assert.equal(techNameOf(AUDIT_CONFIG.tote.formId, {}, { first_name: "Brett", last_name: "Buhler" }), "Brett Buhler");
   assert.equal(techNameOf(AUDIT_CONFIG.audit.formId, {}, { first_name: " Landon ", last_name: "Bliss" }), "Landon Bliss");
   assert.equal(techNameOf(AUDIT_CONFIG.tote.formId, { Tech: "Kyle Reiff" }, { first_name: "X", last_name: "Y" }), "Kyle Reiff");
+});
+
+test("truck check photos: any image or GHL file link, anywhere in the submission", () => {
+  const sub = {
+    answers: { "Front of truck": "https://example.com/a.JPG", Notes: "all good, see http://x.com/page", "Date": "2026-10-05" },
+    fields: {
+      abc123: { "f1e2": { url: "https://services.leadconnectorhq.com/documents/download/XYZ", meta: { name: "IMG_1.heic" } } },
+      def456: [{ url: "https://storage.googleapis.com/msgsndr/loc/media/b.png?alt=1" }, "https://example.com/a.JPG"],
+      list: "https://example.com/c.jpeg, https://example.com/d.webp",
+    },
+  };
+  assert.deepEqual(submissionPhotoUrls(sub).map(p => [p.url, p.image]), [
+    ["https://example.com/a.JPG", true],
+    ["https://services.leadconnectorhq.com/documents/download/XYZ", false],
+    ["https://storage.googleapis.com/msgsndr/loc/media/b.png?alt=1", true],
+    ["https://example.com/c.jpeg", true],
+    ["https://example.com/d.webp", true],
+  ]);
+  assert.deepEqual(submissionPhotoUrls({}), []);
 });
