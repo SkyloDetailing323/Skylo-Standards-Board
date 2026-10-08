@@ -1528,8 +1528,27 @@ const byLastName = (a,b) => lastNameKey(a.name).localeCompare(lastNameKey(b.name
 const byFirstName = (a,b) => String(a.name||"").trim().toLowerCase().localeCompare(String(b.name||"").trim().toLowerCase());
 const PAYROLL_SORTS = { last:byLastName, first:byFirstName, revenue:(a,b) => b.revenue-a.revenue || byLastName(a,b) };
 
+// Detail Apprentice training pay (owner's rules, Oct 2026): every hour
+// clocked BEFORE a tech's first job in HCP is a training hour. $7.50/hr is
+// paid in the pay period it was worked; another $7.50/hr is held and paid in
+// the pay period holding their 90th day (start date + 90), if still active.
+// From the day of their first job on, they're paid commission only.
+const TRAINING_RATE_NOW = 7.5;
+const TRAINING_RATE_HELD = 7.5;
+const TRAINING_HELD_DAYS = 90;
+function trainingInfo(tech, jobs, timeEntries) {
+  const myJobs = jobs.filter(j => j.tech_id===tech.id && j.job_date);
+  const firstJob = myJobs.length ? myJobs.reduce((m,j) => j.job_date < m ? j.job_date : m, myJobs[0].job_date) : null;
+  const entries = timeEntries.filter(e => e.tech_id===tech.id && (!firstJob || e.work_date < firstJob));
+  if (!entries.length) return null;
+  const firstClock = entries.reduce((m,e) => e.work_date < m ? e.work_date : m, entries[0].work_date);
+  const base = tech.start_date || firstClock;
+  const d = new Date(base+"T12:00:00Z"); d.setUTCDate(d.getUTCDate()+TRAINING_HELD_DAYS);
+  return { firstJob, entries, day90:d.toISOString().split("T")[0], totalHours:entries.reduce((s,e)=>s+sessionHours(e),0) };
+}
+
 // ─── PAYROLL TAB ──────────────────────────────────────────────────────────────
-function PayrollTab({ techs, jobs, tipEntries=[], switchovers=[], token=null, canWaive=false }) {
+function PayrollTab({ techs, jobs, tipEntries=[], switchovers=[], timeEntries=[], token=null, canWaive=false }) {
   const allPeriods = getPayPeriods();
   const activePeriods = allPeriods.filter(p=>jobs.some(j=>j.job_date>=p.start&&j.job_date<=p.end)||p.key===currentPPKey());
   const [selKey, setSelKey] = useState(currentPPKey());
@@ -1589,7 +1608,15 @@ function PayrollTab({ techs, jobs, tipEntries=[], switchovers=[], token=null, ca
     const toteHere = toteAll.filter(c=>c.check.work_date>=period.start&&c.check.work_date<=period.end);
     const toteCents = toteHere.reduce((s,c)=>s+c.chargedCents,0);
     const toteDeduct = toteCents/100;
-    const total   = commission+tips+upsellPay+switchPay-toteDeduct;
+    // Training pay (see trainingInfo above). Shown from the 10th/25th
+    // schedule on; earlier training hours were paid outside the app.
+    const tr = showBonuses ? trainingInfo(t, jobs, timeEntries) : null;
+    const trEntries = tr ? tr.entries.filter(e=>e.work_date>=period.start&&e.work_date<=period.end) : [];
+    const trainingHours = trEntries.reduce((s,e)=>s+sessionHours(e),0);
+    const trainingDays = [...new Set(trEntries.map(e=>e.work_date))].sort();
+    const trainingPay = Math.round(trainingHours*TRAINING_RATE_NOW*100)/100;
+    const heldDue = tr && t.is_active!==false && tr.day90>=period.start && tr.day90<=period.end ? Math.round(tr.totalHours*TRAINING_RATE_HELD*100)/100 : 0;
+    const total   = commission+tips+upsellPay+switchPay-toteDeduct+trainingPay+heldDue;
     const weeks   = wkKeys.map(wk=>{
       const wj=tj.filter(j=>j.week_key===wk);
       const wkEndDate = new Date(wk+"T12:00:00Z"); wkEndDate.setUTCDate(wkEndDate.getUTCDate()+6);
@@ -1597,13 +1624,13 @@ function PayrollTab({ techs, jobs, tipEntries=[], switchovers=[], token=null, ca
       const wkTips = tipsRangeTotal(tipEntries, t.id, wk, wkEndStr);
       return { wk, rev:wj.reduce((s,j)=>s+(j.revenue||0),0), tips:wkTips, count:wj.length };
     }).filter(w=>w.rev>0||w.tips>0);
-    return { ...t, revenue, tips, rate, commission, upsellAmt, upsellPay, upsellRate, sws, switchPay, switchUnpriced, toteHere, toteDeduct, total, weeks };
-  }).filter(r=>r.revenue>0||r.tips>0||r.upsellAmt>0||r.sws.length>0||r.toteHere.length>0).sort(PAYROLL_SORTS[sortBy] || byLastName);
+    return { ...t, revenue, tips, rate, commission, upsellAmt, upsellPay, upsellRate, sws, switchPay, switchUnpriced, toteHere, toteDeduct, tr, trainingHours, trainingDays, trainingPay, heldDue, total, weeks };
+  }).filter(r=>r.revenue>0||r.tips>0||r.upsellAmt>0||r.sws.length>0||r.toteHere.length>0||r.trainingHours>0||r.heldDue>0).sort(PAYROLL_SORTS[sortBy] || byLastName);
 
   const teamTotal = rows.reduce((s,r)=>s+r.total,0);
 
   function exportCSV() {
-    const lines=["Tech,Revenue,Commission Rate,Commission,Tips,Upsells,Upsell Rate,Upsell Bonus,Switchovers,Switchover Bonus,Tote Deduction,Total Pay",...rows.map(r=>[r.name,`$${r.revenue.toFixed(2)}`,`${r.rate}%`,`$${r.commission.toFixed(2)}`,`$${r.tips.toFixed(2)}`,`$${r.upsellAmt.toFixed(2)}`,`${Math.round(r.upsellRate*100)}%`,`$${r.upsellPay.toFixed(2)}`,r.sws.length,`$${r.switchPay.toFixed(2)}`,`-$${r.toteDeduct.toFixed(2)}`,`$${r.total.toFixed(2)}`].join(","))].join("\n");
+    const lines=["Tech,Revenue,Commission Rate,Commission,Tips,Upsells,Upsell Rate,Upsell Bonus,Switchovers,Switchover Bonus,Tote Deduction,Training Hours,Training Pay,90-Day Training Pay,Total Pay",...rows.map(r=>[r.name,`$${r.revenue.toFixed(2)}`,`${r.rate}%`,`$${r.commission.toFixed(2)}`,`$${r.tips.toFixed(2)}`,`$${r.upsellAmt.toFixed(2)}`,`${Math.round(r.upsellRate*100)}%`,`$${r.upsellPay.toFixed(2)}`,r.sws.length,`$${r.switchPay.toFixed(2)}`,`-$${r.toteDeduct.toFixed(2)}`,r.trainingHours.toFixed(2),`$${r.trainingPay.toFixed(2)}`,`$${r.heldDue.toFixed(2)}`,`$${r.total.toFixed(2)}`].join(","))].join("\n");
     const url=URL.createObjectURL(new Blob([lines],{type:"text/csv"}));
     const a=Object.assign(document.createElement("a"),{href:url,download:`skylo-payroll-${selKey}.csv`});
     a.click(); URL.revokeObjectURL(url);
@@ -1680,6 +1707,17 @@ function PayrollTab({ techs, jobs, tipEntries=[], switchovers=[], token=null, ca
               </div>
               {showBonuses&&(
                 <div style={{ display:"flex", flexDirection:"column", gap:"6px", marginTop:"8px", marginBottom:r.weeks.length>1?"10px":0 }}>
+                  {(r.trainingHours>0||r.heldDue>0)&&(
+                    <div style={{ background:`${C.purple}0d`, border:`1px solid ${C.purple}33`, borderRadius:"8px", padding:"10px 12px" }}>
+                      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:"10px" }}>
+                        <div style={{ fontSize:"10px", color:C.purple, letterSpacing:"1px", textTransform:"uppercase", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>🎓 Training Pay</div>
+                        <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"18px", color:C.purple }}>${(r.trainingPay+r.heldDue).toFixed(2)}</div>
+                      </div>
+                      {r.trainingHours>0&&<div style={{ fontSize:"13px", color:C.black, marginTop:"4px" }}>{r.trainingHours.toFixed(2)} training hrs × ${TRAINING_RATE_NOW.toFixed(2)} = <strong>${r.trainingPay.toFixed(2)}</strong> <span style={{ fontSize:"11px", color:C.muted }}>({r.trainingDays.map(fmtShortDate).join(", ")})</span></div>}
+                      {r.heldDue>0&&<div style={{ fontSize:"13px", color:C.black, marginTop:"4px" }}>90-day training pay due ({fmtShortDate(r.tr.day90)}): {r.tr.totalHours.toFixed(2)} hrs × ${TRAINING_RATE_HELD.toFixed(2)} = <strong>${r.heldDue.toFixed(2)}</strong></div>}
+                      {r.trainingHours>0&&!r.heldDue&&r.tr&&<div style={{ fontSize:"11px", color:C.muted, marginTop:"3px" }}>Plus ${TRAINING_RATE_HELD.toFixed(2)}/hr held: ${(Math.round(r.tr.totalHours*TRAINING_RATE_HELD*100)/100).toFixed(2)} so far ({r.tr.totalHours.toFixed(2)} hrs), paid at 90 days ({fmtShortDate(r.tr.day90)}) if still active.{r.tr.firstJob ? ` Training ended with their first job ${fmtShortDate(r.tr.firstJob)}.` : ""}</div>}
+                    </div>
+                  )}
                   <div style={{ background:C.cardLt, borderRadius:"8px", padding:"10px 12px", display:"flex", justifyContent:"space-between", alignItems:"center", gap:"10px" }}>
                     <div>
                       <div style={{ fontSize:"10px", color:C.muted, letterSpacing:"1px", textTransform:"uppercase", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>📈 Upsell Bonus</div>
@@ -8101,7 +8139,7 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
           <Leaderboard techs={activeTechs} jobs={jobs||[]} upsells={upsells} reviews={reviews} callbacks={callbacks||[]} switchovers={switchovers} timeEntries={timeEntries}/>
         )}
         {tab==="payroll"&&(
-          <PayrollTab techs={techs} jobs={jobs||[]} upsells={upsells} tipEntries={tipEntries} switchovers={switchovers||[]} token={currentUser?.token} canWaive={!isManager}/>
+          <PayrollTab techs={techs} jobs={jobs||[]} upsells={upsells} tipEntries={tipEntries} switchovers={switchovers||[]} timeEntries={timeEntries||[]} token={currentUser?.token} canWaive={!isManager}/>
         )}
 
         {tab==="ridealong"&&(
