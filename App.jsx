@@ -1521,6 +1521,11 @@ function ReportsTab({ techs, jobs, upsells=[], timeEntries=[], tipEntries=[], te
   );
 }
 
+// Payroll lists techs alphabetically by last name (then first), the same
+// order as the payroll provider.
+const lastNameKey = n => { const p = String(n||"").trim().split(/\s+/); return `${p.slice(1).join(" ") || p[0]} ${p[0]}`.toLowerCase(); };
+const byLastName = (a,b) => lastNameKey(a.name).localeCompare(lastNameKey(b.name));
+
 // ─── PAYROLL TAB ──────────────────────────────────────────────────────────────
 function PayrollTab({ techs, jobs, tipEntries=[], switchovers=[], token=null, canWaive=false }) {
   const allPeriods = getPayPeriods();
@@ -1590,7 +1595,7 @@ function PayrollTab({ techs, jobs, tipEntries=[], switchovers=[], token=null, ca
       return { wk, rev:wj.reduce((s,j)=>s+(j.revenue||0),0), tips:wkTips, count:wj.length };
     }).filter(w=>w.rev>0||w.tips>0);
     return { ...t, revenue, tips, rate, commission, upsellAmt, upsellPay, upsellRate, sws, switchPay, switchUnpriced, toteHere, toteDeduct, total, weeks };
-  }).filter(r=>r.revenue>0||r.tips>0||r.upsellAmt>0||r.sws.length>0||r.toteHere.length>0).sort((a,b)=>b.total-a.total);
+  }).filter(r=>r.revenue>0||r.tips>0||r.upsellAmt>0||r.sws.length>0||r.toteHere.length>0).sort(byLastName);
 
   const teamTotal = rows.reduce((s,r)=>s+r.total,0);
 
