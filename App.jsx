@@ -3,7 +3,7 @@ import { TEST_QUESTIONS, TESTS, TEST_KEYS, questionsFor, shuffle } from "./train
 import { computeOpsMonth, monthRange, mountainDate, CALLBACK_TIERS, QUOTA_TIERS, RETENTION_TIERS, NON_ROUTE_VEHICLES, OPS_EXCLUDED_TITLES } from "./opsBonus.js";
 import { techDriverDays, weeklyDriverScore, findUnassignedDriving, DRIVER_CONFIG } from "./driverScoring.js";
 import { buildFordImport } from "./fordReports.js";
-import { techWeekScores, techScoreCard, teamSummary, TECH_SCORE_CONFIG } from "./techScores.js";
+import { techWeekCard, techScoreCard, teamSummary, scoreWindow, TECH_SCORE_CONFIG } from "./techScores.js";
 import { formKind, scoreToteCheck, scoreTechAudit, latestPerDay, auditDays, weeklyAuditPct, auditWeekStart, toteCharges } from "./auditScoring.js";
 
 // ─── SUPABASE CONFIG ──────────────────────────────────────────────────────────
@@ -3660,7 +3660,7 @@ function TechDashboard({ tech, techs, upsells, switchovers, reviews, callbacks, 
         )}
         {tab==="training"&&<PerfectDayTrainingPanel tech={tech} techs={techs}/>}
         {tab==="forms"&&<FormsTab me={tech} role="tech"/>}
-        {tab==="auditscores"&&<AuditScoresTab techs={techs} token={token} techId={tech.id}/>}
+        {tab==="auditscores"&&<AuditScoresTab techs={techs} token={token} techId={tech.id} jobs={jobs||[]} callbacks={callbacks||[]} reviews={reviews||[]} switchovers={switchovers||[]} quota={q}/>}
         {tab==="mysales"&&SALES_SELF_VIEW[tech.id]&&<SalesTab token={token} onlyRep={SALES_SELF_VIEW[tech.id]}/>}
         {tab==="callbacks"&&CALLBACK_ENTRY_TECHS.has(tech.id)&&<CallbacksPanel techs={techs} jobs={jobs||[]} callbacks={callbacks||[]} refreshAll={refreshAll} showToast={showToast}/>}
       </div>
@@ -7316,8 +7316,6 @@ const auditThisWeek = () => auditWeekStart(mtDateStr(Date.now()));
 const auditDefaultWeek = () => auditWeekStart(mtDateStr(Date.now() - 864e5));
 const shiftWeek = (wk, weeks) => { const d = new Date(wk+"T12:00:00Z"); d.setUTCDate(d.getUTCDate()+weeks*7); return d.toISOString().split("T")[0]; };
 
-const scoreTechWeek = techWeekScores;
-
 // Ford Pro driver scorecard: one box per driving day -- truck(s), miles, and
 // each penalty with its count.
 function DriverDetail({ driver, bare=false }) {
@@ -7406,16 +7404,125 @@ function AuditTechDetail({ week, only="both", bare=false }) {
   );
 }
 
+// ─── Overall Tech Score (techScores.js) ──────────────────────────────────────
+const SCORE_SECTIONS = TECH_SCORE_CONFIG.sections;
+const fmtMoney0 = n => `$${Math.round(n||0).toLocaleString()}`;
+const scoreWindowLabel = (from, to) => `Last ${TECH_SCORE_CONFIG.windowWeeks} weeks · ${fmtShortDate(from)} – ${fmtShortDate(to)}`;
+const sectionColor = v => v==null ? C.muted : v>=TECH_SCORE_CONFIG.passLine ? C.green : C.red;
+const SCORE_INTRO = `Overall score = ${SCORE_SECTIONS.map(s => `${s.label} ${s.weight}%`).join(" · ")}, over the last ${TECH_SCORE_CONFIG.windowWeeks} weeks (Wed–Tue) ending with the week shown. A section with no data is left out and the others re-weighted. Pass at ${TECH_SCORE_CONFIG.passLine}.`;
+const TRUCK_STATUS = {
+  graded:     { label:"Graded",                              color:null },
+  not_graded: { label:`Not graded yet — counts ${TECH_SCORE_CONFIG.truck.notGradedScore} for now`, color:C.gold },
+  missed:     { label:"No Truck Check",                      color:C.red },
+  pending:    { label:"Today — not in yet",                  color:C.muted },
+};
+
+// The five section scores, labeled.
+function SectionChips({ sections, align="flex-end" }) {
+  return (
+    <div style={{ display:"flex", flexWrap:"wrap", gap:"4px", justifyContent:align }}>
+      {SCORE_SECTIONS.map(s => { const v = sections[s.key]; return (
+        <span key={s.key} style={{ fontSize:"12px", color:C.black, background:C.cardLt, border:`1px solid ${C.border}`, borderRadius:"10px", padding:"2px 8px", whiteSpace:"nowrap" }}>
+          {s.label} <strong style={{ color:sectionColor(v) }}>{fmtScore(v)}</strong>
+        </span>
+      ); })}
+    </div>
+  );
+}
+
+// What each section of one tech's overall score is made of.
+function ScoreBreakdown({ card }) {
+  const box = { background:C.white, border:`1px solid ${C.border}`, borderRadius:"10px", padding:"10px 12px", marginTop:"8px" };
+  const line = { display:"flex", justifyContent:"space-between", gap:"8px", fontSize:"13px", color:C.black, marginTop:"4px" };
+  const muted = { fontSize:"13px", color:C.muted, marginTop:"4px" };
+  const sub = { fontSize:"13px", fontWeight:"700", color:C.black, marginTop:"10px" };
+  const head = (key, note) => {
+    const s = SCORE_SECTIONS.find(x => x.key===key), v = card.sections[key];
+    return (
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:"8px" }}>
+        <div>
+          <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"17px", color:C.black }}>{s.icon} {s.label} <span style={{ fontSize:"13px", color:C.muted, fontWeight:"700" }}>· {s.weight}%</span></div>
+          {note && <div style={{ fontSize:"12px", color:C.muted, marginTop:"2px", lineHeight:1.4 }}>{note}</div>}
+        </div>
+        <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"22px", color:sectionColor(v), whiteSpace:"nowrap" }}>{v==null ? "—" : fmtScore(v)}</div>
+      </div>
+    );
+  };
+  const { week, quality, production, driver, totes, truck, equipment } = card;
+  const ded = TECH_SCORE_CONFIG.callbackDeduction;
+  return (
+    <div>
+      <div style={box}>
+        {head("audit", "Average of the audited days.")}
+        {week.days.length===0 ? <div style={muted}>No audits in these weeks — left out.</div> : week.days.map(d => (
+          <div key={d.date} style={line}><span>{fmtShortDate(d.date)}{d.audit.lead ? ` · ${d.audit.lead}` : ""}</span><span style={{ color:scoreColor(d.pct??0), fontWeight:"700" }}>{fmtPct(d.pct)}</span></div>
+        ))}
+      </div>
+      <div style={box}>
+        {head("quality", `Starts at 100. Each callback takes off Level 1 −${ded[1]}, Level 2 −${ded[2]}, Level 3 −${ded[3]} (times the tech's share of a split job).`)}
+        {quality.score==null ? <div style={muted}>No jobs or callbacks — left out.</div>
+          : quality.items.length===0 ? <div style={{ ...muted, color:C.green }}>No callbacks</div>
+          : quality.items.map((c,i) => (
+            <div key={c.id || i} style={line}>
+              <span>{c.date ? fmtShortDate(c.date) : "—"}{c.customer ? ` · ${c.customer}` : ""} · Level {c.level}{c.legacy ? " (no level logged)" : ""}{c.share!==1 ? ` · ${Math.round(c.share*100)}% share` : ""}</span>
+              <span style={{ color:C.red, fontWeight:"700", whiteSpace:"nowrap" }}>−{Math.round(c.deduction*10)/10}</span>
+            </div>
+          ))}
+      </div>
+      <div style={box}>
+        {head("production", `${formatMonthLabel(production.monthKey)} through ${fmtShortDate(production.asOf)}. Monthly targets prorated to ${Math.max(production.daysElapsed, TECH_SCORE_CONFIG.production.minDaysElapsed)} of ${production.daysInMonth} days; each counts up to 100.`)}
+        {production.score==null ? <div style={muted}>No paid jobs this month — left out.</div> : production.metrics.map(m => (
+          <div key={m.key} style={line}>
+            <span>{m.label}: {m.money ? fmtMoney0(m.actual) : m.actual} of {m.money ? fmtMoney0(m.prorated) : Math.round(m.prorated*10)/10} <span style={{ color:C.muted }}>({m.money ? fmtMoney0(m.target) : m.target}/month)</span></span>
+            <span style={{ color:sectionColor(m.pct), fontWeight:"700" }}>{fmtPct(m.pct)}</span>
+          </div>
+        ))}
+      </div>
+      <div style={box}>
+        {head("driver", "Average of the scored driving days (Ford Pro, truck picked at clock-in).")}
+        {!driver ? <div style={muted}>No Ford Pro data — left out.</div> : driver.days.length===0 ? <div style={muted}>No driving days — left out.</div> : driver.days.map(d => (
+          <div key={d.date} style={line}>
+            <span>{fmtShortDate(d.date)} · {d.vehicles.join(" + ") || "—"} · {Math.round(d.miles)} mi</span>
+            <span style={{ color:sectionColor(d.score), fontWeight:"700" }}>{d.score==null ? "no score" : fmtScore(d.score)}</span>
+          </div>
+        ))}
+      </div>
+      <div style={box}>
+        {head("equipment", "Average of the Tote Check and Truck Check scores.")}
+        <div style={sub}>🧰 Tote Checks{equipment.tote!=null ? ` · ${fmtScore(equipment.tote)}` : ""}</div>
+        <div style={{ fontSize:"12px", color:C.muted }}>Rescaled for this score: nothing missing = 100, $7.00 missing = {TECH_SCORE_CONFIG.passLine}, −15 per $7.</div>
+        {totes.length===0 ? <div style={muted}>No tote checks.</div> : totes.map(t => (
+          <div key={t.id} style={line}><span>{fmtShortDate(t.work_date)} · {t.missingCents ? `${fmtCents(t.missingCents)} missing` : "Nothing missing"}</span><span style={{ color:sectionColor(t.equipScore), fontWeight:"700" }}>{fmtScore(t.equipScore)}</span></div>
+        ))}
+        <div style={sub}>🚚 Truck Checks{truck.score!=null ? ` · ${fmtScore(truck.score)}` : ""}</div>
+        {truck.exempt ? <div style={muted}>Apprentice in training — not scored.</div>
+          : truck.nights.length===0 ? <div style={muted}>No nights worked.</div>
+          : <>
+            <div style={{ fontSize:"12px", color:C.muted }}>Submitted {truck.submitted} of {truck.worked} night{truck.worked!==1?"s":""} worked. A missed night counts 0.</div>
+            {truck.nights.map(n => (
+              <div key={n.date} style={line}>
+                <span style={{ color:TRUCK_STATUS[n.status].color || C.black }}>{fmtShortDate(n.date)} · {TRUCK_STATUS[n.status].label}</span>
+                <span style={{ color:sectionColor(n.score), fontWeight:"700" }}>{n.score==null ? "—" : fmtScore(n.score)}</span>
+              </div>
+            ))}
+          </>}
+      </div>
+    </div>
+  );
+}
+
 // view: which section opens first -- "overview" (default), "tote", "audit"
 // or "driver". Admins see every tech plus team scores; a tech (techId set)
-// sees only their own scores plus the team averages.
+// sees only their own scores plus the team averages. The overview is the
+// overall Tech Score over the last 4 weeks (techScores.js); jobs, callbacks,
+// reviews, switchovers and quota feed its Callbacks and Quota sections.
 const AUDIT_SECTIONS = [["overview","📊 Overview"],["tote","🧰 Tote Checks"],["audit","📋 Tech Audits"],["driver","🚗 Driving"]];
 const fmtScore = n => n==null ? "—" : (Math.round(n*10)/10).toFixed(1);
 const passColor = (score, pass) => score==null ? C.muted : pass ? C.green : C.red;
 
 // hideTabs: the admin menu opens each section as its own page (Tech Scores >
 // Overview / Tote Checks / Audit Scores / Driving Scores), so no section bar.
-function AuditScoresTab({ techs, token, techId=null, canSync=false, view="overview", hideTabs=false }) {
+function AuditScoresTab({ techs, token, techId=null, canSync=false, view="overview", hideTabs=false, jobs=[], callbacks=[], reviews=[], switchovers=[], quota=null }) {
   const [section, setSection] = useState(view==="both" ? "overview" : view);
   const [wk, setWk] = useState(auditDefaultWeek());
   const [state, setState] = useState({ loading:true, error:null, data:null });
@@ -7426,13 +7533,16 @@ function AuditScoresTab({ techs, token, techId=null, canSync=false, view="overvi
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState(null);
   const end = weekEndDate(wk);
+  // Everything loads for the overall score's 4-week window; the per-section
+  // pages show just the picked week.
+  const win = scoreWindow(wk);
   const getJson = url => fetch(url, { headers:{ Authorization:`Bearer ${token || ""}` } })
     .then(async r => { const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`); return j; });
 
   useEffect(() => {
     let live = true;
     setState(s => ({ ...s, loading:true, error:null }));
-    getJson(`/.netlify/functions/audit-scores?from=${wk}&to=${end}`)
+    getJson(`/.netlify/functions/audit-scores?from=${win.from}&to=${end}`)
       .then(data => live && setState({ loading:false, error:null, data }))
       .catch(e => live && setState({ loading:false, error:e.message, data:null }));
     return () => { live = false; };
@@ -7445,7 +7555,7 @@ function AuditScoresTab({ techs, token, techId=null, canSync=false, view="overvi
   useEffect(() => {
     let live = true;
     setDrive(s => ({ ...s, loading:true, error:null }));
-    getJson(`/.netlify/functions/driver-scores?from=${wk}&to=${end}`)
+    getJson(`/.netlify/functions/driver-scores?from=${win.from}&to=${end}`)
       .then(data => live && setDrive({ loading:false, error:null, data }))
       .catch(e => live && setDrive({ loading:false, error:e.message, data:null }));
     return () => { live = false; };
@@ -7459,7 +7569,7 @@ function AuditScoresTab({ techs, token, techId=null, canSync=false, view="overvi
     if (!techId) return;
     let live = true;
     setTeamState({ loading:true, error:null, data:null });
-    getJson(`/.netlify/functions/tech-team-scores?from=${wk}&to=${end}`)
+    getJson(`/.netlify/functions/tech-team-scores?from=${win.from}&to=${end}`)
       .then(data => live && setTeamState({ loading:false, error:null, data }))
       .catch(e => live && setTeamState({ loading:false, error:e.message, data:null }));
     return () => { live = false; };
@@ -7477,29 +7587,40 @@ function AuditScoresTab({ techs, token, techId=null, canSync=false, view="overvi
     setSyncing(false);
   }
 
+  const inWeek = d => !!d && d >= wk && d <= end;
   const subs = state.data?.submissions || [];
-  const byTech = {};
+  const weekSubs = subs.filter(s => inWeek(s.work_date));
+  const byTech = {}, byTechWeek = {};
   subs.forEach(s => { if (s.tech_id) (byTech[s.tech_id] = byTech[s.tech_id] || []).push(s); });
-  const cardFor = id => techScoreCard(byTech[id] || [], drive.data, id);
-  const unmatched = [...new Set(subs.filter(s => !s.tech_id && (section==="overview" || formKind(s.form_id)===section)).map(s => s.tech_name || "(no Tech answer)"))].sort();
+  weekSubs.forEach(s => { if (s.tech_id) (byTechWeek[s.tech_id] = byTechWeek[s.tech_id] || []).push(s); });
+  const d0 = drive.data;
+  const driveWeek = d0 ? { ...d0, assignments:d0.assignments.filter(r=>inWeek(r.work_date)), daily:d0.daily.filter(r=>inWeek(r.work_date)), events:d0.events.filter(r=>inWeek(r.work_date)), unassigned:d0.unassigned.filter(r=>inWeek(r.work_date)) } : null;
+  const today = mtDateStr(Date.now());
+  const cardFor = id => techWeekCard(byTechWeek[id] || [], driveWeek, id);
+  const fullCardFor = t => techScoreCard({ techId:t.id, tech:t, subs:byTech[t.id] || [], driverData:d0, jobs, callbacks, reviews, switchovers, quota,
+    truckGrades:state.data?.truck_grades || [], from:win.from, to:end, today });
+  const unmatched = [...new Set((section==="overview" ? subs : weekSubs).filter(s => !s.tech_id && (section==="overview" ? !!formKind(s.form_id) : formKind(s.form_id)===section)).map(s => s.tech_name || "(no Tech answer)"))].sort();
   // Answers and question ids on the Tech Audit form that AUDIT_CONFIG can't map.
-  const auditScored = subs.filter(s => formKind(s.form_id)==="audit").map(s => scoreTechAudit(s));
+  const auditScored = weekSubs.filter(s => formKind(s.form_id)==="audit").map(s => scoreTechAudit(s));
   const unmappedAnswers = [...new Set(auditScored.flatMap(a => a.unmapped))].sort();
   const unmappedIds = [...new Set(auditScored.flatMap(a => a.unmappedFieldIds))].sort();
   const last = state.data?.last_run;
   const arrow = { background:C.white, border:`1px solid ${C.border}`, borderRadius:"8px", padding:"6px 12px", cursor:"pointer", fontSize:"14px", color:C.black };
   const thisWeek = auditThisWeek();
-  const driveNote = drive.error ? `Driving scores unavailable: ${drive.error}` : drive.data && !drive.data.daily.length ? "No Ford Pro data for this week yet — an admin uploads Ford's daily reports on the Trucks tab." : null;
+  const driveNote = drive.error ? `Driving scores unavailable: ${drive.error}` : section==="overview" ? (d0 && !d0.daily.length ? "No Ford Pro data for these weeks yet, so Driving is left out of the overall score." : null) : driveWeek && !driveWeek.daily.length ? "No Ford Pro data for this week yet — an admin uploads Ford's daily reports on the Trucks tab." : null;
   const big = (text, color, size=20) => <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:`${size}px`, color, lineHeight:1, textAlign:"right" }}>{text}</div>;
   const small = text => <div style={{ fontSize:"11px", color:C.muted, marginTop:"3px", textAlign:"right" }}>{text}</div>;
-  const sectionLine = sec => TECH_SCORE_CONFIG.sections.map(s => `${s.icon} ${fmtScore(sec[s.key])}`).join("  ·  ");
+  const sectionLine = sec => <SectionChips sections={sec} align="flex-start"/>;
 
   const header = (
     <>
       {!hideTabs && <div style={{ marginBottom:"10px" }}><SubTabs tabs={AUDIT_SECTIONS} active={section} setActive={s => { setSection(s); setOpen(null); }}/></div>}
       <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:"8px", marginBottom:"12px" }}>
         <button style={arrow} onClick={() => { setWk(shiftWeek(wk,-1)); setOpen(null); }}>◀</button>
-        <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"16px", color:C.black }}>{formatWeekLabel(wk)}{wk===thisWeek ? " · this week" : ""}</div>
+        <div style={{ textAlign:"center" }}>
+          <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"16px", color:C.black }}>{formatWeekLabel(wk)}{wk===thisWeek ? " · this week" : ""}</div>
+          {section==="overview" && <div style={{ fontSize:"12px", color:C.muted, marginTop:"2px" }}>{scoreWindowLabel(win.from, end)}</div>}
+        </div>
         <button style={{ ...arrow, opacity:wk>=thisWeek?0.4:1 }} disabled={wk>=thisWeek} onClick={() => { setWk(shiftWeek(wk,1)); setOpen(null); }}>▶</button>
       </div>
       {state.error && <div style={{ background:`${C.red}10`, border:`1px solid ${C.red}`, borderRadius:"10px", padding:"12px", fontSize:"13px", color:C.red, marginBottom:"10px" }}>Couldn't load: {state.error}</div>}
@@ -7507,7 +7628,7 @@ function AuditScoresTab({ techs, token, techId=null, canSync=false, view="overvi
     </>
   );
   const intro = {
-    overview: `Full score = the average of the week's Tote Check, Tech Audit and Driving scores (a section with no score that week is left out). Pass at ${TECH_SCORE_CONFIG.passLine}. Team score = the average of its members' full scores.`,
+    overview: `${SCORE_INTRO} Team score = the average of its members' overall scores.`,
     tote: "Tote Checks from the GHL form. $7.00 or less missing passes (95%). Items missing on a FAILED check come off that tech's pay on the Payroll tab.",
     audit: "Tech Audits from the GHL form. Each day is the average of its scheduled jobs; the week is the average of the days.",
     driver: `From Ford Pro data on the truck picked at clock-in. Speeding is scored by minutes over the limit per 100 miles; the week is the average of the days. Pass at ${DRIVER_CONFIG.passLine}.`,
@@ -7519,7 +7640,7 @@ function AuditScoresTab({ techs, token, techId=null, canSync=false, view="overvi
       <div onClick={onToggle || undefined} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:"10px", cursor:onToggle?"pointer":"default" }}>
         <div>
           <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"16px", color:C.black }}>{title} {onToggle && <span style={{ fontSize:"12px", color:C.muted }}>{isOpen?"▲":"▼"}</span>}</div>
-          <div style={{ fontSize:"12px", color:C.muted, marginTop:"2px" }}>{sectionLine(t)}</div>
+          <div style={{ marginTop:"4px" }}>{sectionLine(t)}</div>
         </div>
         <div>{big(t.score==null ? "—" : `${fmtScore(t.score)}`, passColor(t.score, t.pass), 24)}{small(t.score==null ? "no scores yet" : `${t.pass?"PASS":"FAIL"} · ${t.scored} of ${t.members} scored`)}</div>
       </div>
@@ -7530,21 +7651,26 @@ function AuditScoresTab({ techs, token, techId=null, canSync=false, view="overvi
   // ─── tech's own view ───
   if (techId) {
     const me = cardFor(techId);
+    const meTech = techs.find(t => t.id===techId) || { id:techId };
+    const full = section==="overview" ? fullCardFor(meTech) : null;
     const team = teamState.data;
     return (
       <div>
         {header}
         {state.data && (<>
           {section==="overview" && (<>
+            <div style={{ fontSize:"13px", color:C.muted, marginBottom:"12px", lineHeight:"1.5" }}>{SCORE_INTRO} Display only — not tied to pay.</div>
             <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(140px, 1fr))", gap:"8px", marginBottom:"12px" }}>
-              <StatBlock label="My Full Score" value={fmtScore(me.overall.score)} color={passColor(me.overall.score, me.overall.pass)} sub={me.overall.score==null ? "no scores this week" : `${me.overall.pass?"PASS":"FAIL"} · pass ${TECH_SCORE_CONFIG.passLine}`}/>
-              {TECH_SCORE_CONFIG.sections.map(s => {
-                const v = me.sections[s.key];
-                const pass = s.key==="tote" ? me.week.latestTote?.pass : s.key==="driver" ? me.driver?.pass : v!=null && v>=TECH_SCORE_CONFIG.passLine;
-                return <StatBlock key={s.key} label={`${s.icon} ${s.label}`} value={fmtScore(v)} color={passColor(v, pass)} sub={v==null ? "none this week" : pass?"PASS":"FAIL"}/>;
+              <StatBlock label="My Overall Score" value={fmtScore(full.overall.score)} color={passColor(full.overall.score, full.overall.pass)} sub={full.overall.score==null ? "no scores yet" : `${full.overall.pass?"PASS":"FAIL"} · pass ${TECH_SCORE_CONFIG.passLine}`}/>
+              {SCORE_SECTIONS.map(s => {
+                const v = full.sections[s.key];
+                return <StatBlock key={s.key} label={`${s.icon} ${s.label}`} value={fmtScore(v)} color={sectionColor(v)} sub={v==null ? "no data — left out" : `${s.weight}% of overall`}/>;
               })}
             </div>
+            <SectionTitle>🔍 What my score is made of</SectionTitle>
+            <div style={{ marginBottom:"14px" }}><ScoreBreakdown card={full}/></div>
             <SectionTitle>👥 Team Scores</SectionTitle>
+            <div style={{ fontSize:"12px", color:C.muted, marginTop:"2px" }}>Averages only. A team shows once at least 3 of its members have a score.</div>
             <div style={{ marginTop:"8px" }}>
               {teamState.error && <div style={{ fontSize:"12px", color:C.red }}>Couldn't load team scores: {teamState.error}</div>}
               {teamState.loading && <div style={{ fontSize:"12px", color:C.muted }}>Loading…</div>}
@@ -7567,14 +7693,21 @@ function AuditScoresTab({ techs, token, techId=null, canSync=false, view="overvi
   }
 
   // ─── admin view ───
-  const cards = techs.filter(t => (t.is_active!==false && t.title!=="owner") || byTech[t.id]).map(t => ({ tech:t, ...cardFor(t.id) }));
-  const teams = teamSummary(cards.filter(c => c.tech.is_active!==false && c.tech.title!=="owner"), techs);
-  const unassignedCount = drive.data ? findUnassignedDriving(drive.data).filter(f => !drive.data.unassigned.some(u => u.vin===f.vin && u.work_date===f.work_date && (u.assigned_tech_id || u.dismissed))).length : 0;
+  const overview = section==="overview";
+  // Overview: every active non-owner tech's overall score for the window.
+  // Section pages: the picked week (plus archived techs who had a check).
+  const cards = overview
+    ? techs.filter(t => t.is_active!==false && t.title!=="owner").map(t => ({ tech:t, ...fullCardFor(t) }))
+    : techs.filter(t => (t.is_active!==false && t.title!=="owner") || byTechWeek[t.id]).map(t => ({ tech:t, ...cardFor(t.id) }));
+  const teams = overview ? teamSummary(cards, techs) : null;
+  const dd = overview ? d0 : driveWeek;
+  const unassignedCount = dd ? findUnassignedDriving(dd).filter(f => !dd.unassigned.some(u => u.vin===f.vin && u.work_date===f.work_date && (u.assigned_tech_id || u.dismissed))).length : 0;
   const unknownFordTypes = [...new Set(cards.flatMap(c => c.driver ? c.driver.days.flatMap(d => d.unknownTypes) : []))];
   const has = c => section==="overview" ? c.overall.score!=null : section==="tote" ? !!(c.week.latestTote || c.week.excluded.length) : section==="audit" ? c.week.days.length>0 : !!c.driver?.days.length;
   const sortVal = c => section==="overview" ? c.overall.score : section==="tote" ? c.sections.tote : section==="audit" ? c.sections.audit : c.sections.driver;
   const rows = cards.map(c => ({ ...c, has:has(c) }))
     .sort((a,b) => (b.has?1:0) - (a.has?1:0) || ((sortVal(b) ?? -1) - (sortVal(a) ?? -1)) || a.tech.name.localeCompare(b.tech.name));
+  const rankOf = Object.fromEntries(rows.filter(r => r.has).map((r,i) => [r.tech.id, i+1]));
 
   // One tech's row: their score for the current section; tap to open every audit
   // they had. prefix keeps the same tech's row under a team separate.
@@ -7584,7 +7717,7 @@ function AuditScoresTab({ techs, token, techId=null, canSync=false, view="overvi
         let summary;
         if (section==="overview") summary = overall.score==null
           ? big("No scores", C.muted)
-          : <>{big(`${fmtScore(overall.score)} ${overall.pass?"PASS":"FAIL"}`, passColor(overall.score, overall.pass))}{small(sectionLine(sections))}</>;
+          : <>{big(fmtScore(overall.score), passColor(overall.score, overall.pass), 28)}{small(`${overall.pass?"PASS":"FAIL"} · ${overall.sectionsScored} of ${SCORE_SECTIONS.length} sections`)}</>;
         else if (section==="tote") summary = t
           ? <>{big(`${fmtPct(t.score)} ${t.pass?"PASS":"FAIL"}`, t.pass?C.green:C.red)}{small(t.missingCents ? `${fmtCents(t.missingCents)} missing · ${fmtShortDate(t.work_date)}` : `Nothing missing · ${fmtShortDate(t.work_date)}`)}</>
           : <>{big("No check", C.muted)}{week.excluded.length>0 && small(`${week.excluded.length} not counted (wrong checker)`)}</>;
@@ -7597,12 +7730,12 @@ function AuditScoresTab({ techs, token, techId=null, canSync=false, view="overvi
         return (
           <div key={key} style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"12px 14px", marginBottom:"8px", opacity:canOpen?1:0.6 }}>
             <div onClick={() => canOpen && setOpen(isOpen?null:key)} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:"10px", cursor:canOpen?"pointer":"default" }}>
-              <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"17px", color:C.black }}>{tech.name} {canOpen && <span style={{ fontSize:"12px", color:C.muted }}>{isOpen?"▲":"▼"}</span>}</div>
+              <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"18px", color:C.black }}>{section==="overview" && rankOf[tech.id] ? <span style={{ color:C.muted }}>#{rankOf[tech.id]} </span> : null}{tech.name} {canOpen && <span style={{ fontSize:"12px", color:C.muted }}>{isOpen?"▲":"▼"}</span>}</div>
               <div>{summary}</div>
             </div>
+            {section==="overview" && overall.score!=null && <div style={{ marginTop:"6px" }}><SectionChips sections={sections} align="flex-start"/></div>}
             {isOpen && <div style={{ marginTop:"8px" }}>
-              {section==="driver" ? (driver ? <DriverDetail driver={driver}/> : <div style={{ fontSize:"13px", color:C.muted }}>No driving data for this week.</div>) : <AuditTechDetail week={week} only={section==="overview" ? "both" : section}/>}
-              {section==="overview" && driver && <DriverDetail driver={driver}/>}
+              {section==="overview" ? <ScoreBreakdown card={c}/> : section==="driver" ? (driver ? <DriverDetail driver={driver}/> : <div style={{ fontSize:"13px", color:C.muted }}>No driving data for this week.</div>) : <AuditTechDetail week={week} only={section}/>}
             </div>}
           </div>
         );
@@ -7671,7 +7804,7 @@ function AuditScoresTab({ techs, token, techId=null, canSync=false, view="overvi
       </>)}
       {state.data && section==="overview" && (<>
         <SectionTitle>👥 Team Scores</SectionTitle>
-        <div style={{ fontSize:"12px", color:C.muted, marginTop:"2px" }}>Tap a team to see its members, then tap a tech to see every audit.</div>
+        <div style={{ fontSize:"12px", color:C.muted, marginTop:"2px" }}>Tap a team to see its members, then tap a tech to see what their score is made of.</div>
         <div style={{ marginTop:"8px", marginBottom:"14px" }}>
           {teamCard("Whole company", teams.company, true)}
           {[...teams.teams].sort((a,b) => (b.score ?? -1) - (a.score ?? -1)).map(t => {
@@ -7679,8 +7812,8 @@ function AuditScoresTab({ techs, token, techId=null, canSync=false, view="overvi
             return teamCard(`${t.name} · ${t.lead}`, t, false, () => setOpenTeam(openTeam===t.id ? null : t.id), openTeam===t.id, members.map(c => techRow(c, `team:${t.id}:`)));
           })}
         </div>
-        <SectionTitle>🧑‍🔧 Individual Scores</SectionTitle>
-        <div style={{ height:"8px" }}/>
+        <SectionTitle>🏆 Total Performance Leaderboard</SectionTitle>
+        <div style={{ fontSize:"12px", color:C.muted, marginTop:"2px", marginBottom:"8px" }}>{scoreWindowLabel(win.from, end)} · tap a tech for the breakdown.</div>
       </>)}
       {state.data && section!=="overview" && (
         <div style={{ marginBottom:"10px" }}><SubTabs tabs={[["tech","By tech"],["each",`Every ${section==="driver" ? "driving day" : section==="tote" ? "tote check" : "audit"}`]]} active={listMode} setActive={m => { setListMode(m); setOpen(null); }}/></div>
@@ -8549,7 +8682,7 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
         )}
 
         {[["scoresoverview","overview"],["totechecks","tote"],["auditscores","audit"],["driving","driver"]].map(([id, view]) => tab===id && (
-          <AuditScoresTab key={id} view={view} hideTabs techs={techs} token={currentUser?.token} canSync={!isManager}/>
+          <AuditScoresTab key={id} view={view} hideTabs techs={techs} token={currentUser?.token} canSync={!isManager} jobs={jobs||[]} callbacks={callbacks||[]} reviews={reviews||[]} switchovers={switchovers||[]} quota={quota}/>
         ))}
         {tab==="truckinspections"&&(
           <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"20px", fontSize:"14px", color:C.black, lineHeight:"1.6" }}>
