@@ -1529,15 +1529,24 @@ const byFirstName = (a,b) => String(a.name||"").trim().toLowerCase().localeCompa
 const PAYROLL_SORTS = { last:byLastName, first:byFirstName, revenue:(a,b) => b.revenue-a.revenue || byLastName(a,b) };
 
 // Detail Apprentice training pay (owner's rules, Oct 2026): every hour
-// clocked BEFORE a tech's first job in HCP is a training hour. $7.50/hr is
+// clocked BEFORE a tech's first REAL job in HCP is a training hour. A real
+// job has revenue and a customer who isn't on the team -- the test job a
+// trainee does on Truxton's, Casey's or Will's car doesn't end training. $7.50/hr is
 // paid in the pay period it was worked; another $7.50/hr is held and paid in
 // the pay period holding their 90th day (start date + 90), if still active.
 // From the day of their first job on, they're paid commission only.
 const TRAINING_RATE_NOW = 7.5;
 const TRAINING_RATE_HELD = 7.5;
 const TRAINING_HELD_DAYS = 90;
-function trainingInfo(tech, jobs, timeEntries) {
-  const myJobs = jobs.filter(j => j.tech_id===tech.id && j.job_date);
+const normName = s => String(s||"").toLowerCase().replace(/[^a-z]/g, "");
+function isRealJob(j, staffNames) {
+  if (!((j.revenue||0) > 0)) return false;
+  const c = normName(j.customer_name);
+  return !c || !staffNames.some(n => n && c.includes(n));
+}
+function trainingInfo(tech, jobs, timeEntries, techs=[]) {
+  const staffNames = techs.map(t => normName(t.name)).filter(n => n.length >= 6);
+  const myJobs = jobs.filter(j => j.tech_id===tech.id && j.job_date && isRealJob(j, staffNames));
   const firstJob = myJobs.length ? myJobs.reduce((m,j) => j.job_date < m ? j.job_date : m, myJobs[0].job_date) : null;
   const entries = timeEntries.filter(e => e.tech_id===tech.id && (!firstJob || e.work_date < firstJob));
   if (!entries.length) return null;
@@ -1610,7 +1619,7 @@ function PayrollTab({ techs, jobs, tipEntries=[], switchovers=[], timeEntries=[]
     const toteDeduct = toteCents/100;
     // Training pay (see trainingInfo above). Shown from the 10th/25th
     // schedule on; earlier training hours were paid outside the app.
-    const tr = showBonuses ? trainingInfo(t, jobs, timeEntries) : null;
+    const tr = showBonuses ? trainingInfo(t, jobs, timeEntries, techs) : null;
     const trEntries = tr ? tr.entries.filter(e=>e.work_date>=period.start&&e.work_date<=period.end) : [];
     const trainingHours = trEntries.reduce((s,e)=>s+sessionHours(e),0);
     const trainingDays = [...new Set(trEntries.map(e=>e.work_date))].sort();
@@ -1715,7 +1724,7 @@ function PayrollTab({ techs, jobs, tipEntries=[], switchovers=[], timeEntries=[]
                       </div>
                       {r.trainingHours>0&&<div style={{ fontSize:"13px", color:C.black, marginTop:"4px" }}>{r.trainingHours.toFixed(2)} training hrs × ${TRAINING_RATE_NOW.toFixed(2)} = <strong>${r.trainingPay.toFixed(2)}</strong> <span style={{ fontSize:"11px", color:C.muted }}>({r.trainingDays.map(fmtShortDate).join(", ")})</span></div>}
                       {r.heldDue>0&&<div style={{ fontSize:"13px", color:C.black, marginTop:"4px" }}>90-day training pay due ({fmtShortDate(r.tr.day90)}): {r.tr.totalHours.toFixed(2)} hrs × ${TRAINING_RATE_HELD.toFixed(2)} = <strong>${r.heldDue.toFixed(2)}</strong></div>}
-                      {r.trainingHours>0&&!r.heldDue&&r.tr&&<div style={{ fontSize:"11px", color:C.muted, marginTop:"3px" }}>Plus ${TRAINING_RATE_HELD.toFixed(2)}/hr held: ${(Math.round(r.tr.totalHours*TRAINING_RATE_HELD*100)/100).toFixed(2)} so far ({r.tr.totalHours.toFixed(2)} hrs), paid at 90 days ({fmtShortDate(r.tr.day90)}) if still active.{r.tr.firstJob ? ` Training ended with their first job ${fmtShortDate(r.tr.firstJob)}.` : ""}</div>}
+                      {r.trainingHours>0&&!r.heldDue&&r.tr&&<div style={{ fontSize:"11px", color:C.muted, marginTop:"3px" }}>Plus ${TRAINING_RATE_HELD.toFixed(2)}/hr held: ${(Math.round(r.tr.totalHours*TRAINING_RATE_HELD*100)/100).toFixed(2)} so far ({r.tr.totalHours.toFixed(2)} hrs), paid at 90 days ({fmtShortDate(r.tr.day90)}) if still active.{r.tr.firstJob ? ` Training ended with their first real job ${fmtShortDate(r.tr.firstJob)}.` : ""}</div>}
                     </div>
                   )}
                   <div style={{ background:C.cardLt, borderRadius:"8px", padding:"10px 12px", display:"flex", justifyContent:"space-between", alignItems:"center", gap:"10px" }}>
