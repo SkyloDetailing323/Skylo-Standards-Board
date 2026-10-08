@@ -6220,6 +6220,16 @@ function OnboardingSignOff({ tech, refreshAll, showToast, onComplete }) {
 // Read-only view of both written tests with the right answer marked, so an
 // admin can review the questions. Lives on the Development tab, which only
 // admins can open; apprentices never see answers.
+// Fixed per-question order for the review list (seeded by the question id) so
+// the right answer isn't always first and the order doesn't jump around.
+function reviewOrder(x) {
+  let h = 0; for (const ch of x.id) h = (Math.imul(h, 31) + ch.charCodeAt(0)) >>> 0;
+  const rand = () => { h = (h + 0x6D2B79F5) >>> 0; let t = h; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+  const a = [x.correct, ...x.wrong];
+  for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(rand() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
+  return a;
+}
+
 function TestQuestionBank() {
   const [key, setKey] = useState("perfect_day");
   const [q, setQ] = useState("");
@@ -6235,7 +6245,7 @@ function TestQuestionBank() {
         {TEST_KEYS.map(k => <button key={k} onClick={() => setKey(k)} style={pill(key === k)}>{TESTS[k].name} ({questionsFor(k).length})</button>)}
       </div>
       <div style={{ fontSize:"12px", color:C.muted }}>
-        Every question on the {TESTS[key].name}, grouped by topic. ✓ is the right answer; apprentices see all four answers shuffled and never see which is right. Answers here appear in a fixed order.
+        Every question on the {TESTS[key].name}, grouped by topic. ✓ marks the right answer. On the real test the A–D order is reshuffled every time, and apprentices never see which answer is right.
       </div>
       <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search questions or answers" style={{ background:C.white, border:`1px solid ${C.border}`, color:C.black, padding:"10px 14px", borderRadius:"8px", fontSize:"14px", width:"100%", boxSizing:"border-box" }}/>
       {shown.length === 0 && <div style={{ fontSize:"13px", color:C.muted }}>No questions match.</div>}
@@ -6245,8 +6255,17 @@ function TestQuestionBank() {
           {shown.filter(x => x.topic === topic).map(x => (
             <div key={x.id} style={{ borderTop:`1px solid ${C.border}40`, paddingTop:"10px" }}>
               <div style={{ fontSize:"14px", color:C.black, fontWeight:"700", lineHeight:1.4 }}><span style={{ color:C.muted, fontWeight:"600" }}>#{numOf[x.id]}</span> {x.q}</div>
-              <div style={{ fontSize:"13px", color:C.green, fontWeight:"700", marginTop:"6px" }}>✓ {x.correct}</div>
-              {x.wrong.map(w => <div key={w} style={{ fontSize:"13px", color:C.muted, marginTop:"3px" }}>✗ {w}</div>)}
+              <div style={{ marginTop:"6px", display:"flex", flexDirection:"column", gap:"3px" }}>
+                {reviewOrder(x).map((a, i) => {
+                  const right = a === x.correct;
+                  return (
+                    <div key={a} style={{ fontSize:"13px", color:right ? C.green : C.muted, fontWeight:right ? "700" : "400", display:"flex", gap:"8px" }}>
+                      <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", minWidth:"14px" }}>{"ABCD"[i]}</span>
+                      <span>{a}{right ? " ✓" : ""}</span>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           ))}
         </div>
