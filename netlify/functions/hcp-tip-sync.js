@@ -150,6 +150,12 @@ async function markProcessed(gmailMessageId, hcpJobId, status, detail) {
 }
 
 async function writeSingleTechTip(job, techId, workDate, amount) {
+  // A tip keeps the FIRST paid date it was recorded with. HCP re-sends the
+  // receipt ("COPY OF CUSTOMER RECEIPT") days later, and that email's date
+  // must not move an already-paid tip into a later pay period.
+  const existing = await sbFetch(`tip_entries?hcp_job_id=eq.${encodeURIComponent(job.id)}&tech_id=eq.${encodeURIComponent(techId)}&select=work_date`);
+  const prev = existing && existing[0] && existing[0].work_date;
+  if (prev && prev < workDate) workDate = prev;
   await sbFetch("tip_entries?on_conflict=hcp_job_id,tech_id", {
     method: "POST",
     prefer: "resolution=merge-duplicates,return=minimal",
