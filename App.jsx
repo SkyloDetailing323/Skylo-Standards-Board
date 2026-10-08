@@ -3670,7 +3670,110 @@ function DeleteTab({ techs, upsells, switchovers, reviews, saving, setSaving, re
 
 // ─── ADMIN TIME SHEET ──────────────────────────────────────────────────────────
 const MONTH_NAMES = { january:0, jan:0, february:1, feb:1, march:2, mar:2, april:3, apr:3, may:4, june:5, jun:5, july:6, jul:6, august:7, aug:7, september:8, sep:8, sept:8, october:9, oct:9, november:10, nov:10, december:11, dec:11 };
-function AdminTimeSheetTab({ techs, timeEntries, refreshAll, showToast }) {
+// Owner/manager fixes to a tech's clock-ins: edit a session's in/out times,
+// add a missed session, or delete a wrong one. Hours feed Payroll (training
+// pay), so the Field Supervisor can't edit his own time here.
+function AdminTimeEditor({ techs, timeEntries, start, end, refreshAll, showToast, lockedTechId=null }) {
+  const list = techs.filter(t => t.is_active!==false && t.title!=="owner").sort((a,b)=>a.name.localeCompare(b.name));
+  const [techId, setTechId] = useState("");
+  const [editing, setEditing] = useState(null);           // entry id
+  const [form, setForm] = useState({ in:"", out:"" });
+  const [add, setAdd] = useState({ date:"", in:"", out:"" });
+  const [busy, setBusy] = useState(false);
+  const locked = techId && techId===lockedTechId;
+  const entries = timeEntries.filter(e => e.tech_id===techId && e.work_date>=start && e.work_date<=end)
+    .sort((a,b) => b.work_date.localeCompare(a.work_date) || a.clock_in.localeCompare(b.clock_in));
+  const days = [...new Set(entries.map(e => e.work_date))];
+  const inp = { background:C.white, border:`1px solid ${C.border}`, color:C.black, padding:"8px", borderRadius:"8px", fontSize:"13px" };
+  const small = (bg, fg=C.white) => ({ background:bg, border:"none", color:fg, padding:"6px 12px", borderRadius:"8px", cursor:"pointer", fontSize:"12px", fontWeight:"700" });
+
+  function toIsoPair(date, tin, tout) {
+    if (!tin) throw new Error("Clock-in time is required");
+    const inIso = mtTimeToIso(date, tin);
+    if (!tout) return { clock_in:inIso, clock_out:null };
+    let outIso = mtTimeToIso(date, tout);
+    if (outIso <= inIso) throw new Error("Clock-out has to be after clock-in");
+    return { clock_in:inIso, clock_out:outIso };
+  }
+  async function save(e) {
+    setBusy(true);
+    try {
+      await sb(`time_entries?id=eq.${e.id}`, { method:"PATCH", prefer:"return=minimal", body:JSON.stringify({ ...toIsoPair(e.work_date, form.in, form.out), auto_closed:false }) });
+      await refreshAll(); setEditing(null); showToast("✅ Session updated");
+    } catch(err) { showToast("Error: "+err.message, false); }
+    setBusy(false);
+  }
+  async function remove(e) {
+    if (!window.confirm(`Delete this session (${isoToMtTimeInput(e.clock_in)}–${e.clock_out ? isoToMtTimeInput(e.clock_out) : "open"} on ${fmtShortDate(e.work_date)})?`)) return;
+    setBusy(true);
+    try { await sb(`time_entries?id=eq.${e.id}`, { method:"DELETE", prefer:"return=minimal" }); await refreshAll(); showToast("Session deleted"); }
+    catch(err) { showToast("Error: "+err.message, false); }
+    setBusy(false);
+  }
+  async function addSession() {
+    if (!add.date) return showToast("Pick a date", false);
+    if (!add.out) return showToast("Add a clock-out time", false);
+    setBusy(true);
+    try {
+      await sb("time_entries", { method:"POST", prefer:"return=minimal", body:JSON.stringify({ tech_id:techId, work_date:add.date, ...toIsoPair(add.date, add.in, add.out) }) });
+      await refreshAll(); setAdd({ date:"", in:"", out:"" }); showToast("✅ Session added");
+    } catch(err) { showToast("Error: "+err.message, false); }
+    setBusy(false);
+  }
+
+  return (
+    <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.purple}`, borderRadius:"12px", padding:"16px 18px", display:"flex", flexDirection:"column", gap:"10px" }}>
+      <Label color={C.purple}>✏️ Edit a Tech's Time · {start} → {end}</Label>
+      <select value={techId} onChange={e=>{ setTechId(e.target.value); setEditing(null); }} style={{ ...inp, width:"100%" }}>
+        <option value="">— Select Tech —</option>
+        {list.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+      </select>
+      {locked && <div style={{ fontSize:"12px", color:C.red }}>You can't edit your own time here — ask an owner.</div>}
+      {techId && !locked && (<>
+        {days.length===0 && <div style={{ fontSize:"13px", color:C.muted }}>No sessions in this date range. Change the range above, or add one below.</div>}
+        {days.map(d => {
+          const dayEntries = entries.filter(e => e.work_date===d);
+          const total = dayEntries.reduce((s,e)=>s+sessionHours(e),0);
+          return (
+            <div key={d} style={{ background:C.cardLt, borderRadius:"8px", padding:"10px 12px" }}>
+              <div style={{ display:"flex", justifyContent:"space-between", fontSize:"13px", fontWeight:"700", color:C.black }}>
+                <span>{new Date(d+"T12:00:00Z").toLocaleDateString("en-US",{ weekday:"short", month:"short", day:"numeric", timeZone:"UTC" })}</span>
+                <span>{total.toFixed(2)}h</span>
+              </div>
+              {dayEntries.map(e => editing===e.id ? (
+                <div key={e.id} style={{ display:"flex", gap:"6px", alignItems:"center", flexWrap:"wrap", marginTop:"6px" }}>
+                  <input type="time" value={form.in} onChange={ev=>setForm(f=>({...f,in:ev.target.value}))} style={inp}/>
+                  <span style={{ color:C.muted }}>to</span>
+                  <input type="time" value={form.out} onChange={ev=>setForm(f=>({...f,out:ev.target.value}))} style={inp}/>
+                  <button disabled={busy} onClick={()=>save(e)} style={small(C.green)}>Save</button>
+                  <button onClick={()=>setEditing(null)} style={small(C.cardLt, C.muted)}>Cancel</button>
+                </div>
+              ) : (
+                <div key={e.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:"8px", fontSize:"13px", color:C.black, marginTop:"6px" }}>
+                  <span>{formatMTTime(e.clock_in)} – {e.clock_out ? formatMTTime(e.clock_out) : <span style={{ color:C.gold }}>still clocked in</span>} <span style={{ color:C.muted }}>· {sessionHours(e).toFixed(2)}h{e.auto_closed ? " · auto-closed at midnight" : ""}</span></span>
+                  <span style={{ display:"flex", gap:"6px" }}>
+                    <button onClick={()=>{ setEditing(e.id); setForm({ in:isoToMtTimeInput(e.clock_in), out:e.clock_out ? isoToMtTimeInput(e.clock_out) : "" }); }} style={small(C.blue)}>Edit</button>
+                    <button disabled={busy} onClick={()=>remove(e)} style={small("none", C.red)}>Delete</button>
+                  </span>
+                </div>
+              ))}
+            </div>
+          );
+        })}
+        <div style={{ borderTop:`1px solid ${C.border}`, paddingTop:"10px", display:"flex", gap:"6px", alignItems:"center", flexWrap:"wrap" }}>
+          <span style={{ fontSize:"12px", color:C.muted }}>Add a missed session:</span>
+          <input type="date" value={add.date} max={mtDateStr(Date.now())} onChange={e=>setAdd(a=>({...a,date:e.target.value}))} style={inp}/>
+          <input type="time" value={add.in} onChange={e=>setAdd(a=>({...a,in:e.target.value}))} style={inp}/>
+          <span style={{ color:C.muted }}>to</span>
+          <input type="time" value={add.out} onChange={e=>setAdd(a=>({...a,out:e.target.value}))} style={inp}/>
+          <button disabled={busy} onClick={addSession} style={small(C.purple)}>Add</button>
+        </div>
+      </>)}
+    </div>
+  );
+}
+
+function AdminTimeSheetTab({ techs, timeEntries, refreshAll, showToast, lockedTechId=null }) {
   const [rangePreset, setRangePreset] = useState("wtd");
   const [cStart, setCStart] = useState("");
   const [cEnd, setCEnd] = useState("");
@@ -3777,6 +3880,8 @@ function AdminTimeSheetTab({ techs, timeEntries, refreshAll, showToast }) {
           ))}
         </div>
       </div>
+
+      <AdminTimeEditor techs={techs} timeEntries={timeEntries} start={start} end={end} refreshAll={refreshAll} showToast={showToast} lockedTechId={lockedTechId}/>
 
       <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.orange}`, borderRadius:"12px", padding:"20px", display:"flex", flexDirection:"column", gap:"12px" }}>
         <Label color={C.orange}>Bulk Import — One-Time Backfill</Label>
@@ -7656,7 +7761,7 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
         })()}
 
         {tab==="timesheet"&&(
-          <AdminTimeSheetTab techs={techs} timeEntries={timeEntries} refreshAll={refreshAll} showToast={showToast}/>
+          <AdminTimeSheetTab techs={techs} timeEntries={timeEntries} refreshAll={refreshAll} showToast={showToast} lockedTechId={isManager ? currentUser?.techId : null}/>
         )}
 
         {tab==="tips"&&(
