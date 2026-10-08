@@ -357,6 +357,16 @@ function sessionHours(entry, nowMs = Date.now()) {
   }
   return Math.max(0, (outMs - inMs) / 3600000);
 }
+// PAID hours of a session: Wednesday team meetings (8-11 AM Mountain) aren't
+// paid, so on a Wednesday anything clocked before 11:00 AM MT doesn't count.
+// Used for pay (Payroll training hours); the Time Sheet still shows the
+// actual clock times.
+const UNPAID_MEETING = { weekday:3, untilHHMM:"11:00" };
+function paidSessionHours(entry, nowMs = Date.now()) {
+  if (new Date(entry.work_date+"T12:00:00Z").getUTCDay() !== UNPAID_MEETING.weekday) return sessionHours(entry, nowMs);
+  const cutoff = mtTimeToIso(entry.work_date, UNPAID_MEETING.untilHHMM);
+  return sessionHours(entry.clock_in < cutoff ? { ...entry, clock_in:cutoff } : entry, nowMs);
+}
 function dayHoursTotal(entries, techId, workDate, nowMs = Date.now()) {
   return entries.filter(e => e.tech_id === techId && e.work_date === workDate).reduce((s,e) => s + sessionHours(e, nowMs), 0);
 }
@@ -1553,7 +1563,7 @@ function trainingInfo(tech, jobs, timeEntries, techs=[]) {
   const firstClock = entries.reduce((m,e) => e.work_date < m ? e.work_date : m, entries[0].work_date);
   const base = tech.start_date || firstClock;
   const d = new Date(base+"T12:00:00Z"); d.setUTCDate(d.getUTCDate()+TRAINING_HELD_DAYS);
-  return { firstJob, entries, day90:d.toISOString().split("T")[0], totalHours:entries.reduce((s,e)=>s+sessionHours(e),0) };
+  return { firstJob, entries, day90:d.toISOString().split("T")[0], totalHours:entries.reduce((s,e)=>s+paidSessionHours(e),0) };
 }
 
 // ─── PAYROLL TAB ──────────────────────────────────────────────────────────────
@@ -1621,7 +1631,7 @@ function PayrollTab({ techs, jobs, tipEntries=[], switchovers=[], timeEntries=[]
     // schedule on; earlier training hours were paid outside the app.
     const tr = showBonuses ? trainingInfo(t, jobs, timeEntries, techs) : null;
     const trEntries = tr ? tr.entries.filter(e=>e.work_date>=period.start&&e.work_date<=period.end) : [];
-    const trainingHours = trEntries.reduce((s,e)=>s+sessionHours(e),0);
+    const trainingHours = trEntries.reduce((s,e)=>s+paidSessionHours(e),0);
     const trainingDays = [...new Set(trEntries.map(e=>e.work_date))].sort();
     const trainingPay = Math.round(trainingHours*TRAINING_RATE_NOW*100)/100;
     const heldDue = tr && t.is_active!==false && tr.day90>=period.start && tr.day90<=period.end ? Math.round(tr.totalHours*TRAINING_RATE_HELD*100)/100 : 0;
