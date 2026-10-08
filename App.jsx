@@ -5330,7 +5330,8 @@ function ApprenticeFinalDay({ tech, prog, onStartTest }) {
       {steps.testUnlocked && !steps.writtenMisc && <button onClick={() => onStartTest("misc")} style={btn}>Take the Miscellaneous test</button>}
       {!steps.testUnlocked && <div style={{ fontSize:"12px", color:C.muted }}>The written tests unlock once your classroom day, {TRAINING_MIN_DAYS} full Perfect Days, and every Miscellaneous rep are done.</div>}
       {steps.written && !steps.practical && <div style={{ fontSize:"13px", color:C.black }}>✅ Both written tests passed. Next: your practical test — Will watches you run a full Perfect Day.</div>}
-      {steps.practical && <div style={{ fontSize:"13px", color:C.green, fontWeight:"700" }}>🎓 You passed everything — welcome to Detail Pro!</div>}
+      {steps.practical && !steps.promoted && <div style={{ fontSize:"13px", color:C.green, fontWeight:"700" }}>🏁 Practical passed! Last step: your Final Onboarding Cert gets signed, which makes you a Detail Pro.</div>}
+      {steps.promoted && <div style={{ fontSize:"13px", color:C.green, fontWeight:"700" }}>🎓 You passed everything — welcome to Detail Pro!</div>}
     </div>
   );
 }
@@ -6164,19 +6165,22 @@ function OnboardingSignOff({ tech, refreshAll, showToast, onComplete }) {
     if (!allChecked) return showToast("Check all three boxes first", false);
     if (!sig.trim()) return showToast("Type your name to sign", false);
     const today = mountainDate(new Date().toISOString());
-    if (!window.confirm(`Sign off ${tech.name}'s onboarding?\n\nThey'll become a Detail Pro today (${today}) and their 1-week check-in will be due 7 days from now.`)) return;
+    // Only an apprentice gets promoted; signing for anyone already past that
+    // must never change (demote) their title.
+    const promote = (tech.title || "detail_apprentice") === "detail_apprentice";
+    if (!window.confirm(`Sign off ${tech.name}'s onboarding?\n\n${promote ? `They'll become a Detail Pro today (${today}) and their` : `Their title stays the same. Their`} 1-week check-in will be due 7 days from now.`)) return;
     setSaving(true);
     try {
       await sb(`techs?id=eq.${tech.id}`, { method:"PATCH", prefer:"return=minimal", body:JSON.stringify({
         perfect_day_rubric_complete:true, misc_rubric_complete:true, onboarding_complete:true,
         onboarding_signed_by:sig.trim(), onboarding_complete_date:today,
-        title:"detail_pro", onboarding_stage:"active",
+        ...(promote ? { title:"detail_pro" } : {}), onboarding_stage:"active",
       }) });
       // Drop any check-ins that were scheduled off the hire date and haven't
       // happened yet, then schedule fresh ones from today.
       await sb(`checkins?tech_id=eq.${tech.id}&or=(status.is.null,status.neq.completed)`, { method:"DELETE", prefer:"return=minimal" });
       await scheduleCheckins(tech.id, today);
-      showToast(`🎓 ${tech.name} is now a Detail Pro. Check-ins start today.`);
+      showToast(promote ? `🎓 ${tech.name} is now a Detail Pro. Check-ins start today.` : `✅ ${tech.name}'s onboarding is signed. Check-ins start today.`);
       await refreshAll();
       onComplete && onComplete();
     } catch(e) { showToast("Error: " + e.message, false); }
