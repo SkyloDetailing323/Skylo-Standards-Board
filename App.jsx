@@ -3053,19 +3053,23 @@ function IncentiveBoard({ techs, upsells, switchovers, reviews, callbacks, curre
 // driver scorecard (driverScoring.js) matches each truck's Ford data to the
 // tech who picked it. One row per tech per day (truck_assignments); a
 // same-day change overwrites it, and every pick/change goes to
-// truck_assignment_log. Picking a truck someone else already has that day
-// needs a confirmation and marks both picks shared.
-async function saveTruckPick({ tech, vehicle, workDate, truckAssignments, techs, action }) {
-  const others = truckAssignments.filter(a => a.vehicle_id===vehicle.id && a.work_date===workDate && a.tech_id!==tech.id);
-  if (others.length) {
-    const names = others.map(a => techs.find(t => t.id===a.tech_id)?.name || "another tech").join(", ");
-    if (!window.confirm(`${vehicle.name} is already picked today by ${names}.\n\nAre you sure you're driving ${vehicle.name} too? Both picks will be flagged for the office to check.`)) return false;
+// truck_assignment_log. One tech per truck per day: a truck someone already
+// picked today is greyed out, and the database's unique index
+// (truck_assignments_one_tech_per_truck) rejects a pick if two techs grab the
+// same truck at the same moment -- saveTruckPick then throws a TruckTakenError.
+class TruckTakenError extends Error {}
+const TRUCK_TAKEN_MSG = "Someone just took that truck — pick another";
+const isTruckTakenErr = msg => /23505/.test(msg) && /truck_assignments_one_tech_per_truck|\(vehicle_id, work_date\)/.test(msg);
+async function saveTruckPick({ tech, vehicle, workDate, action }) {
+  try {
+    await sb("truck_assignments?on_conflict=tech_id,work_date", { method:"POST", prefer:"resolution=merge-duplicates,return=minimal",
+      body:JSON.stringify({ tech_id:tech.id, vehicle_id:vehicle.id, work_date:workDate, shared:false, picked_at:new Date().toISOString() }) });
+  } catch(e) {
+    if (isTruckTakenErr(e.message)) throw new TruckTakenError(TRUCK_TAKEN_MSG);
+    throw e;
   }
-  await sb("truck_assignments?on_conflict=tech_id,work_date", { method:"POST", prefer:"resolution=merge-duplicates,return=minimal",
-    body:JSON.stringify({ tech_id:tech.id, vehicle_id:vehicle.id, work_date:workDate, shared:others.length>0, picked_at:new Date().toISOString() }) });
-  for (const o of others) if (!o.shared) await sb(`truck_assignments?id=eq.${o.id}`, { method:"PATCH", prefer:"return=minimal", body:JSON.stringify({ shared:true }) }).catch(()=>{});
   await sb("truck_assignment_log", { method:"POST", prefer:"return=minimal",
-    body:JSON.stringify({ tech_id:tech.id, vehicle_id:vehicle.id, work_date:workDate, action: others.length ? "shared" : action, note: others.length ? `also picked by ${others.length} other tech(s)` : null }) }).catch(()=>{});
+    body:JSON.stringify({ tech_id:tech.id, vehicle_id:vehicle.id, work_date:workDate, action }) }).catch(()=>{});
   return true;
 }
 
@@ -3092,17 +3096,24 @@ function TimeSheetTab({ tech, techs=[], timeEntries, vehicles=[], truckAssignmen
     const weekday = new Date(today+"T12:00:00Z").getUTCDay();
     sb(`tech_schedule?tech_id=eq.${tech.id}&weekday=eq.${weekday}&select=vehicle`).then(rows => {
       const v = activeVehicles.find(v => v.name===rows?.[0]?.vehicle);
-      if (v) setPickId(id => id || v.id);
+      if (v && !takenBy(v.id)) setPickId(id => id || v.id);
     }).catch(()=>{});
     // eslint-disable-next-line
   }, [tech.id, today, truckRequired]);
+  // Who already has each truck today (not counting this tech).
+  const takenBy = vehicleId => truckAssignments.find(a => a.vehicle_id===vehicleId && a.work_date===today && a.tech_id!==tech.id);
+  const firstName = id => (techs.find(t=>t.id===id)?.name || "another tech").split(" ")[0];
+  // false = the truck is taken (pick another; no clock-in). Any other save
+  // error is thrown, and clock-in goes ahead anyway.
   async function pickTruck(vehicleId, action) {
     // Already picked today (even if that truck was deactivated since): done.
     if (myPick?.vehicle_id===vehicleId) return true;
     const vehicle = activeVehicles.find(v => v.id===vehicleId);
     if (!vehicle) return !!myPick;
-    const ok = await saveTruckPick({ tech, vehicle, workDate:today, truckAssignments, techs, action: myPick ? "change" : action });
-    if (!ok) { setPickId(myPick?.vehicle_id || ""); return false; }
+    const taken = async () => { setPickId(myPick?.vehicle_id || ""); showToast(TRUCK_TAKEN_MSG, false); await refreshAll(); return false; };
+    if (takenBy(vehicleId)) return taken();
+    try { await saveTruckPick({ tech, vehicle, workDate:today, action: myPick ? "change" : action }); }
+    catch(e) { if (e instanceof TruckTakenError) return taken(); throw e; }
     return true;
   }
   async function changeTruck(vehicleId) {
@@ -3134,8 +3145,8 @@ function TimeSheetTab({ tech, techs=[], timeEntries, vehicles=[], truckAssignmen
     setSaving(true);
     try {
       // The truck pick never blocks the time entry (it feeds pay hours): if
-      // saving the pick fails, clock in anyway and say so. Only the tech
-      // backing out of the shared-truck question stops the clock-in.
+      // saving the pick fails, clock in anyway and say so. Only a truck
+      // someone else already took stops the clock-in (pick another).
       let pickErr = null;
       if (truckRequired) {
         let picked = true;
@@ -3228,15 +3239,15 @@ function TimeSheetTab({ tech, techs=[], timeEntries, vehicles=[], truckAssignmen
             <div style={{ fontSize:"11px", color:C.muted, letterSpacing:"1px", fontWeight:"700", marginBottom:"6px" }}>🚚 TRUCK TODAY{!myPick && <span style={{ color:C.red }}> *</span>}</div>
             {myPick && !changingTruck ? (
               <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:"10px" }}>
-                <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"18px", color:C.black }}>{vehicles.find(v=>v.id===myPick.vehicle_id)?.name || "—"}{myPick.shared && <span style={{ fontSize:"12px", color:C.gold, fontWeight:"700" }}> ⚠ shared</span>}</span>
+                <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"18px", color:C.black }}>{vehicles.find(v=>v.id===myPick.vehicle_id)?.name || "—"}</span>
                 <button onClick={()=>setChangingTruck(true)} style={{ background:"none", border:`1px solid ${C.border}`, color:C.blue, padding:"4px 10px", borderRadius:"4px", cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", fontSize:"11px" }}>CHANGE</button>
               </div>
             ) : (
               <select value={pickId} disabled={saving} onChange={e => myPick ? changeTruck(e.target.value) : setPickId(e.target.value)} style={{ background:C.white, border:`1px solid ${pickId?C.border:C.red}`, color:pickId?C.black:C.muted, padding:"10px 14px", borderRadius:"8px", fontSize:"14px", width:"100%", boxSizing:"border-box" }}>
                 <option value="">Pick your truck…</option>
                 {activeVehicles.map(v => {
-                  const takenBy = truckAssignments.filter(a => a.vehicle_id===v.id && a.work_date===today && a.tech_id!==tech.id).map(a => techs.find(t=>t.id===a.tech_id)?.name).filter(Boolean);
-                  return <option key={v.id} value={v.id}>{v.name} — {v.model}{takenBy.length ? ` (taken: ${takenBy.join(", ")})` : ""}</option>;
+                  const other = takenBy(v.id);
+                  return <option key={v.id} value={v.id} disabled={!!other}>{v.name} — {v.model}{other ? ` (taken by ${firstName(other.tech_id)})` : ""}</option>;
                 })}
               </select>
             )}
@@ -7742,11 +7753,22 @@ function TrucksAdminTab({ techs, vehicles, timeEntries=[], token, refreshAll, sh
     setBusy(true);
     try {
       await sb(`truck_assignments?id=eq.${a.id}`, { method:"DELETE", prefer:"return=minimal" });
-      const rest = (picks||[]).filter(o => o.id!==a.id && o.vehicle_id===a.vehicle_id);
-      if (rest.length===1) await sb(`truck_assignments?id=eq.${rest[0].id}`, { method:"PATCH", prefer:"return=minimal", body:JSON.stringify({ shared:false }) });
       await sb("truck_assignment_log", { method:"POST", prefer:"return=minimal", body:JSON.stringify({ tech_id:a.tech_id, vehicle_id:a.vehicle_id, work_date:a.work_date, action:"admin_remove" }) }).catch(()=>{});
       setBump(b=>b+1); await refreshAll(); showToast("Pick removed");
     } catch(e) { showToast("Error: "+e.message, false); }
+    setBusy(false);
+  }
+  // Give an unpicked truck to a tech for the day. Moves that tech's own pick
+  // if they had one (one row per tech per day).
+  async function assignPick(vehicle, techId) {
+    if (!techId) return;
+    const had = (picks||[]).find(a => a.tech_id===techId);
+    if (had && !window.confirm(`${techName(techId)} already has ${vehicles.find(v=>v.id===had.vehicle_id)?.name || "a truck"} on ${fmtShortDate(day)}. Move them to ${vehicle.name}?`)) return;
+    setBusy(true);
+    try {
+      await saveTruckPick({ tech:{ id:techId }, vehicle, workDate:day, action:"admin_assign" });
+      setBump(b=>b+1); await refreshAll(); showToast(`✅ ${vehicle.name} → ${techName(techId)}`);
+    } catch(e) { showToast(e instanceof TruckTakenError ? "That truck already has a tech that day — remove their pick first" : "Error: "+e.message, false); }
     setBusy(false);
   }
   async function driving(action, row, techId=null) {
@@ -7838,7 +7860,12 @@ function TrucksAdminTab({ techs, vehicles, timeEntries=[], token, refreshAll, sh
                 <div key={v.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:"8px", padding:"6px 0", borderBottom:`1px solid ${C.border}` }}>
                   <span style={{ fontSize:"13px", color:C.black, fontWeight:"700", minWidth:"70px" }}>{v.name}</span>
                   <div style={{ flex:1, display:"flex", gap:"6px", flexWrap:"wrap", justifyContent:"flex-end" }}>
-                    {on.length===0 && <span style={{ fontSize:"12px", color:C.muted }}>not picked</span>}
+                    {on.length===0 && (
+                      <select value="" disabled={busy} onChange={e => assignPick(v, e.target.value)} style={{ ...inp, width:"auto", fontSize:"12px", padding:"4px 6px", color:C.muted }}>
+                        <option value="">not picked — assign…</option>
+                        {techs.filter(t=>t.is_active!==false && t.title!=="owner").sort(byFirstName).map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                      </select>
+                    )}
                     {on.map(a => (
                       <span key={a.id} style={{ display:"inline-flex", alignItems:"center", gap:"6px", fontSize:"12px", color:C.black, background:on.length>1?`${C.gold}20`:C.cardLt, border:`1px solid ${on.length>1?C.gold:C.border}`, borderRadius:"14px", padding:"3px 4px 3px 10px" }}>
                         {techName(a.tech_id)}{on.length>1 && " ⚠"}
@@ -7849,7 +7876,8 @@ function TrucksAdminTab({ techs, vehicles, timeEntries=[], token, refreshAll, sh
                 </div>
               );
             })}
-            {dayPicks.some(a => dayPicks.filter(o=>o.vehicle_id===a.vehicle_id).length>1) && <div style={{ fontSize:"12px", color:C.gold }}>⚠ Shared truck: two techs picked it, so its driving isn't scored for either until one pick is removed.</div>}
+            <div style={{ fontSize:"12px", color:C.muted }}>One tech per truck per day. To move a truck to someone else, remove the pick (×) and assign it.</div>
+            {dayPicks.some(a => dayPicks.filter(o=>o.vehicle_id===a.vehicle_id).length>1) && <div style={{ fontSize:"12px", color:C.gold }}>⚠ Two techs on one truck (picked before one-truck-per-tech): its driving isn't scored for either until one pick is removed.</div>}
             {noPick.length>0 && <div style={{ fontSize:"12px", color:C.red, marginTop:"4px" }}>Clocked in without a truck pick: {noPick.map(techName).join(", ")}</div>}
           </div>
         )}

@@ -48,18 +48,23 @@ on conflict (vin) do nothing;
 
 -- ─── truck picks ─────────────────────────────────────────────────────────────
 -- One row per tech per day: the truck they picked at clock-in. A same-day
--- correction overwrites it (the last pick wins). Two techs on the same truck
--- the same day is allowed only after they confirm the warning (shared=true).
+-- correction overwrites it (the last pick wins). One tech per truck per day:
+-- a truck someone already picked that day can't be picked again (unique
+-- index below); an admin removes or reassigns a pick on the Trucks tab.
+-- `shared` is no longer set by the app (kept so scoring tolerates old rows).
 create table if not exists public.truck_assignments (
   id          uuid primary key default gen_random_uuid(),
   tech_id     uuid not null,
   vehicle_id  uuid not null references public.vehicles(id),
   work_date   date not null,                 -- Mountain-time day
-  shared      boolean not null default false, -- picked a truck someone else already had that day
+  shared      boolean not null default false, -- legacy: two techs on one truck (no longer created)
   picked_at   timestamptz not null default now(),
   unique (tech_id, work_date)
 );
 create index if not exists truck_assignments_day_idx on public.truck_assignments (work_date, vehicle_id);
+-- One tech per truck per day. The app shows "Someone just took that truck"
+-- when two techs pick the same truck at the same moment and this rejects one.
+create unique index if not exists truck_assignments_one_tech_per_truck on public.truck_assignments (vehicle_id, work_date);
 alter table public.truck_assignments enable row level security;
 drop policy if exists "allow anon full access" on public.truck_assignments;
 create policy "allow anon full access" on public.truck_assignments for all using (true) with check (true);
@@ -71,7 +76,7 @@ create table if not exists public.truck_assignment_log (
   tech_id     uuid not null,
   vehicle_id  uuid references public.vehicles(id),
   work_date   date not null,
-  action      text not null,                 -- 'pick' | 'change' | 'shared' | 'admin_remove'
+  action      text not null,                 -- 'pick' | 'change' | 'admin_assign' | 'admin_remove' ('shared' on legacy rows)
   note        text,
   at          timestamptz not null default now()
 );
