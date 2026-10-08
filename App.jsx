@@ -3073,6 +3073,9 @@ async function saveTruckPick({ tech, vehicle, workDate, action }) {
   return true;
 }
 
+// Titles that drive a company truck: they must pick one to clock in.
+const TRUCK_DRIVER_TITLES = ["detail_pro","senior_detail_pro","lead_detail_pro","commercial_detail","equipment_coordinator"];
+
 function TimeSheetTab({ tech, techs=[], timeEntries, vehicles=[], truckAssignments=[], refreshAll, showToast, nowTick }) {
   const myEntries = timeEntries.filter(e => e.tech_id === tech.id);
   const today = mtDateStr(nowTick);
@@ -3082,24 +3085,27 @@ function TimeSheetTab({ tech, techs=[], timeEntries, vehicles=[], truckAssignmen
   const [editDate, setEditDate] = useState(today);
   const [editingId, setEditingId] = useState(null);
   const [editForm, setEditForm] = useState({ in:"", out:"" });
-  // Truck today. Required to clock in once the vehicles list exists (if the
-  // vehicles table isn't set up yet, clock-in works like before).
+  // Truck today. Required to clock in for the detail techs who drive a truck
+  // (TRUCK_DRIVER_TITLES) once the vehicles list exists; anyone else (sales,
+  // apprentices riding with a trainer, the Field Supervisor) can pick one but
+  // doesn't have to. No vehicles table yet = clock-in works like before.
   const activeVehicles = vehicles.filter(v => v.active!==false);
-  const truckRequired = activeVehicles.length > 0;
+  const truckOffered = activeVehicles.length > 0;
+  const truckRequired = truckOffered && TRUCK_DRIVER_TITLES.includes(tech.title || "detail_apprentice");
   const myPick = truckAssignments.find(a => a.tech_id===tech.id && a.work_date===today);
   const [pickId, setPickId] = useState(myPick?.vehicle_id || "");
   const [changingTruck, setChangingTruck] = useState(false);
   useEffect(() => { if (myPick) setPickId(myPick.vehicle_id); }, [myPick?.vehicle_id]);
   // Pre-select the truck on this tech's regular schedule for today, if any.
   useEffect(() => {
-    if (myPick || pickId || !truckRequired) return;
+    if (myPick || pickId || !truckOffered) return;
     const weekday = new Date(today+"T12:00:00Z").getUTCDay();
     sb(`tech_schedule?tech_id=eq.${tech.id}&weekday=eq.${weekday}&select=vehicle`).then(rows => {
       const v = activeVehicles.find(v => v.name===rows?.[0]?.vehicle);
       if (v && !takenBy(v.id)) setPickId(id => id || v.id);
     }).catch(()=>{});
     // eslint-disable-next-line
-  }, [tech.id, today, truckRequired]);
+  }, [tech.id, today, truckOffered]);
   // Who already has each truck today (not counting this tech).
   const takenBy = vehicleId => truckAssignments.find(a => a.vehicle_id===vehicleId && a.work_date===today && a.tech_id!==tech.id);
   const firstName = id => (techs.find(t=>t.id===id)?.name || "another tech").split(" ")[0];
@@ -3148,7 +3154,7 @@ function TimeSheetTab({ tech, techs=[], timeEntries, vehicles=[], truckAssignmen
       // saving the pick fails, clock in anyway and say so. Only a truck
       // someone else already took stops the clock-in (pick another).
       let pickErr = null;
-      if (truckRequired) {
+      if (truckOffered && pickId) {
         let picked = true;
         try { picked = await pickTruck(pickId, "pick"); }
         catch(e) { pickErr = e.message; }
@@ -3234,9 +3240,9 @@ function TimeSheetTab({ tech, techs=[], timeEntries, vehicles=[], truckAssignmen
       )}
 
       <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"20px", display:"flex", flexDirection:"column", gap:"14px" }}>
-        {truckRequired && (
+        {truckOffered && (
           <div>
-            <div style={{ fontSize:"11px", color:C.muted, letterSpacing:"1px", fontWeight:"700", marginBottom:"6px" }}>🚚 TRUCK TODAY{!myPick && <span style={{ color:C.red }}> *</span>}</div>
+            <div style={{ fontSize:"11px", color:C.muted, letterSpacing:"1px", fontWeight:"700", marginBottom:"6px" }}>🚚 TRUCK TODAY{!myPick && truckRequired && <span style={{ color:C.red }}> *</span>}</div>
             {myPick && !changingTruck ? (
               <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:"10px" }}>
                 <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"18px", color:C.black }}>{vehicles.find(v=>v.id===myPick.vehicle_id)?.name || "—"}</span>
@@ -7850,11 +7856,26 @@ function AuditScoresTab({ techs, token, techId=null, canSync=false, view="overvi
 // Apprentices still in training aren't listed. Owners and the Field
 // Supervisor can set or override a grade. Feeds the Truck part of the
 // Equipment & Truck section of the Tech Score. Display only -- not tied to pay.
-function PhotoThumb({ url }) {
+// GHL photos need the GHL login, so they come through audit-scores
+// (?photo=<documentId>) with this login's token; plain image links load as-is.
+function PhotoThumb({ photo, token }) {
+  const [src, setSrc] = useState(photo.documentId ? null : photo.url);
   const [bad, setBad] = useState(false);
+  useEffect(() => {
+    if (!photo.documentId) return;
+    let live = true, objUrl = null;
+    fetch(`/.netlify/functions/audit-scores?photo=${encodeURIComponent(photo.documentId)}`, { headers:{ Authorization:`Bearer ${token || ""}` } })
+      .then(r => { if (!r.ok) throw new Error(r.status); return r.blob(); })
+      .then(b => { objUrl = URL.createObjectURL(b); if (live) setSrc(objUrl); })
+      .catch(() => live && setBad(true));
+    return () => { live = false; if (objUrl) URL.revokeObjectURL(objUrl); };
+  }, [photo.documentId, token]);
+  const box = { display:"inline-flex", alignItems:"center", justifyContent:"center", width:"104px", height:"104px", borderRadius:"8px", border:`1px solid ${C.border}`, background:C.cardLt, overflow:"hidden", fontSize:"12px", color:C.muted, textDecoration:"none", textAlign:"center" };
+  if (bad || (!photo.image && !photo.documentId)) return <a href={photo.url} target="_blank" rel="noopener noreferrer" style={{ ...box, color:C.blue }}>📎 Open file</a>;
+  if (!src) return <div style={box}>Loading…</div>;
   return (
-    <a href={url} target="_blank" rel="noopener noreferrer" style={{ display:"inline-flex", alignItems:"center", justifyContent:"center", width:"104px", height:"104px", borderRadius:"8px", border:`1px solid ${C.border}`, background:C.cardLt, overflow:"hidden", fontSize:"13px", color:C.blue, textDecoration:"none", textAlign:"center" }}>
-      {bad ? "📎 Open file" : <img src={url} alt="Truck Check photo" loading="lazy" onError={() => setBad(true)} style={{ width:"100%", height:"100%", objectFit:"cover" }}/>}
+    <a href={src} target="_blank" rel="noopener noreferrer" style={box}>
+      <img src={src} alt="Truck Check photo" loading="lazy" onError={() => setBad(true)} style={{ width:"100%", height:"100%", objectFit:"cover" }}/>
     </a>
   );
 }
@@ -7914,7 +7935,7 @@ function TruckInspectionsTab({ techs, jobs=[], token, canGrade=false, showToast=
       <div style={{ marginTop:"8px" }}>
         <div style={{ fontSize:"14px", color:C.black }}>Submitted {fmtShortDate(mtDateStr(Date.parse(sub.submitted_at)))} at {formatMTTime(sub.submitted_at)}</div>
         {photos.length===0 ? <div style={{ fontSize:"13px", color:C.muted, marginTop:"6px" }}>No photos found on this submission.</div> : (
-          <div style={{ display:"flex", flexWrap:"wrap", gap:"6px", marginTop:"8px" }}>{photos.map(p => <PhotoThumb key={p.url} url={p.url}/>)}</div>
+          <div style={{ display:"flex", flexWrap:"wrap", gap:"6px", marginTop:"8px" }}>{photos.map(p => <PhotoThumb key={p.documentId || p.url} photo={p} token={token}/>)}</div>
         )}
         <div style={{ fontSize:"14px", color:C.black, marginTop:"8px" }}>
           {g ? <>Grade <strong>{fmtScore(Number(g.score))}</strong>{g.graded_by ? ` · by ${g.graded_by}` : ""}{g.graded_at ? ` · ${fmtShortDate(mtDateStr(Date.parse(g.graded_at)))}` : ""}</>

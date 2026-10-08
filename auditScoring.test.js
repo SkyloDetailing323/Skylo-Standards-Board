@@ -156,19 +156,21 @@ test("Tech name falls back to the form's First/Last Name (Forms tab prefill)", (
   assert.equal(techNameOf(AUDIT_CONFIG.tote.formId, { Tech: "Kyle Reiff" }, { first_name: "X", last_name: "Y" }), "Kyle Reiff");
 });
 
-test("truck check photos: any image or GHL file link, anywhere in the submission", () => {
+test("truck check photos: GHL file uploads (real shape) and plain image links", () => {
   const sub = {
-    answers: { "Front of truck": "https://example.com/a.JPG", Notes: "all good, see http://x.com/page", "Date": "2026-10-05" },
+    answers: { "Date 6zgc": "2026-10-07", Notes: "all good, see http://x.com/page" },
     fields: {
-      abc123: { "f1e2": { url: "https://services.leadconnectorhq.com/documents/download/XYZ", meta: { name: "IMG_1.heic" } } },
-      def456: [{ url: "https://storage.googleapis.com/msgsndr/loc/media/b.png?alt=1" }, "https://example.com/a.JPG"],
+      // GHL file upload: { <uploadId>: { url, meta:{ mimetype }, documentId } } under the question's field id
+      pngpwOeV4WPoQMESk9bM: { "74ca92f5": { url: "https://services.leadconnectorhq.com/documents/download/DOC1", meta: { mimetype: "image/jpeg", originalname: "image.jpg" }, documentId: "DOC1" } },
+      sSuRnQiPZWHaKtqjNUHb: { "aa11": { url: "https://services.leadconnectorhq.com/documents/download/DOC2", meta: { mimetype: "application/pdf" }, documentId: "DOC2" } },
+      // The form page itself is not a photo
+      eventData: { page: { url: "https://api.leadconnectorhq.com/widget/form/70rs6amtoR9LiP9BDY7E" } },
       list: "https://example.com/c.jpeg, https://example.com/d.webp",
     },
   };
-  assert.deepEqual(submissionPhotoUrls(sub).map(p => [p.url, p.image]), [
-    ["https://example.com/a.JPG", true],
-    ["https://services.leadconnectorhq.com/documents/download/XYZ", false],
-    ["https://storage.googleapis.com/msgsndr/loc/media/b.png?alt=1", true],
+  assert.deepEqual(submissionPhotoUrls(sub).map(p => [p.documentId || p.url, p.image]), [
+    ["DOC1", true],
+    ["DOC2", false],
     ["https://example.com/c.jpeg", true],
     ["https://example.com/d.webp", true],
   ]);

@@ -86,9 +86,31 @@ async function truckGradesFor(ids) {
   return out;
 }
 
+// GET ?photo=<GHL documentId>: a Truck Check photo. GHL's download links need
+// the GHL login, so the photo is fetched here and passed through. Owners and
+// the Field Supervisor see any; a tech only photos on their own submissions.
+async function photo(who, docId) {
+  if (!/^[A-Za-z0-9_-]{6,64}$/.test(docId || "")) return json(400, { error: "Bad photo id" });
+  const admin = who.role === "owner" || who.role === "manager";
+  const own = admin ? "" : `&tech_id=eq.${encodeURIComponent(who.techId || "none")}`;
+  const rows = await sbGetAll(`ghl_form_submissions?select=id&form_id=eq.${TRUCK_FORM_ID}&raw->>others=like.*${docId}*${own}&limit=1`);
+  if (!rows.length) return json(404, { error: "Photo not found" });
+  const res = await fetch(`https://services.leadconnectorhq.com/documents/download/${docId}`, {
+    headers: { Authorization: `Bearer ${process.env.GHL_TOKEN}`, Version: "2021-07-28" },
+  });
+  if (!res.ok) return json(502, { error: `GHL photo HTTP ${res.status}` });
+  const buf = Buffer.from(await res.arrayBuffer());
+  if (buf.length > 5.5 * 1024 * 1024) return json(413, { error: "Photo too large to show here" });
+  return { statusCode: 200, isBase64Encoded: true, body: buf.toString("base64"),
+    headers: { "Content-Type": res.headers.get("content-type") || "image/jpeg", "Cache-Control": "private, max-age=86400" } };
+}
+
 exports.handler = async (event) => {
   const who = verifyToken(tokenFrom(event));
   if (!who) return json(401, { error: "Log in again" });
+  if (event.httpMethod === "GET" && (event.queryStringParameters || {}).photo) {
+    try { return await photo(who, event.queryStringParameters.photo); } catch (e) { return json(500, { error: e.message }); }
+  }
   if (event.httpMethod === "POST") {
     let body; try { body = JSON.parse(event.body || "{}"); } catch { return json(400, { error: "Bad JSON" }); }
     // Tote waivers predate the action field: no action = a waiver.

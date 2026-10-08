@@ -403,19 +403,30 @@ export function weeklyAuditPct(days) {
 // leave out). Any http(s) string that looks like an image or a GHL-hosted
 // file counts; tolerant on purpose, since the exact shape varies.
 const IMG_EXT = /\.(jpe?g|png|gif|webp|heic|heif|bmp|tiff?)(\?|#|$)/i;
-const FILE_HOST = /(msgsndr|leadconnectorhq|gohighlevel|highlevel|filesafe|storage\.googleapis\.com|firebasestorage|amazonaws\.com|cloudfront\.net)/i;
 export function submissionPhotoUrls(sub) {
+  // GHL file uploads are objects like { url, meta:{ mimetype }, documentId }
+  // keyed by upload id under the question's field id. Their download URLs
+  // need the GHL login, so the app shows them through audit-scores
+  // (?photo=<documentId>). Plain image links are kept as a fallback.
   const out = [], seen = new Set();
-  const walk = (v, depth) => {
-    if (v == null || depth > 10) return;
+  const add = (url, image, documentId) => { const k = documentId || url; if (!k || seen.has(k)) return; seen.add(k); out.push({ url, image, documentId: documentId || null }); };
+  const walk = (v, depth, key) => {
+    if (v == null || depth > 10 || key === "eventData") return;
     if (typeof v === "string") {
       for (const part of v.split(/[\s,]+(?=https?:\/\/)/i)) {
         const s = part.trim();
-        if (!/^https?:\/\/\S+$/i.test(s) || seen.has(s) || !(IMG_EXT.test(s) || FILE_HOST.test(s))) continue;
-        seen.add(s); out.push({ url: s, image: IMG_EXT.test(s) });
+        if (/^https?:\/\/\S+$/i.test(s) && IMG_EXT.test(s)) add(s, true, null);
       }
     } else if (Array.isArray(v)) v.forEach(x => walk(x, depth + 1));
-    else if (typeof v === "object") Object.values(v).forEach(x => walk(x, depth + 1));
+    else if (typeof v === "object") {
+      if (typeof v.url === "string" && (v.documentId || (v.meta && v.meta.mimetype))) {
+        const mime = (v.meta && v.meta.mimetype) || "";
+        const doc = v.documentId || (String(v.url).match(/documents\/download\/([A-Za-z0-9_-]+)/) || [])[1] || null;
+        add(v.url, /^image\//i.test(mime) || IMG_EXT.test(v.url), doc);
+        return;
+      }
+      Object.entries(v).forEach(([k, x]) => walk(x, depth + 1, k));
+    }
   };
   walk(sub && sub.answers, 0);
   walk(sub && sub.fields, 0);
