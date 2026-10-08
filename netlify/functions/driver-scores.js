@@ -95,6 +95,7 @@ exports.handler = async (event) => {
 
     if (!isDate(q.from) || !isDate(q.to)) return json(400, { error: "from and to must be YYYY-MM-DD" });
     if (!admin && !who.techId) return json(403, { error: "No tech on this login" });
+    if (!admin && (Date.parse(q.to) - Date.parse(q.from)) / 864e5 > 62) return json(400, { error: "Pick a range of 62 days or less" });
     const range = `work_date=gte.${q.from}&work_date=lte.${q.to}`;
     const vehicles = await sbGetAll("vehicles?select=id,name,vin,active&order=name");
     let assignments = await sbGetAll(`truck_assignments?select=tech_id,vehicle_id,work_date,shared&${range}`);
@@ -102,7 +103,7 @@ exports.handler = async (event) => {
 
     // A tech sees their own picks, plus (anonymized) anyone else on the same
     // truck the same day so a shared truck shows as shared.
-    let vins = null;
+    let vins = null, myDays = null;
     if (!admin) {
       const mine = assignments.filter(a => a.tech_id === who.techId);
       assignments = assignments.filter(a => a.tech_id === who.techId || mine.some(m => m.vehicle_id === a.vehicle_id && m.work_date === a.work_date))
@@ -110,10 +111,13 @@ exports.handler = async (event) => {
       unassigned = unassigned.filter(u => u.assigned_tech_id === who.techId);
       const vinById = Object.fromEntries(vehicles.map(v => [v.id, v.vin]));
       vins = [...new Set([...mine.map(a => vinById[a.vehicle_id]), ...unassigned.map(u => u.vin)].filter(Boolean))];
+      // Only the days THIS tech had the truck -- not other techs' days on it.
+      myDays = new Set([...mine.map(a => `${vinById[a.vehicle_id]}|${a.work_date}`), ...unassigned.map(u => `${u.vin}|${u.work_date}`)]);
     }
     const vinFilter = vins ? `&vin=in.(${vins.map(encodeURIComponent).join(",") || "none"})` : "";
-    const daily = await sbGetAll(`ford_vehicle_daily?select=vin,work_date,miles,trips,idle_minutes,speeding_minutes&${range}${vinFilter}`);
-    const events = await sbGetAll(`ford_vehicle_events?select=vin,work_date,event_time,event_type,mph_over,speed_mph,limit_mph,duration_sec&${range}${vinFilter}&order=event_time`);
+    const mineOnly = rows => myDays ? rows.filter(r => myDays.has(`${r.vin}|${r.work_date}`)) : rows;
+    const daily = mineOnly(await sbGetAll(`ford_vehicle_daily?select=vin,work_date,miles,trips,idle_minutes,speeding_minutes&${range}${vinFilter}`));
+    const events = mineOnly(await sbGetAll(`ford_vehicle_events?select=vin,work_date,event_time,event_type,mph_over,speed_mph,limit_mph,duration_sec&${range}${vinFilter}&order=event_time`));
     let lastPull = null;
     if (admin) {
       const s = await sb("ghl_sync_state?key=eq.ford_last_run&select=value,updated_at").catch(() => []);

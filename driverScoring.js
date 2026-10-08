@@ -21,7 +21,7 @@ export const DRIVER_CONFIG = {
   //     so counting events punishes city driving).
   //   mode "events": 5-19 mph over is scored per event per 100 miles.
   // 20+ mph over (and Ford's 85 mph threshold) is always -10 per event.
-  speeding: { minMphOver: 5, severeMphOver: 20, mode: "minutes" },
+  speeding: { minMphOver: 5, severeMphOver: 20, mode: "minutes", severeMergeSec: 60 },
   penalties: {
     harsh_braking:      { label: "Harsh braking",          unit: "harsh brake",  per100: 2 },
     harsh_acceleration: { label: "Harsh acceleration",     unit: "harsh accel",  per100: 2 },
@@ -71,11 +71,21 @@ export function scoreDriverDay(day, cfg = DRIVER_CONFIG) {
   const miles = Number(day.miles) || 0;
   const counts = {}, unknownTypes = new Set(), flags = [];
   let idleFromEvents = 0;
-  for (const ev of day.events || []) {
+  // Ford logs a long stretch over the limit as several short events, so
+  // severe (20+ over / 85 mph) events on the same truck within
+  // severeMergeSec of the last one are one stretch: one flat penalty.
+  const lastSevere = {};
+  const evs = [...(day.events || [])].sort((a, b) => String(a.event_time || "").localeCompare(String(b.event_time || "")));
+  for (const ev of evs) {
     const k = eventKind(ev, cfg);
     if (k === "idling") { idleFromEvents += (Number(ev.duration_sec) || 0) / 60; continue; }
     if (k === "ignored") continue;
     if (k === null) { unknownTypes.add(ev.event_type); continue; }
+    if (k === "speeding_severe" && ev.event_time) {
+      const t = Date.parse(ev.event_time), prev = lastSevere[ev.vin || ""];
+      lastSevere[ev.vin || ""] = t;
+      if (prev != null && Number.isFinite(t) && t - prev <= (cfg.speeding.severeMergeSec ?? 60) * 1000) continue;
+    }
     counts[k] = (counts[k] || 0) + 1;
   }
   if (counts.speeding_unknown) flags.push(`${counts.speeding_unknown} speeding event(s) without mph over the limit — not scored`);

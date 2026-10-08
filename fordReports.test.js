@@ -73,3 +73,38 @@ test("events mode still matches the spec example (420 mi -> 94.0)", () => {
   const d = scoreDriverDay({ date: "d", miles: 420, speedingMinutes: 12, events: [...evs("Harsh Braking", 6), ...evs("Harsh Acceleration", 2), ...evs("Speeding Over Posted Limit", 3, { mph_over: 8 })] }, cfg);
   assert.equal(Math.round(d.score * 10) / 10, 94.0);
 });
+
+test("a Ford 'N/A' limit is unknown (not 0), so it isn't scored as speeding", () => {
+  const csv = "Date,Time,Vehicle,Speed Limit (mph),Event Type,Speed (mph),Duration (Seconds)\n" +
+    '10/6/26,"9:00:00 AM",Mav/3,N/A,"Speeding Over Posted Limit",45,12\n';
+  const r = buildFordImport([{ name: "fleet.csv", text: FLEET }, { name: "s.csv", text: csv }], vehicles);
+  assert.equal(r.events[0].limit_mph, null);
+  assert.equal(r.events[0].mph_over, null);
+});
+
+test("the same report uploaded twice doesn't double the events", () => {
+  const once = buildFordImport([{ name: "fleet.csv", text: FLEET }, { name: "speeding.csv", text: SPEEDING }], vehicles);
+  const twice = buildFordImport([{ name: "fleet.csv", text: FLEET }, { name: "speeding.csv", text: SPEEDING }, { name: "speeding (1).csv", text: SPEEDING }, { name: "fleet (1).csv", text: FLEET }], vehicles);
+  assert.equal(twice.events.length, once.events.length);
+  assert.equal(twice.daily.length, once.daily.length);
+});
+
+test("speeding minutes are minutes over the posted limit only", () => {
+  const fleet = FLEET.replace("6.000,0.000", "6.000,2.000");
+  const r = buildFordImport([{ name: "fleet.csv", text: fleet }], vehicles);
+  assert.equal(r.daily.find(d => d.vin === "3FTTW8J34SRA88072").speeding_minutes, 6);
+});
+
+test("no dated events: the import doesn't guess a day", () => {
+  const r = buildFordImport([{ name: "fleet.csv", text: FLEET }], vehicles);
+  assert.equal(r.workDate, null);
+  assert.ok(r.warnings.some(w => /pick the day/.test(w)));
+});
+
+test("severe speeding events within 60s on one truck count once", () => {
+  const ev = (t, over) => ({ vin: "V1", event_type: "Speeding Over Posted Limit", mph_over: over, event_time: `2026-10-06T10:00:${t}-06:00` });
+  const day = scoreDriverDay({ date: "2026-10-06", miles: 100, events: [ev("00", 22), ev("20", 25), ev("45", 21)] });
+  assert.equal(day.counts.speeding_severe, 1);
+  const apart = scoreDriverDay({ date: "2026-10-06", miles: 100, events: [ev("00", 22), { ...ev("00", 22), event_time: "2026-10-06T10:05:00-06:00" }] });
+  assert.equal(apart.counts.speeding_severe, 2);
+});

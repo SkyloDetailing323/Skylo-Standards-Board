@@ -3024,9 +3024,10 @@ function TimeSheetTab({ tech, techs=[], timeEntries, vehicles=[], truckAssignmen
     // eslint-disable-next-line
   }, [tech.id, today, truckRequired]);
   async function pickTruck(vehicleId, action) {
-    const vehicle = activeVehicles.find(v => v.id===vehicleId);
-    if (!vehicle) return false;
+    // Already picked today (even if that truck was deactivated since): done.
     if (myPick?.vehicle_id===vehicleId) return true;
+    const vehicle = activeVehicles.find(v => v.id===vehicleId);
+    if (!vehicle) return !!myPick;
     const ok = await saveTruckPick({ tech, vehicle, workDate:today, truckAssignments, techs, action: myPick ? "change" : action });
     if (!ok) { setPickId(myPick?.vehicle_id || ""); return false; }
     return true;
@@ -3059,10 +3060,20 @@ function TimeSheetTab({ tech, techs=[], timeEntries, vehicles=[], truckAssignmen
     if (truckRequired && !pickId) return showToast("Pick your truck for today first", false);
     setSaving(true);
     try {
-      if (truckRequired && !(await pickTruck(pickId, "pick"))) { setSaving(false); return; }
+      // The truck pick never blocks the time entry (it feeds pay hours): if
+      // saving the pick fails, clock in anyway and say so. Only the tech
+      // backing out of the shared-truck question stops the clock-in.
+      let pickErr = null;
+      if (truckRequired) {
+        let picked = true;
+        try { picked = await pickTruck(pickId, "pick"); }
+        catch(e) { pickErr = e.message; }
+        if (!picked) { setSaving(false); return; }
+      }
       await sb("time_entries", { method:"POST", body:JSON.stringify({ tech_id:tech.id, work_date:today, clock_in:new Date().toISOString() }) });
       await refreshAll();
-      showToast("✅ Clocked in!");
+      if (pickErr) showToast("Clocked in, but your truck pick didn't save — tell your lead. ("+pickErr+")", false);
+      else showToast("✅ Clocked in!");
     } catch(e) { showToast("Error: "+e.message, false); }
     setSaving(false);
   }
@@ -7030,7 +7041,9 @@ const AUDIT_SECTIONS = [["overview","📊 Overview"],["tote","🧰 Tote Checks"]
 const fmtScore = n => n==null ? "—" : (Math.round(n*10)/10).toFixed(1);
 const passColor = (score, pass) => score==null ? C.muted : pass ? C.green : C.red;
 
-function AuditScoresTab({ techs, token, techId=null, canSync=false, view="overview" }) {
+// hideTabs: the admin menu opens each section as its own page (Tech Scores >
+// Overview / Tote Checks / Audit Scores / Driving Scores), so no section bar.
+function AuditScoresTab({ techs, token, techId=null, canSync=false, view="overview", hideTabs=false }) {
   const [section, setSection] = useState(view==="both" ? "overview" : view);
   const [wk, setWk] = useState(auditDefaultWeek());
   const [state, setState] = useState({ loading:true, error:null, data:null });
@@ -7111,11 +7124,11 @@ function AuditScoresTab({ techs, token, techId=null, canSync=false, view="overvi
 
   const header = (
     <>
-      <div style={{ marginBottom:"10px" }}><SubTabs tabs={AUDIT_SECTIONS} active={section} setActive={s => { setSection(s); setOpen(null); }}/></div>
+      {!hideTabs && <div style={{ marginBottom:"10px" }}><SubTabs tabs={AUDIT_SECTIONS} active={section} setActive={s => { setSection(s); setOpen(null); }}/></div>}
       <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:"8px", marginBottom:"12px" }}>
-        <button style={arrow} onClick={() => setWk(shiftWeek(wk,-1))}>◀</button>
+        <button style={arrow} onClick={() => { setWk(shiftWeek(wk,-1)); setOpen(null); }}>◀</button>
         <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"16px", color:C.black }}>{formatWeekLabel(wk)}{wk===thisWeek ? " · this week" : ""}</div>
-        <button style={{ ...arrow, opacity:wk>=thisWeek?0.4:1 }} disabled={wk>=thisWeek} onClick={() => setWk(shiftWeek(wk,1))}>▶</button>
+        <button style={{ ...arrow, opacity:wk>=thisWeek?0.4:1 }} disabled={wk>=thisWeek} onClick={() => { setWk(shiftWeek(wk,1)); setOpen(null); }}>▶</button>
       </div>
       {state.error && <div style={{ background:`${C.red}10`, border:`1px solid ${C.red}`, borderRadius:"10px", padding:"12px", fontSize:"13px", color:C.red, marginBottom:"10px" }}>Couldn't load: {state.error}</div>}
       {state.loading && !state.data && <div style={{ color:C.muted, padding:"16px" }}>Loading...</div>}
@@ -7216,7 +7229,7 @@ function AuditScoresTab({ techs, token, techId=null, canSync=false, view="overvi
               <div>{summary}</div>
             </div>
             {isOpen && <div style={{ marginTop:"8px" }}>
-              {section==="driver" ? <DriverDetail driver={driver}/> : <AuditTechDetail week={week} only={section==="overview" ? "both" : section}/>}
+              {section==="driver" ? (driver ? <DriverDetail driver={driver}/> : <div style={{ fontSize:"13px", color:C.muted }}>No driving data for this week.</div>) : <AuditTechDetail week={week} only={section==="overview" ? "both" : section}/>}
               {section==="overview" && driver && <DriverDetail driver={driver}/>}
             </div>}
           </div>
@@ -7250,7 +7263,7 @@ function AuditScoresTab({ techs, token, techId=null, canSync=false, view="overvi
   return (
     <div>
       {header}
-      <div style={{ fontSize:"13px", color:C.muted, marginBottom:"12px", lineHeight:"1.5" }}>{intro} Weeks run Wednesday–Tuesday. Display only — not tied to pay{section==="tote" ? " (except the Payroll tote deduction above)" : ""}.</div>
+      <div style={{ fontSize:"13px", color:C.muted, marginBottom:"12px", lineHeight:"1.5" }}>{intro} Weeks run Wednesday–Tuesday. {section==="tote" ? "Items missing on a FAILED tote check come off that tech's pay on the Payroll tab." : "Display only — not tied to pay."}</div>
       {(section==="tote" || section==="audit") && (
         <div style={{ background:C.cardLt, border:`1px solid ${C.border}`, borderRadius:"10px", padding:"10px 12px", marginBottom:"12px", fontSize:"12px", color:C.black }}>
           {last ? <>Last GHL form sync: {new Date(last.finished_at || last.updated_at).toLocaleString("en-US", { month:"short", day:"numeric", hour:"numeric", minute:"2-digit", timeZone:"America/Denver" })}{last.errors?.length ? <span style={{ color:C.red }}> · {last.errors.join("; ")}</span> : ""}{last.labels?.source==="raw_keys" ? <div style={{ color:C.gold, marginTop:"4px" }}>⚠ Couldn't read the form's question labels from GHL ({last.labels.error}). The token may need the locations/customFields.readonly scope.</div> : null}</> : "Not synced yet."}
@@ -7392,8 +7405,9 @@ function TrucksAdminTab({ techs, vehicles, timeEntries=[], token, refreshAll, sh
     try {
       const files = await Promise.all([...fileList].map(f => f.text().then(text => ({ name:f.name, text }))));
       const r = buildFordImport(files, vehicles);
-      const yesterday = mtDateStr(Date.now() - 864e5);
-      setImp(r); setImpDate(r.workDate || yesterday);
+      // No dated events = no way to know the day: make the admin pick it
+      // rather than silently guessing yesterday.
+      setImp(r); setImpDate(r.workDate || "");
     } catch(e) { showToast("Couldn't read those files: "+e.message, false); }
   }
   async function importFord() {
@@ -7505,7 +7519,7 @@ function TrucksAdminTab({ techs, vehicles, timeEntries=[], token, refreshAll, sh
             )}
             {imp.warnings.map((w,i) => <div key={i} style={{ color:C.gold, marginTop:"4px" }}>⚠ {w}</div>)}
             <div style={{ display:"flex", gap:"8px", marginTop:"10px" }}>
-              <button disabled={busy || (!imp.daily.length && !imp.events.length)} onClick={importFord} style={smallBtn(C.green)}>Import {impDate ? fmtShortDate(impDate) : ""}</button>
+              <button disabled={busy || !impDate || (!imp.daily.length && !imp.events.length)} onClick={importFord} style={smallBtn(C.green)}>Import {impDate ? fmtShortDate(impDate) : ""}</button>
               <button disabled={busy} onClick={()=>{ setImp(null); setFileKey(k=>k+1); }} style={smallBtn(C.muted)}>Cancel</button>
             </div>
           </div>
@@ -7860,7 +7874,10 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
       ["forms","📝","Forms"],
     ]},
     { label:"Tech Scores", items:[
-      ["auditscores","📊","Audits"],
+      ["scoresoverview","📊","Overview"],
+      ["totechecks","🧰","Tote Checks"],
+      ["auditscores","📋","Audit Scores"],
+      ["driving","🚗","Driving Scores"],
       ["truckinspections","🚚","Truck Inspections"],
     ]},
     { label:"Journey", items:[
@@ -7948,9 +7965,9 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
           <FormsTab me={isManager ? techs.find(t => t.id===currentUser?.techId) || null : null} role={isManager ? "manager" : "owner"}/>
         )}
 
-        {tab==="auditscores"&&(
-          <AuditScoresTab techs={techs} token={currentUser?.token} canSync={!isManager}/>
-        )}
+        {[["scoresoverview","overview"],["totechecks","tote"],["auditscores","audit"],["driving","driver"]].map(([id, view]) => tab===id && (
+          <AuditScoresTab key={id} view={view} hideTabs techs={techs} token={currentUser?.token} canSync={!isManager}/>
+        ))}
         {tab==="truckinspections"&&(
           <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"20px", fontSize:"14px", color:C.black, lineHeight:"1.6" }}>
             <Label color={C.blue}>🚚 Truck Inspections</Label>

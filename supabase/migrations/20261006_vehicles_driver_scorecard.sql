@@ -31,10 +31,10 @@ grant select, insert, update on public.vehicles to anon, authenticated;
 -- deliberately left out).
 insert into public.vehicles (name, model, plate, vin, active) values
   ('Bertha', 'Ford F-550 XLT',           'Temp Tag',  '1FDFF5HT7SDA14974', true),
-  ('Van 2',  'Ford Transit Connect XLT', 'OBHF5',     'NMOLS7F79G1255493', true),
-  ('Van 3',  'Ford Transit Connect XLT', '5AJ895',    'NMOLS7E7XH1326378', true),
-  ('Van 4',  'Ford Transit Connect XLT', '2EBZ7',     'NMOLS7E26M1489561', false),
-  ('Van 5',  'Ford Transit Connect XLT', '9EFX8',     'NMOLS7E7XJ1365512', true),
+  ('Van 2',  'Ford Transit Connect XLT', 'OBHF5',     'NM0LS7F79G1255493', true),
+  ('Van 3',  'Ford Transit Connect XLT', '5AJ895',    'NM0LS7E7XH1326378', true),
+  ('Van 4',  'Ford Transit Connect XLT', '2EBZ7',     'NM0LS7E26M1489561', false),
+  ('Van 5',  'Ford Transit Connect XLT', '9EFX8',     'NM0LS7E7XJ1365512', true),
   ('Mav 1',  'Ford Maverick XLT',        '3GEP3',     '3FTTW8A36SRA19318', true),
   ('Mav 2',  'Ford Maverick XLT',        '3GEP2',     '3FTTW8B39SRA65188', true),
   ('Mav 3',  'Ford Maverick XLT',        '4BB046',    '3FTTW8J34SRA88072', true),

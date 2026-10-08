@@ -47,7 +47,8 @@ export function reportKind(headers) {
   return null;
 }
 
-const num = v => { const n = Number(String(v ?? "").replace(/[^0-9.\-]/g, "")); return Number.isFinite(n) && String(v ?? "").trim() !== "" && v !== "-" ? n : null; };
+// A cell with no digits at all ("", "-", "N/A") is unknown (null), never 0.
+const num = v => { const t = String(v ?? "").replace(/[^0-9.\-]/g, ""); if (!/[0-9]/.test(t)) return null; const n = Number(t); return Number.isFinite(n) ? n : null; };
 // Ford shows short durations as "<10" seconds.
 const seconds = v => String(v || "").trim().startsWith("<") ? Math.max(0, (num(v) ?? 10) / 2) : num(v);
 // "Mav/1" (Ford) -> "mav1"; "Mav 1" (ours) -> "mav1".
@@ -79,29 +80,42 @@ export function buildFordImport(files, vehicles = []) {
   const knownVins = new Set(vehicles.map(v => v.vin));
 
   const daily = [], events = [], dates = {};
-  const seen = {};
+  // Event ids number repeats WITHIN a file (two real events in the same
+  // second), so the same file uploaded twice (e.g. "speeding (1).csv")
+  // produces the same ids and is dropped instead of doubling penalties.
+  let seen = {};
+  const eventIds = new Set();
+  let dupEvents = 0;
   const addEvent = (vin, date, time, type, extra) => {
     const dt = fordDateTime(date, time);
     if (!vin || !dt) return;
-    dates[dt.work_date] = (dates[dt.work_date] || 0) + 1;
     const base = `${vin}|${dt.event_time}|${type}`;
     seen[base] = (seen[base] || 0) + 1;
-    events.push({ id: seen[base] > 1 ? `${base}|${seen[base]}` : base, vin, work_date: dt.work_date, event_time: dt.event_time, event_type: type, ...extra });
+    const id = seen[base] > 1 ? `${base}|${seen[base]}` : base;
+    if (eventIds.has(id)) { dupEvents++; return; }
+    eventIds.add(id);
+    dates[dt.work_date] = (dates[dt.work_date] || 0) + 1;
+    events.push({ id, vin, work_date: dt.work_date, event_time: dt.event_time, event_type: type, ...extra });
   };
   const vinOf = (r) => (r.VIN ? r.VIN.toUpperCase() : vinByName[vehicleKey(r.Vehicle)]) || null;
 
+  const dailyByVin = {};
   for (const f of parsed) {
     if (!f.kind) { skipped.push(f.name); continue; }
+    seen = {};
     used.push(`${f.name} (${f.kind.replace("_", " ")}, ${f.rows.length} rows)`);
     for (const r of f.rows) {
       if (f.kind === "fleet_activity") {
         const vin = (r.VIN || "").toUpperCase();
         if (!vin) continue;
+        // Minutes over the posted limit only: time over Ford's 85 mph
+        // threshold is already inside it (and 85+ also gets its own flat
+        // penalty per event), so adding it would count it twice.
         const posted = num(r["Speeding Over Posted Duration (min)"]) ?? 0;
-        const over85 = num(r["Speeding Over Threshold Duration (min)"]) ?? 0;
-        daily.push({ vin, vehicle: r["Vehicle Name"], miles: num(r["Distance Driven (mi)"]) ?? 0, trips: num(r.Trips),
+        if (dailyByVin[vin]) warnings.push(`${r["Vehicle Name"] || vin} is in more than one Fleet Activity file — using the last one.`);
+        dailyByVin[vin] = { vin, vehicle: r["Vehicle Name"], miles: num(r["Distance Driven (mi)"]) ?? 0, trips: num(r.Trips),
           idle_minutes: num(r["Total Idle Time (hr)"]) != null ? Math.round(num(r["Total Idle Time (hr)"]) * 60 * 10) / 10 : null,
-          speeding_minutes: Math.round((posted + over85) * 100) / 100 });
+          speeding_minutes: Math.round(posted * 100) / 100 };
         continue;
       }
       const vin = vinOf(r);
@@ -119,12 +133,15 @@ export function buildFordImport(files, vehicles = []) {
       }
     }
   }
+  daily.push(...Object.values(dailyByVin));
+  if (dupEvents) warnings.push(`${dupEvents} duplicate event(s) skipped (the same report uploaded twice?).`);
   if (!parsed.some(f => f.kind === "fleet_activity")) warnings.push("No Fleet Activity Summary file — miles come from that report, so no day can be scored without it.");
   const unknownVins = [...new Set([...daily.map(d => d.vin), ...events.map(e => e.vin)])].filter(v => !knownVins.has(v));
   if (unknownVins.length) warnings.push(`VIN(s) not in the vehicles list (add them on the Trucks tab or they won't match anyone's pick): ${unknownVins.join(", ")}`);
   // The day the report covers: the date most events carry. Fleet Activity
   // has no date column, so its rows go on that day.
   const workDate = Object.entries(dates).sort((a, b) => b[1] - a[1])[0]?.[0] || null;
+  if (!workDate && daily.length) warnings.push("These files have no dated events, so the day can't be read from them — pick the day the Fleet Activity report covers before importing.");
   if (Object.keys(dates).length > 1) warnings.push(`Events span more than one day (${Object.keys(dates).sort().join(", ")}); each event keeps its own date.`);
   return { workDate, daily, events, used, skipped, warnings };
 }

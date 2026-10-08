@@ -41,6 +41,7 @@ export default async (req) => {
   const url = new URL(req.url);
   const from = url.searchParams.get("from"), to = url.searchParams.get("to");
   if (!isDate(from) || !isDate(to)) return json(400, { error: "from and to must be YYYY-MM-DD" });
+  if ((Date.parse(to) - Date.parse(from)) / 864e5 > 62) return json(400, { error: "Pick a range of 62 days or less" });
   const range = `work_date=gte.${from}&work_date=lte.${to}`;
   try {
     const [techs, subs, vehicles, assignments, daily, events, unassigned] = await Promise.all([
