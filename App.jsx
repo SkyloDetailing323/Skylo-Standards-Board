@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, Fragment } from "react";
-import { TEST_QUESTIONS, shuffle } from "./trainingTest.js";
+import { TEST_QUESTIONS, TESTS, TEST_KEYS, questionsFor, shuffle } from "./trainingTest.js";
 import { computeOpsMonth, monthRange, mountainDate, CALLBACK_TIERS, QUOTA_TIERS, RETENTION_TIERS, NON_ROUTE_VEHICLES, OPS_EXCLUDED_TITLES } from "./opsBonus.js";
 import { techDriverDays, weeklyDriverScore, findUnassignedDriving, DRIVER_CONFIG } from "./driverScoring.js";
 import { buildFordImport } from "./fordReports.js";
@@ -14,7 +14,7 @@ const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 // left out: PINs are checked server-side (netlify/functions/auth-login.js)
 // and the anon role has no SELECT on that column. Add new techs columns here
 // AND grant them to anon/authenticated, or they won't load.
-const TECH_COLUMNS = "id,name,avatar,badges,start_date,is_lead,team_lead_id,team_name,hourly_rate,commission_rate,is_active,onboarding_stage,assigned_trainer_id,cert_status,cert_attempts,classroom_complete,title,left_date,leave_reason,fire_category,fire_notes,fire_approval,fire_reviewed_at,on_leave";
+const TECH_COLUMNS = "id,name,avatar,badges,start_date,is_lead,team_lead_id,team_name,hourly_rate,commission_rate,is_active,onboarding_stage,assigned_trainer_id,cert_status,cert_attempts,classroom_complete,title,left_date,leave_reason,fire_category,fire_notes,fire_approval,fire_reviewed_at,on_leave,perfect_day_rubric_complete,misc_rubric_complete,onboarding_complete,onboarding_signed_by,onboarding_complete_date";
 
 async function sb(path, opts = {}) {
   const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
@@ -359,6 +359,16 @@ function sessionHours(entry, nowMs = Date.now()) {
     outMs = nowMs;
   }
   return Math.max(0, (outMs - inMs) / 3600000);
+}
+// PAID hours of a session: Wednesday team meetings (8-11 AM Mountain) aren't
+// paid, so on a Wednesday anything clocked before 11:00 AM MT doesn't count.
+// Used for pay (Payroll training hours); the Time Sheet still shows the
+// actual clock times.
+const UNPAID_MEETING = { weekday:3, untilHHMM:"11:00" };
+function paidSessionHours(entry, nowMs = Date.now()) {
+  if (new Date(entry.work_date+"T12:00:00Z").getUTCDay() !== UNPAID_MEETING.weekday) return sessionHours(entry, nowMs);
+  const cutoff = mtTimeToIso(entry.work_date, UNPAID_MEETING.untilHHMM);
+  return sessionHours(entry.clock_in < cutoff ? { ...entry, clock_in:cutoff } : entry, nowMs);
 }
 function dayHoursTotal(entries, techId, workDate, nowMs = Date.now()) {
   return entries.filter(e => e.tech_id === techId && e.work_date === workDate).reduce((s,e) => s + sessionHours(e, nowMs), 0);
@@ -1524,8 +1534,43 @@ function ReportsTab({ techs, jobs, upsells=[], timeEntries=[], tipEntries=[], te
   );
 }
 
+// Payroll lists techs alphabetically by last name (then first), the same
+// order as the payroll provider.
+const lastNameKey = n => { const p = String(n||"").trim().split(/\s+/); return `${p.slice(1).join(" ") || p[0]} ${p[0]}`.toLowerCase(); };
+const byLastName = (a,b) => lastNameKey(a.name).localeCompare(lastNameKey(b.name));
+const byFirstName = (a,b) => String(a.name||"").trim().toLowerCase().localeCompare(String(b.name||"").trim().toLowerCase());
+const PAYROLL_SORTS = { last:byLastName, first:byFirstName, revenue:(a,b) => b.revenue-a.revenue || byLastName(a,b) };
+
+// Detail Apprentice training pay (owner's rules, Oct 2026): every hour
+// clocked BEFORE a tech's first REAL job in HCP is a training hour. A real
+// job has revenue and a customer who isn't on the team -- the test job a
+// trainee does on Truxton's, Casey's or Will's car doesn't end training. $7.50/hr is
+// paid in the pay period it was worked; another $7.50/hr is held and paid in
+// the pay period holding their 90th day (start date + 90), if still active.
+// From the day of their first job on, they're paid commission only.
+const TRAINING_RATE_NOW = 7.5;
+const TRAINING_RATE_HELD = 7.5;
+const TRAINING_HELD_DAYS = 90;
+const normName = s => String(s||"").toLowerCase().replace(/[^a-z]/g, "");
+function isRealJob(j, staffNames) {
+  if (!((j.revenue||0) > 0)) return false;
+  const c = normName(j.customer_name);
+  return !c || !staffNames.some(n => n && c.includes(n));
+}
+function trainingInfo(tech, jobs, timeEntries, techs=[]) {
+  const staffNames = techs.map(t => normName(t.name)).filter(n => n.length >= 6);
+  const myJobs = jobs.filter(j => j.tech_id===tech.id && j.job_date && isRealJob(j, staffNames));
+  const firstJob = myJobs.length ? myJobs.reduce((m,j) => j.job_date < m ? j.job_date : m, myJobs[0].job_date) : null;
+  const entries = timeEntries.filter(e => e.tech_id===tech.id && (!firstJob || e.work_date < firstJob));
+  if (!entries.length) return null;
+  const firstClock = entries.reduce((m,e) => e.work_date < m ? e.work_date : m, entries[0].work_date);
+  const base = tech.start_date || firstClock;
+  const d = new Date(base+"T12:00:00Z"); d.setUTCDate(d.getUTCDate()+TRAINING_HELD_DAYS);
+  return { firstJob, entries, day90:d.toISOString().split("T")[0], totalHours:entries.reduce((s,e)=>s+paidSessionHours(e),0) };
+}
+
 // ─── PAYROLL TAB ──────────────────────────────────────────────────────────────
-function PayrollTab({ techs, jobs, tipEntries=[], switchovers=[], token=null, canWaive=false }) {
+function PayrollTab({ techs, jobs, tipEntries=[], switchovers=[], timeEntries=[], token=null, canWaive=false }) {
   const allPeriods = getPayPeriods();
   const activePeriods = allPeriods.filter(p=>jobs.some(j=>j.job_date>=p.start&&j.job_date<=p.end)||p.key===currentPPKey());
   const [selKey, setSelKey] = useState(currentPPKey());
@@ -1534,6 +1579,7 @@ function PayrollTab({ techs, jobs, tipEntries=[], switchovers=[], token=null, ca
   const [tote, setTote] = useState({ loading:true, error:null, subs:[], waivers:[] });
   const [toteBump, setToteBump] = useState(0);
   const [waiving, setWaiving] = useState(null);
+  const [sortBy, setSortBy] = useState("last");
   useEffect(() => {
     let live = true;
     fetch(`/.netlify/functions/audit-scores?kind=tote&from=${PP_SEMI_MONTHLY_FROM}&to=${mtDateStr(Date.now())}`, { headers:{ Authorization:`Bearer ${token || ""}` } })
@@ -1584,7 +1630,15 @@ function PayrollTab({ techs, jobs, tipEntries=[], switchovers=[], token=null, ca
     const toteHere = toteAll.filter(c=>c.check.work_date>=period.start&&c.check.work_date<=period.end);
     const toteCents = toteHere.reduce((s,c)=>s+c.chargedCents,0);
     const toteDeduct = toteCents/100;
-    const total   = commission+tips+upsellPay+switchPay-toteDeduct;
+    // Training pay (see trainingInfo above). Shown from the 10th/25th
+    // schedule on; earlier training hours were paid outside the app.
+    const tr = showBonuses ? trainingInfo(t, jobs, timeEntries, techs) : null;
+    const trEntries = tr ? tr.entries.filter(e=>e.work_date>=period.start&&e.work_date<=period.end) : [];
+    const trainingHours = trEntries.reduce((s,e)=>s+paidSessionHours(e),0);
+    const trainingDays = [...new Set(trEntries.map(e=>e.work_date))].sort();
+    const trainingPay = Math.round(trainingHours*TRAINING_RATE_NOW*100)/100;
+    const heldDue = tr && t.is_active!==false && tr.day90>=period.start && tr.day90<=period.end ? Math.round(tr.totalHours*TRAINING_RATE_HELD*100)/100 : 0;
+    const total   = commission+tips+upsellPay+switchPay-toteDeduct+trainingPay+heldDue;
     const weeks   = wkKeys.map(wk=>{
       const wj=tj.filter(j=>j.week_key===wk);
       const wkEndDate = new Date(wk+"T12:00:00Z"); wkEndDate.setUTCDate(wkEndDate.getUTCDate()+6);
@@ -1592,13 +1646,13 @@ function PayrollTab({ techs, jobs, tipEntries=[], switchovers=[], token=null, ca
       const wkTips = tipsRangeTotal(tipEntries, t.id, wk, wkEndStr);
       return { wk, rev:wj.reduce((s,j)=>s+(j.revenue||0),0), tips:wkTips, count:wj.length };
     }).filter(w=>w.rev>0||w.tips>0);
-    return { ...t, revenue, tips, rate, commission, upsellAmt, upsellPay, upsellRate, sws, switchPay, switchUnpriced, toteHere, toteDeduct, total, weeks };
-  }).filter(r=>r.revenue>0||r.tips>0||r.upsellAmt>0||r.sws.length>0||r.toteHere.length>0).sort((a,b)=>b.total-a.total);
+    return { ...t, revenue, tips, rate, commission, upsellAmt, upsellPay, upsellRate, sws, switchPay, switchUnpriced, toteHere, toteDeduct, tr, trainingHours, trainingDays, trainingPay, heldDue, total, weeks };
+  }).filter(r=>r.revenue>0||r.tips>0||r.upsellAmt>0||r.sws.length>0||r.toteHere.length>0||r.trainingHours>0||r.heldDue>0).sort(PAYROLL_SORTS[sortBy] || byLastName);
 
   const teamTotal = rows.reduce((s,r)=>s+r.total,0);
 
   function exportCSV() {
-    const lines=["Tech,Revenue,Commission Rate,Commission,Tips,Upsells,Upsell Rate,Upsell Bonus,Switchovers,Switchover Bonus,Tote Deduction,Total Pay",...rows.map(r=>[r.name,`$${r.revenue.toFixed(2)}`,`${r.rate}%`,`$${r.commission.toFixed(2)}`,`$${r.tips.toFixed(2)}`,`$${r.upsellAmt.toFixed(2)}`,`${Math.round(r.upsellRate*100)}%`,`$${r.upsellPay.toFixed(2)}`,r.sws.length,`$${r.switchPay.toFixed(2)}`,`-$${r.toteDeduct.toFixed(2)}`,`$${r.total.toFixed(2)}`].join(","))].join("\n");
+    const lines=["Tech,Revenue,Commission Rate,Commission,Tips,Upsells,Upsell Rate,Upsell Bonus,Switchovers,Switchover Bonus,Tote Deduction,Training Hours,Training Pay,90-Day Training Pay,Total Pay",...rows.map(r=>[r.name,`$${r.revenue.toFixed(2)}`,`${r.rate}%`,`$${r.commission.toFixed(2)}`,`$${r.tips.toFixed(2)}`,`$${r.upsellAmt.toFixed(2)}`,`${Math.round(r.upsellRate*100)}%`,`$${r.upsellPay.toFixed(2)}`,r.sws.length,`$${r.switchPay.toFixed(2)}`,`-$${r.toteDeduct.toFixed(2)}`,r.trainingHours.toFixed(2),`$${r.trainingPay.toFixed(2)}`,`$${r.heldDue.toFixed(2)}`,`$${r.total.toFixed(2)}`].join(","))].join("\n");
     const url=URL.createObjectURL(new Blob([lines],{type:"text/csv"}));
     const a=Object.assign(document.createElement("a"),{href:url,download:`skylo-payroll-${selKey}.csv`});
     a.click(); URL.revokeObjectURL(url);
@@ -1627,6 +1681,14 @@ function PayrollTab({ techs, jobs, tipEntries=[], switchovers=[], token=null, ca
             </div>
           ))}
         </div>
+      </div>
+
+      {/* Sort */}
+      <div style={{ display:"flex", alignItems:"center", gap:"8px", flexWrap:"wrap" }}>
+        <span style={{ fontSize:"11px", color:C.muted, letterSpacing:"1px", textTransform:"uppercase", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>Sort by</span>
+        {[["last","Last name"],["first","First name"],["revenue","Serviced revenue"]].map(([id,label])=>(
+          <button key={id} onClick={()=>setSortBy(id)} style={{ background:sortBy===id?C.blue:C.white, border:`1px solid ${sortBy===id?C.blue:C.border}`, color:sortBy===id?C.white:C.black, padding:"6px 12px", borderRadius:"16px", cursor:"pointer", fontSize:"12px", fontWeight:"700", fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:"1px", textTransform:"uppercase" }}>{label}</button>
+        ))}
       </div>
 
       {/* Team total */}
@@ -1667,6 +1729,17 @@ function PayrollTab({ techs, jobs, tipEntries=[], switchovers=[], token=null, ca
               </div>
               {showBonuses&&(
                 <div style={{ display:"flex", flexDirection:"column", gap:"6px", marginTop:"8px", marginBottom:r.weeks.length>1?"10px":0 }}>
+                  {(r.trainingHours>0||r.heldDue>0)&&(
+                    <div style={{ background:`${C.purple}0d`, border:`1px solid ${C.purple}33`, borderRadius:"8px", padding:"10px 12px" }}>
+                      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:"10px" }}>
+                        <div style={{ fontSize:"10px", color:C.purple, letterSpacing:"1px", textTransform:"uppercase", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>🎓 Training Pay</div>
+                        <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"18px", color:C.purple }}>${(r.trainingPay+r.heldDue).toFixed(2)}</div>
+                      </div>
+                      {r.trainingHours>0&&<div style={{ fontSize:"13px", color:C.black, marginTop:"4px" }}>{r.trainingHours.toFixed(2)} training hrs × ${TRAINING_RATE_NOW.toFixed(2)} = <strong>${r.trainingPay.toFixed(2)}</strong> <span style={{ fontSize:"11px", color:C.muted }}>({r.trainingDays.map(fmtShortDate).join(", ")})</span></div>}
+                      {r.heldDue>0&&<div style={{ fontSize:"13px", color:C.black, marginTop:"4px" }}>90-day training pay due ({fmtShortDate(r.tr.day90)}): {r.tr.totalHours.toFixed(2)} hrs × ${TRAINING_RATE_HELD.toFixed(2)} = <strong>${r.heldDue.toFixed(2)}</strong></div>}
+                      {r.trainingHours>0&&!r.heldDue&&r.tr&&<div style={{ fontSize:"11px", color:C.muted, marginTop:"3px" }}>Plus ${TRAINING_RATE_HELD.toFixed(2)}/hr held: ${(Math.round(r.tr.totalHours*TRAINING_RATE_HELD*100)/100).toFixed(2)} so far ({r.tr.totalHours.toFixed(2)} hrs), paid at 90 days ({fmtShortDate(r.tr.day90)}) if still active.{r.tr.firstJob ? ` Training ended with their first real job ${fmtShortDate(r.tr.firstJob)}.` : ""}</div>}
+                    </div>
+                  )}
                   <div style={{ background:C.cardLt, borderRadius:"8px", padding:"10px 12px", display:"flex", justifyContent:"space-between", alignItems:"center", gap:"10px" }}>
                     <div>
                       <div style={{ fontSize:"10px", color:C.muted, letterSpacing:"1px", textTransform:"uppercase", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>📈 Upsell Bonus</div>
@@ -3296,7 +3369,10 @@ function TechDashboard({ tech, techs, upsells, switchovers, reviews, callbacks, 
       ["reviews","⭐","Reviews"],
       ...(tech.is_lead?[["myteam","👥","My Team"]]:[]),
     ]},
-    ...(SALES_SELF_VIEW[tech.id]?[{ label:"Sales", items:[["mysales","🤝","My Sales"]] }]:[]),
+    ...(SALES_SELF_VIEW[tech.id]||CALLBACK_ENTRY_TECHS.has(tech.id)?[{ label:"Sales", items:[
+      ...(SALES_SELF_VIEW[tech.id]?[["mysales","🤝","My Sales"]]:[]),
+      ...(CALLBACK_ENTRY_TECHS.has(tech.id)?[["callbacks","📞","Callbacks"]]:[]),
+    ] }]:[]),
     ...(!isApprenticeTech(tech)?[{ label:"Forms", items:[["forms","📝","Forms"]] }]:[]),
     { label:"Training", items:[
       ["training","📋","Perfect Day Training"],
@@ -3575,6 +3651,7 @@ function TechDashboard({ tech, techs, upsells, switchovers, reviews, callbacks, 
         {tab==="forms"&&<FormsTab me={tech} role="tech"/>}
         {tab==="auditscores"&&<AuditScoresTab techs={techs} token={token} techId={tech.id}/>}
         {tab==="mysales"&&SALES_SELF_VIEW[tech.id]&&<SalesTab token={token} onlyRep={SALES_SELF_VIEW[tech.id]}/>}
+        {tab==="callbacks"&&CALLBACK_ENTRY_TECHS.has(tech.id)&&<CallbacksPanel techs={techs} jobs={jobs||[]} callbacks={callbacks||[]} refreshAll={refreshAll} showToast={showToast}/>}
       </div>
       {toast&&(
         <div style={{ position:"fixed", bottom:"24px", left:"50%", transform:"translateX(-50%)", background:toast.ok?C.green:"#ef4444", color:C.white, padding:"12px 28px", borderRadius:"24px", fontSize:"14px", fontWeight:"900", zIndex:999, whiteSpace:"nowrap", fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:"1px", fontStyle:"italic", boxShadow:"0 4px 20px rgba(0,0,0,0.15)" }}>
@@ -3704,7 +3781,110 @@ function DeleteTab({ techs, upsells, switchovers, reviews, saving, setSaving, re
 
 // ─── ADMIN TIME SHEET ──────────────────────────────────────────────────────────
 const MONTH_NAMES = { january:0, jan:0, february:1, feb:1, march:2, mar:2, april:3, apr:3, may:4, june:5, jun:5, july:6, jul:6, august:7, aug:7, september:8, sep:8, sept:8, october:9, oct:9, november:10, nov:10, december:11, dec:11 };
-function AdminTimeSheetTab({ techs, timeEntries, refreshAll, showToast }) {
+// Owner/manager fixes to a tech's clock-ins: edit a session's in/out times,
+// add a missed session, or delete a wrong one. Hours feed Payroll (training
+// pay), so the Field Supervisor can't edit his own time here.
+function AdminTimeEditor({ techs, timeEntries, start, end, refreshAll, showToast, lockedTechId=null }) {
+  const list = techs.filter(t => t.is_active!==false && t.title!=="owner").sort((a,b)=>a.name.localeCompare(b.name));
+  const [techId, setTechId] = useState("");
+  const [editing, setEditing] = useState(null);           // entry id
+  const [form, setForm] = useState({ in:"", out:"" });
+  const [add, setAdd] = useState({ date:"", in:"", out:"" });
+  const [busy, setBusy] = useState(false);
+  const locked = techId && techId===lockedTechId;
+  const entries = timeEntries.filter(e => e.tech_id===techId && e.work_date>=start && e.work_date<=end)
+    .sort((a,b) => b.work_date.localeCompare(a.work_date) || a.clock_in.localeCompare(b.clock_in));
+  const days = [...new Set(entries.map(e => e.work_date))];
+  const inp = { background:C.white, border:`1px solid ${C.border}`, color:C.black, padding:"8px", borderRadius:"8px", fontSize:"13px" };
+  const small = (bg, fg=C.white) => ({ background:bg, border:"none", color:fg, padding:"6px 12px", borderRadius:"8px", cursor:"pointer", fontSize:"12px", fontWeight:"700" });
+
+  function toIsoPair(date, tin, tout) {
+    if (!tin) throw new Error("Clock-in time is required");
+    const inIso = mtTimeToIso(date, tin);
+    if (!tout) return { clock_in:inIso, clock_out:null };
+    let outIso = mtTimeToIso(date, tout);
+    if (outIso <= inIso) throw new Error("Clock-out has to be after clock-in");
+    return { clock_in:inIso, clock_out:outIso };
+  }
+  async function save(e) {
+    setBusy(true);
+    try {
+      await sb(`time_entries?id=eq.${e.id}`, { method:"PATCH", prefer:"return=minimal", body:JSON.stringify({ ...toIsoPair(e.work_date, form.in, form.out), auto_closed:false }) });
+      await refreshAll(); setEditing(null); showToast("✅ Session updated");
+    } catch(err) { showToast("Error: "+err.message, false); }
+    setBusy(false);
+  }
+  async function remove(e) {
+    if (!window.confirm(`Delete this session (${isoToMtTimeInput(e.clock_in)}–${e.clock_out ? isoToMtTimeInput(e.clock_out) : "open"} on ${fmtShortDate(e.work_date)})?`)) return;
+    setBusy(true);
+    try { await sb(`time_entries?id=eq.${e.id}`, { method:"DELETE", prefer:"return=minimal" }); await refreshAll(); showToast("Session deleted"); }
+    catch(err) { showToast("Error: "+err.message, false); }
+    setBusy(false);
+  }
+  async function addSession() {
+    if (!add.date) return showToast("Pick a date", false);
+    if (!add.out) return showToast("Add a clock-out time", false);
+    setBusy(true);
+    try {
+      await sb("time_entries", { method:"POST", prefer:"return=minimal", body:JSON.stringify({ tech_id:techId, work_date:add.date, ...toIsoPair(add.date, add.in, add.out) }) });
+      await refreshAll(); setAdd({ date:"", in:"", out:"" }); showToast("✅ Session added");
+    } catch(err) { showToast("Error: "+err.message, false); }
+    setBusy(false);
+  }
+
+  return (
+    <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.purple}`, borderRadius:"12px", padding:"16px 18px", display:"flex", flexDirection:"column", gap:"10px" }}>
+      <Label color={C.purple}>✏️ Edit a Tech's Time · {start} → {end}</Label>
+      <select value={techId} onChange={e=>{ setTechId(e.target.value); setEditing(null); }} style={{ ...inp, width:"100%" }}>
+        <option value="">— Select Tech —</option>
+        {list.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+      </select>
+      {locked && <div style={{ fontSize:"12px", color:C.red }}>You can't edit your own time here — ask an owner.</div>}
+      {techId && !locked && (<>
+        {days.length===0 && <div style={{ fontSize:"13px", color:C.muted }}>No sessions in this date range. Change the range above, or add one below.</div>}
+        {days.map(d => {
+          const dayEntries = entries.filter(e => e.work_date===d);
+          const total = dayEntries.reduce((s,e)=>s+sessionHours(e),0);
+          return (
+            <div key={d} style={{ background:C.cardLt, borderRadius:"8px", padding:"10px 12px" }}>
+              <div style={{ display:"flex", justifyContent:"space-between", fontSize:"13px", fontWeight:"700", color:C.black }}>
+                <span>{new Date(d+"T12:00:00Z").toLocaleDateString("en-US",{ weekday:"short", month:"short", day:"numeric", timeZone:"UTC" })}</span>
+                <span>{total.toFixed(2)}h</span>
+              </div>
+              {dayEntries.map(e => editing===e.id ? (
+                <div key={e.id} style={{ display:"flex", gap:"6px", alignItems:"center", flexWrap:"wrap", marginTop:"6px" }}>
+                  <input type="time" value={form.in} onChange={ev=>setForm(f=>({...f,in:ev.target.value}))} style={inp}/>
+                  <span style={{ color:C.muted }}>to</span>
+                  <input type="time" value={form.out} onChange={ev=>setForm(f=>({...f,out:ev.target.value}))} style={inp}/>
+                  <button disabled={busy} onClick={()=>save(e)} style={small(C.green)}>Save</button>
+                  <button onClick={()=>setEditing(null)} style={small(C.cardLt, C.muted)}>Cancel</button>
+                </div>
+              ) : (
+                <div key={e.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:"8px", fontSize:"13px", color:C.black, marginTop:"6px" }}>
+                  <span>{formatMTTime(e.clock_in)} – {e.clock_out ? formatMTTime(e.clock_out) : <span style={{ color:C.gold }}>still clocked in</span>} <span style={{ color:C.muted }}>· {sessionHours(e).toFixed(2)}h{e.auto_closed ? " · auto-closed at midnight" : ""}</span></span>
+                  <span style={{ display:"flex", gap:"6px" }}>
+                    <button onClick={()=>{ setEditing(e.id); setForm({ in:isoToMtTimeInput(e.clock_in), out:e.clock_out ? isoToMtTimeInput(e.clock_out) : "" }); }} style={small(C.blue)}>Edit</button>
+                    <button disabled={busy} onClick={()=>remove(e)} style={small("none", C.red)}>Delete</button>
+                  </span>
+                </div>
+              ))}
+            </div>
+          );
+        })}
+        <div style={{ borderTop:`1px solid ${C.border}`, paddingTop:"10px", display:"flex", gap:"6px", alignItems:"center", flexWrap:"wrap" }}>
+          <span style={{ fontSize:"12px", color:C.muted }}>Add a missed session:</span>
+          <input type="date" value={add.date} max={mtDateStr(Date.now())} onChange={e=>setAdd(a=>({...a,date:e.target.value}))} style={inp}/>
+          <input type="time" value={add.in} onChange={e=>setAdd(a=>({...a,in:e.target.value}))} style={inp}/>
+          <span style={{ color:C.muted }}>to</span>
+          <input type="time" value={add.out} onChange={e=>setAdd(a=>({...a,out:e.target.value}))} style={inp}/>
+          <button disabled={busy} onClick={addSession} style={small(C.purple)}>Add</button>
+        </div>
+      </>)}
+    </div>
+  );
+}
+
+function AdminTimeSheetTab({ techs, timeEntries, refreshAll, showToast, lockedTechId=null }) {
   const [rangePreset, setRangePreset] = useState("wtd");
   const [cStart, setCStart] = useState("");
   const [cEnd, setCEnd] = useState("");
@@ -3811,6 +3991,8 @@ function AdminTimeSheetTab({ techs, timeEntries, refreshAll, showToast }) {
           ))}
         </div>
       </div>
+
+      <AdminTimeEditor techs={techs} timeEntries={timeEntries} start={start} end={end} refreshAll={refreshAll} showToast={showToast} lockedTechId={lockedTechId}/>
 
       <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.orange}`, borderRadius:"12px", padding:"20px", display:"flex", flexDirection:"column", gap:"12px" }}>
         <Label color={C.orange}>Bulk Import — One-Time Backfill</Label>
@@ -4732,6 +4914,16 @@ async function scheduleCheckins(techId, startDate) {
   }
 }
 
+// Check-ins (week 1, 2, 4, 6, 12) count from the day a tech finishes
+// onboarding, not their hire date. Apprentices have no check-ins until the
+// Final Onboarding Cert is signed; anyone hired straight in at another title
+// still counts from their start date.
+const isInTraining = t => (t.title || "detail_apprentice") === "detail_apprentice" && !t.onboarding_complete_date;
+function checkinBaseDate(t) {
+  if (t.onboarding_complete_date) return t.onboarding_complete_date;
+  return isInTraining(t) ? null : (t.start_date || null);
+}
+
 // Training runs day by day: on every training day the trainer goes through
 // the whole Perfect Day section with the apprentice (each item checked off,
 // or marked N/A when it didn't come up that day), and over the course of
@@ -4904,7 +5096,7 @@ function PerfectDayTrainingPanel({ tech=null, techs=[], admin=false, fixedSubjec
 
   if (!subject) return null;
   const showRoad = !training && !admin && (subject.title || "detail_apprentice") === "detail_apprentice";
-  if (selfTest) return <WrittenTestRunner self trainee={subject} onExit={() => setSelfTest(false)}/>;
+  if (selfTest) return <WrittenTestRunner self testKey={selfTest} trainee={subject} onExit={() => setSelfTest(false)}/>;
 
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:"12px" }}>
@@ -4947,7 +5139,7 @@ function PerfectDayTrainingPanel({ tech=null, techs=[], admin=false, fixedSubjec
         </div>
       </div>
 
-      {showRoad && !loading && <ApprenticeFinalDay tech={subject} prog={prog} onStartTest={() => setSelfTest(true)}/>}
+      {showRoad && !loading && <ApprenticeFinalDay tech={subject} prog={prog} onStartTest={key => setSelfTest(key)}/>}
       {loading && <div style={{ color:C.muted, padding:"16px" }}>Loading training progress...</div>}
       {!loading && rubricItems.length === 0 && (
         <div style={{ background:C.cardLt, border:`1px solid ${C.border}`, borderRadius:"10px", padding:"14px", fontSize:"13px", color:C.muted }}>
@@ -5127,12 +5319,18 @@ function PerfectDayTrainingPanel({ tech=null, techs=[], admin=false, fixedSubjec
 
 const fmtWhen = iso => iso ? new Date(iso).toLocaleDateString("en-US", { month:"short", day:"numeric", year:"numeric", timeZone:"America/Denver" }) : "";
 const QUESTION_BY_ID = Object.fromEntries(TEST_QUESTIONS.map(q => [q.id, q]));
+// Tests taken before the split (no test_key) covered both rubrics, so a pass
+// on one of those counts for both tests.
+const passedTestFor = (tests, key) => tests.find(t => t.status === "passed" && (t.test_key === key || !t.test_key));
+const testName = t => t.test_key ? TESTS[t.test_key]?.name || "Written test" : "Written test (both rubrics)";
 
 // The apprentice takes the test on the administrator's device. Questions come
 // one at a time with the four answers shuffled; after each round only the
 // missed questions come back (re-shuffled) until every one is answered right.
 // Right answers are never shown while the test is running.
-function WrittenTestRunner({ trainee, adminUser, onExit, self=false }) {
+function WrittenTestRunner({ trainee, adminUser, onExit, self=false, testKey="perfect_day" }) {
+  const T = TESTS[testKey];
+  const QS = questionsFor(testKey);
   const [test, setTest] = useState(null);
   const [roundIds, setRoundIds] = useState([]);
   const [roundNo, setRoundNo] = useState(1);
@@ -5150,10 +5348,10 @@ function WrittenTestRunner({ trainee, adminUser, onExit, self=false }) {
   async function begin() {
     setSaving(true);
     try {
-      const row = { trainee_id:trainee.id, administered_by:self ? null : (adminUser?.techId || null), administered_by_name:self ? "Self (own phone)" : (adminUser?.name || null), total_questions:TEST_QUESTIONS.length, status:"in_progress", rounds:[] };
+      const row = { trainee_id:trainee.id, administered_by:self ? null : (adminUser?.techId || null), administered_by_name:self ? "Self (own phone)" : (adminUser?.name || null), total_questions:QS.length, test_key:testKey, status:"in_progress", rounds:[] };
       const res = await sb("training_tests", { method:"POST", body:JSON.stringify(row) });
       setTest(res?.[0] || row);
-      startRound(TEST_QUESTIONS.map(q => q.id), 1);
+      startRound(QS.map(q => q.id), 1);
     } catch(e) { window.alert("Couldn't start the test: " + e.message); }
     setSaving(false);
   }
@@ -5184,11 +5382,11 @@ function WrittenTestRunner({ trainee, adminUser, onExit, self=false }) {
 
   if (!test) return (
     <div style={wrap}>
-      <div style={{ ...h, fontSize:"22px" }}>📝 Written Test — {trainee.name}</div>
+      <div style={{ ...h, fontSize:"22px" }}>📝 {T.name} — {trainee.name}</div>
       <div style={{ fontSize:"13px", color:C.black, lineHeight:1.6 }}>
         {self
-          ? <>{TEST_QUESTIONS.length} multiple-choice questions on the Perfect Day rubric and the Miscellaneous section. Take your time — no notes or help.<br/><br/>You need <b>100%</b> to pass. After you submit you'll see your score, and any questions you missed come back (in a new order) until you get every one right.</>
-          : <>{TEST_QUESTIONS.length} multiple-choice questions covering the Perfect Day rubric and the Miscellaneous section. Hand the phone to {trainee.name.split(" ")[0]} once you start.<br/><br/>To pass they need <b>100%</b>. After the first try, any missed questions come back (in a new order) until every one is right. The right answers are never shown.</>}
+          ? <>{QS.length} multiple-choice questions on {T.covers}. Take your time — no notes or help.<br/><br/>You need <b>100%</b> to pass. After you submit you'll see your score, and any questions you missed come back (in a new order) until you get every one right.</>
+          : <>{QS.length} multiple-choice questions covering {T.covers}. Hand the phone to {trainee.name.split(" ")[0]} once you start.<br/><br/>To pass they need <b>100%</b>. After the first try, any missed questions come back (in a new order) until every one is right. The right answers are never shown.</>}
       </div>
       <button onClick={begin} disabled={saving} style={big(C.purple, !saving)}>{saving ? "Starting..." : "Start test"}</button>
       <button onClick={onExit} style={{ background:"none", border:"none", color:C.muted, cursor:"pointer", fontSize:"13px" }}>Cancel</button>
@@ -5202,9 +5400,9 @@ function WrittenTestRunner({ trainee, adminUser, onExit, self=false }) {
         <div style={{ ...h, fontSize:"13px", color:C.purple, letterSpacing:"2px" }}>{roundNo === 1 ? "FIRST TRY" : `RETAKE ${roundNo - 1}`}</div>
         <div style={{ ...h, fontSize:"40px", color:passed ? C.green : C.black }}>{result.asked - result.wrong.length}/{result.asked}</div>
         {passed ? (<>
-          <div style={{ fontSize:"15px", color:C.green, fontWeight:"700" }}>✅ Test passed{roundNo > 1 ? ` after ${roundNo - 1} retake${roundNo > 2 ? "s" : ""}` : " — 100% on the first try!"}</div>
+          <div style={{ fontSize:"15px", color:C.green, fontWeight:"700" }}>✅ {T.name} passed{roundNo > 1 ? ` after ${roundNo - 1} retake${roundNo > 2 ? "s" : ""}` : " — 100% on the first try!"}</div>
           {test.first_try_correct != null && roundNo > 1 && <div style={{ fontSize:"13px", color:C.muted }}>First try: {test.first_try_correct}/{test.total_questions}</div>}
-          <div style={{ fontSize:"13px", color:C.black }}>{self ? "Next up: your practical Perfect Day test with Will." : `Hand the phone back to ${adminUser?.name || "Will"}. Next up: the practical Perfect Day test.`}</div>
+          <div style={{ fontSize:"13px", color:C.black }}>{self ? "Next up: the other written test if you haven't passed it yet, then your practical Perfect Day test with Will." : `Hand the phone back to ${adminUser?.name || "Will"}. Both written tests have to be passed before the practical.`}</div>
           <button onClick={onExit} style={big(C.green)}>Done</button>
         </>) : (<>
           <div style={{ fontSize:"14px", color:C.black }}>{result.wrong.length} question{result.wrong.length===1?"":"s"} missed. Retake {result.wrong.length===1?"it":"them"} until every answer is right.</div>
@@ -5223,7 +5421,7 @@ function WrittenTestRunner({ trainee, adminUser, onExit, self=false }) {
   return (
     <div style={wrap}>
       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline" }}>
-        <div style={{ ...h, fontSize:"13px", color:C.purple, letterSpacing:"2px" }}>{roundNo === 1 ? "WRITTEN TEST" : `RETAKE ${roundNo - 1}`} · {trainee.name.split(" ")[0].toUpperCase()}</div>
+        <div style={{ ...h, fontSize:"13px", color:C.purple, letterSpacing:"2px" }}>{roundNo === 1 ? T.name.toUpperCase() : `RETAKE ${roundNo - 1}`} · {trainee.name.split(" ")[0].toUpperCase()}</div>
         <div style={{ fontSize:"12px", color:C.muted }}>{idx + 1} of {order.length}</div>
       </div>
       <Bar pct={(answered / order.length) * 100} color={C.purple} h={6}/>
@@ -5258,7 +5456,8 @@ function WrittenTestRunner({ trainee, adminUser, onExit, self=false }) {
 // so attempt counts, cert status and the onboarding stage stay in sync.
 function FinalEvalRunner({ trainee, adminUser, rubricItems, priorAttempts, onExit, refreshAll }) {
   // Passing the practical (the written test is already required to start it)
-  // finishes training: they're promoted to Detail Pro.
+  // marks them Certified. The promotion to Detail Pro happens when the Final
+  // Onboarding Cert is signed in the Development tab.
   const items = rubricItems.filter(i => (i.section || "daily") === "daily");
   const [scores, setScores] = useState({});
   const [itemNotes, setItemNotes] = useState({});
@@ -5281,7 +5480,7 @@ function FinalEvalRunner({ trainee, adminUser, rubricItems, priorAttempts, onExi
       if (!certId) throw new Error("No evaluation id returned");
       await sb("perfect_day_cert_results", { method:"POST", prefer:"return=minimal", body:JSON.stringify(items.map(i => ({ cert_id:certId, rubric_item_id:i.id, result:scores[i.id], notes:itemNotes[i.id] || null }))) });
       const certStatus = overall==="pass" ? "passed" : attempt===1 ? "failed_retest_1" : attempt===2 ? "failed_retest_2" : "hard_fail";
-      await sb(`techs?id=eq.${trainee.id}`, { method:"PATCH", prefer:"return=minimal", body:JSON.stringify({ cert_attempts:attempt, cert_status:certStatus, ...(overall==="pass" ? { onboarding_stage:"cert_passed", title:"detail_pro" } : {}) }) });
+      await sb(`techs?id=eq.${trainee.id}`, { method:"PATCH", prefer:"return=minimal", body:JSON.stringify({ cert_attempts:attempt, cert_status:certStatus, ...(overall==="pass" ? { onboarding_stage:"cert_passed" } : {}) }) });
       refreshAll && refreshAll();
       setDone({ overall, attempt });
     } catch(e) { window.alert("Couldn't save the evaluation: " + e.message); }
@@ -5293,7 +5492,7 @@ function FinalEvalRunner({ trainee, adminUser, rubricItems, priorAttempts, onExi
   if (done) return (
     <div style={{ background:C.card, border:`1px solid ${done.overall==="pass" ? C.green : C.red}`, borderRadius:"12px", padding:"18px", display:"flex", flexDirection:"column", gap:"10px" }}>
       <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"24px", color:done.overall==="pass" ? C.green : C.red }}>{done.overall==="pass" ? "✅ Passed the practical test" : `❌ Did not pass (attempt ${done.attempt})`}</div>
-      {done.overall==="pass" && <div style={{ fontSize:"14px", color:C.black }}>🎓 {trainee.name} has been promoted to <b>Detail Pro</b>.</div>}
+      {done.overall==="pass" && <div style={{ fontSize:"14px", color:C.black }}>Next: sign {trainee.name.split(" ")[0]}'s <b>Final Onboarding Cert</b> in the Development tab to promote them to Detail Pro.</div>}
       {done.overall!=="pass" && <div style={{ fontSize:"13px", color:C.black }}>Missed {fails.length} item{fails.length===1?"":"s"}: {fails.map(i => `#${i.sort_order}`).join(", ")}. {done.attempt >= 3 ? "That was the third attempt — marked Hard Fail." : "They can retest after more training."}</div>}
       <button onClick={onExit} style={btn(C.blue)}>Done</button>
     </div>
@@ -5344,20 +5543,23 @@ function finalDaySteps({ trainee, prog, tests, evals }) {
   const classroom = !!trainee.classroom_complete;
   const fieldDone = prog.daily.length > 0 && prog.fullDays >= TRAINING_MIN_DAYS;
   const miscDone = prog.miscMax === 0 || prog.miscDone >= prog.miscMax;
-  const written = tests.find(t => t.status === "passed");
+  const writtenPD = passedTestFor(tests, "perfect_day");
+  const writtenMisc = passedTestFor(tests, "misc");
+  const written = writtenPD && writtenMisc;
   const practical = evals.find(e => e.overall_result === "pass");
   const testUnlocked = classroom && fieldDone && miscDone;
   return {
-    classroom, fieldDone, miscDone, written, practical, testUnlocked,
+    classroom, fieldDone, miscDone, written, writtenPD, writtenMisc, practical, testUnlocked,
     evalUnlocked: !!written,
     promoted: !!practical && trainee.title === "detail_pro",
     list: [
       { key:"classroom", label:"Classroom day", done:classroom },
       { key:"field", label:`${TRAINING_MIN_DAYS} full Perfect Days in the field`, done:fieldDone, detail:`${prog.fullDays}/${TRAINING_MIN_DAYS}` },
       { key:"misc", label:`Miscellaneous — every item ${MISC_REPS}×`, done:miscDone, detail:`${prog.miscDone}/${prog.miscMax}` },
-      { key:"written", label:"Written test (100%)", done:!!written, detail:written ? `${written.first_try_correct}/${written.total_questions} first try` : null, locked:!testUnlocked },
+      { key:"written_pd", label:"Perfect Day written test (100%)", done:!!writtenPD, detail:writtenPD ? `${writtenPD.first_try_correct}/${writtenPD.total_questions} first try` : null, locked:!testUnlocked },
+      { key:"written_misc", label:"Miscellaneous written test (100%)", done:!!writtenMisc, detail:writtenMisc ? `${writtenMisc.first_try_correct}/${writtenMisc.total_questions} first try` : null, locked:!testUnlocked },
       { key:"practical", label:"Practical test with Will", done:!!practical, locked:!written },
-      { key:"pro", label:"Promoted to Detail Pro", done:!!practical && trainee.title === "detail_pro", locked:!practical },
+      { key:"pro", label:"Final Onboarding Cert signed → Detail Pro", done:!!practical && trainee.title === "detail_pro", locked:!practical },
     ],
   };
 }
@@ -5384,7 +5586,7 @@ function ApprenticeFinalDay({ tech, prog, onStartTest }) {
   const [evals, setEvals] = useState([]);
   useEffect(() => {
     Promise.all([
-      sb(`training_tests?trainee_id=eq.${tech.id}&select=id,status,first_try_correct,total_questions,completed_at&order=started_at.desc`),
+      sb(`training_tests?trainee_id=eq.${tech.id}&select=id,status,test_key,first_try_correct,total_questions,completed_at&order=started_at.desc`),
       sb(`perfect_day_certs?tech_id=eq.${tech.id}&select=id,overall_result,attempt_number,test_date&order=created_at.desc`),
     ]).then(([t, e]) => { setTests(t || []); setEvals(e || []); }).catch(() => {});
   }, [tech.id]);
@@ -5394,10 +5596,12 @@ function ApprenticeFinalDay({ tech, prog, onStartTest }) {
     <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.gold}`, borderRadius:"12px", padding:"16px", display:"flex", flexDirection:"column", gap:"12px" }}>
       <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"18px", color:C.black }}>🎓 Road to Detail Pro</div>
       <FinalDayStepList steps={steps}/>
-      {steps.testUnlocked && !steps.written && <button onClick={onStartTest} style={btn}>Take the written test</button>}
-      {!steps.testUnlocked && <div style={{ fontSize:"12px", color:C.muted }}>The written test unlocks once your classroom day, {TRAINING_MIN_DAYS} full Perfect Days, and every Miscellaneous rep are done.</div>}
-      {steps.written && !steps.practical && <div style={{ fontSize:"13px", color:C.black }}>✅ Written test passed. Next: your practical test — Will watches you run a full Perfect Day.</div>}
-      {steps.practical && <div style={{ fontSize:"13px", color:C.green, fontWeight:"700" }}>🎓 You passed everything — welcome to Detail Pro!</div>}
+      {steps.testUnlocked && !steps.writtenPD && <button onClick={() => onStartTest("perfect_day")} style={btn}>Take the Perfect Day test</button>}
+      {steps.testUnlocked && !steps.writtenMisc && <button onClick={() => onStartTest("misc")} style={btn}>Take the Miscellaneous test</button>}
+      {!steps.testUnlocked && <div style={{ fontSize:"12px", color:C.muted }}>The written tests unlock once your classroom day, {TRAINING_MIN_DAYS} full Perfect Days, and every Miscellaneous rep are done.</div>}
+      {steps.written && !steps.practical && <div style={{ fontSize:"13px", color:C.black }}>✅ Both written tests passed. Next: your practical test — Will watches you run a full Perfect Day.</div>}
+      {steps.practical && !steps.promoted && <div style={{ fontSize:"13px", color:C.green, fontWeight:"700" }}>🏁 Practical passed! Last step: your Final Onboarding Cert gets signed, which makes you a Detail Pro.</div>}
+      {steps.promoted && <div style={{ fontSize:"13px", color:C.green, fontWeight:"700" }}>🎓 You passed everything — welcome to Detail Pro!</div>}
     </div>
   );
 }
@@ -5409,7 +5613,9 @@ function FinalDayResults({ trainee, prog, tests, evals, evalResults, rubricItems
   const [openEval, setOpenEval] = useState(null);
   const name = id => techs.find(t => t.id === id)?.name;
   const item = id => rubricItems.find(i => i.id === id);
-  const passedTest = tests.find(t => t.status === "passed");
+  const passedPD = passedTestFor(tests, "perfect_day");
+  const passedMisc = passedTestFor(tests, "misc");
+  const passedTest = passedPD && passedMisc;
   const passedEval = evals.find(e => e.overall_result === "pass");
   const small = { fontSize:"11px", color:C.muted, letterSpacing:"1px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800" };
   const startBtn = color => ({ background:color, border:"none", color:C.white, padding:"8px 14px", borderRadius:"16px", cursor:"pointer", fontSize:"12px", fontWeight:"900", fontStyle:"italic", letterSpacing:"1px", fontFamily:"'Barlow Condensed',sans-serif", textTransform:"uppercase" });
@@ -5424,14 +5630,21 @@ function FinalDayResults({ trainee, prog, tests, evals, evalResults, rubricItems
 
       <div>
         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:"8px" }}>
-          <div>
-            <div style={small}>1 · WRITTEN TEST</div>
-            <div style={{ fontSize:"13px", color:passedTest ? C.green : C.black, marginTop:"2px" }}>
-              {passedTest ? `✅ Passed ${fmtWhen(passedTest.completed_at)} · ${passedTest.first_try_correct}/${passedTest.total_questions} on the first try` : tests.length ? "Not passed yet" : "Not taken yet — they take it on their own phone once training is done"}
-            </div>
-          </div>
-          {!passedTest && <button onClick={onStartTest} style={startBtn(C.purple)}>Give on this phone</button>}
+          <div style={small}>1 · WRITTEN TESTS</div>
         </div>
+        {TEST_KEYS.map(key => {
+          const p = passedTestFor(tests, key);
+          const tried = tests.some(t => t.test_key === key);
+          return (
+            <div key={key} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:"8px", marginTop:"6px" }}>
+              <div style={{ fontSize:"13px", color:p ? C.green : C.black }}>
+                <b>{TESTS[key].name}</b> · {p ? `✅ Passed ${fmtWhen(p.completed_at)} · ${p.first_try_correct}/${p.total_questions} first try` : tried ? "Not passed yet" : "Not taken yet"}
+              </div>
+              {!p && <button onClick={() => onStartTest(key)} style={startBtn(C.purple)}>Give on this phone</button>}
+            </div>
+          );
+        })}
+        {!passedTest && !tests.length && <div style={{ fontSize:"11px", color:C.muted, marginTop:"4px" }}>They can also take both on their own phone once training is done.</div>}
         {tests.map(t => {
           const missed = t.rounds?.[0]?.wrong || [];
           const retakes = Math.max(0, (t.rounds?.length || 0) - 1);
@@ -5439,7 +5652,7 @@ function FinalDayResults({ trainee, prog, tests, evals, evalResults, rubricItems
           return (
             <div key={t.id} onClick={() => setOpenTest(open ? null : t.id)} style={row}>
               <div style={{ display:"flex", justifyContent:"space-between", fontSize:"12px", gap:"8px" }}>
-                <span style={{ color:C.black, fontWeight:"700" }}>{fmtWhen(t.started_at)} · {t.status==="passed" ? "Passed" : t.status==="abandoned" ? "Stopped early" : "In progress"}</span>
+                <span style={{ color:C.black, fontWeight:"700" }}>{testName(t)} · {fmtWhen(t.started_at)} · {t.status==="passed" ? "Passed" : t.status==="abandoned" ? "Stopped early" : "In progress"}</span>
                 <span style={{ color:C.muted }}>{t.first_try_correct != null ? `${t.first_try_correct}/${t.total_questions} first try` : "—"}{retakes ? ` · ${retakes} retake${retakes===1?"":"s"}` : ""} {open ? "▲" : "▼"}</span>
               </div>
               <div style={{ fontSize:"10px", color:C.muted }}>Given by {t.administered_by_name || name(t.administered_by) || "—"}</div>
@@ -5473,7 +5686,7 @@ function FinalDayResults({ trainee, prog, tests, evals, evalResults, rubricItems
             <div style={{ fontSize:"13px", color:passedEval ? C.green : C.black, marginTop:"2px" }}>
               {passedEval ? `✅ Passed ${fmtWhen(passedEval.test_date + "T12:00:00Z")} (attempt ${passedEval.attempt_number})` : evals.length ? `Not passed yet · ${evals.length} attempt${evals.length===1?"":"s"}` : "Not done yet"}
             </div>
-            {!passedTest && <div style={{ fontSize:"11px", color:C.gold, marginTop:"2px" }}>🔒 Unlocks after the written test is passed.</div>}
+            {!passedTest && <div style={{ fontSize:"11px", color:C.gold, marginTop:"2px" }}>🔒 Unlocks after both written tests are passed.</div>}
           </div>
           {!passedEval && passedTest && <button onClick={onStartEval} style={startBtn(C.gold)}>Start practical</button>}
         </div>
@@ -6081,6 +6294,7 @@ function TrainingOverviewTab({ techs, currentUser, refreshAll }) {
   const [loading, setLoading] = useState(true);
   const [openId, setOpenId] = useState(null);
   const [mode, setMode] = useState(null); // null | "test" | "eval"
+  const [testKey, setTestKey] = useState("perfect_day");
   const [trainerSel, setTrainerSel] = useState("");
 
   // Who is giving the test/evaluation: the manager's own tech record, or the
@@ -6124,7 +6338,7 @@ function TrainingOverviewTab({ techs, currentUser, refreshAll }) {
 
   if (loading) return <div style={{ color:C.muted, padding:"20px" }}>Loading training...</div>;
 
-  if (open && mode === "test") return <WrittenTestRunner trainee={open.t} adminUser={adminUser} onExit={() => { setMode(null); load(); }}/>;
+  if (open && mode === "test") return <WrittenTestRunner testKey={testKey} trainee={open.t} adminUser={adminUser} onExit={() => { setMode(null); load(); }}/>;
   if (open && mode === "eval") return <FinalEvalRunner trainee={open.t} adminUser={adminUser} rubricItems={items} priorAttempts={evals.filter(e => e.tech_id === open.t.id).length} refreshAll={refreshAll} onExit={() => { setMode(null); load(); }}/>;
 
   if (open) {
@@ -6140,7 +6354,7 @@ function TrainingOverviewTab({ techs, currentUser, refreshAll }) {
           </select>
         </div>
         <FinalDayResults trainee={open.t} prog={open.prog} tests={tests.filter(x => x.trainee_id === open.t.id)} evals={evals.filter(e => e.tech_id === open.t.id)} evalResults={evalResults} rubricItems={items} techs={techs}
-          onStartTest={() => setMode("test")}
+          onStartTest={key => { setTestKey(key); setMode("test"); }}
           onStartEval={() => setMode("eval")}
           onToggleClassroom={async () => { try { await sb(`techs?id=eq.${open.t.id}`, { method:"PATCH", prefer:"return=minimal", body:JSON.stringify({ classroom_complete:!open.t.classroom_complete }) }); refreshAll && await refreshAll(); } catch(e) { window.alert("Couldn't save: " + e.message); } }}/>
         <PerfectDayTrainingPanel key={open.t.id} admin techs={techs} fixedSubject={open.t} adminTrainerId={trainerSel || trainerOf(open.t) || ""}/>
@@ -6181,10 +6395,149 @@ function TrainingOverviewTab({ techs, currentUser, refreshAll }) {
             {lastNote?.overall_rating ? <span style={{ color:C.gold }}>{"★".repeat(lastNote.overall_rating)}</span> : null}
             {lastNote?.pace === "behind" && <span style={{ color:C.red }}>Behind pace</span>}
             {notes.some(n => n.trainee_id === t.id && n.incident) && <span style={{ color:C.red }}>⚠️ Incident noted</span>}
-            {prog.complete && !tests.some(x => x.trainee_id === t.id && x.status === "passed") && <span style={{ color:C.green, fontWeight:"700" }}>{t.classroom_complete ? "✅ Ready for the written test" : "✅ Field training done · classroom day not marked"}</span>}
-            {(() => { const pt = tests.find(x => x.trainee_id === t.id && x.status === "passed"); return pt ? <span style={{ color:C.purple }}>📝 Test passed · {pt.first_try_correct}/{pt.total_questions} first try</span> : null; })()}
+            {(() => { const mine = tests.filter(x => x.trainee_id === t.id); return prog.complete && !(passedTestFor(mine, "perfect_day") && passedTestFor(mine, "misc")); })() && <span style={{ color:C.green, fontWeight:"700" }}>{t.classroom_complete ? "✅ Ready for the written tests" : "✅ Field training done · classroom day not marked"}</span>}
+            {(() => { const mine = tests.filter(x => x.trainee_id === t.id); return TEST_KEYS.map(k => { const pt = passedTestFor(mine, k); return pt ? <span key={k} style={{ color:C.purple }}>📝 {TESTS[k].short} passed · {pt.first_try_correct}/{pt.total_questions} first try</span> : null; }); })()}
             {(() => { const es = evals.filter(e => e.tech_id === t.id); if (!es.length) return null; const p = es.find(e => e.overall_result === "pass"); return <span style={{ color:p ? C.green : C.red, fontWeight:"700" }}>{p ? (t.title === "detail_pro" ? "🎓 Promoted to Detail Pro" : "🏁 Practical passed") : `🏁 Practical failed ×${es.length}`}</span>; })()}
           </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ─── FINAL ONBOARDING SIGN-OFF ───────────────────────────────────────────────
+// Sits under the cert on the Development tab. Once all three boxes are
+// checked and an admin types their name, the apprentice becomes a Detail Pro
+// and their check-in clock starts that day (week 1 check-in = 7 days later).
+const ONBOARDING_BOXES = [
+  ["perfect_day_rubric_complete", "Perfect Day Rubric complete"],
+  ["misc_rubric_complete",        "Miscellaneous Rubric complete"],
+  ["onboarding_complete",         "Onboarding complete"],
+];
+function OnboardingSignOff({ tech, refreshAll, showToast, onComplete }) {
+  const fromTech = t => Object.fromEntries(ONBOARDING_BOXES.map(([k]) => [k, !!t[k]]));
+  const [boxes, setBoxes] = useState(fromTech(tech));
+  const [sig, setSig] = useState("");
+  const [saving, setSaving] = useState(false);
+  useEffect(() => { setBoxes(fromTech(tech)); setSig(""); }, [tech.id]);
+  const signed = !!tech.onboarding_complete_date;
+  const allChecked = ONBOARDING_BOXES.every(([k]) => boxes[k]);
+
+  async function toggle(key, val) {
+    setBoxes(b => ({ ...b, [key]:val }));
+    try {
+      await sb(`techs?id=eq.${tech.id}`, { method:"PATCH", prefer:"return=minimal", body:JSON.stringify({ [key]:val }) });
+      refreshAll && refreshAll();
+    } catch(e) { setBoxes(b => ({ ...b, [key]:!val })); showToast("Error: " + e.message, false); }
+  }
+
+  async function complete() {
+    if (!allChecked) return showToast("Check all three boxes first", false);
+    if (!sig.trim()) return showToast("Type your name to sign", false);
+    const today = mountainDate(new Date().toISOString());
+    // Only an apprentice gets promoted; signing for anyone already past that
+    // must never change (demote) their title.
+    const promote = (tech.title || "detail_apprentice") === "detail_apprentice";
+    if (!window.confirm(`Sign off ${tech.name}'s onboarding?\n\n${promote ? `They'll become a Detail Pro today (${today}) and their` : `Their title stays the same. Their`} 1-week check-in will be due 7 days from now.`)) return;
+    setSaving(true);
+    try {
+      await sb(`techs?id=eq.${tech.id}`, { method:"PATCH", prefer:"return=minimal", body:JSON.stringify({
+        perfect_day_rubric_complete:true, misc_rubric_complete:true, onboarding_complete:true,
+        onboarding_signed_by:sig.trim(), onboarding_complete_date:today,
+        ...(promote ? { title:"detail_pro" } : {}), onboarding_stage:"active",
+      }) });
+      // Drop any check-ins that were scheduled off the hire date and haven't
+      // happened yet, then schedule fresh ones from today.
+      await sb(`checkins?tech_id=eq.${tech.id}&or=(status.is.null,status.neq.completed)`, { method:"DELETE", prefer:"return=minimal" });
+      await scheduleCheckins(tech.id, today);
+      showToast(promote ? `🎓 ${tech.name} is now a Detail Pro. Check-ins start today.` : `✅ ${tech.name}'s onboarding is signed. Check-ins start today.`);
+      await refreshAll();
+      onComplete && onComplete();
+    } catch(e) { showToast("Error: " + e.message, false); }
+    setSaving(false);
+  }
+
+  return (
+    <div style={{ background:C.card, border:`1px solid ${signed ? C.green : C.border}`, borderRadius:"12px", padding:"16px", display:"flex", flexDirection:"column", gap:"10px" }}>
+      <Label color={signed ? C.green : C.blue}>Onboarding Sign-Off — {tech.name}</Label>
+      {ONBOARDING_BOXES.map(([key, label]) => (
+        <div key={key} style={{ display:"flex", alignItems:"center", gap:"10px", padding:"8px", background:`${C.blue}08`, borderRadius:"8px" }}>
+          <input type="checkbox" id={`ob_${key}_${tech.id}`} checked={signed || !!boxes[key]} disabled={signed} onChange={e => toggle(key, e.target.checked)} style={{ width:"16px", height:"16px", cursor:signed ? "default" : "pointer" }}/>
+          <label htmlFor={`ob_${key}_${tech.id}`} style={{ fontSize:"13px", color:C.black, cursor:signed ? "default" : "pointer" }}>{label}</label>
+        </div>
+      ))}
+      {signed ? (
+        <div style={{ fontSize:"13px", color:C.green, fontWeight:"700" }}>
+          ✅ Signed by {tech.onboarding_signed_by || "—"} on {tech.onboarding_complete_date}. Check-ins count from this date.
+        </div>
+      ) : (
+        <>
+          <div>
+            <div style={{ fontSize:"11px", color:C.muted, marginBottom:"4px" }}>Signature (type your full name)</div>
+            <input type="text" value={sig} onChange={e => setSig(e.target.value)} placeholder="Your name" style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"10px", borderRadius:"8px", fontSize:"15px", fontStyle:"italic", width:"100%", boxSizing:"border-box" }}/>
+          </div>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:"8px", flexWrap:"wrap" }}>
+            <div style={{ fontSize:"12px", color:C.muted }}>Signing promotes them to Detail Pro and starts their check-in clock today.</div>
+            <button onClick={complete} disabled={saving || !allChecked || !sig.trim()} style={{ ...btnSm(allChecked && sig.trim() ? C.green : C.border), color:C.white }}>{saving ? "Saving..." : "Sign & Complete Onboarding"}</button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ─── WRITTEN TEST QUESTION BANK (admin view) ────────────────────────────────
+// Read-only view of both written tests with the right answer marked, so an
+// admin can review the questions. Lives on the Development tab, which only
+// admins can open; apprentices never see answers.
+// Fixed per-question order for the review list (seeded by the question id) so
+// the right answer isn't always first and the order doesn't jump around.
+function reviewOrder(x) {
+  let h = 0; for (const ch of x.id) h = (Math.imul(h, 31) + ch.charCodeAt(0)) >>> 0;
+  const rand = () => { h = (h + 0x6D2B79F5) >>> 0; let t = h; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+  const a = [x.correct, ...x.wrong];
+  for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(rand() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
+  return a;
+}
+
+function TestQuestionBank() {
+  const [key, setKey] = useState("perfect_day");
+  const [q, setQ] = useState("");
+  const all = questionsFor(key);
+  const term = q.trim().toLowerCase();
+  const shown = term ? all.filter(x => [x.q, x.topic, x.correct, ...x.wrong].join(" ").toLowerCase().includes(term)) : all;
+  const topics = [...new Set(shown.map(x => x.topic))];
+  const numOf = Object.fromEntries(all.map((x, i) => [x.id, i + 1]));
+  const pill = on => ({ flex:1, background:on ? C.purple : C.cardLt, border:`1px solid ${on ? C.purple : C.border}`, color:on ? C.white : C.black, padding:"8px 12px", borderRadius:"16px", cursor:"pointer", fontSize:"12px", fontWeight:"900", fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:"1px", textTransform:"uppercase" });
+  return (
+    <div style={{ display:"flex", flexDirection:"column", gap:"12px" }}>
+      <div style={{ display:"flex", gap:"6px" }}>
+        {TEST_KEYS.map(k => <button key={k} onClick={() => setKey(k)} style={pill(key === k)}>{TESTS[k].name} ({questionsFor(k).length})</button>)}
+      </div>
+      <div style={{ fontSize:"12px", color:C.muted }}>
+        Every question on the {TESTS[key].name}, grouped by topic. ✓ marks the right answer. On the real test the A–D order is reshuffled every time, and apprentices never see which answer is right.
+      </div>
+      <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search questions or answers" style={{ background:C.white, border:`1px solid ${C.border}`, color:C.black, padding:"10px 14px", borderRadius:"8px", fontSize:"14px", width:"100%", boxSizing:"border-box" }}/>
+      {shown.length === 0 && <div style={{ fontSize:"13px", color:C.muted }}>No questions match.</div>}
+      {topics.map(topic => (
+        <div key={topic} style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"14px 16px", display:"flex", flexDirection:"column", gap:"12px" }}>
+          <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"13px", color:C.purple, letterSpacing:"2px" }}>{topic.toUpperCase()} · {shown.filter(x => x.topic === topic).length}</div>
+          {shown.filter(x => x.topic === topic).map(x => (
+            <div key={x.id} style={{ borderTop:`1px solid ${C.border}40`, paddingTop:"10px" }}>
+              <div style={{ fontSize:"14px", color:C.black, fontWeight:"700", lineHeight:1.4 }}><span style={{ color:C.muted, fontWeight:"600" }}>#{numOf[x.id]}</span> {x.q}</div>
+              <div style={{ marginTop:"6px", display:"flex", flexDirection:"column", gap:"3px" }}>
+                {reviewOrder(x).map((a, i) => {
+                  const right = a === x.correct;
+                  return (
+                    <div key={a} style={{ fontSize:"13px", color:right ? C.green : C.muted, fontWeight:right ? "700" : "400", display:"flex", gap:"8px" }}>
+                      <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", minWidth:"14px" }}>{"ABCD"[i]}</span>
+                      <span>{a}{right ? " ✓" : ""}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
         </div>
       ))}
     </div>
@@ -6347,7 +6700,7 @@ function DevelopmentTab({ techs, rideAlongs, refreshAll, showToast }) {
 
       {/* Sub-view switcher */}
       <div style={{ display:"flex", gap:"8px", flexWrap:"wrap" }}>
-        {[["signoff","📋 Training Sign-Off"],["cert","🏆 Perfect Day Cert"],["checkins","📅 Check-Ins"]].map(([id,label]) => (
+        {[["signoff","📋 Training Sign-Off"],["cert","🏆 Final Onboarding Cert"],["checkins","📅 Check-Ins"],["tests","📝 Written Tests"]].map(([id,label]) => (
           <button key={id} onClick={() => setDevView(id)} style={{ ...btnSm(devView===id ? C.blue : C.cardLt), color:devView===id ? C.white : C.black, flex:1, minWidth:"120px", border:`1px solid ${devView===id ? C.blue : C.border}` }}>{label}</button>
         ))}
       </div>
@@ -6396,7 +6749,7 @@ function DevelopmentTab({ techs, rideAlongs, refreshAll, showToast }) {
         </div>
       )}
 
-      {/* ── B. PERFECT DAY CERT ── */}
+      {/* ── B. FINAL ONBOARDING CERT ── */}
       {devView==="cert" && (
         <div style={{ display:"flex", flexDirection:"column", gap:"12px" }}>
           {lastCertResult && lastCertResult.overall==="fail" && (
@@ -6417,7 +6770,7 @@ function DevelopmentTab({ techs, rideAlongs, refreshAll, showToast }) {
             </div>
           )}
           <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"16px", display:"flex", flexDirection:"column", gap:"12px" }}>
-            <Label color={C.blue}>New Perfect Day Cert</Label>
+            <Label color={C.blue}>Final Onboarding Cert</Label>
             <div style={{ display:"flex", gap:"10px", flexWrap:"wrap" }}>
               <div style={{ flex:1, minWidth:"150px" }}>
                 <div style={{ fontSize:"11px", color:C.muted, marginBottom:"4px" }}>Tech</div>
@@ -6467,6 +6820,9 @@ function DevelopmentTab({ techs, rideAlongs, refreshAll, showToast }) {
               </>
             )}
           </div>
+          {certTechSel && techs.find(t => t.id === certTechSel) && (
+            <OnboardingSignOff tech={techs.find(t => t.id === certTechSel)} refreshAll={refreshAll} showToast={showToast} onComplete={loadDevData}/>
+          )}
           {certTechSel && certs.filter(c=>c.tech_id===certTechSel).length > 0 && (
             <div style={{ display:"flex", flexDirection:"column", gap:"8px" }}>
               <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", fontSize:"13px", color:C.muted, letterSpacing:"1px" }}>PAST ATTEMPTS</div>
@@ -6485,6 +6841,8 @@ function DevelopmentTab({ techs, rideAlongs, refreshAll, showToast }) {
       )}
 
       {/* ── C. CHECK-INS ── */}
+      {devView==="tests" && <TestQuestionBank/>}
+
       {devView==="checkins" && (
         <div style={{ display:"flex", flexDirection:"column", gap:"12px" }}>
           {selectedCheckin && (
@@ -6521,16 +6879,19 @@ function DevelopmentTab({ techs, rideAlongs, refreshAll, showToast }) {
             </div>
           )}
           {activeTechs.map(tech => {
-            const tci = checkins.filter(c=>c.tech_id===tech.id).sort((a,b)=>a.scheduled_date.localeCompare(b.scheduled_date));
+            const training = isInTraining(tech);
+            const tci = training ? [] : checkins.filter(c=>c.tech_id===tech.id).sort((a,b)=>a.scheduled_date.localeCompare(b.scheduled_date));
             const today = new Date().toISOString().split("T")[0];
             return (
               <div key={tech.id} style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", overflow:"hidden" }}>
                 <div style={{ background:C.cardLt, padding:"10px 16px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"15px", color:C.black }}>
                   {tech.name}
-                  {tech.start_date && <span style={{ fontSize:"11px", color:C.muted, fontWeight:"400", marginLeft:"8px" }}>started {tech.start_date}</span>}
+                  {training
+                    ? <span style={{ fontSize:"11px", color:C.purple, fontWeight:"700", marginLeft:"8px" }}>🎓 Detail Apprentice — in training</span>
+                    : checkinBaseDate(tech) && <span style={{ fontSize:"11px", color:C.muted, fontWeight:"400", marginLeft:"8px" }}>{tech.onboarding_complete_date ? `onboarding complete ${tech.onboarding_complete_date}` : `started ${tech.start_date}`}</span>}
                 </div>
                 {tci.length === 0 ? (
-                  <div style={{ padding:"12px 16px", fontSize:"12px", color:C.muted }}>No check-ins scheduled. Set a start date to auto-schedule.</div>
+                  <div style={{ padding:"12px 16px", fontSize:"12px", color:C.muted }}>{training ? "Check-ins start once the Final Onboarding Cert is signed. Their 1-week check-in is 7 days after that." : "No check-ins scheduled. Set a start date to auto-schedule."}</div>
                 ) : (
                   <div style={{ display:"flex", flexWrap:"wrap", gap:"8px", padding:"12px 16px" }}>
                     {tci.map(ci => {
@@ -7588,6 +7949,260 @@ function TrucksAdminTab({ techs, vehicles, timeEntries=[], token, refreshAll, sh
   );
 }
 
+// ─── CALLBACKS (log + history) ───────────────────────────────────────────────
+// Used by the admin panel and by Trevor's login (CALLBACK_ENTRY_TECHS) --
+// he's the one who enters callbacks as they come in.
+const CALLBACK_ENTRY_TECHS = new Set(["4641f4da-a16f-411b-8688-8b81ac06eda7"]);   // Trevor Prince
+function CallbacksPanel({ techs, jobs, callbacks, refreshAll, showToast }) {
+  const CB_EMPTY = { techId:"", jobId:"", lookback:14, jobDate:"", customer:"", jobNumber:"", splitTechId:"", missed:[], severity:0, reason:"" };
+  const [cbForm, setCbForm] = useState(CB_EMPTY);
+  const [cbPreset, setCbPreset] = useState("mtd");
+  const [cbCStart, setCbCStart] = useState("");
+  const [cbCEnd, setCbCEnd] = useState("");
+  const [saving, setSaving] = useState(false);
+  const inp={ background:C.white, border:`1px solid ${C.border}`, color:C.black, padding:"10px 14px", borderRadius:"8px", fontSize:"14px", fontFamily:"'Barlow',sans-serif", width:"100%", boxSizing:"border-box" };
+  const sel=(val)=>({...inp, color:val?C.black:C.muted});
+  const btn=(color)=>({ background:saving?C.border:color||C.blue, border:"none", color:C.black, padding:"13px", borderRadius:"24px", cursor:saving?"not-allowed":"pointer", fontSize:"13px", fontWeight:"900", fontStyle:"italic", letterSpacing:"2px", fontFamily:"'Barlow Condensed',sans-serif", width:"100%", textTransform:"uppercase" });
+  // The jobs a tech did recently, newest first -- picking one fills in the
+  // date and client, and tells us who else was on it (split job).
+  function recentJobsFor(techId, days) {
+    if (!techId) return [];
+    const since = new Date(); since.setDate(since.getDate()-days);
+    const sinceStr = since.toLocaleDateString("en-CA",{timeZone:"America/Denver"});
+    const seen = new Set();
+    return (jobs||[]).filter(j=>j.tech_id===techId && j.job_date>=sinceStr && (j.revenue||0)>0 && !seen.has(j.hcp_job_id) && seen.add(j.hcp_job_id))
+      .sort((x,y)=>y.job_date.localeCompare(x.job_date));
+  }
+  function techsOnJob(hcpJobId) {
+    return [...new Set((jobs||[]).filter(j=>j.hcp_job_id===hcpJobId).map(j=>j.tech_id))];
+  }
+  async function logCallback() {
+    const f = cbForm;
+    if (!f.techId) return showToast("Select a tech",false);
+    const picked = f.jobId && f.jobId!=="manual" ? (jobs||[]).find(j=>j.hcp_job_id===f.jobId && j.tech_id===f.techId) : null;
+    if (!picked && f.jobId!=="manual") return showToast("Pick the job (or choose 'Job not listed')",false);
+    const jobDate = picked ? picked.job_date : f.jobDate;
+    if (!jobDate) return showToast("Enter the date the job was completed",false);
+    if (!f.missed.length) return showToast("Pick at least one thing that was missed",false);
+    if (!f.severity) return showToast("Pick the severity level",false);
+    const techIds = picked
+      ? techsOnJob(picked.hcp_job_id)
+      : [f.techId, ...(f.splitTechId && f.splitTechId!==f.techId ? [f.splitTechId] : [])];
+    const weight = Math.round(1/techIds.length*10000)/10000;
+    const group_id = crypto.randomUUID();
+    setSaving(true);
+    try {
+      const rows = techIds.map(id=>({
+        tech_id:id, weight, group_id,
+        job_date: jobDate,
+        customer_name: (picked?.customer_name || f.customer || "").trim() || null,
+        job_number: f.jobNumber.trim() || null,
+        hcp_job_id: picked ? picked.hcp_job_id : null,
+        missed_items: f.missed, severity: f.severity,
+        reason: f.reason || "",
+      }));
+      await sb("callbacks",{method:"POST",body:JSON.stringify(rows)});
+      await refreshAll();
+      const names = techIds.map(id=>techs.find(t=>t.id===id)?.name||"?").join(" & ");
+      const each = Math.round(CALLBACK_SEVERITY[f.severity].pts*weight);
+      showToast(`📞 Callback logged for ${names} — ${each} pts deducted${techIds.length>1?" each (split)":""}`);
+      setCbForm(CB_EMPTY);
+    } catch(e){ showToast("Error: "+e.message,false); }
+    setSaving(false);
+  }
+  async function deleteCallback(cb) {
+    const both = cb.group_id && callbacks.filter(c=>c.group_id===cb.group_id).length>1;
+    if (!window.confirm(both ? "Delete this callback for everyone on the job?" : "Delete this callback?")) return;
+    setSaving(true);
+    try { await sb(cb.group_id ? `callbacks?group_id=eq.${cb.group_id}` : `callbacks?id=eq.${cb.id}`,{method:"DELETE",prefer:"return=minimal"}); await refreshAll(); showToast("Callback removed"); }
+    catch(e){ showToast("Error: "+e.message,false); }
+    setSaving(false);
+  }
+          const f = cbForm;
+          const recent = recentJobsFor(f.techId, f.lookback);
+          const picked = f.jobId && f.jobId!=="manual" ? recent.find(j=>j.hcp_job_id===f.jobId) : null;
+          const crew = picked ? techsOnJob(picked.hcp_job_id) : [];
+          const toggleMissed = id => setCbForm(v=>({...v, missed: v.missed.includes(id) ? v.missed.filter(x=>x!==id) : [...v.missed, id]}));
+          // Date-filtered view: callbacks by the day the job was completed,
+          // grouped so a split job shows once.
+          const { start:cbStart, end:cbEnd } = getDateRangeBounds(cbPreset, cbCStart, cbCEnd);
+          const inRange = callbacks.filter(c=>{ const d=callbackDate(c); return d && d>=cbStart && d<=cbEnd; });
+          const groups = Object.values(inRange.reduce((acc,c)=>{ const k=c.group_id||c.id; (acc[k]=acc[k]||[]).push(c); return acc; },{}))
+            .sort((x,y)=>(callbackDate(y[0])||"").localeCompare(callbackDate(x[0])||""));
+          const cbCount = inRange.reduce((s,c)=>s+(c.weight==null?1:Number(c.weight)),0);
+          const jobCount = new Set((jobs||[]).filter(j=>j.job_date>=cbStart && j.job_date<=cbEnd && (j.revenue||0)>0).map(j=>j.hcp_job_id)).size;
+          const rate = jobCount>0 ? cbCount/jobCount*100 : 0;
+          const itemCounts = {};
+          groups.forEach(g=>(g[0].missed_items||[]).forEach(id=>{ itemCounts[id]=(itemCounts[id]||0)+1; }));
+          const topItems = Object.entries(itemCounts).sort((x,y)=>y[1]-x[1]);
+          const sevCounts = [1,2,3].map(l=>groups.filter(g=>g[0].severity===l).length);
+          const techSummary = techs.map(t=>{
+            const mine = inRange.filter(c=>c.tech_id===t.id);
+            return { t, count: mine.reduce((s,c)=>s+(c.weight==null?1:Number(c.weight)),0), pts: mine.reduce((s,c)=>s+callbackPoints(c),0) };
+          }).filter(x=>x.count>0).sort((x,y)=>y.count-x.count);
+          const fmtCount = n => Number.isInteger(n) ? String(n) : n.toFixed(1);
+          const chip = on => ({ display:"flex", alignItems:"flex-start", gap:"8px", padding:"6px 8px", borderRadius:"8px", border:`1px solid ${on?"#ef4444":C.border}`, background:on?"#ef444410":C.white, cursor:"pointer", fontSize:"13px", color:C.black });
+          return (
+          <div style={{ display:"flex", flexDirection:"column", gap:"16px" }}>
+            {/* Date range + rate */}
+            <DateRangePicker label="📅 Callbacks by job date" color="#ef4444" preset={cbPreset} setPreset={setCbPreset} customStart={cbCStart} setCustomStart={setCbCStart} customEnd={cbCEnd} setCustomEnd={setCbCEnd}>
+              <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:"8px", marginTop:"14px" }}>
+                {[
+                  { l:"Callback rate", v:`${rate.toFixed(2)}%`, c: rate>=2?"#ef4444":C.green },
+                  { l:"Callbacks", v:fmtCount(cbCount), c:C.black },
+                  { l:"Completed jobs", v:jobCount, c:C.black },
+                ].map(x=>(
+                  <div key={x.l} style={{ background:C.cardLt, borderRadius:"8px", padding:"10px", textAlign:"center" }}>
+                    <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"24px", color:x.c }}>{x.v}</div>
+                    <div style={{ fontSize:"9px", color:C.muted, textTransform:"uppercase", letterSpacing:"1px" }}>{x.l}</div>
+                  </div>
+                ))}
+              </div>
+              <div style={{ fontSize:"11px", color:C.muted, marginTop:"6px" }}>{cbStart} → {cbEnd} · Standard is under 2% · split-job callbacks count ½ per tech</div>
+            </DateRangePicker>
+
+            {/* Log a callback */}
+            <div style={{ background:C.white, border:`2px solid #ef444444`, borderTop:`3px solid #ef4444`, borderRadius:"12px", padding:"20px", display:"flex", flexDirection:"column", gap:"12px", boxShadow:"0 2px 8px rgba(239,68,68,0.08)" }}>
+              <Label color="#ef4444">📞 Log a Callback</Label>
+              <select value={f.techId} onChange={e=>setCbForm({...CB_EMPTY, techId:e.target.value, lookback:f.lookback})} style={sel(f.techId)}>
+                <option value="">— Select Tech —</option>
+                {techs.filter(t=>t.title!=="owner").map(t=><option key={t.id} value={t.id}>{t.name}{t.is_active===false?" (archived)":""}</option>)}
+              </select>
+              {f.techId&&(<>
+                <div style={{ display:"flex", gap:"8px", alignItems:"center" }}>
+                  <select value={f.jobId} onChange={e=>setCbForm(v=>({...v, jobId:e.target.value}))} style={{ ...sel(f.jobId), flex:1 }}>
+                    <option value="">— Pick the job —</option>
+                    {recent.map(j=><option key={j.hcp_job_id} value={j.hcp_job_id}>{fmtShortDate(j.job_date)} · {j.customer_name||"(no client name)"} · ${Math.round(j.revenue)}{techsOnJob(j.hcp_job_id).length>1?" · split":""}</option>)}
+                    <option value="manual">Job not listed — enter it by hand</option>
+                  </select>
+                  <select value={f.lookback} onChange={e=>setCbForm(v=>({...v, lookback:Number(e.target.value), jobId:""}))} style={{ ...sel(true), width:"auto" }}>
+                    {[14,30,60,90].map(d=><option key={d} value={d}>Last {d} days</option>)}
+                  </select>
+                </div>
+                {picked&&(
+                  <div style={{ fontSize:"12px", color:C.black, background:C.cardLt, borderRadius:"8px", padding:"8px 10px" }}>
+                    Completed <strong>{fmtShortDate(picked.job_date)}</strong> · {picked.customer_name||"no client name"}
+                    {crew.length>1 && <> · <strong style={{ color:"#ef4444" }}>Split job:</strong> {crew.map(id=>techs.find(t=>t.id===id)?.name||"?").join(" & ")} — each gets 1/{crew.length} of the callback and points</>}
+                  </div>
+                )}
+                {f.jobId==="manual"&&(
+                  <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"8px" }}>
+                    <div>
+                      <div style={{ fontSize:"10px", color:C.muted, marginBottom:"4px" }}>Date the job was completed</div>
+                      <input type="date" value={f.jobDate} onChange={e=>setCbForm(v=>({...v, jobDate:e.target.value}))} style={inp}/>
+                    </div>
+                    <div>
+                      <div style={{ fontSize:"10px", color:C.muted, marginBottom:"4px" }}>Client name</div>
+                      <input value={f.customer} onChange={e=>setCbForm(v=>({...v, customer:e.target.value}))} style={inp}/>
+                    </div>
+                    <select value={f.splitTechId} onChange={e=>setCbForm(v=>({...v, splitTechId:e.target.value}))} style={{ ...sel(f.splitTechId), gridColumn:"1 / -1" }}>
+                      <option value="">Split job? Pick the other tech (optional)</option>
+                      {techs.filter(t=>t.id!==f.techId && t.title!=="owner").map(t=><option key={t.id} value={t.id}>{t.name}</option>)}
+                    </select>
+                  </div>
+                )}
+                <input placeholder="HCP job # (optional)" value={f.jobNumber} onChange={e=>setCbForm(v=>({...v, jobNumber:e.target.value}))} style={inp}/>
+                <div>
+                  <div style={{ fontSize:"12px", color:C.muted, marginBottom:"6px" }}>What was missed? (pick all that apply)</div>
+                  {CALLBACK_AREAS.map(a=>(
+                    <div key={a.area} style={{ marginBottom:"8px" }}>
+                      <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"13px", color:C.black, marginBottom:"4px" }}>{a.area}</div>
+                      <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(220px,1fr))", gap:"6px" }}>
+                        {a.items.map(i=>{ const on=f.missed.includes(i.id); return (
+                          <label key={i.id} style={chip(on)}>
+                            <input type="checkbox" checked={on} onChange={()=>toggleMissed(i.id)} style={{ marginTop:"2px" }}/>
+                            <span><strong>{i.label}</strong>{i.hint&&<span style={{ display:"block", fontSize:"11px", color:C.muted }}>{i.hint}</span>}</span>
+                          </label>
+                        ); })}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div>
+                  <div style={{ fontSize:"12px", color:C.muted, marginBottom:"6px" }}>How bad was it?</div>
+                  <div style={{ display:"flex", flexDirection:"column", gap:"6px" }}>
+                    {[1,2,3].map(l=>{ const on=f.severity===l, sv=CALLBACK_SEVERITY[l]; return (
+                      <label key={l} style={chip(on)}>
+                        <input type="radio" name="cb-severity" checked={on} onChange={()=>setCbForm(v=>({...v, severity:l}))} style={{ marginTop:"2px" }}/>
+                        <span><strong>{sv.label}</strong> — {sv.desc} <strong style={{ color:"#ef4444" }}>(−{sv.pts} pts)</strong></span>
+                      </label>
+                    ); })}
+                  </div>
+                </div>
+                <input placeholder="Notes (optional)" value={f.reason} onChange={e=>setCbForm(v=>({...v, reason:e.target.value}))} style={inp}/>
+                <button onClick={logCallback} disabled={saving} style={{ ...btn("#ef4444"), color:C.white }}>{saving?"Saving...":"Log Callback — Deduct Points"}</button>
+              </>)}
+            </div>
+
+            {/* Breakdown for the range */}
+            {groups.length>0&&(
+              <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"16px 18px", boxShadow:"0 2px 8px rgba(43,156,240,0.08)", display:"flex", flexDirection:"column", gap:"12px" }}>
+                <Label color="#ef4444">📊 Breakdown</Label>
+                <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:"8px" }}>
+                  {[1,2,3].map((l,i)=>(
+                    <div key={l} style={{ background:C.cardLt, borderRadius:"8px", padding:"8px", textAlign:"center" }}>
+                      <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"20px", color:C.black }}>{sevCounts[i]}</div>
+                      <div style={{ fontSize:"9px", color:C.muted, textTransform:"uppercase", letterSpacing:"1px" }}>{CALLBACK_SEVERITY[l].label}</div>
+                    </div>
+                  ))}
+                </div>
+                {topItems.length>0&&(
+                  <div>
+                    <div style={{ fontSize:"12px", color:C.muted, marginBottom:"4px" }}>Most missed</div>
+                    {topItems.map(([id,n])=>(
+                      <div key={id} style={{ display:"flex", justifyContent:"space-between", fontSize:"13px", color:C.black, padding:"2px 0" }}><span>{CALLBACK_ITEM_LABEL[id]||id}</span><strong>{n}</strong></div>
+                    ))}
+                  </div>
+                )}
+                <div>
+                  <div style={{ fontSize:"12px", color:C.muted, marginBottom:"4px" }}>By tech</div>
+                  {techSummary.map(x=>(
+                    <div key={x.t.id} style={{ display:"flex", justifyContent:"space-between", fontSize:"13px", color:C.black, padding:"2px 0" }}>
+                      <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>{x.t.name}</span>
+                      <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", color:"#ef4444" }}>{fmtCount(x.count)} callback{x.count!==1?"s":""} · {x.pts} pts</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* History for the range */}
+            <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:"12px", overflow:"hidden", boxShadow:"0 2px 8px rgba(43,156,240,0.08)" }}>
+              <div style={{ padding:"14px 18px", borderBottom:`1px solid ${C.border}`, background:C.cardLt }}>
+                <Label color="#ef4444">📋 Callback History</Label>
+              </div>
+              <div style={{ padding:"14px 18px", display:"flex", flexDirection:"column", gap:"8px" }}>
+                {groups.length===0&&<div style={{ fontSize:"13px", color:C.muted }}>No callbacks for jobs in this date range. Keep it that way! 💪</div>}
+                {groups.map(g=>{
+                  const c = g[0];
+                  const names = g.map(r=>techs.find(t=>t.id===r.tech_id)?.name||"Unknown").join(" & ");
+                  return (
+                    <div key={c.group_id||c.id} style={{ background:`#ef444410`, border:`1px solid #ef444433`, borderLeft:`3px solid #ef4444`, borderRadius:"8px", padding:"12px 14px", display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:"12px" }}>
+                      <div>
+                        <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"15px", color:C.black }}>
+                          {names}{g.length>1&&<span style={{ fontSize:"11px", color:"#ef4444", marginLeft:"6px" }}>SPLIT</span>}
+                          {c.severity&&<span style={{ fontSize:"11px", color:C.white, background:"#ef4444", borderRadius:"8px", padding:"1px 7px", marginLeft:"6px" }}>{CALLBACK_SEVERITY[c.severity].label}</span>}
+                        </div>
+                        <div style={{ fontSize:"12px", color:C.black, marginTop:"3px" }}>
+                          Job {callbackDate(c)?fmtShortDate(callbackDate(c)):"?"}{c.customer_name?` · ${c.customer_name}`:""}{c.job_number?` · #${c.job_number}`:""}
+                        </div>
+                        {(c.missed_items||[]).length>0&&<div style={{ fontSize:"11px", color:C.muted, marginTop:"2px" }}>Missed: {c.missed_items.map(id=>CALLBACK_ITEM_LABEL[id]||id).join(", ")}</div>}
+                        {c.reason&&<div style={{ fontSize:"11px", color:C.muted, marginTop:"2px" }}>{c.reason}</div>}
+                        <div style={{ fontSize:"10px", color:C.muted, marginTop:"2px" }}>Logged {new Date(c.created_at).toLocaleDateString("en-US",{month:"short",day:"numeric"})}</div>
+                      </div>
+                      <div style={{ display:"flex", alignItems:"center", gap:"10px", flexShrink:0 }}>
+                        <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"15px", color:"#ef4444" }}>{callbackPoints(c)} pts{g.length>1?" each":""}</span>
+                        <button onClick={()=>deleteCallback(c)} disabled={saving} style={{ background:"none", border:`1px solid #ef4444`, color:"#ef4444", padding:"4px 10px", borderRadius:"6px", cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", fontSize:"11px" }}>DELETE</button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+          );
+}
+
 // ─── ADMIN PANEL ──────────────────────────────────────────────────────────────
 // isManager: logged in as the Field Supervisor. Same panel as the owners, but
 // read-only on anything that decides his own bonus (quota targets, trucks and
@@ -7613,11 +8228,6 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
   const [swCStart, setSwCStart] = useState("");
   const [swCEnd, setSwCEnd] = useState("");
   const [reviewForm, setReviewForm] = useState({});
-  const CB_EMPTY = { techId:"", jobId:"", lookback:14, jobDate:"", customer:"", jobNumber:"", splitTechId:"", missed:[], severity:0, reason:"" };
-  const [cbForm, setCbForm] = useState(CB_EMPTY);
-  const [cbPreset, setCbPreset] = useState("mtd");
-  const [cbCStart, setCbCStart] = useState("");
-  const [cbCEnd, setCbCEnd] = useState("");
   const [archivingId, setArchivingId] = useState(null);
   const [archiveForm, setArchiveForm] = useState({left_date:"",leave_reason:"",fire_category:"",fire_notes:""});
   const [toast, setToast] = useState(null);
@@ -7658,7 +8268,7 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
   async function addTech() {
     if (!addForm.name||!addForm.pin||addForm.pin.length!==4) return showToast("Name + 4-digit PIN required",false);
     setSaving(true);
-    try { const avatar=addForm.avatar||addForm.name.split(" ").map(w=>w[0]).join("").toUpperCase().slice(0,2); const res=await sb("techs?select=id",{method:"POST",body:JSON.stringify({name:addForm.name,pin:addForm.pin,avatar,badges:["day_one"],start_date:addForm.start_date||null,commission_rate:parseInt(addForm.commission_rate)||27,title:addForm.title||"detail_apprentice"})}); if(res&&res[0]&&addForm.start_date)await scheduleCheckins(res[0].id,addForm.start_date).catch(()=>{}); await refreshAll(); showToast(`✅ ${addForm.name} added!`); setAddForm({name:"",pin:"",avatar:"",start_date:"",commission_rate:27,title:"detail_apprentice"}); }
+    try { const avatar=addForm.avatar||addForm.name.split(" ").map(w=>w[0]).join("").toUpperCase().slice(0,2); const res=await sb("techs?select=id",{method:"POST",body:JSON.stringify({name:addForm.name,pin:addForm.pin,avatar,badges:["day_one"],start_date:addForm.start_date||null,commission_rate:parseInt(addForm.commission_rate)||27,title:addForm.title||"detail_apprentice"})}); if(res&&res[0]&&addForm.start_date&&(addForm.title||"detail_apprentice")!=="detail_apprentice")await scheduleCheckins(res[0].id,addForm.start_date).catch(()=>{}); await refreshAll(); showToast(`✅ ${addForm.name} added!`); setAddForm({name:"",pin:"",avatar:"",start_date:"",commission_rate:27,title:"detail_apprentice"}); }
     catch(e){ showToast(/duplicate|23505|techs_pin/i.test(e.message) ? "That PIN is already in use — pick another" : "Error: "+e.message,false); }
     setSaving(false);
   }
@@ -7674,7 +8284,7 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
   }
   async function updateStartDate(techId,date) {
     if (isManager && techs.find(t=>t.id===techId)?.start_date) return showToast("Only an owner can change a start date",false);
-    try { await sb(`techs?id=eq.${techId}`,{method:"PATCH",body:JSON.stringify({start_date:date||null}),prefer:"return=minimal"}); if(date)await scheduleCheckins(techId,date).catch(()=>{}); await refreshAll(); showToast("✅ Start date saved!"); }
+    try { await sb(`techs?id=eq.${techId}`,{method:"PATCH",body:JSON.stringify({start_date:date||null}),prefer:"return=minimal"}); const st=techs.find(t=>t.id===techId); if(date&&st&&!isInTraining(st)&&!st.onboarding_complete_date)await scheduleCheckins(techId,date).catch(()=>{}); await refreshAll(); showToast("✅ Start date saved!"); }
     catch(e){ showToast("Error: "+e.message,false); }
   }
   function startArchive(tech) {
@@ -7755,61 +8365,6 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
     if (!window.confirm("Delete this switchover?")) return;
     setSaving(true);
     try { await sb(`switchovers?id=eq.${id}`,{method:"DELETE",prefer:"return=minimal"}); await refreshAll(); setEditingSwId(null); showToast("Switchover deleted"); }
-    catch(e){ showToast("Error: "+e.message,false); }
-    setSaving(false);
-  }
-  // The jobs a tech did recently, newest first -- picking one fills in the
-  // date and client, and tells us who else was on it (split job).
-  function recentJobsFor(techId, days) {
-    if (!techId) return [];
-    const since = new Date(); since.setDate(since.getDate()-days);
-    const sinceStr = since.toLocaleDateString("en-CA",{timeZone:"America/Denver"});
-    const seen = new Set();
-    return (jobs||[]).filter(j=>j.tech_id===techId && j.job_date>=sinceStr && (j.revenue||0)>0 && !seen.has(j.hcp_job_id) && seen.add(j.hcp_job_id))
-      .sort((x,y)=>y.job_date.localeCompare(x.job_date));
-  }
-  function techsOnJob(hcpJobId) {
-    return [...new Set((jobs||[]).filter(j=>j.hcp_job_id===hcpJobId).map(j=>j.tech_id))];
-  }
-  async function logCallback() {
-    const f = cbForm;
-    if (!f.techId) return showToast("Select a tech",false);
-    const picked = f.jobId && f.jobId!=="manual" ? (jobs||[]).find(j=>j.hcp_job_id===f.jobId && j.tech_id===f.techId) : null;
-    if (!picked && f.jobId!=="manual") return showToast("Pick the job (or choose 'Job not listed')",false);
-    const jobDate = picked ? picked.job_date : f.jobDate;
-    if (!jobDate) return showToast("Enter the date the job was completed",false);
-    if (!f.missed.length) return showToast("Pick at least one thing that was missed",false);
-    if (!f.severity) return showToast("Pick the severity level",false);
-    const techIds = picked
-      ? techsOnJob(picked.hcp_job_id)
-      : [f.techId, ...(f.splitTechId && f.splitTechId!==f.techId ? [f.splitTechId] : [])];
-    const weight = Math.round(1/techIds.length*10000)/10000;
-    const group_id = crypto.randomUUID();
-    setSaving(true);
-    try {
-      const rows = techIds.map(id=>({
-        tech_id:id, weight, group_id,
-        job_date: jobDate,
-        customer_name: (picked?.customer_name || f.customer || "").trim() || null,
-        job_number: f.jobNumber.trim() || null,
-        hcp_job_id: picked ? picked.hcp_job_id : null,
-        missed_items: f.missed, severity: f.severity,
-        reason: f.reason || "",
-      }));
-      await sb("callbacks",{method:"POST",body:JSON.stringify(rows)});
-      await refreshAll();
-      const names = techIds.map(id=>techs.find(t=>t.id===id)?.name||"?").join(" & ");
-      const each = Math.round(CALLBACK_SEVERITY[f.severity].pts*weight);
-      showToast(`📞 Callback logged for ${names} — ${each} pts deducted${techIds.length>1?" each (split)":""}`);
-      setCbForm(CB_EMPTY);
-    } catch(e){ showToast("Error: "+e.message,false); }
-    setSaving(false);
-  }
-  async function deleteCallback(cb) {
-    const both = cb.group_id && callbacks.filter(c=>c.group_id===cb.group_id).length>1;
-    if (!window.confirm(both ? "Delete this callback for everyone on the job?" : "Delete this callback?")) return;
-    setSaving(true);
-    try { await sb(cb.group_id ? `callbacks?group_id=eq.${cb.group_id}` : `callbacks?id=eq.${cb.id}`,{method:"DELETE",prefer:"return=minimal"}); await refreshAll(); showToast("Callback removed"); }
     catch(e){ showToast("Error: "+e.message,false); }
     setSaving(false);
   }
@@ -8137,198 +8692,14 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
         })()}
 
         {tab==="timesheet"&&(
-          <AdminTimeSheetTab techs={techs} timeEntries={timeEntries} refreshAll={refreshAll} showToast={showToast}/>
+          <AdminTimeSheetTab techs={techs} timeEntries={timeEntries} refreshAll={refreshAll} showToast={showToast} lockedTechId={isManager ? currentUser?.techId : null}/>
         )}
 
         {tab==="tips"&&(
           <AdminTipEntry techs={techs} tipEntries={tipEntries} refreshAll={refreshAll} showToast={showToast}/>
         )}
 
-        {tab==="callbacks"&&(()=>{
-          const f = cbForm;
-          const recent = recentJobsFor(f.techId, f.lookback);
-          const picked = f.jobId && f.jobId!=="manual" ? recent.find(j=>j.hcp_job_id===f.jobId) : null;
-          const crew = picked ? techsOnJob(picked.hcp_job_id) : [];
-          const toggleMissed = id => setCbForm(v=>({...v, missed: v.missed.includes(id) ? v.missed.filter(x=>x!==id) : [...v.missed, id]}));
-          // Date-filtered view: callbacks by the day the job was completed,
-          // grouped so a split job shows once.
-          const { start:cbStart, end:cbEnd } = getDateRangeBounds(cbPreset, cbCStart, cbCEnd);
-          const inRange = callbacks.filter(c=>{ const d=callbackDate(c); return d && d>=cbStart && d<=cbEnd; });
-          const groups = Object.values(inRange.reduce((acc,c)=>{ const k=c.group_id||c.id; (acc[k]=acc[k]||[]).push(c); return acc; },{}))
-            .sort((x,y)=>(callbackDate(y[0])||"").localeCompare(callbackDate(x[0])||""));
-          const cbCount = inRange.reduce((s,c)=>s+(c.weight==null?1:Number(c.weight)),0);
-          const jobCount = new Set((jobs||[]).filter(j=>j.job_date>=cbStart && j.job_date<=cbEnd && (j.revenue||0)>0).map(j=>j.hcp_job_id)).size;
-          const rate = jobCount>0 ? cbCount/jobCount*100 : 0;
-          const itemCounts = {};
-          groups.forEach(g=>(g[0].missed_items||[]).forEach(id=>{ itemCounts[id]=(itemCounts[id]||0)+1; }));
-          const topItems = Object.entries(itemCounts).sort((x,y)=>y[1]-x[1]);
-          const sevCounts = [1,2,3].map(l=>groups.filter(g=>g[0].severity===l).length);
-          const techSummary = techs.map(t=>{
-            const mine = inRange.filter(c=>c.tech_id===t.id);
-            return { t, count: mine.reduce((s,c)=>s+(c.weight==null?1:Number(c.weight)),0), pts: mine.reduce((s,c)=>s+callbackPoints(c),0) };
-          }).filter(x=>x.count>0).sort((x,y)=>y.count-x.count);
-          const fmtCount = n => Number.isInteger(n) ? String(n) : n.toFixed(1);
-          const chip = on => ({ display:"flex", alignItems:"flex-start", gap:"8px", padding:"6px 8px", borderRadius:"8px", border:`1px solid ${on?"#ef4444":C.border}`, background:on?"#ef444410":C.white, cursor:"pointer", fontSize:"13px", color:C.black });
-          return (
-          <div style={{ display:"flex", flexDirection:"column", gap:"16px" }}>
-            {/* Date range + rate */}
-            <DateRangePicker label="📅 Callbacks by job date" color="#ef4444" preset={cbPreset} setPreset={setCbPreset} customStart={cbCStart} setCustomStart={setCbCStart} customEnd={cbCEnd} setCustomEnd={setCbCEnd}>
-              <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:"8px", marginTop:"14px" }}>
-                {[
-                  { l:"Callback rate", v:`${rate.toFixed(2)}%`, c: rate>=2?"#ef4444":C.green },
-                  { l:"Callbacks", v:fmtCount(cbCount), c:C.black },
-                  { l:"Completed jobs", v:jobCount, c:C.black },
-                ].map(x=>(
-                  <div key={x.l} style={{ background:C.cardLt, borderRadius:"8px", padding:"10px", textAlign:"center" }}>
-                    <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"24px", color:x.c }}>{x.v}</div>
-                    <div style={{ fontSize:"9px", color:C.muted, textTransform:"uppercase", letterSpacing:"1px" }}>{x.l}</div>
-                  </div>
-                ))}
-              </div>
-              <div style={{ fontSize:"11px", color:C.muted, marginTop:"6px" }}>{cbStart} → {cbEnd} · Standard is under 2% · split-job callbacks count ½ per tech</div>
-            </DateRangePicker>
-
-            {/* Log a callback */}
-            <div style={{ background:C.white, border:`2px solid #ef444444`, borderTop:`3px solid #ef4444`, borderRadius:"12px", padding:"20px", display:"flex", flexDirection:"column", gap:"12px", boxShadow:"0 2px 8px rgba(239,68,68,0.08)" }}>
-              <Label color="#ef4444">📞 Log a Callback</Label>
-              <select value={f.techId} onChange={e=>setCbForm({...CB_EMPTY, techId:e.target.value, lookback:f.lookback})} style={sel(f.techId)}>
-                <option value="">— Select Tech —</option>
-                {techs.filter(t=>t.title!=="owner").map(t=><option key={t.id} value={t.id}>{t.name}{t.is_active===false?" (archived)":""}</option>)}
-              </select>
-              {f.techId&&(<>
-                <div style={{ display:"flex", gap:"8px", alignItems:"center" }}>
-                  <select value={f.jobId} onChange={e=>setCbForm(v=>({...v, jobId:e.target.value}))} style={{ ...sel(f.jobId), flex:1 }}>
-                    <option value="">— Pick the job —</option>
-                    {recent.map(j=><option key={j.hcp_job_id} value={j.hcp_job_id}>{fmtShortDate(j.job_date)} · {j.customer_name||"(no client name)"} · ${Math.round(j.revenue)}{techsOnJob(j.hcp_job_id).length>1?" · split":""}</option>)}
-                    <option value="manual">Job not listed — enter it by hand</option>
-                  </select>
-                  <select value={f.lookback} onChange={e=>setCbForm(v=>({...v, lookback:Number(e.target.value), jobId:""}))} style={{ ...sel(true), width:"auto" }}>
-                    {[14,30,60,90].map(d=><option key={d} value={d}>Last {d} days</option>)}
-                  </select>
-                </div>
-                {picked&&(
-                  <div style={{ fontSize:"12px", color:C.black, background:C.cardLt, borderRadius:"8px", padding:"8px 10px" }}>
-                    Completed <strong>{fmtShortDate(picked.job_date)}</strong> · {picked.customer_name||"no client name"}
-                    {crew.length>1 && <> · <strong style={{ color:"#ef4444" }}>Split job:</strong> {crew.map(id=>techs.find(t=>t.id===id)?.name||"?").join(" & ")} — each gets 1/{crew.length} of the callback and points</>}
-                  </div>
-                )}
-                {f.jobId==="manual"&&(
-                  <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"8px" }}>
-                    <div>
-                      <div style={{ fontSize:"10px", color:C.muted, marginBottom:"4px" }}>Date the job was completed</div>
-                      <input type="date" value={f.jobDate} onChange={e=>setCbForm(v=>({...v, jobDate:e.target.value}))} style={inp}/>
-                    </div>
-                    <div>
-                      <div style={{ fontSize:"10px", color:C.muted, marginBottom:"4px" }}>Client name</div>
-                      <input value={f.customer} onChange={e=>setCbForm(v=>({...v, customer:e.target.value}))} style={inp}/>
-                    </div>
-                    <select value={f.splitTechId} onChange={e=>setCbForm(v=>({...v, splitTechId:e.target.value}))} style={{ ...sel(f.splitTechId), gridColumn:"1 / -1" }}>
-                      <option value="">Split job? Pick the other tech (optional)</option>
-                      {techs.filter(t=>t.id!==f.techId && t.title!=="owner").map(t=><option key={t.id} value={t.id}>{t.name}</option>)}
-                    </select>
-                  </div>
-                )}
-                <input placeholder="HCP job # (optional)" value={f.jobNumber} onChange={e=>setCbForm(v=>({...v, jobNumber:e.target.value}))} style={inp}/>
-                <div>
-                  <div style={{ fontSize:"12px", color:C.muted, marginBottom:"6px" }}>What was missed? (pick all that apply)</div>
-                  {CALLBACK_AREAS.map(a=>(
-                    <div key={a.area} style={{ marginBottom:"8px" }}>
-                      <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"13px", color:C.black, marginBottom:"4px" }}>{a.area}</div>
-                      <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(220px,1fr))", gap:"6px" }}>
-                        {a.items.map(i=>{ const on=f.missed.includes(i.id); return (
-                          <label key={i.id} style={chip(on)}>
-                            <input type="checkbox" checked={on} onChange={()=>toggleMissed(i.id)} style={{ marginTop:"2px" }}/>
-                            <span><strong>{i.label}</strong>{i.hint&&<span style={{ display:"block", fontSize:"11px", color:C.muted }}>{i.hint}</span>}</span>
-                          </label>
-                        ); })}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-                <div>
-                  <div style={{ fontSize:"12px", color:C.muted, marginBottom:"6px" }}>How bad was it?</div>
-                  <div style={{ display:"flex", flexDirection:"column", gap:"6px" }}>
-                    {[1,2,3].map(l=>{ const on=f.severity===l, sv=CALLBACK_SEVERITY[l]; return (
-                      <label key={l} style={chip(on)}>
-                        <input type="radio" name="cb-severity" checked={on} onChange={()=>setCbForm(v=>({...v, severity:l}))} style={{ marginTop:"2px" }}/>
-                        <span><strong>{sv.label}</strong> — {sv.desc} <strong style={{ color:"#ef4444" }}>(−{sv.pts} pts)</strong></span>
-                      </label>
-                    ); })}
-                  </div>
-                </div>
-                <input placeholder="Notes (optional)" value={f.reason} onChange={e=>setCbForm(v=>({...v, reason:e.target.value}))} style={inp}/>
-                <button onClick={logCallback} disabled={saving} style={{ ...btn("#ef4444"), color:C.white }}>{saving?"Saving...":"Log Callback — Deduct Points"}</button>
-              </>)}
-            </div>
-
-            {/* Breakdown for the range */}
-            {groups.length>0&&(
-              <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"16px 18px", boxShadow:"0 2px 8px rgba(43,156,240,0.08)", display:"flex", flexDirection:"column", gap:"12px" }}>
-                <Label color="#ef4444">📊 Breakdown</Label>
-                <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:"8px" }}>
-                  {[1,2,3].map((l,i)=>(
-                    <div key={l} style={{ background:C.cardLt, borderRadius:"8px", padding:"8px", textAlign:"center" }}>
-                      <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"20px", color:C.black }}>{sevCounts[i]}</div>
-                      <div style={{ fontSize:"9px", color:C.muted, textTransform:"uppercase", letterSpacing:"1px" }}>{CALLBACK_SEVERITY[l].label}</div>
-                    </div>
-                  ))}
-                </div>
-                {topItems.length>0&&(
-                  <div>
-                    <div style={{ fontSize:"12px", color:C.muted, marginBottom:"4px" }}>Most missed</div>
-                    {topItems.map(([id,n])=>(
-                      <div key={id} style={{ display:"flex", justifyContent:"space-between", fontSize:"13px", color:C.black, padding:"2px 0" }}><span>{CALLBACK_ITEM_LABEL[id]||id}</span><strong>{n}</strong></div>
-                    ))}
-                  </div>
-                )}
-                <div>
-                  <div style={{ fontSize:"12px", color:C.muted, marginBottom:"4px" }}>By tech</div>
-                  {techSummary.map(x=>(
-                    <div key={x.t.id} style={{ display:"flex", justifyContent:"space-between", fontSize:"13px", color:C.black, padding:"2px 0" }}>
-                      <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>{x.t.name}</span>
-                      <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", color:"#ef4444" }}>{fmtCount(x.count)} callback{x.count!==1?"s":""} · {x.pts} pts</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* History for the range */}
-            <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:"12px", overflow:"hidden", boxShadow:"0 2px 8px rgba(43,156,240,0.08)" }}>
-              <div style={{ padding:"14px 18px", borderBottom:`1px solid ${C.border}`, background:C.cardLt }}>
-                <Label color="#ef4444">📋 Callback History</Label>
-              </div>
-              <div style={{ padding:"14px 18px", display:"flex", flexDirection:"column", gap:"8px" }}>
-                {groups.length===0&&<div style={{ fontSize:"13px", color:C.muted }}>No callbacks for jobs in this date range. Keep it that way! 💪</div>}
-                {groups.map(g=>{
-                  const c = g[0];
-                  const names = g.map(r=>techs.find(t=>t.id===r.tech_id)?.name||"Unknown").join(" & ");
-                  return (
-                    <div key={c.group_id||c.id} style={{ background:`#ef444410`, border:`1px solid #ef444433`, borderLeft:`3px solid #ef4444`, borderRadius:"8px", padding:"12px 14px", display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:"12px" }}>
-                      <div>
-                        <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"15px", color:C.black }}>
-                          {names}{g.length>1&&<span style={{ fontSize:"11px", color:"#ef4444", marginLeft:"6px" }}>SPLIT</span>}
-                          {c.severity&&<span style={{ fontSize:"11px", color:C.white, background:"#ef4444", borderRadius:"8px", padding:"1px 7px", marginLeft:"6px" }}>{CALLBACK_SEVERITY[c.severity].label}</span>}
-                        </div>
-                        <div style={{ fontSize:"12px", color:C.black, marginTop:"3px" }}>
-                          Job {callbackDate(c)?fmtShortDate(callbackDate(c)):"?"}{c.customer_name?` · ${c.customer_name}`:""}{c.job_number?` · #${c.job_number}`:""}
-                        </div>
-                        {(c.missed_items||[]).length>0&&<div style={{ fontSize:"11px", color:C.muted, marginTop:"2px" }}>Missed: {c.missed_items.map(id=>CALLBACK_ITEM_LABEL[id]||id).join(", ")}</div>}
-                        {c.reason&&<div style={{ fontSize:"11px", color:C.muted, marginTop:"2px" }}>{c.reason}</div>}
-                        <div style={{ fontSize:"10px", color:C.muted, marginTop:"2px" }}>Logged {new Date(c.created_at).toLocaleDateString("en-US",{month:"short",day:"numeric"})}</div>
-                      </div>
-                      <div style={{ display:"flex", alignItems:"center", gap:"10px", flexShrink:0 }}>
-                        <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"15px", color:"#ef4444" }}>{callbackPoints(c)} pts{g.length>1?" each":""}</span>
-                        <button onClick={()=>deleteCallback(c)} disabled={saving} style={{ background:"none", border:`1px solid #ef4444`, color:"#ef4444", padding:"4px 10px", borderRadius:"6px", cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", fontSize:"11px" }}>DELETE</button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          </div>
-          );
-        })()}
+        {tab==="callbacks"&&<CallbacksPanel techs={techs} jobs={jobs} callbacks={callbacks} refreshAll={refreshAll} showToast={showToast}/>}
 
         {tab==="award"&&(
           <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"20px", display:"flex", flexDirection:"column", gap:"12px" }}>
@@ -8620,7 +8991,7 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
           <Leaderboard techs={activeTechs} jobs={jobs||[]} upsells={upsells} reviews={reviews} callbacks={callbacks||[]} switchovers={switchovers} timeEntries={timeEntries}/>
         )}
         {tab==="payroll"&&(
-          <PayrollTab techs={techs} jobs={jobs||[]} upsells={upsells} tipEntries={tipEntries} switchovers={switchovers||[]} token={currentUser?.token} canWaive={!isManager}/>
+          <PayrollTab techs={techs} jobs={jobs||[]} upsells={upsells} tipEntries={tipEntries} switchovers={switchovers||[]} timeEntries={timeEntries||[]} token={currentUser?.token} canWaive={!isManager}/>
         )}
 
         {tab==="ridealong"&&(
