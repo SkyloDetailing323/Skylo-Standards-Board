@@ -56,12 +56,34 @@ function toRow(job) {
   };
 }
 
+
+// Temporary (Oct 2026): records which fields HCP sends on a job -- the field
+// paths, plus the values of anything that looks like "who created/booked it"
+// -- so we can tell whether Trevor's sales can be credited by job creator.
+// Saved to ghl_sync_state "hcp_job_shape". Remove once answered.
+const ACTOR_RE = /(creat|book|_by$|^by_|owner|user|dispatch|origin|source|sales|employee_id|author|actor)/i;
+function shapeOf(obj, prefix = "", out = { paths: new Set(), actor: {} }, depth = 0) {
+  if (!obj || typeof obj !== "object" || depth > 3) return out;
+  const o = Array.isArray(obj) ? obj[0] : obj;
+  if (!o || typeof o !== "object") return out;
+  for (const [k, v] of Object.entries(o)) {
+    const path = prefix ? `${prefix}.${k}` : k;
+    out.paths.add(path);
+    if (ACTOR_RE.test(k) && (v == null || typeof v !== "object")) out.actor[path] = v;
+    if (ACTOR_RE.test(k) && v && typeof v === "object") out.actor[path] = JSON.stringify(v).slice(0, 300);
+    if (v && typeof v === "object" && !/^customer$/.test(k)) shapeOf(v, path, out, depth + 1);
+  }
+  return out;
+}
+const shape = { paths: new Set(), samples: [] };
+
 async function pull(filters, deadline, stats) {
   for (let page = 1; Date.now() < deadline; page++) {
     const data = await hcp(`jobs?${[...filters, `page=${page}`, `page_size=${PAGE_SIZE}`].join("&")}`);
     const jobs = data.jobs || [];
     stats.api_calls++;
     if (jobs.length) {
+      for (const j of jobs) { const sh = shapeOf(j); sh.paths.forEach(p => shape.paths.add(p)); if (shape.samples.length < 5 && Object.keys(sh.actor).length) shape.samples.push({ job: j.id, created_at: j.created_at, actor: sh.actor }); }
       const rows = jobs.map(toRow);
       await sb("hcp_sales_jobs?on_conflict=hcp_job_id", { method: "POST", prefer: "resolution=merge-duplicates,return=minimal", body: JSON.stringify(rows) });
       stats.jobs += rows.length;
@@ -102,6 +124,7 @@ exports.handler = async (event) => {
     stats.canceled_removed = cres.ok ? await cres.json() : `failed (HTTP ${cres.status}): ${(await cres.text()).slice(0, 200)}`;
     stats.seconds = Math.round((Date.now() - started) / 1000);
     await saveState({ ok: true, ...stats });
+    await sb("ghl_sync_state?on_conflict=key", { method: "POST", prefer: "resolution=merge-duplicates,return=minimal", body: JSON.stringify({ key: "hcp_job_shape", value: { paths: [...shape.paths].sort(), samples: shape.samples }, updated_at: new Date().toISOString() }) }).catch(() => {});
     console.log("hcp-sales-sync:", JSON.stringify(stats));
   } catch (e) {
     console.error("hcp-sales-sync:", e.message);
