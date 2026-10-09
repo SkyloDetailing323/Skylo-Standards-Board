@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { rowFor, pointsFor, tierFor, POINTS_TABLE } from "./salesPoints.js";
+import { rowFor, pointsFor, tierFor, POINTS_TABLE, freqFromTags, freqFromVisits, buildSales, monthPoints } from "./salesPoints.js";
 
 test("exact table rows", () => {
   assert.equal(pointsFor(145, "weekly"), 116);
@@ -29,8 +29,10 @@ test("over $1,000 climbs in $50 steps by the $950->$1,000 increment", () => {
   assert.equal(pointsFor(1100, "quarterly"), 98 + 2 * 5);
 });
 
-test("unknown frequency earns nothing", () => {
-  assert.equal(pointsFor(300, "biannual"), 0);
+test("unknown frequency earns nothing; bi-annual is half of quarterly", () => {
+  assert.equal(pointsFor(300, "every_blue_moon"), 0);
+  assert.equal(pointsFor(300, "biannual"), 13);   // quarterly 25 / 2, rounded
+  assert.equal(pointsFor(1000, "biannual"), 49);  // quarterly 98 / 2
 });
 
 test("tiers: highest reached pays, no stacking", () => {
@@ -43,4 +45,86 @@ test("tiers: highest reached pays, no stacking", () => {
   const top = tierFor(5000);
   assert.equal(top.pay, 1850);
   assert.equal(top.next, null);
+});
+
+const D = s => new Date(s + "T18:00:00Z").toISOString();
+const job = (id, cust, sched, opts = {}) => ({ hcp_job_id: id, hcp_customer_id: cust, first_name: "A", last_name: cust, scheduled_start: D(sched),
+  completed_at: opts.done ? D(opts.done === true ? sched : opts.done) : null, job_created_at: opts.created ? D(opts.created) : null, work_status: opts.status || (opts.done ? "complete unrated" : "scheduled"),
+  total_cents: opts.cents ?? 25000, tip_cents: opts.tip ?? 0, tags: opts.tags || [] });
+const NOW = new Date("2026-10-09T20:00:00Z").getTime();
+
+test("frequency: plan tag first, else gap to nearest 1/2/4/8/12/26 weeks", () => {
+  assert.equal(freqFromTags(["sold by trevor", "NEW", "Monthly"]), "monthly");
+  assert.equal(freqFromTags(["Bi-Weekly"]), "biweekly");
+  assert.equal(freqFromTags(["NEW"]), null);
+  const w = d => new Date(d).getTime();
+  assert.equal(freqFromVisits([w("2026-10-02"), w("2026-10-30"), w("2026-11-27")]), "monthly");
+  assert.equal(freqFromVisits([w("2026-10-01"), w("2026-12-24")]), "quarterly");
+  assert.equal(freqFromVisits([w("2026-10-01"), w("2027-04-01")]), "biannual");
+  assert.equal(freqFromVisits([w("2026-10-01"), w("2026-10-15"), w("2026-10-29")]), "biweekly");
+});
+
+test("a sale is a completed 'sold by' job, in the month it was completed, price without tips", () => {
+  const jobs = [
+    job("a1", "amy", "2026-09-29", { done: "2026-10-01", tags: ["sold by trevor", "NEW"], cents: 30000, tip: 5000 }),
+    job("b1", "bob", "2026-10-03", { tags: ["sold by trevor"] }),                        // not completed yet
+    job("c1", "cat", "2026-10-04", { done: true, tags: ["sold by hunter"] }),            // someone else's
+  ];
+  const sales = buildSales(jobs, { tag: "sold by trevor", now: NOW });
+  assert.equal(sales.length, 1);
+  assert.equal(sales[0].month, "2026-10");
+  assert.equal(sales[0].price, 250);
+  assert.equal(sales[0].freq, "one_time");
+  assert.equal(sales[0].status, "counted");
+  assert.equal(buildSales(jobs, { tag: "sold by trevor", now: NOW, revenueByJob: { a1: 240 } })[0].price, 240);
+});
+
+test("no plan tag: frequency from the next 6 months of scheduled visits", () => {
+  const jobs = [
+    job("d1", "dan", "2026-10-02", { done: true, tags: ["sold by trevor", "NEW"] }),
+    job("d2", "dan", "2026-10-30"), job("d3", "dan", "2026-11-27"), job("d4", "dan", "2026-12-25"),
+  ];
+  const [s] = buildSales(jobs, { tag: "sold by trevor", now: NOW });
+  assert.equal(s.freq, "monthly");
+  assert.equal(s.freq_source, "visits");
+  assert.equal(s.status, "pending");
+  assert.equal(s.needed, 3);
+});
+
+test("chargeback: plan stops before the window clears -> points off in the month of the first missed visit", () => {
+  const jobs = [
+    job("e1", "eve", "2026-08-03", { done: true, tags: ["sold by trevor", "Monthly"] }),
+    job("e2", "eve", "2026-08-31", { done: true }),
+    job("e3", "eve", "2026-09-28", { status: "pro canceled" }),
+    job("e4", "eve", "2026-10-26", { status: "pro canceled" }),
+  ];
+  const [s] = buildSales(jobs, { tag: "sold by trevor", now: NOW });
+  assert.equal(s.status, "charged_back");
+  assert.equal(s.chargeback_on, "2026-09-28");
+  const sep = monthPoints([s], "2026-09"), aug = monthPoints([s], "2026-08");
+  assert.equal(aug.net, s.points);
+  assert.equal(sep.net, -s.points);
+});
+
+test("window cleared after enough completed services; a plan switch with visits still booked isn't a chargeback", () => {
+  const cleared = buildSales([
+    job("f1", "fay", "2026-07-01", { done: true, tags: ["sold by trevor", "Quarterly"] }),
+    job("f2", "fay", "2026-09-23", { done: true }),
+  ], { tag: "sold by trevor", now: NOW })[0];
+  assert.equal(cleared.status, "cleared");
+  const switched = buildSales([
+    job("g1", "gus", "2026-09-01", { done: true, tags: ["sold by trevor", "Bimonthly"] }),
+    job("g2", "gus", "2026-10-27", { status: "pro canceled" }),
+    job("g3", "gus", "2026-11-06"),                                   // new monthly plan's visit
+  ], { tag: "sold by trevor", now: NOW })[0];
+  assert.equal(switched.status, "pending");
+});
+
+test("an existing plan's visits don't make a rebooked one-off a new plan sale", () => {
+  const jobs = [
+    job("h0", "hal", "2026-06-01", { done: true, created: "2026-05-20" }),
+    job("h1", "hal", "2026-10-05", { done: true, created: "2026-10-01", tags: ["sold by trevor", "RETURNING"] }),
+    job("h2", "hal", "2026-10-19", { created: "2026-05-20" }), job("h3", "hal", "2026-11-02", { created: "2026-05-20" }),
+  ];
+  assert.equal(buildSales(jobs, { tag: "sold by trevor", now: NOW })[0].freq, "one_time");
 });

@@ -6,8 +6,10 @@
 //
 // GET ?type=marketing&from=YYYY-MM-DD&to=YYYY-MM-DD
 // GET ?type=sales&rep=trevor|ethan&from=...&to=...
-// GET ?type=sales_deals&rep=trevor&from=...&to=...
-//   Trevor's closed clients for his points bonus (salesPoints.js does the math).
+// GET ?type=sales_deals&rep=trevor
+//   Trevor's sales for his points bonus: every HCP job of every customer who
+//   has a job tagged "sold by trevor", plus each tagged job's revenue without
+//   tips. salesPoints.js (buildSales) does the rest in the browser.
 //   A rep with selfTechId can also open their own sales report from their
 //   tech login (rep is forced to theirs; nothing else is allowed).
 // Header: Authorization: Bearer <login token>
@@ -16,7 +18,7 @@ const { verifyToken, tokenFrom } = require("./lib/authToken");
 
 // Which GHL pipelines belong to each rep's report.
 const REPS = {
-  trevor: { name: "Trevor", pipelines: ["Residential Leads", "Residential Estimates"], selfTechId: "4641f4da-a16f-411b-8688-8b81ac06eda7" },
+  trevor: { name: "Trevor", pipelines: ["Residential Leads", "Residential Estimates"], selfTechId: "4641f4da-a16f-411b-8688-8b81ac06eda7", salesTag: "sold by trevor" },
   ethan:  { name: "Ethan",  pipelines: ["Commercial Sales"] },
 };
 
@@ -62,62 +64,24 @@ async function restIn(path, col, ids) {
   for (let i = 0; i < ids.length; i += 150) out.push(...await rest(`${path}&${col}=${inList(ids.slice(i, i + 150))}`));
   return out;
 }
-const mtDate = ts => new Date(ts).toLocaleDateString("en-CA", { timeZone: "America/Denver" });
-const PLAN_FREQ = { weekly: "weekly", biweekly: "biweekly", monthly: "monthly", bimonthly: "bimonthly", quarterly: "quarterly", biannual: "biannual" };
 
-// A rep's new clients whose first visit was booked in the range, with the
-// ticket price and frequency the points table needs. Same customers and
-// first-visit price as the Sales report's revenue: a GHL contact from the
-// rep's pipelines, matched to HCP jobs, first visit's price without tips;
-// canceled HCP jobs drop out. Frequency = the contact's GHL maintenance-plan
-// pipeline (an open plan wins over a lost one), else the spacing of the plan
-// visits booked with the first visit in HCP, else one-time.
-async function salesDeals(rep, from, to) {
-  const pipes = await rest("ghl_pipelines?select=id,name");
-  const repPipes = pipes.filter(p => rep.pipelines.includes(p.name)).map(p => p.id);
-  const planPipes = Object.fromEntries(pipes.filter(p => /maintenance plan/i.test(p.name))
-    .map(p => [p.id, PLAN_FREQ[p.name.replace(/maintenance plan/i, "").trim().toLowerCase()] || null]));
-  if (!repPipes.length) return [];
-  const opps = await rest(`ghl_opportunities?select=contact_id,created_at&contact_id=not.is.null&pipeline_id=${inList(repPipes)}`);
-  const since = {};
-  for (const o of opps) if (!since[o.contact_id] || o.created_at < since[o.contact_id]) since[o.contact_id] = o.created_at;
-  const contacts = Object.keys(since);
-  if (!contacts.length) return [];
-  const matches = await restIn("lead_job_matches?select=contact_id,hcp_job_id", "contact_id", contacts);
-  if (!matches.length) return [];
-  const credited = await rpc("credited_jobs", { p: matches.map(m => ({ k: m.contact_id, since: since[m.contact_id], job: m.hcp_job_id })) });
-
-  const deals = {};
-  for (const j of credited || []) {
-    if (j.part !== "first") continue;
-    const d = deals[j.k] ||= { contact_id: j.k, price: 0, booked_at: j.job_created_at, hcp_freq: j.plan_freq || null, job_ids: [] };
-    d.price += Number(j.value) || 0;
-    d.job_ids.push(j.hcp_job_id);
-    if (j.job_created_at < d.booked_at) d.booked_at = j.job_created_at;
-  }
-  const list = Object.values(deals).filter(d => { const md = mtDate(d.booked_at); return md >= from && md <= to; });
-  if (!list.length) return [];
-
-  const ids = list.map(d => d.contact_id);
-  const [plans, names] = await Promise.all([
-    restIn(`ghl_opportunities?select=contact_id,pipeline_id,status,created_at&pipeline_id=${inList(Object.keys(planPipes))}`, "contact_id", ids),
-    restIn("hcp_sales_jobs?select=hcp_job_id,first_name,last_name", "hcp_job_id", list.flatMap(d => d.job_ids)),
-  ]);
-  const nameOf = Object.fromEntries(names.map(n => [n.hcp_job_id, `${n.first_name || ""} ${n.last_name || ""}`.trim()]));
-  return list.map(d => {
-    const mine = plans.filter(p => p.contact_id === d.contact_id && planPipes[p.pipeline_id])
-      .sort((a, b) => ((a.status === "lost") - (b.status === "lost")) || (b.created_at > a.created_at ? 1 : -1));
-    const plan = mine[0];
-    return {
-      contact_id: d.contact_id,
-      name: d.job_ids.map(id => nameOf[id]).find(Boolean) || "Unknown client",
-      booked_on: mtDate(d.booked_at),
-      price: Math.round(d.price * 100) / 100,
-      freq: plan ? planPipes[plan.pipeline_id] : (d.hcp_freq || "one_time"),
-      freq_source: plan ? "ghl_plan" : d.hcp_freq ? "hcp_visits" : "none",
-      plan_cancelled: plan?.status === "lost",
-    };
-  }).sort((a, b) => a.booked_on < b.booked_on ? 1 : -1);
+// Jobs for the points bonus. Who sold it comes from the HCP job tag ("sold
+// by trevor") -- Trevor and Ethan both book, so the GHL pipelines can't tell
+// them apart. Only a booking's first visit carries tags, so the tagged jobs
+// are the sales; the customers' other jobs show the plan's later visits
+// (frequency and the chargeback window).
+async function salesJobs(rep) {
+  const cols = "hcp_job_id,hcp_customer_id,first_name,last_name,work_status,scheduled_start,completed_at,job_created_at,total_cents,tip_cents,raw";
+  const tagged = await rest(`hcp_sales_jobs?select=${cols}&raw->>tags=ilike.*${encodeURIComponent(rep.salesTag)}*`);
+  const customers = [...new Set(tagged.map(j => j.hcp_customer_id).filter(Boolean))];
+  const others = customers.length ? await restIn(`hcp_sales_jobs?select=${cols}`, "hcp_customer_id", customers) : [];
+  const all = {};
+  for (const j of [...tagged, ...others]) all[j.hcp_job_id] = j;
+  const jobs = Object.values(all).map(({ raw, ...j }) => ({ ...j, tags: raw?.tags || [] }));
+  const revRows = tagged.length ? await restIn("jobs?select=hcp_job_id,revenue", "hcp_job_id", tagged.map(j => j.hcp_job_id)) : [];
+  const revenue = {};
+  for (const r of revRows) revenue[r.hcp_job_id] = (revenue[r.hcp_job_id] || 0) + (Number(r.revenue) || 0);
+  return { jobs, revenue };
 }
 
 const isDate = s => /^\d{4}-\d{2}-\d{2}$/.test(s || "");
@@ -188,8 +152,8 @@ exports.handler = async (event) => {
       return json(200, { ...report, pipelines: rep.pipelines });
     }
     if (q.type === "sales_deals") {
-      if (q.rep !== "trevor") return json(400, { error: "Points bonus is for Trevor only" });
-      return json(200, { rep: q.rep, from: q.from, to: q.to, deals: await salesDeals(REPS.trevor, q.from, q.to) });
+      if (!REPS[q.rep]?.salesTag) return json(400, { error: "No points bonus for this rep" });
+      return json(200, { rep: q.rep, tag: REPS[q.rep].salesTag, ...(await salesJobs(REPS[q.rep])) });
     }
     return json(400, { error: "Unknown report type" });
   } catch (e) {
