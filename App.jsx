@@ -1,7 +1,10 @@
 import { useState, useEffect, useCallback, Fragment } from "react";
 import { TEST_QUESTIONS, TESTS, TEST_KEYS, questionsFor, shuffle } from "./trainingTest.js";
 import { computeOpsMonth, monthRange, mountainDate, CALLBACK_TIERS, QUOTA_TIERS, RETENTION_TIERS, NON_ROUTE_VEHICLES, OPS_EXCLUDED_TITLES } from "./opsBonus.js";
-import { formKind, scoreToteCheck, scoreTechAudit, latestPerDay, auditDays, weeklyAuditPct, auditWeekStart, toteCharges } from "./auditScoring.js";
+import { techDriverDays, weeklyDriverScore, findUnassignedDriving, DRIVER_CONFIG } from "./driverScoring.js";
+import { buildFordImport } from "./fordReports.js";
+import { techWeekCard, techScoreCard, teamSummary, scoreWindow, truckScore, isTruckExempt, TECH_SCORE_CONFIG } from "./techScores.js";
+import { formKind, scoreToteCheck, scoreTechAudit, latestPerDay, auditDays, weeklyAuditPct, auditWeekStart, toteCharges, submissionPhotoUrls } from "./auditScoring.js";
 
 // ─── SUPABASE CONFIG ──────────────────────────────────────────────────────────
 const SUPABASE_URL = "https://mjmwxxvqcsptrocwucis.supabase.co";
@@ -3045,7 +3048,35 @@ function IncentiveBoard({ techs, upsells, switchovers, reviews, callbacks, curre
 }
 
 // ─── TIME SHEET (tech-facing) ─────────────────────────────────────────────────
-function TimeSheetTab({ tech, timeEntries, refreshAll, showToast, nowTick }) {
+// ─── TRUCK PICKS ──────────────────────────────────────────────────────────────
+// Which company truck a tech drives today, picked at clock-in. The Ford Pro
+// driver scorecard (driverScoring.js) matches each truck's Ford data to the
+// tech who picked it. One row per tech per day (truck_assignments); a
+// same-day change overwrites it, and every pick/change goes to
+// truck_assignment_log. One tech per truck per day: a truck someone already
+// picked today is greyed out, and the database's unique index
+// (truck_assignments_one_tech_per_truck) rejects a pick if two techs grab the
+// same truck at the same moment -- saveTruckPick then throws a TruckTakenError.
+class TruckTakenError extends Error {}
+const TRUCK_TAKEN_MSG = "Someone just took that truck — pick another";
+const isTruckTakenErr = msg => /23505/.test(msg) && /truck_assignments_one_tech_per_truck|\(vehicle_id, work_date\)/.test(msg);
+async function saveTruckPick({ tech, vehicle, workDate, action }) {
+  try {
+    await sb("truck_assignments?on_conflict=tech_id,work_date", { method:"POST", prefer:"resolution=merge-duplicates,return=minimal",
+      body:JSON.stringify({ tech_id:tech.id, vehicle_id:vehicle.id, work_date:workDate, shared:false, picked_at:new Date().toISOString() }) });
+  } catch(e) {
+    if (isTruckTakenErr(e.message)) throw new TruckTakenError(TRUCK_TAKEN_MSG);
+    throw e;
+  }
+  await sb("truck_assignment_log", { method:"POST", prefer:"return=minimal",
+    body:JSON.stringify({ tech_id:tech.id, vehicle_id:vehicle.id, work_date:workDate, action }) }).catch(()=>{});
+  return true;
+}
+
+// Titles that drive a company truck: they must pick one to clock in.
+const TRUCK_DRIVER_TITLES = ["detail_pro","senior_detail_pro","lead_detail_pro","commercial_detail","equipment_coordinator"];
+
+function TimeSheetTab({ tech, techs=[], timeEntries, vehicles=[], truckAssignments=[], refreshAll, showToast, nowTick }) {
   const myEntries = timeEntries.filter(e => e.tech_id === tech.id);
   const today = mtDateStr(nowTick);
   const openEntry = myEntries.find(e => !e.clock_out);
@@ -3054,6 +3085,49 @@ function TimeSheetTab({ tech, timeEntries, refreshAll, showToast, nowTick }) {
   const [editDate, setEditDate] = useState(today);
   const [editingId, setEditingId] = useState(null);
   const [editForm, setEditForm] = useState({ in:"", out:"" });
+  // Truck today. Required to clock in for the detail techs who drive a truck
+  // (TRUCK_DRIVER_TITLES) once the vehicles list exists; anyone else (sales,
+  // apprentices riding with a trainer, the Field Supervisor) can pick one but
+  // doesn't have to. No vehicles table yet = clock-in works like before.
+  const activeVehicles = vehicles.filter(v => v.active!==false);
+  const truckOffered = activeVehicles.length > 0;
+  const truckRequired = truckOffered && TRUCK_DRIVER_TITLES.includes(tech.title || "detail_apprentice");
+  const myPick = truckAssignments.find(a => a.tech_id===tech.id && a.work_date===today);
+  const [pickId, setPickId] = useState(myPick?.vehicle_id || "");
+  const [changingTruck, setChangingTruck] = useState(false);
+  useEffect(() => { if (myPick) setPickId(myPick.vehicle_id); }, [myPick?.vehicle_id]);
+  // Pre-select the truck on this tech's regular schedule for today, if any.
+  useEffect(() => {
+    if (myPick || pickId || !truckOffered) return;
+    const weekday = new Date(today+"T12:00:00Z").getUTCDay();
+    sb(`tech_schedule?tech_id=eq.${tech.id}&weekday=eq.${weekday}&select=vehicle`).then(rows => {
+      const v = activeVehicles.find(v => v.name===rows?.[0]?.vehicle);
+      if (v && !takenBy(v.id)) setPickId(id => id || v.id);
+    }).catch(()=>{});
+    // eslint-disable-next-line
+  }, [tech.id, today, truckOffered]);
+  // Who already has each truck today (not counting this tech).
+  const takenBy = vehicleId => truckAssignments.find(a => a.vehicle_id===vehicleId && a.work_date===today && a.tech_id!==tech.id);
+  const firstName = id => (techs.find(t=>t.id===id)?.name || "another tech").split(" ")[0];
+  // false = the truck is taken (pick another; no clock-in). Any other save
+  // error is thrown, and clock-in goes ahead anyway.
+  async function pickTruck(vehicleId, action) {
+    // Already picked today (even if that truck was deactivated since): done.
+    if (myPick?.vehicle_id===vehicleId) return true;
+    const vehicle = activeVehicles.find(v => v.id===vehicleId);
+    if (!vehicle) return !!myPick;
+    const taken = async () => { setPickId(myPick?.vehicle_id || ""); showToast(TRUCK_TAKEN_MSG, false); await refreshAll(); return false; };
+    if (takenBy(vehicleId)) return taken();
+    try { await saveTruckPick({ tech, vehicle, workDate:today, action: myPick ? "change" : action }); }
+    catch(e) { if (e instanceof TruckTakenError) return taken(); throw e; }
+    return true;
+  }
+  async function changeTruck(vehicleId) {
+    setPickId(vehicleId); setSaving(true);
+    try { if (await pickTruck(vehicleId, "change")) { await refreshAll(); setChangingTruck(false); showToast("✅ Truck updated"); } }
+    catch(e) { showToast("Error: "+e.message, false); }
+    setSaving(false);
+  }
 
   // Lazy auto-close: any of THIS tech's own sessions still open from a past
   // date get closed at that day's midnight the moment they load this tab.
@@ -3073,11 +3147,23 @@ function TimeSheetTab({ tech, timeEntries, refreshAll, showToast, nowTick }) {
   }, [myEntries.map(e=>e.id+(e.clock_out||"")).join(","), today]);
 
   async function clockIn() {
+    if (truckRequired && !pickId) return showToast("Pick your truck for today first", false);
     setSaving(true);
     try {
+      // The truck pick never blocks the time entry (it feeds pay hours): if
+      // saving the pick fails, clock in anyway and say so. Only a truck
+      // someone else already took stops the clock-in (pick another).
+      let pickErr = null;
+      if (truckOffered && pickId) {
+        let picked = true;
+        try { picked = await pickTruck(pickId, "pick"); }
+        catch(e) { pickErr = e.message; }
+        if (!picked) { setSaving(false); return; }
+      }
       await sb("time_entries", { method:"POST", body:JSON.stringify({ tech_id:tech.id, work_date:today, clock_in:new Date().toISOString() }) });
       await refreshAll();
-      showToast("✅ Clocked in!");
+      if (pickErr) showToast("Clocked in, but your truck pick didn't save — tell your lead. ("+pickErr+")", false);
+      else showToast("✅ Clocked in!");
     } catch(e) { showToast("Error: "+e.message, false); }
     setSaving(false);
   }
@@ -3154,6 +3240,25 @@ function TimeSheetTab({ tech, timeEntries, refreshAll, showToast, nowTick }) {
       )}
 
       <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"20px", display:"flex", flexDirection:"column", gap:"14px" }}>
+        {truckOffered && (
+          <div>
+            <div style={{ fontSize:"11px", color:C.muted, letterSpacing:"1px", fontWeight:"700", marginBottom:"6px" }}>🚚 TRUCK TODAY{!myPick && truckRequired && <span style={{ color:C.red }}> *</span>}</div>
+            {myPick && !changingTruck ? (
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:"10px" }}>
+                <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"18px", color:C.black }}>{vehicles.find(v=>v.id===myPick.vehicle_id)?.name || "—"}</span>
+                <button onClick={()=>setChangingTruck(true)} style={{ background:"none", border:`1px solid ${C.border}`, color:C.blue, padding:"4px 10px", borderRadius:"4px", cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", fontSize:"11px" }}>CHANGE</button>
+              </div>
+            ) : (
+              <select value={pickId} disabled={saving} onChange={e => myPick ? changeTruck(e.target.value) : setPickId(e.target.value)} style={{ background:C.white, border:`1px solid ${pickId?C.border:C.red}`, color:pickId?C.black:C.muted, padding:"10px 14px", borderRadius:"8px", fontSize:"14px", width:"100%", boxSizing:"border-box" }}>
+                <option value="">Pick your truck…</option>
+                {activeVehicles.map(v => {
+                  const other = takenBy(v.id);
+                  return <option key={v.id} value={v.id} disabled={!!other}>{v.name} — {v.model}{other ? ` (taken by ${firstName(other.tech_id)})` : ""}</option>;
+                })}
+              </select>
+            )}
+          </div>
+        )}
         <div style={{ display:"flex", gap:"12px" }}>
           <button onClick={clockIn} disabled={saving||isClockedInToday} style={{ flex:1, background:isClockedInToday?C.border:C.green, border:"none", color:C.white, padding:"16px", borderRadius:"12px", cursor:(saving||isClockedInToday)?"not-allowed":"pointer", fontSize:"14px", fontWeight:"900", letterSpacing:"1px", fontFamily:"'Barlow Condensed',sans-serif", textTransform:"uppercase" }}>Clock In</button>
           <button onClick={clockOut} disabled={saving||!isClockedInToday} style={{ flex:1, background:!isClockedInToday?C.border:"#ef4444", border:"none", color:C.white, padding:"16px", borderRadius:"12px", cursor:(saving||!isClockedInToday)?"not-allowed":"pointer", fontSize:"14px", fontWeight:"900", letterSpacing:"1px", fontFamily:"'Barlow Condensed',sans-serif", textTransform:"uppercase" }}>Clock Out</button>
@@ -3226,7 +3331,7 @@ function TimeSheetTab({ tech, timeEntries, refreshAll, showToast, nowTick }) {
 }
 
 // ─── TECH DASHBOARD ───────────────────────────────────────────────────────────
-function TechDashboard({ tech, techs, upsells, switchovers, reviews, callbacks, quota, jobs, timeEntries=[], tipEntries=[], refreshAll=async()=>{}, rideAlongs=[], token=null, onLogout }) {
+function TechDashboard({ tech, techs, upsells, switchovers, reviews, callbacks, quota, jobs, timeEntries=[], tipEntries=[], refreshAll=async()=>{}, rideAlongs=[], token=null, vehicles=[], truckAssignments=[], onLogout }) {
   const q = quota || DEFAULT_QUOTA;
   const [tab, setTab] = useState("overview");
   const [menuOpen, setMenuOpen] = useState(false);
@@ -3288,7 +3393,7 @@ function TechDashboard({ tech, techs, upsells, switchovers, reviews, callbacks, 
     ...(!isApprenticeTech(tech)?[{ label:"Forms", items:[["forms","📝","Forms"]] }]:[]),
     { label:"Training", items:[
       ["training","📋","Perfect Day Training"],
-      ["auditscores","🧰","My Audit Scores"],
+      ["auditscores","📊","My Audits"],
     ]},
   ];
 
@@ -3536,7 +3641,7 @@ function TechDashboard({ tech, techs, upsells, switchovers, reviews, callbacks, 
             )}
           </div>
         )}
-        {tab==="timesheet"&&<TimeSheetTab tech={tech} timeEntries={timeEntries} refreshAll={refreshAll} showToast={showToast} nowTick={nowTick}/>}
+        {tab==="timesheet"&&<TimeSheetTab tech={tech} techs={techs} timeEntries={timeEntries} vehicles={vehicles} truckAssignments={truckAssignments} refreshAll={refreshAll} showToast={showToast} nowTick={nowTick}/>}
         {tab==="reports"&&<ReportsTab techs={techs} jobs={jobs||[]} upsells={upsells||[]} timeEntries={timeEntries} tipEntries={tipEntries} techId={tech.id}/>}
         {tab==="leaderboard"&&<Leaderboard techs={techs} jobs={jobs||[]} upsells={upsells} reviews={reviews} callbacks={callbacks||[]} switchovers={switchovers} timeEntries={timeEntries}/>}
         {tab==="badges"&&<BadgeGrid earned={tech.badges}/>}
@@ -3561,7 +3666,7 @@ function TechDashboard({ tech, techs, upsells, switchovers, reviews, callbacks, 
         )}
         {tab==="training"&&<PerfectDayTrainingPanel tech={tech} techs={techs}/>}
         {tab==="forms"&&<FormsTab me={tech} role="tech"/>}
-        {tab==="auditscores"&&<AuditScoresTab techs={techs} token={token} techId={tech.id}/>}
+        {tab==="auditscores"&&<AuditScoresTab techs={techs} token={token} techId={tech.id} jobs={jobs||[]} callbacks={callbacks||[]} reviews={reviews||[]} switchovers={switchovers||[]} quota={q}/>}
         {tab==="mysales"&&SALES_SELF_VIEW[tech.id]&&<SalesTab token={token} onlyRep={SALES_SELF_VIEW[tech.id]}/>}
         {tab==="callbacks"&&CALLBACK_ENTRY_TECHS.has(tech.id)&&<CallbacksPanel techs={techs} jobs={jobs||[]} callbacks={callbacks||[]} refreshAll={refreshAll} showToast={showToast}/>}
       </div>
@@ -7217,22 +7322,45 @@ const auditThisWeek = () => auditWeekStart(mtDateStr(Date.now()));
 const auditDefaultWeek = () => auditWeekStart(mtDateStr(Date.now() - 864e5));
 const shiftWeek = (wk, weeks) => { const d = new Date(wk+"T12:00:00Z"); d.setUTCDate(d.getUTCDate()+weeks*7); return d.toISOString().split("T")[0]; };
 
-function scoreTechWeek(subs) {
-  const toteAll = subs.filter(s => formKind(s.form_id)==="tote").map(s => scoreToteCheck(s));
-  const totes = latestPerDay(toteAll.filter(t => !t.excluded));
-  const excluded = toteAll.filter(t => t.excluded);
-  const days = auditDays(subs.filter(s => formKind(s.form_id)==="audit").map(s => scoreTechAudit(s)));
-  return { totes, excluded, latestTote: totes[0] || null, days, auditPct: weeklyAuditPct(days) };
+// Ford Pro driver scorecard: one box per driving day -- truck(s), miles, and
+// each penalty with its count.
+function DriverDetail({ driver, bare=false }) {
+  const box = { background:C.white, border:`1px solid ${C.border}`, borderRadius:"10px", padding:"10px 12px", marginTop:"8px" };
+  return (
+    <div>
+      {!bare && <div style={{ marginTop:"14px" }}><SectionTitle>🚗 Driving</SectionTitle></div>}
+      {!bare && driver.days.length===0 && <div style={{ fontSize:"13px", color:C.muted, marginTop:"4px" }}>No driving days this week.</div>}
+      {driver.days.map(d => (
+        <div key={d.date} style={box}>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:"8px" }}>
+            <div style={{ fontSize:"13px", color:C.black, fontWeight:"700" }}>{fmtShortDate(d.date)} · {d.vehicles.join(" + ") || "—"} · {Math.round(d.miles)} mi</div>
+            {d.score==null ? <span style={{ fontSize:"12px", color:C.muted }}>no score</span> : <Pill color={d.pass?C.green:C.red}>{fmtScore(d.score)} {d.pass?"PASS":"FAIL"}</Pill>}
+          </div>
+          {d.reason && <div style={{ fontSize:"12px", color:C.muted, marginTop:"3px" }}>{d.reason}</div>}
+          {d.score!=null && d.penalties.length===0 && <div style={{ fontSize:"12px", color:C.green, marginTop:"3px" }}>Clean day — no driving events</div>}
+          {d.penalties.map(p => (
+            <div key={p.key} style={{ display:"flex", justifyContent:"space-between", gap:"8px", fontSize:"12px", color:C.black, marginTop:"3px" }}>
+              <span>{p.label}: {p.detail}</span><span style={{ color:C.red, whiteSpace:"nowrap" }}>−{(Math.round(p.points*100)/100).toFixed(2)}</span>
+            </div>
+          ))}
+          {d.speedingUnder>0 && <div style={{ fontSize:"11px", color:C.muted, marginTop:"3px" }}>{d.speedingUnder} speeding event{d.speedingUnder!==1?"s":""} under {DRIVER_CONFIG.speeding.minMphOver} mph over — no penalty</div>}
+          {d.flags.map((f,i) => <div key={i} style={{ fontSize:"12px", color:C.gold, marginTop:"3px" }}>⚠ {f}</div>)}
+        </div>
+      ))}
+    </div>
+  );
 }
 
-function AuditTechDetail({ week, only="both" }) {
+// bare: show just the boxes (no section headings) -- used for one audit at a
+// time in the "Every audit" lists.
+function AuditTechDetail({ week, only="both", bare=false }) {
   const box = { background:C.white, border:`1px solid ${C.border}`, borderRadius:"10px", padding:"10px 12px", marginTop:"8px" };
   const flagList = flags => flags.map((f,i) => <div key={i} style={{ fontSize:"12px", color:C.gold, marginTop:"3px" }}>⚠ {f}</div>);
   return (
     <div>
       {only!=="audit" && <>
-      <SectionTitle>🧰 Tote Checks</SectionTitle>
-      {week.totes.length===0 && week.excluded.length===0 && <div style={{ fontSize:"13px", color:C.muted, marginTop:"4px" }}>No tote check this week.</div>}
+      {!bare && <SectionTitle>🧰 Tote Checks</SectionTitle>}
+      {!bare && week.totes.length===0 && week.excluded.length===0 && <div style={{ fontSize:"13px", color:C.muted, marginTop:"4px" }}>No tote check this week.</div>}
       {week.totes.map(t => (
         <div key={t.id} style={box}>
           <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:"8px" }}>
@@ -7254,8 +7382,8 @@ function AuditTechDetail({ week, only="both" }) {
 
       </>}
       {only!=="tote" && <>
-      <div style={{ marginTop:only==="audit"?0:"14px" }}><SectionTitle>📋 Tech Audits</SectionTitle></div>
-      {week.days.length===0 && <div style={{ fontSize:"13px", color:C.muted, marginTop:"4px" }}>No audits this week.</div>}
+      {!bare && <div style={{ marginTop:only==="audit"?0:"14px" }}><SectionTitle>📋 Tech Audits</SectionTitle></div>}
+      {!bare && week.days.length===0 && <div style={{ fontSize:"13px", color:C.muted, marginTop:"4px" }}>No audits this week.</div>}
       {week.days.map(d => (
         <div key={d.date} style={box}>
           <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
@@ -7282,26 +7410,177 @@ function AuditTechDetail({ week, only="both" }) {
   );
 }
 
-// view: "both" (a tech's own My Audit Scores), or one admin Tech Scores
-// page: "tote" or "audit".
-function AuditScoresTab({ techs, token, techId=null, canSync=false, view="both" }) {
+// ─── Overall Tech Score (techScores.js) ──────────────────────────────────────
+const SCORE_SECTIONS = TECH_SCORE_CONFIG.sections;
+const fmtMoney0 = n => `$${Math.round(n||0).toLocaleString()}`;
+const scoreWindowLabel = (from, to) => `Last ${TECH_SCORE_CONFIG.windowWeeks} weeks · ${fmtShortDate(from)} – ${fmtShortDate(to)}`;
+const sectionColor = v => v==null ? C.muted : v>=TECH_SCORE_CONFIG.passLine ? C.green : C.red;
+const SCORE_INTRO = `Overall score = ${SCORE_SECTIONS.map(s => `${s.label} ${s.weight}%`).join(" · ")}, over the last ${TECH_SCORE_CONFIG.windowWeeks} weeks (Wed–Tue) ending with the week shown. A section with no data is left out and the others re-weighted. Pass at ${TECH_SCORE_CONFIG.passLine}.`;
+const TRUCK_STATUS = {
+  graded:     { label:"Graded",                              color:null },
+  not_graded: { label:`Not graded yet — counts ${TECH_SCORE_CONFIG.truck.notGradedScore} for now`, color:C.gold },
+  missed:     { label:"No Truck Check",                      color:C.red },
+  pending:    { label:"Today — not in yet",                  color:C.muted },
+};
+
+// The five section scores, labeled.
+function SectionChips({ sections, align="flex-end" }) {
+  return (
+    <div style={{ display:"flex", flexWrap:"wrap", gap:"4px", justifyContent:align }}>
+      {SCORE_SECTIONS.map(s => { const v = sections[s.key]; return (
+        <span key={s.key} style={{ fontSize:"12px", color:C.black, background:C.cardLt, border:`1px solid ${C.border}`, borderRadius:"10px", padding:"2px 8px", whiteSpace:"nowrap" }}>
+          {s.label} <strong style={{ color:sectionColor(v) }}>{fmtScore(v)}</strong>
+        </span>
+      ); })}
+    </div>
+  );
+}
+
+// What each section of one tech's overall score is made of.
+function ScoreBreakdown({ card }) {
+  const box = { background:C.white, border:`1px solid ${C.border}`, borderRadius:"10px", padding:"10px 12px", marginTop:"8px" };
+  const line = { display:"flex", justifyContent:"space-between", gap:"8px", fontSize:"13px", color:C.black, marginTop:"4px" };
+  const muted = { fontSize:"13px", color:C.muted, marginTop:"4px" };
+  const sub = { fontSize:"13px", fontWeight:"700", color:C.black, marginTop:"10px" };
+  const head = (key, note) => {
+    const s = SCORE_SECTIONS.find(x => x.key===key), v = card.sections[key];
+    return (
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:"8px" }}>
+        <div>
+          <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"17px", color:C.black }}>{s.icon} {s.label} <span style={{ fontSize:"13px", color:C.muted, fontWeight:"700" }}>· {s.weight}%</span></div>
+          {note && <div style={{ fontSize:"12px", color:C.muted, marginTop:"2px", lineHeight:1.4 }}>{note}</div>}
+        </div>
+        <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"22px", color:sectionColor(v), whiteSpace:"nowrap" }}>{v==null ? "—" : fmtScore(v)}</div>
+      </div>
+    );
+  };
+  const { week, quality, production, driver, totes, truck, equipment } = card;
+  const ded = TECH_SCORE_CONFIG.callbackDeduction;
+  return (
+    <div>
+      <div style={box}>
+        {head("audit", "Average of the audited days.")}
+        {week.days.length===0 ? <div style={muted}>No audits in these weeks — left out.</div> : week.days.map(d => (
+          <div key={d.date} style={line}><span>{fmtShortDate(d.date)}{d.audit.lead ? ` · ${d.audit.lead}` : ""}</span><span style={{ color:scoreColor(d.pct??0), fontWeight:"700" }}>{fmtPct(d.pct)}</span></div>
+        ))}
+      </div>
+      <div style={box}>
+        {head("quality", `Starts at 100. Each callback takes off Level 1 −${ded[1]}, Level 2 −${ded[2]}, Level 3 −${ded[3]} (times the tech's share of a split job).`)}
+        {quality.score==null ? <div style={muted}>No jobs or callbacks — left out.</div>
+          : quality.items.length===0 ? <div style={{ ...muted, color:C.green }}>No callbacks</div>
+          : quality.items.map((c,i) => (
+            <div key={c.id || i} style={line}>
+              <span>{c.date ? fmtShortDate(c.date) : "—"}{c.customer ? ` · ${c.customer}` : ""} · Level {c.level}{c.legacy ? " (no level logged)" : ""}{c.share!==1 ? ` · ${Math.round(c.share*100)}% share` : ""}</span>
+              <span style={{ color:C.red, fontWeight:"700", whiteSpace:"nowrap" }}>−{Math.round(c.deduction*10)/10}</span>
+            </div>
+          ))}
+      </div>
+      <div style={box}>
+        {head("production", `${formatMonthLabel(production.monthKey)} through ${fmtShortDate(production.asOf)}. Monthly targets prorated to ${Math.max(production.daysElapsed, TECH_SCORE_CONFIG.production.minDaysElapsed)} of ${production.daysInMonth} days; each counts up to 100.`)}
+        {production.score==null ? <div style={muted}>No paid jobs this month — left out.</div> : production.metrics.map(m => (
+          <div key={m.key} style={line}>
+            <span>{m.label}: {m.money ? fmtMoney0(m.actual) : m.actual} of {m.money ? fmtMoney0(m.prorated) : Math.round(m.prorated*10)/10} <span style={{ color:C.muted }}>({m.money ? fmtMoney0(m.target) : m.target}/month)</span></span>
+            <span style={{ color:sectionColor(m.pct), fontWeight:"700" }}>{fmtPct(m.pct)}</span>
+          </div>
+        ))}
+      </div>
+      <div style={box}>
+        {head("driver", "Average of the scored driving days (Ford Pro, truck picked at clock-in).")}
+        {!driver ? <div style={muted}>No Ford Pro data — left out.</div> : driver.days.length===0 ? <div style={muted}>No driving days — left out.</div> : driver.days.map(d => (
+          <div key={d.date} style={line}>
+            <span>{fmtShortDate(d.date)} · {d.vehicles.join(" + ") || "—"} · {Math.round(d.miles)} mi</span>
+            <span style={{ color:sectionColor(d.score), fontWeight:"700" }}>{d.score==null ? "no score" : fmtScore(d.score)}</span>
+          </div>
+        ))}
+      </div>
+      <div style={box}>
+        {head("equipment", "Average of the Tote Check and Truck Check scores.")}
+        <div style={sub}>🧰 Tote Checks{equipment.tote!=null ? ` · ${fmtScore(equipment.tote)}` : ""}</div>
+        <div style={{ fontSize:"12px", color:C.muted }}>Rescaled for this score: nothing missing = 100, $7.00 missing = {TECH_SCORE_CONFIG.passLine}, −15 per $7.</div>
+        {totes.length===0 ? <div style={muted}>No tote checks.</div> : totes.map(t => (
+          <div key={t.id} style={line}><span>{fmtShortDate(t.work_date)} · {t.missingCents ? `${fmtCents(t.missingCents)} missing` : "Nothing missing"}</span><span style={{ color:sectionColor(t.equipScore), fontWeight:"700" }}>{fmtScore(t.equipScore)}</span></div>
+        ))}
+        <div style={sub}>🚚 Truck Checks{truck.score!=null ? ` · ${fmtScore(truck.score)}` : ""}</div>
+        {truck.exempt ? <div style={muted}>Apprentice in training — not scored.</div>
+          : truck.nights.length===0 ? <div style={muted}>No nights worked.</div>
+          : <>
+            <div style={{ fontSize:"12px", color:C.muted }}>Submitted {truck.submitted} of {truck.worked} night{truck.worked!==1?"s":""} worked. A missed night counts 0.</div>
+            {truck.nights.map(n => (
+              <div key={n.date} style={line}>
+                <span style={{ color:TRUCK_STATUS[n.status].color || C.black }}>{fmtShortDate(n.date)} · {TRUCK_STATUS[n.status].label}</span>
+                <span style={{ color:sectionColor(n.score), fontWeight:"700" }}>{n.score==null ? "—" : fmtScore(n.score)}</span>
+              </div>
+            ))}
+          </>}
+      </div>
+    </div>
+  );
+}
+
+// view: which section opens first -- "overview" (default), "tote", "audit"
+// or "driver". Admins see every tech plus team scores; a tech (techId set)
+// sees only their own scores plus the team averages. The overview is the
+// overall Tech Score over the last 4 weeks (techScores.js); jobs, callbacks,
+// reviews, switchovers and quota feed its Callbacks and Quota sections.
+const AUDIT_SECTIONS = [["overview","📊 Overview"],["tote","🧰 Tote Checks"],["audit","📋 Tech Audits"],["driver","🚗 Driving"]];
+const fmtScore = n => n==null ? "—" : (Math.round(n*10)/10).toFixed(1);
+const passColor = (score, pass) => score==null ? C.muted : pass ? C.green : C.red;
+
+// hideTabs: the admin menu opens each section as its own page (Tech Scores >
+// Overview / Tote Checks / Audit Scores / Driving Scores), so no section bar.
+function AuditScoresTab({ techs, token, techId=null, canSync=false, view="overview", hideTabs=false, jobs=[], callbacks=[], reviews=[], switchovers=[], quota=null }) {
+  const [section, setSection] = useState(view==="both" ? "overview" : view);
   const [wk, setWk] = useState(auditDefaultWeek());
   const [state, setState] = useState({ loading:true, error:null, data:null });
   const [open, setOpen] = useState(null);
+  const [openTeam, setOpenTeam] = useState(null);   // admin: team expanded to its members
+  const [listMode, setListMode] = useState("tech"); // admin sections: "tech" (by tech) or "each" (every audit)
   const [bump, setBump] = useState(0);
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState(null);
   const end = weekEndDate(wk);
+  // Everything loads for the overall score's 4-week window; the per-section
+  // pages show just the picked week.
+  const win = scoreWindow(wk);
+  const getJson = url => fetch(url, { headers:{ Authorization:`Bearer ${token || ""}` } })
+    .then(async r => { const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`); return j; });
 
   useEffect(() => {
     let live = true;
     setState(s => ({ ...s, loading:true, error:null }));
-    fetch(`/.netlify/functions/audit-scores?from=${wk}&to=${end}`, { headers:{ Authorization:`Bearer ${token || ""}` } })
-      .then(async r => { const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`); return j; })
+    getJson(`/.netlify/functions/audit-scores?from=${win.from}&to=${end}`)
       .then(data => live && setState({ loading:false, error:null, data }))
       .catch(e => live && setState({ loading:false, error:e.message, data:null }));
     return () => { live = false; };
+    // eslint-disable-next-line
   }, [wk, end, token, bump]);
+
+  // Ford Pro driver scorecard for the same week (separate so a Ford problem
+  // never hides the tote/audit scores).
+  const [drive, setDrive] = useState({ loading:true, error:null, data:null });
+  useEffect(() => {
+    let live = true;
+    setDrive(s => ({ ...s, loading:true, error:null }));
+    getJson(`/.netlify/functions/driver-scores?from=${win.from}&to=${end}`)
+      .then(data => live && setDrive({ loading:false, error:null, data }))
+      .catch(e => live && setDrive({ loading:false, error:e.message, data:null }));
+    return () => { live = false; };
+    // eslint-disable-next-line
+  }, [wk, end, token, bump]);
+
+  // A tech can't load everyone's checks, so their team scores come from the
+  // server as averages only. Admins compute them from the full data below.
+  const [teamState, setTeamState] = useState({ loading:false, error:null, data:null });
+  useEffect(() => {
+    if (!techId) return;
+    let live = true;
+    setTeamState({ loading:true, error:null, data:null });
+    getJson(`/.netlify/functions/tech-team-scores?from=${win.from}&to=${end}`)
+      .then(data => live && setTeamState({ loading:false, error:null, data }))
+      .catch(e => live && setTeamState({ loading:false, error:e.message, data:null }));
+    return () => { live = false; };
+    // eslint-disable-next-line
+  }, [techId, wk, end, token]);
 
   async function syncNow() {
     setSyncing(true); setSyncMsg(null);
@@ -7314,105 +7593,688 @@ function AuditScoresTab({ techs, token, techId=null, canSync=false, view="both" 
     setSyncing(false);
   }
 
+  const inWeek = d => !!d && d >= wk && d <= end;
   const subs = state.data?.submissions || [];
-  const byTech = {};
+  const weekSubs = subs.filter(s => inWeek(s.work_date));
+  const byTech = {}, byTechWeek = {};
   subs.forEach(s => { if (s.tech_id) (byTech[s.tech_id] = byTech[s.tech_id] || []).push(s); });
-  const unmatched = [...new Set(subs.filter(s => !s.tech_id && (view==="both" || formKind(s.form_id)===view)).map(s => s.tech_name || "(no Tech answer)"))].sort();
+  weekSubs.forEach(s => { if (s.tech_id) (byTechWeek[s.tech_id] = byTechWeek[s.tech_id] || []).push(s); });
+  const d0 = drive.data;
+  const driveWeek = d0 ? { ...d0, assignments:d0.assignments.filter(r=>inWeek(r.work_date)), daily:d0.daily.filter(r=>inWeek(r.work_date)), events:d0.events.filter(r=>inWeek(r.work_date)), unassigned:d0.unassigned.filter(r=>inWeek(r.work_date)) } : null;
+  const today = mtDateStr(Date.now());
+  const cardFor = id => techWeekCard(byTechWeek[id] || [], driveWeek, id);
+  const fullCardFor = t => techScoreCard({ techId:t.id, tech:t, subs:byTech[t.id] || [], driverData:d0, jobs, callbacks, reviews, switchovers, quota,
+    truckGrades:state.data?.truck_grades || [], from:win.from, to:end, today });
+  const unmatched = [...new Set((section==="overview" ? subs : weekSubs).filter(s => !s.tech_id && (section==="overview" ? !!formKind(s.form_id) : formKind(s.form_id)===section)).map(s => s.tech_name || "(no Tech answer)"))].sort();
   // Answers and question ids on the Tech Audit form that AUDIT_CONFIG can't map.
-  const auditScored = subs.filter(s => formKind(s.form_id)==="audit").map(s => scoreTechAudit(s));
+  const auditScored = weekSubs.filter(s => formKind(s.form_id)==="audit").map(s => scoreTechAudit(s));
   const unmappedAnswers = [...new Set(auditScored.flatMap(a => a.unmapped))].sort();
   const unmappedIds = [...new Set(auditScored.flatMap(a => a.unmappedFieldIds))].sort();
   const last = state.data?.last_run;
   const arrow = { background:C.white, border:`1px solid ${C.border}`, borderRadius:"8px", padding:"6px 12px", cursor:"pointer", fontSize:"14px", color:C.black };
   const thisWeek = auditThisWeek();
+  const driveNote = drive.error ? `Driving scores unavailable: ${drive.error}` : section==="overview" ? (d0 && !d0.daily.length ? "No Ford Pro data for these weeks yet, so Driving is left out of the overall score." : null) : driveWeek && !driveWeek.daily.length ? "No Ford Pro data for this week yet — an admin uploads Ford's daily reports on the Trucks tab." : null;
+  const big = (text, color, size=20) => <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:`${size}px`, color, lineHeight:1, textAlign:"right" }}>{text}</div>;
+  const small = text => <div style={{ fontSize:"11px", color:C.muted, marginTop:"3px", textAlign:"right" }}>{text}</div>;
+  const sectionLine = sec => <SectionChips sections={sec} align="flex-start"/>;
 
-  const weekPicker = (
-    <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:"8px", marginBottom:"12px" }}>
-      <button style={arrow} onClick={() => setWk(shiftWeek(wk,-1))}>◀</button>
-      <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"16px", color:C.black }}>{formatWeekLabel(wk)}{wk===thisWeek ? " · this week" : ""}</div>
-      <button style={{ ...arrow, opacity:wk>=thisWeek?0.4:1 }} disabled={wk>=thisWeek} onClick={() => setWk(shiftWeek(wk,1))}>▶</button>
+  const header = (
+    <>
+      {!hideTabs && <div style={{ marginBottom:"10px" }}><SubTabs tabs={AUDIT_SECTIONS} active={section} setActive={s => { setSection(s); setOpen(null); }}/></div>}
+      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:"8px", marginBottom:"12px" }}>
+        <button style={arrow} onClick={() => { setWk(shiftWeek(wk,-1)); setOpen(null); }}>◀</button>
+        <div style={{ textAlign:"center" }}>
+          <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"16px", color:C.black }}>{formatWeekLabel(wk)}{wk===thisWeek ? " · this week" : ""}</div>
+          {section==="overview" && <div style={{ fontSize:"12px", color:C.muted, marginTop:"2px" }}>{scoreWindowLabel(win.from, end)}</div>}
+        </div>
+        <button style={{ ...arrow, opacity:wk>=thisWeek?0.4:1 }} disabled={wk>=thisWeek} onClick={() => { setWk(shiftWeek(wk,1)); setOpen(null); }}>▶</button>
+      </div>
+      {state.error && <div style={{ background:`${C.red}10`, border:`1px solid ${C.red}`, borderRadius:"10px", padding:"12px", fontSize:"13px", color:C.red, marginBottom:"10px" }}>Couldn't load: {state.error}</div>}
+      {state.loading && !state.data && <div style={{ color:C.muted, padding:"16px" }}>Loading...</div>}
+    </>
+  );
+  const intro = {
+    overview: `${SCORE_INTRO} Team score = the average of its members' overall scores.`,
+    tote: "Tote Checks from the GHL form. $7.00 or less missing passes (95%). Items missing on a FAILED check come off that tech's pay on the Payroll tab.",
+    audit: "Tech Audits from the GHL form. Each day is the average of its scheduled jobs; the week is the average of the days.",
+    driver: `From Ford Pro data on the truck picked at clock-in. Speeding is scored by minutes over the limit per 100 miles; the week is the average of the days. Pass at ${DRIVER_CONFIG.passLine}.`,
+  }[section];
+  // A team / company score card. Admins can tap a team (onToggle) to see its
+  // members underneath (children).
+  const teamCard = (title, t, highlight=false, onToggle=null, isOpen=false, children=null) => (
+    <div key={title} style={{ background:highlight?C.blueXlt:C.white, border:`1px solid ${highlight?C.blue:C.border}`, borderRadius:"12px", padding:"12px 14px", marginBottom:"8px" }}>
+      <div onClick={onToggle || undefined} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:"10px", cursor:onToggle?"pointer":"default" }}>
+        <div>
+          <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"16px", color:C.black }}>{title} {onToggle && <span style={{ fontSize:"12px", color:C.muted }}>{isOpen?"▲":"▼"}</span>}</div>
+          <div style={{ marginTop:"4px" }}>{sectionLine(t)}</div>
+        </div>
+        <div>{big(t.score==null ? "—" : `${fmtScore(t.score)}`, passColor(t.score, t.pass), 24)}{small(t.score==null ? "no scores yet" : `${t.pass?"PASS":"FAIL"} · ${t.scored} of ${t.members} scored`)}</div>
+      </div>
+      {isOpen && children && <div style={{ marginTop:"10px" }}>{children}</div>}
     </div>
   );
-  const status = state.error
-    ? <div style={{ background:`${C.red}10`, border:`1px solid ${C.red}`, borderRadius:"10px", padding:"12px", fontSize:"13px", color:C.red }}>Couldn't load: {state.error}</div>
-    : state.loading && !state.data ? <div style={{ color:C.muted, padding:"16px" }}>Loading...</div> : null;
 
+  // ─── tech's own view ───
   if (techId) {
-    const week = scoreTechWeek(byTech[techId] || []);
+    const me = cardFor(techId);
+    const meTech = techs.find(t => t.id===techId) || { id:techId };
+    const full = section==="overview" ? fullCardFor(meTech) : null;
+    const team = teamState.data;
     return (
       <div>
-        {weekPicker}
-        {status}
+        {header}
         {state.data && (<>
-          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"8px", marginBottom:"12px" }}>
-            <StatBlock label="Tote Check" value={week.latestTote ? fmtPct(week.latestTote.score) : "—"} color={week.latestTote ? (week.latestTote.pass?C.green:C.red) : C.muted} sub={week.latestTote ? (week.latestTote.pass?"PASS":"FAIL") : "none this week"}/>
-            <StatBlock label="Audit Score" value={fmtPct(week.auditPct)} color={week.auditPct==null?C.muted:scoreColor(week.auditPct)} sub={`${week.days.length} day${week.days.length!==1?"s":""} audited`}/>
-          </div>
-          <AuditTechDetail week={week}/>
+          {section==="overview" && (<>
+            <div style={{ fontSize:"13px", color:C.muted, marginBottom:"12px", lineHeight:"1.5" }}>{SCORE_INTRO} Display only — not tied to pay.</div>
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(140px, 1fr))", gap:"8px", marginBottom:"12px" }}>
+              <StatBlock label="My Overall Score" value={fmtScore(full.overall.score)} color={passColor(full.overall.score, full.overall.pass)} sub={full.overall.score==null ? "no scores yet" : `${full.overall.pass?"PASS":"FAIL"} · pass ${TECH_SCORE_CONFIG.passLine}`}/>
+              {SCORE_SECTIONS.map(s => {
+                const v = full.sections[s.key];
+                return <StatBlock key={s.key} label={`${s.icon} ${s.label}`} value={fmtScore(v)} color={sectionColor(v)} sub={v==null ? "no data — left out" : `${s.weight}% of overall`}/>;
+              })}
+            </div>
+            <SectionTitle>🔍 What my score is made of</SectionTitle>
+            <div style={{ marginBottom:"14px" }}><ScoreBreakdown card={full}/></div>
+            <SectionTitle>👥 Team Scores</SectionTitle>
+            <div style={{ fontSize:"12px", color:C.muted, marginTop:"2px" }}>Averages only. A team shows once at least 3 of its members have a score.</div>
+            <div style={{ marginTop:"8px" }}>
+              {teamState.error && <div style={{ fontSize:"12px", color:C.red }}>Couldn't load team scores: {teamState.error}</div>}
+              {teamState.loading && <div style={{ fontSize:"12px", color:C.muted }}>Loading…</div>}
+              {team && (<>
+                {team.my_team && team.teams.filter(t => t.name===team.my_team).map(t => teamCard(`My team · ${t.name}`, t, true))}
+                {teamCard("Whole company", team.company)}
+                {team.teams.filter(t => t.name!==team.my_team).map(t => teamCard(t.name, t))}
+              </>)}
+            </div>
+          </>)}
+          {section==="tote" && <AuditTechDetail week={me.week} only="tote"/>}
+          {section==="audit" && <AuditTechDetail week={me.week} only="audit"/>}
+          {section==="driver" && (<>
+            {driveNote && <div style={{ fontSize:"12px", color:C.muted, marginBottom:"8px" }}>{driveNote}</div>}
+            {me.driver && <DriverDetail driver={me.driver}/>}
+          </>)}
         </>)}
       </div>
     );
   }
 
-  const rows = techs.filter(t => (t.is_active!==false && t.title!=="owner") || byTech[t.id])
-    .map(t => {
-      const week = scoreTechWeek(byTech[t.id] || []);
-      const has = view==="tote" ? !!(week.latestTote || week.excluded.length) : week.days.length>0;
-      return { tech:t, week, has };
-    })
-    .sort((a,b) => (b.has?1:0) - (a.has?1:0) || a.tech.name.localeCompare(b.tech.name));
-  const intro = {
-    tote: "Tote Checks from the GHL form. $7.00 or less missing passes (95%). Items missing on a FAILED check come off that tech's pay on the Payroll tab.",
-    audit: "Tech Audits from the GHL form. Each day is the average of its scheduled jobs; the week is the average of the days.",
-  }[view];
-  const big = (text, color) => <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"20px", color, lineHeight:1, textAlign:"right" }}>{text}</div>;
-  const small = text => <div style={{ fontSize:"11px", color:C.muted, marginTop:"3px", textAlign:"right" }}>{text}</div>;
+  // ─── admin view ───
+  const overview = section==="overview";
+  // Overview: every active non-owner tech's overall score for the window.
+  // Section pages: the picked week (plus archived techs who had a check).
+  const cards = overview
+    ? techs.filter(t => t.is_active!==false && t.title!=="owner").map(t => ({ tech:t, ...fullCardFor(t) }))
+    : techs.filter(t => (t.is_active!==false && t.title!=="owner") || byTechWeek[t.id]).map(t => ({ tech:t, ...cardFor(t.id) }));
+  const teams = overview ? teamSummary(cards, techs) : null;
+  const dd = overview ? d0 : driveWeek;
+  const unassignedCount = dd ? findUnassignedDriving(dd).filter(f => !dd.unassigned.some(u => u.vin===f.vin && u.work_date===f.work_date && (u.assigned_tech_id || u.dismissed))).length : 0;
+  const unknownFordTypes = [...new Set(cards.flatMap(c => c.driver ? c.driver.days.flatMap(d => d.unknownTypes) : []))];
+  const has = c => section==="overview" ? c.overall.score!=null : section==="tote" ? !!(c.week.latestTote || c.week.excluded.length) : section==="audit" ? c.week.days.length>0 : !!c.driver?.days.length;
+  const sortVal = c => section==="overview" ? c.overall.score : section==="tote" ? c.sections.tote : section==="audit" ? c.sections.audit : c.sections.driver;
+  const rows = cards.map(c => ({ ...c, has:has(c) }))
+    .sort((a,b) => (b.has?1:0) - (a.has?1:0) || ((sortVal(b) ?? -1) - (sortVal(a) ?? -1)) || a.tech.name.localeCompare(b.tech.name));
+  const rankOf = Object.fromEntries(rows.filter(r => r.has).map((r,i) => [r.tech.id, i+1]));
+
+  // One tech's row: their score for the current section; tap to open every audit
+  // they had. prefix keeps the same tech's row under a team separate.
+  function techRow(c, prefix="") {
+        const { tech, week, driver, sections, overall, has:canOpen } = c;
+        const key = prefix + tech.id, isOpen = open===key, t = week.latestTote;
+        let summary;
+        if (section==="overview") summary = overall.score==null
+          ? big("No scores", C.muted)
+          : <>{big(fmtScore(overall.score), passColor(overall.score, overall.pass), 28)}{small(`${overall.pass?"PASS":"FAIL"} · ${overall.sectionsScored} of ${SCORE_SECTIONS.length} sections`)}</>;
+        else if (section==="tote") summary = t
+          ? <>{big(`${fmtPct(t.score)} ${t.pass?"PASS":"FAIL"}`, t.pass?C.green:C.red)}{small(t.missingCents ? `${fmtCents(t.missingCents)} missing · ${fmtShortDate(t.work_date)}` : `Nothing missing · ${fmtShortDate(t.work_date)}`)}</>
+          : <>{big("No check", C.muted)}{week.excluded.length>0 && small(`${week.excluded.length} not counted (wrong checker)`)}</>;
+        else if (section==="audit") summary = week.days.length
+          ? <>{big(fmtPct(week.auditPct), scoreColor(week.auditPct??0))}{small(`${week.days.length} day${week.days.length!==1?"s":""} audited`)}</>
+          : big("No audits", C.muted);
+        else summary = driver?.score!=null
+          ? <>{big(`${fmtScore(driver.score)} ${driver.pass?"PASS":"FAIL"}`, passColor(driver.score, driver.pass))}{small(`${driver.scoredDays} day${driver.scoredDays!==1?"s":""} · ${Math.round(driver.days.reduce((s,d)=>s+d.miles,0))} mi`)}</>
+          : big(driver?.days.length ? "No score" : "No driving", C.muted);
+        return (
+          <div key={key} style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"12px 14px", marginBottom:"8px", opacity:canOpen?1:0.6 }}>
+            <div onClick={() => canOpen && setOpen(isOpen?null:key)} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:"10px", cursor:canOpen?"pointer":"default" }}>
+              <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"18px", color:C.black }}>{section==="overview" && rankOf[tech.id] ? <span style={{ color:C.muted }}>#{rankOf[tech.id]} </span> : null}{tech.name} {canOpen && <span style={{ fontSize:"12px", color:C.muted }}>{isOpen?"▲":"▼"}</span>}</div>
+              <div>{summary}</div>
+            </div>
+            {section==="overview" && overall.score!=null && <div style={{ marginTop:"6px" }}><SectionChips sections={sections} align="flex-start"/></div>}
+            {isOpen && <div style={{ marginTop:"8px" }}>
+              {section==="overview" ? <ScoreBreakdown card={c}/> : section==="driver" ? (driver ? <DriverDetail driver={driver}/> : <div style={{ fontSize:"13px", color:C.muted }}>No driving data for this week.</div>) : <AuditTechDetail week={week} only={section}/>}
+            </div>}
+          </div>
+        );
+  }
+
+  // Every single tote check / audit day / driving day this week, newest first.
+  function everyAudit() {
+    const out = [];
+    for (const c of cards) {
+      if (section==="tote") {
+        for (const t of c.week.totes) out.push({ key:`t:${t.id}`, tech:c.tech, date:t.work_date, sub:t.checkedBy ? `checked by ${t.checkedBy}` : "",
+          summary:<>{big(`${fmtPct(t.score)} ${t.pass?"PASS":"FAIL"}`, t.pass?C.green:C.red, 18)}{small(t.missingCents ? `${fmtCents(t.missingCents)} missing` : "Nothing missing")}</>,
+          detail:<AuditTechDetail bare only="tote" week={{ totes:[t], excluded:[], days:[] }}/> });
+        for (const t of c.week.excluded) out.push({ key:`x:${t.id}`, tech:c.tech, date:t.work_date, sub:"not counted",
+          summary:big("Not counted", C.gold, 16), detail:<AuditTechDetail bare only="tote" week={{ totes:[], excluded:[t], days:[] }}/> });
+      } else if (section==="audit") {
+        for (const d of c.week.days) out.push({ key:`a:${d.audit.id}`, tech:c.tech, date:d.date, sub:d.audit.lead ? `tech lead ${d.audit.lead}` : "",
+          summary:<>{big(fmtPct(d.pct), scoreColor(d.pct??0), 18)}{small(`${d.audit.jobs.filter(j=>!j.skipped).length} job${d.audit.jobs.filter(j=>!j.skipped).length!==1?"s":""}`)}</>,
+          detail:<AuditTechDetail bare only="audit" week={{ totes:[], excluded:[], days:[d] }}/> });
+      } else if (c.driver) {
+        for (const d of c.driver.days) out.push({ key:`d:${c.tech.id}:${d.date}`, tech:c.tech, date:d.date, sub:`${d.vehicles.join(" + ") || "—"} · ${Math.round(d.miles)} mi`,
+          summary:d.score==null ? big("No score", C.muted, 16) : big(`${fmtScore(d.score)} ${d.pass?"PASS":"FAIL"}`, passColor(d.score, d.pass), 18),
+          detail:<DriverDetail bare driver={{ days:[d] }}/> });
+      }
+    }
+    return out.sort((a,b) => b.date.localeCompare(a.date) || a.tech.name.localeCompare(b.tech.name));
+  }
+
 
   return (
     <div>
-      <div style={{ fontSize:"13px", color:C.muted, marginBottom:"12px", lineHeight:"1.5" }}>
-        {intro} Weeks run Wednesday–Tuesday.
-      </div>
-      <div style={{ background:C.cardLt, border:`1px solid ${C.border}`, borderRadius:"10px", padding:"10px 12px", marginBottom:"12px", fontSize:"12px", color:C.black }}>
-        {last ? <>Last GHL form sync: {new Date(last.finished_at || last.updated_at).toLocaleString("en-US", { month:"short", day:"numeric", hour:"numeric", minute:"2-digit", timeZone:"America/Denver" })}{last.errors?.length ? <span style={{ color:C.red }}> · {last.errors.join("; ")}</span> : ""}{last.labels?.source==="raw_keys" ? <div style={{ color:C.gold, marginTop:"4px" }}>⚠ Couldn't read the form's question labels from GHL ({last.labels.error}). The token may need the locations/customFields.readonly scope.</div> : null}</> : "Not synced yet."}
-        {canSync && <div><button onClick={syncNow} disabled={syncing} style={{ marginTop:"8px", background:C.green, color:C.white, border:"none", padding:"6px 14px", borderRadius:"18px", fontSize:"12px", fontWeight:"900", cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:"1px", textTransform:"uppercase" }}>{syncing ? "Syncing..." : "Sync now"}</button></div>}
-        {syncMsg && <div style={{ marginTop:"6px" }}>{syncMsg}</div>}
-      </div>
-      {weekPicker}
-      {status}
-      {state.data && unmatched.length>0 && (
+      {header}
+      <div style={{ fontSize:"13px", color:C.muted, marginBottom:"12px", lineHeight:"1.5" }}>{intro} Weeks run Wednesday–Tuesday. {section==="tote" ? "Items missing on a FAILED tote check come off that tech's pay on the Payroll tab." : "Display only — not tied to pay."}</div>
+      {(section==="tote" || section==="audit") && (
+        <div style={{ background:C.cardLt, border:`1px solid ${C.border}`, borderRadius:"10px", padding:"10px 12px", marginBottom:"12px", fontSize:"12px", color:C.black }}>
+          {last ? <>Last GHL form sync: {new Date(last.finished_at || last.updated_at).toLocaleString("en-US", { month:"short", day:"numeric", hour:"numeric", minute:"2-digit", timeZone:"America/Denver" })}{last.errors?.length ? <span style={{ color:C.red }}> · {last.errors.join("; ")}</span> : ""}{last.labels?.source==="raw_keys" ? <div style={{ color:C.gold, marginTop:"4px" }}>⚠ Couldn't read the form's question labels from GHL ({last.labels.error}). The token may need the locations/customFields.readonly scope.</div> : null}</> : "Not synced yet."}
+          {canSync && <div><button onClick={syncNow} disabled={syncing} style={{ marginTop:"8px", background:C.green, color:C.white, border:"none", padding:"6px 14px", borderRadius:"18px", fontSize:"12px", fontWeight:"900", cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:"1px", textTransform:"uppercase" }}>{syncing ? "Syncing..." : "Sync now"}</button></div>}
+          {syncMsg && <div style={{ marginTop:"6px" }}>{syncMsg}</div>}
+        </div>
+      )}
+      {state.data && section!=="driver" && unmatched.length>0 && (
         <div style={{ background:"rgba(239,68,68,0.08)", border:"1px solid #ef4444", borderRadius:"10px", padding:"10px 12px", marginBottom:"12px", fontSize:"12px", color:C.black }}>
           <div style={{ fontWeight:"700", color:C.red }}>⚠ Forms this week with a Tech name that doesn't exactly match the roster — not shown below:</div>
           {unmatched.join(", ")}
         </div>
       )}
-      {state.data && view==="audit" && (unmappedAnswers.length>0 || unmappedIds.length>0) && (
+      {state.data && section==="audit" && (unmappedAnswers.length>0 || unmappedIds.length>0) && (
         <div style={{ background:`${C.gold}12`, border:`1px solid ${C.gold}`, borderRadius:"10px", padding:"10px 12px", marginBottom:"12px", fontSize:"12px", color:C.black }}>
           <div style={{ fontWeight:"700" }}>⚠ Tech Audit answers the scoring doesn't recognize (fix the form or AUDIT_CONFIG):</div>
           {unmappedAnswers.map(u => <div key={u}>• {u}</div>)}
           {unmappedIds.map(id => <div key={id}>• Question id <code>{id}</code>{last?.unmapped_audit_fields?.[id] ? ` = "${last.unmapped_audit_fields[id].trim()}"` : ""} isn't in AUDIT_CONFIG — if it's a renamed question, add the id to that question's list</div>)}
         </div>
       )}
-      {state.data && rows.map(({ tech, week, has }) => {
-        const t = week.latestTote, isOpen = open===tech.id;
-        const canOpen = has;
-        let summary;
-        if (view==="tote") summary = t
-          ? <>{big(`${fmtPct(t.score)} ${t.pass?"PASS":"FAIL"}`, t.pass?C.green:C.red)}{small(t.missingCents ? `${fmtCents(t.missingCents)} missing · ${fmtShortDate(t.work_date)}` : `Nothing missing · ${fmtShortDate(t.work_date)}`)}</>
-          : <>{big("No check", C.muted)}{week.excluded.length>0 && small(`${week.excluded.length} not counted (wrong checker)`)}</>;
-        else summary = week.days.length
-          ? <>{big(fmtPct(week.auditPct), scoreColor(week.auditPct??0))}{small(`${week.days.length} day${week.days.length!==1?"s":""} audited`)}</>
-          : big("No audits", C.muted);
-        return (
-          <div key={tech.id} style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"12px 14px", marginBottom:"8px", opacity:has?1:0.6 }}>
-            <div onClick={() => canOpen && setOpen(isOpen?null:tech.id)} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:"10px", cursor:canOpen?"pointer":"default" }}>
-              <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"17px", color:C.black }}>{tech.name} {canOpen && <span style={{ fontSize:"12px", color:C.muted }}>{isOpen?"▲":"▼"}</span>}</div>
-              <div>{summary}</div>
+      {(section==="driver" || section==="overview") && (<>
+        {driveNote && <div style={{ fontSize:"12px", color:C.muted, marginBottom:"10px" }}>🚗 {driveNote}</div>}
+        {unassignedCount>0 && (
+          <div style={{ background:"rgba(239,68,68,0.08)", border:"1px solid #ef4444", borderRadius:"10px", padding:"10px 12px", marginBottom:"12px", fontSize:"12px", color:C.black }}>
+            🚨 <strong>{unassignedCount} day{unassignedCount!==1?"s":""} of unassigned driving</strong> this week (a truck drove with no tech's pick on it). Assign or dismiss them in Team Activity → 🚚 Trucks.
+          </div>
+        )}
+        {section==="driver" && unknownFordTypes.length>0 && (
+          <div style={{ background:`${C.gold}12`, border:`1px solid ${C.gold}`, borderRadius:"10px", padding:"10px 12px", marginBottom:"12px", fontSize:"12px", color:C.black }}>
+            ⚠ Ford event types not in DRIVER_CONFIG (scored 0 until mapped): {unknownFordTypes.join(", ")}
+          </div>
+        )}
+      </>)}
+      {state.data && section==="overview" && (<>
+        <SectionTitle>👥 Team Scores</SectionTitle>
+        <div style={{ fontSize:"12px", color:C.muted, marginTop:"2px" }}>Tap a team to see its members, then tap a tech to see what their score is made of.</div>
+        <div style={{ marginTop:"8px", marginBottom:"14px" }}>
+          {teamCard("Whole company", teams.company, true)}
+          {[...teams.teams].sort((a,b) => (b.score ?? -1) - (a.score ?? -1)).map(t => {
+            const members = rows.filter(c => t.memberIds.includes(c.tech.id));
+            return teamCard(`${t.name} · ${t.lead}`, t, false, () => setOpenTeam(openTeam===t.id ? null : t.id), openTeam===t.id, members.map(c => techRow(c, `team:${t.id}:`)));
+          })}
+        </div>
+        <SectionTitle>🏆 Total Performance Leaderboard</SectionTitle>
+        <div style={{ fontSize:"12px", color:C.muted, marginTop:"2px", marginBottom:"8px" }}>{scoreWindowLabel(win.from, end)} · tap a tech for the breakdown.</div>
+      </>)}
+      {state.data && section!=="overview" && (
+        <div style={{ marginBottom:"10px" }}><SubTabs tabs={[["tech","By tech"],["each",`Every ${section==="driver" ? "driving day" : section==="tote" ? "tote check" : "audit"}`]]} active={listMode} setActive={m => { setListMode(m); setOpen(null); }}/></div>
+      )}
+      {state.data && section!=="overview" && listMode==="each" && (() => {
+        const items = everyAudit();
+        if (!items.length) return <div style={{ fontSize:"13px", color:C.muted, padding:"8px 0" }}>Nothing this week.</div>;
+        return items.map(it => {
+          const isOpen = open===`item:${it.key}`;
+          return (
+            <div key={it.key} style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"10px 14px", marginBottom:"8px" }}>
+              <div onClick={() => setOpen(isOpen ? null : `item:${it.key}`)} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:"10px", cursor:"pointer" }}>
+                <div>
+                  <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"16px", color:C.black }}>{it.tech.name} <span style={{ fontSize:"12px", color:C.muted }}>{isOpen?"▲":"▼"}</span></div>
+                  <div style={{ fontSize:"12px", color:C.muted, marginTop:"2px" }}>{fmtShortDate(it.date)}{it.sub ? ` · ${it.sub}` : ""}</div>
+                </div>
+                <div>{it.summary}</div>
+              </div>
+              {isOpen && <div style={{ marginTop:"6px" }}>{it.detail}</div>}
             </div>
-            {isOpen && <div style={{ marginTop:"8px" }}><AuditTechDetail week={week} only={view}/></div>}
+          );
+        });
+      })()}
+      {state.data && (section==="overview" || listMode==="tech") && rows.map(c => techRow(c))}
+    </div>
+  );
+}
+
+
+// ─── TRUCK INSPECTIONS (admin) ────────────────────────────────────────────────
+// The nightly Truck Check (GHL form, photos), per tech per night worked (a
+// job with revenue). Graded nights use the grade; submitted but not graded
+// yet counts 100 for now; a night worked with no Truck Check counts 0.
+// Apprentices still in training aren't listed. Owners and the Field
+// Supervisor can set or override a grade. Feeds the Truck part of the
+// Equipment & Truck section of the Tech Score. Display only -- not tied to pay.
+// GHL photos need the GHL login, so they come through audit-scores
+// (?photo=<documentId>) with this login's token; plain image links load as-is.
+function PhotoThumb({ photo, token }) {
+  const [src, setSrc] = useState(photo.documentId ? null : photo.url);
+  const [bad, setBad] = useState(false);
+  useEffect(() => {
+    if (!photo.documentId) return;
+    let live = true, objUrl = null;
+    fetch(`/.netlify/functions/audit-scores?photo=${encodeURIComponent(photo.documentId)}`, { headers:{ Authorization:`Bearer ${token || ""}` } })
+      .then(r => { if (!r.ok) throw new Error(r.status); return r.blob(); })
+      .then(b => { objUrl = URL.createObjectURL(b); if (live) setSrc(objUrl); })
+      .catch(() => live && setBad(true));
+    return () => { live = false; if (objUrl) URL.revokeObjectURL(objUrl); };
+  }, [photo.documentId, token]);
+  const box = { display:"inline-flex", alignItems:"center", justifyContent:"center", width:"104px", height:"104px", borderRadius:"8px", border:`1px solid ${C.border}`, background:C.cardLt, overflow:"hidden", fontSize:"12px", color:C.muted, textDecoration:"none", textAlign:"center" };
+  if (bad || (!photo.image && !photo.documentId)) return <a href={photo.url} target="_blank" rel="noopener noreferrer" style={{ ...box, color:C.blue }}>📎 Open file</a>;
+  if (!src) return <div style={box}>Loading…</div>;
+  return (
+    <a href={src} target="_blank" rel="noopener noreferrer" style={box}>
+      <img src={src} alt="Truck Check photo" loading="lazy" onError={() => setBad(true)} style={{ width:"100%", height:"100%", objectFit:"cover" }}/>
+    </a>
+  );
+}
+
+function TruckInspectionsTab({ techs, jobs=[], token, canGrade=false, showToast=()=>{} }) {
+  const [wk, setWk] = useState(auditDefaultWeek());
+  const [state, setState] = useState({ loading:true, error:null, data:null });
+  const [open, setOpen] = useState(null);          // tech id
+  const [openNight, setOpenNight] = useState(null); // "<techId>|<date>"
+  const [edit, setEdit] = useState({});            // submission id -> { score, notes }
+  const [saving, setSaving] = useState(null);
+  const end = weekEndDate(wk), today = mtDateStr(Date.now()), thisWeek = auditThisWeek();
+
+  useEffect(() => {
+    let live = true;
+    setState(s => ({ ...s, loading:true, error:null }));
+    fetch(`/.netlify/functions/audit-scores?from=${wk}&to=${end}&kind=truck`, { headers:{ Authorization:`Bearer ${token || ""}` } })
+      .then(async r => { const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`); return j; })
+      .then(data => live && setState({ loading:false, error:null, data }))
+      .catch(e => live && setState({ loading:false, error:e.message, data:null }));
+    return () => { live = false; };
+  }, [wk, end, token]);
+
+  const subs = (state.data?.submissions || []).filter(s => formKind(s.form_id)==="truck");
+  const grades = state.data?.truck_grades || [];
+  const unmatched = [...new Set(subs.filter(s => !s.tech_id).map(s => s.tech_name || "(no name)"))].sort();
+  const rows = techs.filter(t => t.is_active!==false && t.title!=="owner" && !isTruckExempt(t)).sort(byFirstName)
+    .map(t => ({ tech:t, ...truckScore({ techId:t.id, tech:t, jobs, truckSubs:subs.filter(s => s.tech_id===t.id), grades, from:wk, to:end, today }) }));
+  const arrow = { background:C.white, border:`1px solid ${C.border}`, borderRadius:"8px", padding:"6px 12px", cursor:"pointer", fontSize:"14px", color:C.black };
+  const inp = { background:C.white, border:`1px solid ${C.border}`, color:C.black, padding:"8px 10px", borderRadius:"8px", fontSize:"15px", boxSizing:"border-box" };
+
+  async function saveGrade(sub) {
+    const e = edit[sub.id] || {};
+    const score = Number(e.score);
+    if (e.score==null || e.score==="" || !Number.isFinite(score) || score<0 || score>100) return showToast("Grade must be a number from 0 to 100", false);
+    setSaving(sub.id);
+    try {
+      const r = await fetch(`/.netlify/functions/audit-scores`, { method:"POST", headers:{ "Content-Type":"application/json", Authorization:`Bearer ${token || ""}` },
+        body:JSON.stringify({ action:"truck_grade", submission_id:sub.id, score, notes:e.notes || "" }) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+      setState(st => ({ ...st, data:{ ...st.data, truck_grades:[...(st.data?.truck_grades || []).filter(g => g.submission_id!==sub.id), j.grade || { submission_id:sub.id, score, notes:e.notes || null, graded_at:new Date().toISOString() }] } }));
+      setEdit(x => { const n = { ...x }; delete n[sub.id]; return n; });
+      showToast("✅ Grade saved");
+    } catch(err) { showToast("Couldn't save: "+err.message, false); }
+    setSaving(null);
+  }
+
+  // One night: when it came in, its photos, its grade, and the override.
+  function nightDetail(n) {
+    const sub = n.sub, g = n.grade;
+    if (!sub) return <div style={{ fontSize:"14px", color:C.red, marginTop:"6px" }}>{n.status==="pending" ? "Not in yet tonight." : "No Truck Check was submitted for this night — counts 0."}</div>;
+    const photos = submissionPhotoUrls(sub);
+    const e = edit[sub.id] || { score: g?.score ?? "", notes: g?.notes ?? "" };
+    const set = (k, v) => setEdit(x => ({ ...x, [sub.id]: { ...e, [k]:v } }));
+    return (
+      <div style={{ marginTop:"8px" }}>
+        <div style={{ fontSize:"14px", color:C.black }}>Submitted {fmtShortDate(mtDateStr(Date.parse(sub.submitted_at)))} at {formatMTTime(sub.submitted_at)}</div>
+        {photos.length===0 ? <div style={{ fontSize:"13px", color:C.muted, marginTop:"6px" }}>No photos found on this submission.</div> : (
+          <div style={{ display:"flex", flexWrap:"wrap", gap:"6px", marginTop:"8px" }}>{photos.map(p => <PhotoThumb key={p.documentId || p.url} photo={p} token={token}/>)}</div>
+        )}
+        <div style={{ fontSize:"14px", color:C.black, marginTop:"8px" }}>
+          {g ? <>Grade <strong>{fmtScore(Number(g.score))}</strong>{g.graded_by ? ` · by ${g.graded_by}` : ""}{g.graded_at ? ` · ${fmtShortDate(mtDateStr(Date.parse(g.graded_at)))}` : ""}</>
+            : <span style={{ color:C.gold }}>Not graded yet — counts {TECH_SCORE_CONFIG.truck.notGradedScore} for now</span>}
+        </div>
+        {g?.notes && <div style={{ fontSize:"14px", color:C.black, marginTop:"4px" }}>📝 {g.notes}</div>}
+        {canGrade && (
+          <div style={{ display:"flex", gap:"6px", flexWrap:"wrap", alignItems:"center", marginTop:"8px" }}>
+            <input type="number" min="0" max="100" inputMode="decimal" placeholder="0–100" value={e.score} onChange={ev => set("score", ev.target.value)} style={{ ...inp, width:"90px" }} aria-label="Grade"/>
+            <input placeholder="Notes (what was wrong)" value={e.notes} onChange={ev => set("notes", ev.target.value)} style={{ ...inp, flex:"1 1 180px" }} aria-label="Notes"/>
+            <button disabled={saving===sub.id} onClick={() => saveGrade(sub)} style={{ background:C.blue, border:"none", color:C.white, padding:"9px 16px", borderRadius:"8px", cursor:"pointer", fontSize:"14px", fontWeight:"700" }}>{saving===sub.id ? "Saving…" : g ? "Save override" : "Save grade"}</button>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:"8px", marginBottom:"12px" }}>
+        <button style={arrow} onClick={() => { setWk(shiftWeek(wk,-1)); setOpen(null); }}>◀</button>
+        <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"16px", color:C.black }}>{formatWeekLabel(wk)}{wk===thisWeek ? " · this week" : ""}</div>
+        <button style={{ ...arrow, opacity:wk>=thisWeek?0.4:1 }} disabled={wk>=thisWeek} onClick={() => { setWk(shiftWeek(wk,1)); setOpen(null); }}>▶</button>
+      </div>
+      <div style={{ fontSize:"13px", color:C.muted, marginBottom:"12px", lineHeight:"1.5" }}>
+        Nightly Truck Checks (GHL form) for every night a tech worked (a job with revenue). Graded = the grade; submitted but not graded yet counts {TECH_SCORE_CONFIG.truck.notGradedScore} for now; worked with no Truck Check counts 0. Apprentices in training aren't listed. Part of the Equipment &amp; Truck section of the Tech Score. Weeks run Wednesday–Tuesday. Display only — not tied to pay.
+      </div>
+      {state.error && <div style={{ background:`${C.red}10`, border:`1px solid ${C.red}`, borderRadius:"10px", padding:"12px", fontSize:"13px", color:C.red, marginBottom:"10px" }}>Couldn't load: {state.error}</div>}
+      {state.loading && !state.data && <div style={{ color:C.muted, padding:"16px" }}>Loading...</div>}
+      {state.data && unmatched.length>0 && (
+        <div style={{ background:"rgba(239,68,68,0.08)", border:"1px solid #ef4444", borderRadius:"10px", padding:"10px 12px", marginBottom:"12px", fontSize:"13px", color:C.black }}>
+          <div style={{ fontWeight:"700", color:C.red }}>⚠ Truck Checks this week with a name that doesn't match the roster — not counted:</div>
+          {unmatched.join(", ")}
+        </div>
+      )}
+      {state.data && rows.map(r => {
+        const isOpen = open===r.tech.id;
+        const missedNights = r.nights.filter(n => n.status==="missed");
+        const canOpen = r.nights.length>0 || r.extra.length>0;
+        return (
+          <div key={r.tech.id} style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"12px 14px", marginBottom:"8px", opacity:canOpen?1:0.6 }}>
+            <div onClick={() => canOpen && setOpen(isOpen ? null : r.tech.id)} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:"10px", cursor:canOpen?"pointer":"default" }}>
+              <div>
+                <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"18px", color:C.black }}>{r.tech.name} {canOpen && <span style={{ fontSize:"12px", color:C.muted }}>{isOpen?"▲":"▼"}</span>}</div>
+                <div style={{ fontSize:"14px", color:C.black, marginTop:"2px" }}>{r.worked ? `Submitted ${r.submitted} / ${r.worked} night${r.worked!==1?"s":""} worked` : r.nights.length ? "Worked tonight — Truck Check not in yet" : "No nights worked"}{r.notGraded ? <span style={{ color:C.gold }}> · {r.notGraded} not graded yet</span> : null}</div>
+                {missedNights.length>0 && <div style={{ fontSize:"14px", color:C.red, marginTop:"2px", fontWeight:"700" }}>Missing: {missedNights.map(n => fmtShortDate(n.date)).reverse().join(", ")}</div>}
+              </div>
+              <div style={{ textAlign:"right" }}>
+                <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"24px", color:sectionColor(r.score), lineHeight:1 }}>{fmtScore(r.score)}</div>
+                <div style={{ fontSize:"11px", color:C.muted, marginTop:"3px" }}>average grade</div>
+              </div>
+            </div>
+            {isOpen && (
+              <div style={{ marginTop:"8px" }}>
+                {[...r.nights.map(n => ({ ...n, counted:true })), ...r.extra.map(x => ({ ...x, status:"extra", score:null, counted:false }))].map(n => {
+                  const key = `${r.tech.id}|${n.date}`, nOpen = openNight===key;
+                  const st = n.status==="extra" ? { label:"No paid job this night — not counted", color:C.muted } : TRUCK_STATUS[n.status];
+                  return (
+                    <div key={key} style={{ borderTop:`1px solid ${C.border}`, padding:"8px 0" }}>
+                      <div onClick={() => setOpenNight(nOpen ? null : key)} style={{ display:"flex", justifyContent:"space-between", gap:"8px", cursor:"pointer", fontSize:"15px" }}>
+                        <span style={{ color:st.color || C.black, fontWeight:"700" }}>{fmtShortDate(n.date)} · {st.label} <span style={{ fontSize:"12px", color:C.muted }}>{nOpen?"▲":"▼"}</span></span>
+                        <span style={{ color:sectionColor(n.score), fontWeight:"900", fontFamily:"'Barlow Condensed',sans-serif", fontSize:"17px" }}>{n.score==null ? "—" : fmtScore(n.score)}</span>
+                      </div>
+                      {nOpen && nightDetail(n)}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         );
       })}
+    </div>
+  );
+}
+
+// ─── TRUCKS (admin) ───────────────────────────────────────────────────────────
+// Who picked which truck on a day (with history by date), driving nobody
+// picked a truck for (assign it to a tech or dismiss it), and the vehicle
+// list. Feeds the Ford Pro driver scorecard; display only, not tied to pay.
+function TrucksAdminTab({ techs, vehicles, timeEntries=[], token, refreshAll, showToast }) {
+  const today = mtDateStr(Date.now());
+  const [day, setDay] = useState(today);
+  const [picks, setPicks] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [drive, setDrive] = useState({ loading:true, error:null, data:null });
+  const [assignTo, setAssignTo] = useState({});
+  const [edits, setEdits] = useState({});
+  const [newV, setNewV] = useState({ name:"", model:"", plate:"", vin:"" });
+  const [bump, setBump] = useState(0);
+  const [imp, setImp] = useState(null);         // parsed Ford report upload, before import
+  const [impDate, setImpDate] = useState("");
+  const [fileKey, setFileKey] = useState(0);
+  const techName = id => techs.find(t=>t.id===id)?.name || "Unknown tech";
+  const inp = { background:C.white, border:`1px solid ${C.border}`, color:C.black, padding:"7px 9px", borderRadius:"6px", fontSize:"13px", width:"100%", boxSizing:"border-box" };
+  const smallBtn = (color) => ({ background:color, border:"none", color:C.white, padding:"6px 12px", borderRadius:"6px", cursor:busy?"not-allowed":"pointer", fontSize:"12px", fontWeight:"700", whiteSpace:"nowrap" });
+  const card = { background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"14px 16px" };
+
+  useEffect(() => {
+    let live = true;
+    sb(`truck_assignments?select=*&work_date=eq.${day}&order=picked_at`).then(r => live && setPicks(r||[])).catch(() => live && setPicks([]));
+    return () => { live = false; };
+  }, [day, bump]);
+
+  const from = (() => { const d = new Date(today+"T12:00:00Z"); d.setUTCDate(d.getUTCDate()-13); return d.toISOString().slice(0,10); })();
+  useEffect(() => {
+    let live = true;
+    fetch(`/.netlify/functions/driver-scores?from=${from}&to=${today}`, { headers:{ Authorization:`Bearer ${token||""}` } })
+      .then(async r => { const j = await r.json().catch(()=>({})); if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`); return j; })
+      .then(data => live && setDrive({ loading:false, error:null, data }))
+      .catch(e => live && setDrive({ loading:false, error:e.message, data:null }));
+    return () => { live = false; };
+  }, [from, today, token, bump]);
+
+  async function removePick(a) {
+    if (!window.confirm(`Remove ${techName(a.tech_id)}'s pick of ${vehicles.find(v=>v.id===a.vehicle_id)?.name} on ${fmtShortDate(a.work_date)}?`)) return;
+    setBusy(true);
+    try {
+      await sb(`truck_assignments?id=eq.${a.id}`, { method:"DELETE", prefer:"return=minimal" });
+      await sb("truck_assignment_log", { method:"POST", prefer:"return=minimal", body:JSON.stringify({ tech_id:a.tech_id, vehicle_id:a.vehicle_id, work_date:a.work_date, action:"admin_remove" }) }).catch(()=>{});
+      setBump(b=>b+1); await refreshAll(); showToast("Pick removed");
+    } catch(e) { showToast("Error: "+e.message, false); }
+    setBusy(false);
+  }
+  // Give an unpicked truck to a tech for the day. Moves that tech's own pick
+  // if they had one (one row per tech per day).
+  async function assignPick(vehicle, techId) {
+    if (!techId) return;
+    const had = (picks||[]).find(a => a.tech_id===techId);
+    if (had && !window.confirm(`${techName(techId)} already has ${vehicles.find(v=>v.id===had.vehicle_id)?.name || "a truck"} on ${fmtShortDate(day)}. Move them to ${vehicle.name}?`)) return;
+    setBusy(true);
+    try {
+      await saveTruckPick({ tech:{ id:techId }, vehicle, workDate:day, action:"admin_assign" });
+      setBump(b=>b+1); await refreshAll(); showToast(`✅ ${vehicle.name} → ${techName(techId)}`);
+    } catch(e) { showToast(e instanceof TruckTakenError ? "That truck already has a tech that day — remove their pick first" : "Error: "+e.message, false); }
+    setBusy(false);
+  }
+  async function driving(action, row, techId=null) {
+    setBusy(true);
+    try {
+      const r = await fetch(`/.netlify/functions/driver-scores?action=${action}`, { method:"POST", headers:{ "Content-Type":"application/json", Authorization:`Bearer ${token||""}` },
+        body:JSON.stringify({ vin:row.vin, work_date:row.work_date, miles:row.miles, tech_id:techId }) });
+      const j = await r.json().catch(()=>({}));
+      if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+      setBump(b=>b+1);
+      showToast(action==="assign" ? (techId ? `✅ Assigned to ${techName(techId)}` : "Unassigned") : "Dismissed");
+    } catch(e) { showToast("Error: "+e.message, false); }
+    setBusy(false);
+  }
+  // Ford's daily "Driver score" email -> download its CSVs -> drop them here.
+  async function readFordFiles(fileList) {
+    try {
+      const files = await Promise.all([...fileList].map(f => f.text().then(text => ({ name:f.name, text }))));
+      const r = buildFordImport(files, vehicles);
+      // No dated events = no way to know the day: make the admin pick it
+      // rather than silently guessing yesterday.
+      setImp(r); setImpDate(r.workDate || "");
+    } catch(e) { showToast("Couldn't read those files: "+e.message, false); }
+  }
+  async function importFord() {
+    if (!imp || !impDate) return;
+    setBusy(true);
+    try {
+      const r = await fetch(`/.netlify/functions/driver-scores?action=import`, { method:"POST", headers:{ "Content-Type":"application/json", Authorization:`Bearer ${token||""}` },
+        body:JSON.stringify({ work_date:impDate, daily:imp.daily, events:imp.events }) });
+      const j = await r.json().catch(()=>({}));
+      if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+      showToast(`✅ Imported ${j.trucks} trucks and ${j.events} events for ${fmtShortDate(impDate)}`);
+      setImp(null); setFileKey(k=>k+1); setBump(b=>b+1);
+    } catch(e) { showToast("Import failed: "+e.message, false); }
+    setBusy(false);
+  }
+
+  async function saveVehicle(v) {
+    const e = { ...v, ...edits[v.id] };
+    if (!e.name?.trim() || !/^[A-HJ-NPR-Z0-9]{17}$/i.test(e.vin||"")) return showToast("Name and a 17-character VIN are required", false);
+    setBusy(true);
+    try {
+      await sb(`vehicles?id=eq.${v.id}`, { method:"PATCH", prefer:"return=minimal", body:JSON.stringify({ name:e.name.trim(), model:e.model||null, plate:e.plate||null, vin:e.vin.toUpperCase(), active:e.active!==false }) });
+      setEdits(x => { const n={...x}; delete n[v.id]; return n; });
+      await refreshAll(); showToast(`✅ ${e.name} saved`);
+    } catch(err) { showToast(/duplicate|23505/.test(err.message) ? "That name or VIN is already in the list" : "Error: "+err.message, false); }
+    setBusy(false);
+  }
+  async function addVehicle() {
+    if (!newV.name.trim() || !/^[A-HJ-NPR-Z0-9]{17}$/i.test(newV.vin)) return showToast("Name and a 17-character VIN are required", false);
+    setBusy(true);
+    try {
+      await sb("vehicles", { method:"POST", prefer:"return=minimal", body:JSON.stringify({ name:newV.name.trim(), model:newV.model||null, plate:newV.plate||null, vin:newV.vin.toUpperCase(), active:true }) });
+      setNewV({ name:"", model:"", plate:"", vin:"" }); await refreshAll(); showToast("✅ Vehicle added");
+    } catch(err) { showToast(/duplicate|23505/.test(err.message) ? "That name or VIN is already in the list" : "Error: "+err.message, false); }
+    setBusy(false);
+  }
+
+  if (!vehicles.length) return (
+    <div style={{ ...card, fontSize:"13px", color:C.black }}>The vehicles list isn't set up yet — an owner needs to apply the database migration <code>supabase/migrations/20261006_vehicles_driver_scorecard.sql</code>. Until then, clock-in works without a truck pick.</div>
+  );
+
+  const dayPicks = picks || [];
+  const clockedIn = [...new Set(timeEntries.filter(e => e.work_date===day).map(e => e.tech_id))];
+  const noPick = clockedIn.filter(id => !dayPicks.some(a => a.tech_id===id));
+  const d = drive.data;
+  const found = d ? findUnassignedDriving(d) : [];
+  const stored = d?.unassigned || [];
+  const openRows = [
+    ...found.filter(f => !stored.some(s => s.vin===f.vin && s.work_date===f.work_date && (s.assigned_tech_id || s.dismissed))),
+    ...stored.filter(s => !s.assigned_tech_id && !s.dismissed && !found.some(f => f.vin===s.vin && f.work_date===s.work_date))
+      .map(s => ({ ...s, vehicle: vehicles.find(v=>v.vin===s.vin)?.name || s.vin })),
+  ].sort((a,b) => b.work_date.localeCompare(a.work_date));
+  const assignedRows = stored.filter(s => s.assigned_tech_id).sort((a,b) => b.work_date.localeCompare(a.work_date));
+
+  return (
+    <div style={{ display:"flex", flexDirection:"column", gap:"14px" }}>
+      <div style={card}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:"10px", marginBottom:"10px" }}>
+          <Label color={C.blue}>🚚 Trucks {day===today ? "today" : fmtShortDate(day)}</Label>
+          <input type="date" value={day} max={today} onChange={e=>e.target.value && setDay(e.target.value)} style={{ ...inp, width:"auto" }}/>
+        </div>
+        {picks===null ? <div style={{ fontSize:"13px", color:C.muted }}>Loading…</div> : (
+          <div style={{ display:"flex", flexDirection:"column", gap:"6px" }}>
+            {vehicles.filter(v => v.active!==false || dayPicks.some(a=>a.vehicle_id===v.id)).map(v => {
+              const on = dayPicks.filter(a => a.vehicle_id===v.id);
+              return (
+                <div key={v.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:"8px", padding:"6px 0", borderBottom:`1px solid ${C.border}` }}>
+                  <span style={{ fontSize:"13px", color:C.black, fontWeight:"700", minWidth:"70px" }}>{v.name}</span>
+                  <div style={{ flex:1, display:"flex", gap:"6px", flexWrap:"wrap", justifyContent:"flex-end" }}>
+                    {on.length===0 && (
+                      <select value="" disabled={busy} onChange={e => assignPick(v, e.target.value)} style={{ ...inp, width:"auto", fontSize:"12px", padding:"4px 6px", color:C.muted }}>
+                        <option value="">not picked — assign…</option>
+                        {techs.filter(t=>t.is_active!==false && t.title!=="owner").sort(byFirstName).map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                      </select>
+                    )}
+                    {on.map(a => (
+                      <span key={a.id} style={{ display:"inline-flex", alignItems:"center", gap:"6px", fontSize:"12px", color:C.black, background:on.length>1?`${C.gold}20`:C.cardLt, border:`1px solid ${on.length>1?C.gold:C.border}`, borderRadius:"14px", padding:"3px 4px 3px 10px" }}>
+                        {techName(a.tech_id)}{on.length>1 && " ⚠"}
+                        <button disabled={busy} onClick={()=>removePick(a)} title="Remove this pick" style={{ background:"none", border:"none", color:C.red, cursor:"pointer", fontSize:"13px", padding:"0 4px" }}>×</button>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+            <div style={{ fontSize:"12px", color:C.muted }}>One tech per truck per day. To move a truck to someone else, remove the pick (×) and assign it.</div>
+            {dayPicks.some(a => dayPicks.filter(o=>o.vehicle_id===a.vehicle_id).length>1) && <div style={{ fontSize:"12px", color:C.gold }}>⚠ Two techs on one truck (picked before one-truck-per-tech): its driving isn't scored for either until one pick is removed.</div>}
+            {noPick.length>0 && <div style={{ fontSize:"12px", color:C.red, marginTop:"4px" }}>Clocked in without a truck pick: {noPick.map(techName).join(", ")}</div>}
+          </div>
+        )}
+      </div>
+
+      <div style={card}>
+        <Label color={C.green}>📥 Upload Ford reports</Label>
+        <div style={{ fontSize:"12px", color:C.muted, margin:"6px 0 10px", lineHeight:1.5 }}>
+          Each morning Ford emails Equipment@skylod.com a "Ford Pro™ Telematics Report Delivered" email (the <strong>Driver score</strong> schedule) covering the day before. Download these from it and drop them here: <strong>Fleet Activity Summary</strong> (required — miles, idle and speeding minutes), <strong>Vehicle Speeding Events Enhanced</strong>, <strong>Vehicle Harsh Events Enhanced</strong>, <strong>Vehicle Seat Belt Violations Enhanced</strong> and <strong>Vehicle Excessive Idling Enhanced</strong>. Other files are skipped. Locations and addresses are never saved. Uploading the same day again replaces it.
+          {drive.data?.last_pull && <div style={{ marginTop:"4px", color:C.black }}>Last import: {fmtShortDate(drive.data.last_pull.work_date)} — {drive.data.last_pull.trucks} trucks, {drive.data.last_pull.events} events{drive.data.last_pull.by ? ` (by ${drive.data.last_pull.by})` : ""}</div>}
+        </div>
+        <input key={fileKey} type="file" accept=".csv,text/csv" multiple onChange={e => e.target.files?.length && readFordFiles(e.target.files)} style={{ fontSize:"13px", color:C.black }}/>
+        {imp && (
+          <div style={{ marginTop:"10px", background:C.cardLt, border:`1px solid ${C.border}`, borderRadius:"8px", padding:"10px 12px", fontSize:"12px", color:C.black }}>
+            <div style={{ display:"flex", alignItems:"center", gap:"8px", flexWrap:"wrap", marginBottom:"6px" }}>
+              <strong>Day these reports cover:</strong>
+              <input type="date" value={impDate} max={today} onChange={e=>setImpDate(e.target.value)} style={{ ...inp, width:"auto" }}/>
+            </div>
+            {imp.used.map(u => <div key={u}>✓ {u}</div>)}
+            {imp.skipped.length>0 && <div style={{ color:C.muted }}>Skipped: {imp.skipped.join(", ")}</div>}
+            {imp.daily.length>0 && (
+              <div style={{ marginTop:"6px" }}>
+                {imp.daily.map(r => {
+                  const n = imp.events.filter(e => e.vin===r.vin).length;
+                  return <div key={r.vin}>{vehicles.find(v=>v.vin===r.vin)?.name || r.vehicle} — {Math.round(r.miles)} mi, {Math.round(r.speeding_minutes||0)} min speeding, {Math.round(r.idle_minutes||0)} min idle, {n} event{n!==1?"s":""}</div>;
+                })}
+              </div>
+            )}
+            {imp.warnings.map((w,i) => <div key={i} style={{ color:C.gold, marginTop:"4px" }}>⚠ {w}</div>)}
+            <div style={{ display:"flex", gap:"8px", marginTop:"10px" }}>
+              <button disabled={busy || !impDate || (!imp.daily.length && !imp.events.length)} onClick={importFord} style={smallBtn(C.green)}>Import {impDate ? fmtShortDate(impDate) : ""}</button>
+              <button disabled={busy} onClick={()=>{ setImp(null); setFileKey(k=>k+1); }} style={smallBtn(C.muted)}>Cancel</button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div style={card}>
+        <Label color={C.red}>🚨 Unassigned driving (last 14 days)</Label>
+        <div style={{ fontSize:"12px", color:C.muted, margin:"6px 0 10px" }}>A truck drove but nobody picked it that day. It doesn't count against anyone until you assign it. Assigning adds −10 ("drove without picking a truck") plus that day's driving events to the tech's driver score.</div>
+        {drive.error && <div style={{ fontSize:"12px", color:C.red }}>Couldn't load Ford data: {drive.error}</div>}
+        {drive.loading && <div style={{ fontSize:"12px", color:C.muted }}>Loading…</div>}
+        {d && !d.daily.length && <div style={{ fontSize:"12px", color:C.muted }}>No Ford Pro data for the last 14 days yet — upload the daily Ford reports above.</div>}
+        {d && d.daily.length>0 && openRows.length===0 && <div style={{ fontSize:"12px", color:C.green }}>Nothing unassigned.</div>}
+        {openRows.map(r => (
+          <div key={r.vin+r.work_date} style={{ display:"flex", alignItems:"center", gap:"8px", flexWrap:"wrap", padding:"8px 0", borderBottom:`1px solid ${C.border}` }}>
+            <span style={{ fontSize:"13px", color:C.black, fontWeight:"700", flex:"1 1 140px" }}>{r.vehicle} · {fmtShortDate(r.work_date)} · {Math.round(r.miles||0)} mi</span>
+            <select value={assignTo[r.vin+r.work_date]||""} onChange={e=>setAssignTo(x=>({...x,[r.vin+r.work_date]:e.target.value}))} style={{ ...inp, width:"auto", flex:"1 1 140px" }}>
+              <option value="">Assign to…</option>
+              {techs.filter(t=>t.is_active!==false && t.title!=="owner").map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+            </select>
+            <button disabled={busy||!assignTo[r.vin+r.work_date]} onClick={()=>driving("assign", r, assignTo[r.vin+r.work_date])} style={smallBtn(C.blue)}>Assign</button>
+            <button disabled={busy} onClick={()=>driving("dismiss", r)} style={smallBtn(C.muted)}>Dismiss</button>
+          </div>
+        ))}
+        {assignedRows.length>0 && (
+          <div style={{ marginTop:"10px" }}>
+            <div style={{ fontSize:"11px", color:C.muted, fontWeight:"700", letterSpacing:"1px" }}>ASSIGNED</div>
+            {assignedRows.map(r => (
+              <div key={r.vin+r.work_date} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:"8px", fontSize:"12px", color:C.black, padding:"4px 0" }}>
+                <span>{vehicles.find(v=>v.vin===r.vin)?.name || r.vin} · {fmtShortDate(r.work_date)} → {techName(r.assigned_tech_id)}{r.assigned_by ? ` (by ${r.assigned_by})` : ""}</span>
+                <button disabled={busy} onClick={()=>driving("assign", r, null)} style={{ background:"none", border:`1px solid ${C.border}`, color:C.red, borderRadius:"4px", cursor:"pointer", fontSize:"11px", padding:"2px 8px" }}>Undo</button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div style={card}>
+        <Label color={C.blue}>🛻 Vehicles</Label>
+        <div style={{ fontSize:"12px", color:C.muted, margin:"6px 0 10px" }}>Ford Pro data is matched to trucks by VIN. Inactive trucks drop off the clock-in list.</div>
+        {vehicles.map(v => {
+          const e = { ...v, ...edits[v.id] };
+          const set = (k, val) => setEdits(x => ({ ...x, [v.id]: { ...x[v.id], [k]: val } }));
+          return (
+            <div key={v.id} style={{ display:"grid", gridTemplateColumns:"1fr 1.6fr 1fr", gap:"6px", alignItems:"center", padding:"8px 0", borderBottom:`1px solid ${C.border}`, opacity:e.active===false?0.55:1 }}>
+              <input value={e.name||""} onChange={ev=>set("name",ev.target.value)} style={{ ...inp, fontWeight:"700" }} aria-label="Name"/>
+              <input value={e.model||""} onChange={ev=>set("model",ev.target.value)} style={inp} aria-label="Model"/>
+              <input value={e.plate||""} onChange={ev=>set("plate",ev.target.value)} style={inp} aria-label="Plate"/>
+              <input value={e.vin||""} onChange={ev=>set("vin",ev.target.value)} style={{ ...inp, fontFamily:"monospace", fontSize:"12px", gridColumn:"1 / span 2" }} aria-label="VIN"/>
+              <div style={{ display:"flex", alignItems:"center", gap:"6px", justifyContent:"flex-end" }}>
+                <label style={{ fontSize:"11px", color:C.black, display:"flex", alignItems:"center", gap:"3px" }}><input type="checkbox" checked={e.active!==false} onChange={ev=>set("active",ev.target.checked)}/>Active</label>
+                <button disabled={busy||!edits[v.id]} onClick={()=>saveVehicle(v)} style={{ ...smallBtn(C.blue), opacity:edits[v.id]?1:0.4 }}>Save</button>
+              </div>
+            </div>
+          );
+        })}
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1.6fr 1fr", gap:"6px", alignItems:"center", marginTop:"10px" }}>
+          <input placeholder="Name" value={newV.name} onChange={e=>setNewV(x=>({...x,name:e.target.value}))} style={inp}/>
+          <input placeholder="Model" value={newV.model} onChange={e=>setNewV(x=>({...x,model:e.target.value}))} style={inp}/>
+          <input placeholder="Plate" value={newV.plate} onChange={e=>setNewV(x=>({...x,plate:e.target.value}))} style={inp}/>
+          <input placeholder="VIN (17 characters)" value={newV.vin} onChange={e=>setNewV(x=>({...x,vin:e.target.value}))} style={{ ...inp, fontFamily:"monospace", fontSize:"12px", gridColumn:"1 / span 2" }}/>
+          <button disabled={busy} onClick={addVehicle} style={smallBtn(C.green)}>Add vehicle</button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -7675,7 +8537,7 @@ function CallbacksPanel({ techs, jobs, callbacks, refreshAll, showToast }) {
 // isManager: logged in as the Field Supervisor. Same panel as the owners, but
 // read-only on anything that decides his own bonus (quota targets, trucks and
 // holidays, firing approvals, calibration) so he can't move his own numbers.
-function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlongs, schedules, quota, setQuota, jobs, timeEntries=[], tipEntries=[], pendingSplits=[], unmatchedTechs=[], onLogout, refreshAll, isManager=false, currentUser=null }) {
+function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlongs, schedules, quota, setQuota, jobs, timeEntries=[], tipEntries=[], pendingSplits=[], unmatchedTechs=[], vehicles=[], truckAssignments=[], onLogout, refreshAll, isManager=false, currentUser=null }) {
   // Live-standings views (Leaderboard, Journey Map) should only show active
   // techs, matching what the tech-facing app already does — archived techs
   // stay fully visible in Reports/Payroll/Upsell Audit where historical
@@ -7890,12 +8752,14 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
       ["reviews","⭐","Reviews"],
       ["switchovers","🔄","Switchovers"],
       ["timesheet","🕒","Time Sheet"],
+      ["trucks","🚚","Trucks"],
       ["tips","💵","Log Tips"],
       ["callbacks","📞","Callbacks"],
       ["ridealong","🚗","Ride-Alongs"],
       ["forms","📝","Forms"],
     ]},
     { label:"Tech Scores", items:[
+      ["scoresoverview","📊","Overview"],
       ["totechecks","🧰","Tote Checks"],
       ["auditscores","📋","Audit Scores"],
       ["driving","🚗","Driving Scores"],
@@ -7978,21 +8842,19 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
           <SplitJobsAdmin techs={techs} pendingSplits={pendingSplits} refreshAll={refreshAll} showToast={showToast}/>
         )}
 
+        {tab==="trucks"&&(
+          <TrucksAdminTab techs={techs} vehicles={vehicles} timeEntries={timeEntries} token={currentUser?.token} refreshAll={refreshAll} showToast={showToast}/>
+        )}
+
         {tab==="forms"&&(
           <FormsTab me={isManager ? techs.find(t => t.id===currentUser?.techId) || null : null} role={isManager ? "manager" : "owner"}/>
         )}
 
-        {tab==="totechecks"&&(
-          <AuditScoresTab key="tote" view="tote" techs={techs} token={currentUser?.token} canSync={!isManager}/>
-        )}
-        {tab==="auditscores"&&(
-          <AuditScoresTab key="audit" view="audit" techs={techs} token={currentUser?.token} canSync={!isManager}/>
-        )}
-        {(tab==="driving"||tab==="truckinspections")&&(
-          <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"20px", fontSize:"14px", color:C.black, lineHeight:"1.6" }}>
-            <Label color={C.blue}>{tab==="driving"?"🚗 Driving Scores":"🚚 Truck Inspections"}</Label>
-            Coming in Zak's pull request (Ford Pro driver scorecard + truck picks). This page fills in once it's merged.
-          </div>
+        {[["scoresoverview","overview"],["totechecks","tote"],["auditscores","audit"],["driving","driver"]].map(([id, view]) => tab===id && (
+          <AuditScoresTab key={id} view={view} hideTabs techs={techs} token={currentUser?.token} canSync={!isManager} jobs={jobs||[]} callbacks={callbacks||[]} reviews={reviews||[]} switchovers={switchovers||[]} quota={quota}/>
+        ))}
+        {tab==="truckinspections"&&(
+          <TruckInspectionsTab techs={techs} jobs={jobs||[]} token={currentUser?.token} canGrade showToast={showToast}/>
         )}
 
         {tab==="upsellaudit"&&(
@@ -8506,6 +9368,8 @@ export default function App() {
   const [tipEntries, setTipEntries] = useState([]);
   const [pendingSplits, setPendingSplits] = useState([]);
   const [unmatchedTechs, setUnmatchedTechs] = useState([]);
+  const [vehicles, setVehicles] = useState([]);
+  const [truckAssignments, setTruckAssignments] = useState([]);
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [dbError, setDbError] = useState(null);
@@ -8514,7 +9378,9 @@ export default function App() {
 
   const loadAll = useCallback(async () => {
     try {
-      const [t,u,s,r,ra,sch,settings,cb,jb,te,tp,ps,ut] = await Promise.all([
+      // Truck picks: the last ~4 months (the Trucks tab looks older days up itself).
+      const truckSince = mtDateStr(Date.now() - 120*864e5);
+      const [t,u,s,r,ra,sch,settings,cb,jb,te,tp,ps,ut,vh,ta] = await Promise.all([
         sb(`techs?select=${TECH_COLUMNS}&order=name`),
         sb("upsells?select=*"),
         sb("switchovers?select=*"),
@@ -8528,10 +9394,12 @@ export default function App() {
         sbAll("tip_entries?select=*&order=work_date.desc,id.asc").catch(()=>[]),
         sb("jobs?split_confirmed=eq.false&select=hcp_job_id,tech_id,job_date,revenue,tips,upsell_amount,customer_name&order=job_date.desc").catch(()=>[]),
         sb("unmatched_hcp_employees?select=*&order=hcp_name").catch(()=>[]),
+        sb("vehicles?select=*&order=name").catch(()=>[]),
+        sbAll(`truck_assignments?select=*&work_date=gte.${truckSince}&order=work_date.desc,id.asc`).catch(()=>[]),
       ]);
       setTechs(t||[]); setUpsells(u||[]); setSwitchovers(s||[]); setReviews(r||[]);
       setRideAlongs(ra||[]); setSchedules(sch||[]); setCallbacks(cb||[]); setJobs(jb||[]); setTimeEntries(te||[]); setTipEntries(tp||[]);
-      setPendingSplits(ps||[]); setUnmatchedTechs(ut||[]);
+      setPendingSplits(ps||[]); setUnmatchedTechs(ut||[]); setVehicles(vh||[]); setTruckAssignments(ta||[]);
       if (settings&&settings.length>0) {
         try { setQuota(JSON.parse(settings[0].value)); } catch {}
       }
@@ -8659,12 +9527,12 @@ alter table jobs add column if not exists tips numeric default 0;`}
     <AdminPanel techs={techs} setTechs={setTechs} upsells={upsells} setUpsells={setUpsells}
       switchovers={switchovers} setSwitchovers={setSwitchovers} reviews={reviews} setReviews={setReviews}
       callbacks={callbacks} rideAlongs={rideAlongs} schedules={schedules} quota={quota} setQuota={setQuota}
-      jobs={jobs} timeEntries={timeEntries} tipEntries={tipEntries} pendingSplits={pendingSplits} unmatchedTechs={unmatchedTechs} onLogout={()=>setUser(null)} refreshAll={loadAll}
+      jobs={jobs} timeEntries={timeEntries} tipEntries={tipEntries} pendingSplits={pendingSplits} unmatchedTechs={unmatchedTechs} vehicles={vehicles} truckAssignments={truckAssignments} onLogout={()=>setUser(null)} refreshAll={loadAll}
       isManager={user.role==="manager"} currentUser={user}/>
   );
   if (user.type==="tech"&&currentTech) return (
     <TechDashboard tech={currentTech} techs={activeTechs} upsells={upsells} switchovers={switchovers}
-      reviews={reviews} callbacks={callbacks} quota={quota} jobs={jobs} timeEntries={timeEntries} tipEntries={tipEntries} refreshAll={loadAll} rideAlongs={rideAlongs} token={user.token} onLogout={()=>setUser(null)}/>
+      reviews={reviews} callbacks={callbacks} quota={quota} jobs={jobs} timeEntries={timeEntries} tipEntries={tipEntries} refreshAll={loadAll} rideAlongs={rideAlongs} token={user.token} vehicles={vehicles} truckAssignments={truckAssignments} onLogout={()=>setUser(null)}/>
   );
   return null;
 }
