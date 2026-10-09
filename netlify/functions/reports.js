@@ -79,20 +79,65 @@ function rollup(rows, key) {
   return Object.values(m).map(({ pw, ...a }) => ({ ...a, position: a.impressions ? Math.round((pw / a.impressions) * 10) / 10 : null }));
 }
 
+// Free jobs from Google: GHL leads whose form visit came from an unpaid
+// Google result (GHL's session source "Organic Search") or from the Website
+// button on the Maps listing (its link is tagged utm_campaign=gbp), followed
+// to HCP jobs the same way as the ad channels (first visit + plan minimums).
+// Calls straight from the Maps listing never touch the website, so they
+// aren't here.
+const mtDay = ts => new Date(ts).toLocaleDateString("en-CA", { timeZone: "America/Denver" });
+async function freeJobs(from, to) {
+  const opps = await rest(`ghl_opportunities?select=contact_id,created_at,attributions&contact_id=not.is.null&attributions=not.is.null&created_at=gte.${shiftDay(from, -1)}&created_at=lte.${shiftDay(to, 1)}T23:59:59Z`);
+  const kindOf = a => {
+    const t = JSON.stringify(a || []);
+    if (/utm_campaign=gbp/i.test(t)) return "maps";
+    if ((a || []).some(x => x?.utmSessionSource === "Organic Search")) return "organic";
+    return null;
+  };
+  const leads = {};
+  for (const o of opps) {
+    const kind = kindOf(o.attributions), day = mtDay(o.created_at);
+    if (!kind || day < from || day > to) continue;
+    const l = leads[o.contact_id] ||= { kind, since: o.created_at };
+    if (kind === "maps") l.kind = "maps";
+    if (o.created_at < l.since) l.since = o.created_at;
+  }
+  const out = { organic: { leads: 0, booked: 0, upfront: 0, committed: 0 }, maps: { leads: 0, booked: 0, upfront: 0, committed: 0 } };
+  const ids = Object.keys(leads);
+  for (const id of ids) out[leads[id].kind].leads++;
+  if (!ids.length) return out;
+  const matches = await restIn("lead_job_matches?select=contact_id,hcp_job_id", "contact_id", ids);
+  if (!matches.length) return out;
+  const jobs = await rpc("credited_jobs", { p: matches.map(m => ({ k: m.contact_id, since: leads[m.contact_id].since, job: m.hcp_job_id })) });
+  const booked = new Set();
+  for (const j of jobs || []) {
+    const o = out[leads[j.k]?.kind];
+    if (!o || (j.part !== "first" && j.part !== "plan")) continue;
+    const v = Number(j.value) || 0;
+    o.committed += v;
+    if (j.part === "first") { o.upfront += v; if (!booked.has(j.k)) { booked.add(j.k); o.booked++; } }
+  }
+  for (const o of Object.values(out)) { o.upfront = Math.round(o.upfront); o.committed = Math.round(o.committed); }
+  return out;
+}
+
 async function searchReport(from, to) {
   const len = Math.round((new Date(to) - new Date(from)) / 864e5) + 1;
   const pFrom = shiftDay(from, -len), pTo = shiftDay(from, -1);
   const between = (a, b) => `day=gte.${a}&day=lte.${b}`;
-  const [daily, prev, queries, pages, status, state, tok] = await Promise.all([
+  const [daily, prev, queries, pages, prevQueries, prevPages, status, state, tok, free] = await Promise.all([
     rest(`gsc_daily?select=day,clicks,impressions,position&${between(from, to)}&order=day`),
     rest(`gsc_daily?select=clicks,impressions,position&${between(pFrom, pTo)}`),
     rest(`gsc_queries_daily?select=query,clicks,impressions,position&${between(from, to)}`),
     rest(`gsc_pages_daily?select=page,clicks,impressions,position&${between(from, to)}`),
+    rest(`gsc_queries_daily?select=query,clicks,impressions&${between(pFrom, pTo)}`),
+    rest(`gsc_pages_daily?select=page,clicks,impressions&${between(pFrom, pTo)}`),
     rest("gsc_page_status?select=page,verdict,coverage,last_crawl_at,checked_at&order=page"),
     syncState("gsc_last_run"),
     fetch(`${process.env.SUPABASE_URL}/rest/v1/integration_tokens?key=eq.google_ads_refresh_token&select=meta`, {
       headers: { apikey: process.env.SUPABASE_KEY, Authorization: `Bearer ${process.env.SUPABASE_KEY}` },
     }).then(r => r.ok ? r.json() : []).then(r => r[0] || null).catch(() => null),
+    freeJobs(from, to).catch(e => ({ error: e.message })),
   ]);
   const q = rollup(queries, "query").map(x => ({ ...x, brand: BRAND.test(x.query) }));
   const sum = (rows, f) => rows.filter(f).reduce((a, x) => ({ clicks: a.clicks + x.clicks, impressions: a.impressions + x.impressions }), { clicks: 0, impressions: 0 });
@@ -101,10 +146,16 @@ async function searchReport(from, to) {
     totals: rollup(daily)[0] || { clicks: 0, impressions: 0, position: null },
     prev: rollup(prev)[0] || { clicks: 0, impressions: 0, position: null },
     brand: sum(q, x => x.brand), non_brand: sum(q, x => !x.brand),
+    prev_non_brand: sum(prevQueries, x => !BRAND.test(x.query)),
+    // The website button on the Google Business Profile (Maps listing) links
+    // with utm_campaign=gbp, so its clicks show up as that page.
+    prev_maps: sum(prevPages, x => /utm_campaign=gbp/i.test(x.page)),
     daily: daily.map(d => ({ d: d.day, clicks: d.clicks, impressions: d.impressions })),
     queries: q.sort((a, b) => b.impressions - a.impressions).slice(0, 300),
     pages: rollup(pages, "page").sort((a, b) => b.impressions - a.impressions).slice(0, 50),
-    page_status: status,
+    // Tracking links (?utm_...) aren't real pages, so Google never indexes them.
+    page_status: status.filter(p => !p.page.includes("?")),
+    free_jobs: free,
     connection: { google_connected: !!tok, connected: /webmasters/.test(tok?.meta?.scope || ""), last_sync: state?.updated_at || null, last_result: state?.value || null },
   };
 }

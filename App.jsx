@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef, Fragment } from "react";
 import { TEST_QUESTIONS, TESTS, TEST_KEYS, questionsFor, shuffle } from "./trainingTest.js";
+import { scorecard, fixList, pageKind, pageLabel, SEO_GOALS } from "./seoScore.js";
 import { tierFor, BONUS_TIERS, FREQ_LABEL, CHARGEBACK_SERVICES, buildSales, monthPoints, reviewList } from "./salesPoints.js";
 import { computeOpsMonth, monthRange, mountainDate, CALLBACK_TIERS, QUOTA_TIERS, RETENTION_TIERS, NON_ROUTE_VEHICLES, OPS_EXCLUDED_TITLES } from "./opsBonus.js";
 import { techDriverDays, weeklyDriverScore, findUnassignedDriving, DRIVER_CONFIG } from "./driverScoring.js";
@@ -6117,7 +6118,7 @@ const GSC_STEPS = [
 function SearchTable({ rows, keyName, empty, limit = 15 }) {
   const th = { textAlign:"right", padding:"6px 8px", fontSize:"11px", color:C.muted, fontWeight:"600", whiteSpace:"nowrap" };
   const td = { textAlign:"right", padding:"6px 8px", fontSize:"13px", color:C.black, borderTop:`1px solid ${C.border}`, whiteSpace:"nowrap" };
-  const label = v => keyName === "page" ? (v.replace(/^https?:\/\/[^/]+/, "") || "/") : v;
+  const label = v => keyName === "page" ? pageLabel(v) : v;
   return (
     <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"6px", overflowX:"auto" }}>
       {rows.length === 0 ? <div style={{ padding:"10px", fontSize:"13px", color:C.muted }}>{empty}</div> : (
@@ -6136,60 +6137,143 @@ function SearchTable({ rows, keyName, empty, limit = 15 }) {
   );
 }
 
-// Organic Google search for skylod.com (Search Console). Brand = searches for
-// Skylo by name; non-brand = people looking for a detailer who didn't already
-// know Skylo -- the number SEO work should grow.
+// SEO: free traffic from Google search (Search Console) for skylod.com, in
+// plain English. Scores and the fix list come from seoScore.js. Brand =
+// searches for Skylo by name; non-brand = new people who didn't know Skylo.
+const SEO_STATUS = { good:{ c:C.green, t:"On track" }, ok:{ c:"#ff9f0a", t:"Getting there" }, bad:{ c:C.red, t:"Needs work" }, none:{ c:C.muted, t:"Not enough data" } };
+const SEO_GLOSSARY = [
+  ["Times shown (impressions)", "Your site was on the results page someone loaded. They didn't have to scroll to it, so at #8–10 many people never actually saw you. Results further down (past what loads at first) only count once someone scrolls to them."],
+  ["Clicks", "Someone clicked through to skylod.com from a free Google result. Ads aren't counted here."],
+  ["Click rate", "Clicks ÷ times shown. It's low when you're far down the page, or when your Google headline doesn't match what they searched."],
+  ["Average rank", "Where you usually appear: 1 is the top, 1–10 is page one. Most clicks go to the top 3."],
+  ["Brand vs. non-brand", "Brand = they searched Skylo (or Squeegee Boys) by name — they already knew you. Non-brand = they searched for a service, like \"car detailing near me\" — new customers."],
+  ["Headline and description", "The blue title and the grey line under it in Google. They come from each page's title and meta description on skylod.com, and your web person can change them."],
+];
+
+function SeoScoreTile({ x }) {
+  const [open, setOpen] = useState(false);
+  const st = SEO_STATUS[x.status];
+  return (
+    <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`4px solid ${st.c}`, borderRadius:"16px", padding:"12px 14px", minWidth:0 }}>
+      <div style={{ display:"flex", justifyContent:"space-between", gap:"6px", alignItems:"flex-start" }}>
+        <div style={{ fontSize:"11px", color:C.muted, fontWeight:"600", fontFamily:FONT }}>{x.label}</div>
+        <button onClick={() => setOpen(o => !o)} aria-label={`What is ${x.label}?`} style={{ flexShrink:0, width:"20px", height:"20px", borderRadius:"10px", border:`1px solid ${C.border}`, background:open ? C.blue : C.white, color:open ? C.white : C.muted, fontSize:"11px", fontWeight:"700", cursor:"pointer", padding:0, fontFamily:FONT }}>?</button>
+      </div>
+      <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"24px", color:C.black, marginTop:"2px", lineHeight:1.15 }}>{x.value}</div>
+      <div style={{ fontSize:"11px", color:C.muted, marginTop:"2px" }}>{x.sub}</div>
+      <div style={{ height:"6px", background:C.cardLt, borderRadius:"3px", marginTop:"8px", overflow:"hidden" }}><div style={{ width:`${Math.round(x.meter * 100)}%`, height:"100%", background:st.c }}/></div>
+      <div style={{ display:"flex", justifyContent:"space-between", gap:"6px", marginTop:"4px", fontSize:"11px" }}><span style={{ color:st.c, fontWeight:"700" }}>{st.t}</span><span style={{ color:C.muted }}>{x.goal}</span></div>
+      {open && <div style={{ fontSize:"12px", color:C.black, marginTop:"8px", lineHeight:1.45 }}>{x.help}</div>}
+    </div>
+  );
+}
+
 function SearchConsolePanel({ range, token }) {
   const [bump, setBump] = useState(0);
+  const [glossary, setGlossary] = useState(false);
   const s = useGrowthReport({ type:"search", ...range, r:bump }, token);
   const d = s.data, conn = d?.connection || {};
-  const change = (a, b) => b ? `${a >= b ? "▲" : "▼"} ${Math.abs(Math.round(((a - b) / b) * 100))}% vs previous ${d.daily.length || ""} days` : "no earlier data";
+  const days = d?.daily?.length || 0;
+  const change = (a, b) => b ? `${a >= b ? "▲" : "▼"} ${Math.abs(Math.round(((a - b) / b) * 100))}% vs the ${days} days before` : "no earlier data yet";
   const nb = (d?.queries || []).filter(q => !q.brand);
   const almost = nb.filter(q => q.position >= 4 && q.position <= 20).sort((a, b) => b.impressions - a.impressions);
   const unclicked = nb.filter(q => q.position <= 10 && q.impressions >= 10 && q.clicks / q.impressions < 0.02).sort((a, b) => b.impressions - a.impressions);
+  const cities = (d?.pages || []).filter(p => pageKind(p.page) === "city");
+  const others = (d?.pages || []).filter(p => pageKind(p.page) === "page" || pageKind(p.page) === "maps");
   const sm = conn.last_result?.sitemaps || [];
   const notIndexed = (d?.page_status || []).filter(p => p.verdict && p.verdict !== "PASS");
+  const ready = d && d.from === range.from && days > 0;
+  const scores = ready ? scorecard(d, days) : [];
+  const fixes = ready ? fixList(d) : [];
+  const note = { fontSize:"12px", color:C.muted };
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:"12px" }}>
-      <ConnectionCard title="Google Search Console (organic search)" connected={conn.connected} lastSync={conn.last_sync} steps={conn.connected ? null : GSC_STEPS}
+      <div>
+        <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"20px", color:C.black }}>SEO</div>
+        <div style={note}>Free traffic from Google — no ad spend. How easily new customers find skylod.com when they search, and what to fix next.</div>
+      </div>
+      <ConnectionCard title="Google Search Console" connected={conn.connected} lastSync={conn.last_sync} steps={conn.connected ? null : GSC_STEPS}
         connectUrl={`/.netlify/functions/google-ads-auth?t=${encodeURIComponent(token || "")}`} connectLabel={conn.connected ? "Reconnect Google" : "Reconnect Google (adds Search Console)"}
         syncFn={conn.connected ? "gsc-sync" : null} syncDays={480} token={token} onSynced={() => setBump(b => b + 1)}
         note={conn.last_result?.ok === false ? `Last sync failed: ${conn.last_result.error}`
-          : conn.connected ? `Reading ${conn.last_result?.site || "skylod.com"}. Google's search data runs 2–3 days behind.`
+          : conn.connected ? `Reading ${conn.last_result?.site || "skylod.com"}. Google's search data runs 2–3 days behind, so the last few days fill in later.`
           : "Shows what people searched on Google to find skylod.com. Reconnecting Google adds it (same sign-in as Google Ads and Analytics)."}/>
       <ReportState s={s}/>
-      {d && d.from === range.from && d.daily.length > 0 && (<>
+      {ready && (<>
+        <SectionTitle>Scorecard</SectionTitle>
+        <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(170px, 1fr))", gap:"8px" }}>
+          {scores.map(x => <SeoScoreTile key={x.key} x={x}/>)}
+        </div>
+        <div style={note}>Green = on track, yellow = getting there, red = needs work. Tap ? on any score for what it means. Goals: {SEO_GOALS.nonBrandPerMonth}+ new-people clicks a month, every city page in the top {SEO_GOALS.cityTopRank}, {SEO_GOALS.pageOneClickRate}%+ click rate on page one.</div>
+
+        {d.free_jobs && !d.free_jobs.error && (() => {
+          const o = d.free_jobs.organic, m = d.free_jobs.maps, t = k => o[k] + m[k];
+          const split = k => `${k === "upfront" || k === "committed" ? usd(o[k]) : o[k]} search · ${k === "upfront" || k === "committed" ? usd(m[k]) : m[k]} Maps listing`;
+          return (<>
+            <SectionTitle>Free jobs from Google</SectionTitle>
+            <TileGrid>
+              <StatTile label="Leads" value={t("leads")} sub={split("leads")}/>
+              <StatTile label="Booked" value={`${t("booked")} · ${pctOf(t("booked"), t("leads"))}`} sub={split("booked")}/>
+              <StatTile label="Upfront revenue" value={usd(t("upfront"))} sub={split("upfront")}/>
+              <StatTile label="Committed revenue" value={usd(t("committed"))} sub="incl. plan minimums"/>
+            </TileGrid>
+            <div style={note}>Website quote requests that came from a free Google result or the Website button on your Maps listing, followed to HCP jobs the same way as the ad channels — no ad spend behind any of it. Calls straight from the Maps listing aren't counted (they never touch the website).</div>
+          </>);
+        })()}
+
+        <SectionTitle>What to fix next</SectionTitle>
+        <div style={{ display:"flex", flexDirection:"column", gap:"8px" }}>
+          {fixes.length === 0 && <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"12px 14px", fontSize:"13px", color:C.muted }}>Nothing urgent in this range. 🎉</div>}
+          {fixes.map((f, i) => (
+            <div key={i} style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"12px 14px" }}>
+              <div style={{ fontSize:"14px", fontWeight:"700", color:C.black, fontFamily:FONT }}>🔧 {f.title}</div>
+              <div style={{ fontSize:"12px", color:C.black, marginTop:"4px", lineHeight:1.45 }}>{f.body}</div>
+            </div>
+          ))}
+        </div>
+
+        <SectionTitle>The numbers</SectionTitle>
         <TileGrid>
           <StatTile label="Clicks from Google search" value={d.totals.clicks.toLocaleString()} sub={change(d.totals.clicks, d.prev.clicks)}/>
           <StatTile label="Times shown" value={d.totals.impressions.toLocaleString()} sub={change(d.totals.impressions, d.prev.impressions)}/>
           <StatTile label="Click rate" value={pctOf(d.totals.clicks, d.totals.impressions)} sub={`was ${pctOf(d.prev.clicks, d.prev.impressions)}`}/>
           <StatTile label="Average rank" value={d.totals.position ?? "—"} sub={d.prev.position ? `was ${d.prev.position} · lower is better` : "lower is better"}/>
-          <StatTile label="Non-brand clicks" value={d.non_brand.clicks} sub={`${d.non_brand.impressions.toLocaleString()} times shown · new people`}/>
           <StatTile label="Brand clicks" value={d.brand.clicks} sub="searched Skylo by name"/>
+          <StatTile label="Non-brand clicks" value={d.non_brand.clicks} sub={`${d.non_brand.impressions.toLocaleString()} times shown · new people`}/>
         </TileGrid>
         <DailyBars title="Clicks from Google search per day" days={d.daily} value={x => x.clicks}/>
 
-        <SectionTitle>Top non-brand searches</SectionTitle>
+        <SectionTitle>City pages</SectionTitle>
+        <div style={note}>One page per city you serve. Top 3 is where the clicks are.</div>
+        <SearchTable rows={cities} keyName="page" empty="No city pages showed up in this range."/>
+        <SectionTitle>Top searches from new people</SectionTitle>
         <SearchTable rows={nb} keyName="query" empty="No non-brand searches in this range yet."/>
-        <SectionTitle>Almost on page one</SectionTitle>
-        <div style={{ fontSize:"12px", color:C.muted }}>Non-brand searches where skylod.com ranks #4–20. Improving the page that ranks for each is the cheapest way to get more free clicks.</div>
+        <SectionTitle>Almost in the top 3</SectionTitle>
+        <div style={note}>Non-brand searches where you rank #4–20. Improving the page Google shows for each is the cheapest way to get more free clicks.</div>
         <SearchTable rows={almost} keyName="query" empty="None in this range."/>
         <SectionTitle>Shown but not clicked</SectionTitle>
-        <div style={{ fontSize:"12px", color:C.muted }}>On page one, shown 10+ times, under 2% click rate. Usually fixed by rewriting that page's title and description.</div>
+        <div style={note}>On page one, shown 10+ times, under 2% click rate. Usually fixed with a better headline and description, or a page about that exact service.</div>
         <SearchTable rows={unclicked} keyName="query" empty="None in this range."/>
-        <SectionTitle>Top pages</SectionTitle>
-        <SearchTable rows={d.pages} keyName="page" empty="No pages in this range."/>
+        <SectionTitle>Other pages</SectionTitle>
+        <SearchTable rows={others} keyName="page" empty="No pages in this range."/>
 
         <SectionTitle>Site health</SectionTitle>
         <div style={{ background:notIndexed.length || sm.some(x => x.errors) ? `${C.red}10` : C.card, border:`1px solid ${notIndexed.length || sm.some(x => x.errors) ? C.red : C.border}`, borderRadius:"16px", padding:"12px 14px", fontSize:"13px", color:C.black, display:"flex", flexDirection:"column", gap:"6px" }}>
           <div>{d.page_status.length ? (notIndexed.length ? `⚠️ ${notIndexed.length} of the ${d.page_status.length} most-seen pages aren't fully indexed by Google:` : `✅ All ${d.page_status.length} most-seen pages are indexed by Google.`) : "Page indexing is checked on the next sync."}</div>
-          {notIndexed.map(p => <div key={p.page} style={{ fontSize:"12px" }}>{p.page.replace(/^https?:\/\/[^/]+/, "") || "/"} — {p.coverage || p.verdict}</div>)}
+          {notIndexed.map(p => <div key={p.page} style={{ fontSize:"12px" }}>{pageLabel(p.page)} — {p.coverage || p.verdict}</div>)}
           <div>{sm.length ? sm.map(x => `Sitemap ${x.path.replace(/^https?:\/\/[^/]+/, "")}: ${x.errors ? `⚠️ ${x.errors} errors` : "✅ no errors"}${x.warnings ? `, ${x.warnings} warnings` : ""}${x.last_downloaded ? ` · read by Google ${fmtDay(x.last_downloaded.slice(0, 10))}` : ""}`).join(" · ") : "⚠️ No sitemap submitted — add one in Search Console → Sitemaps so Google finds every page."}</div>
         </div>
-        <div style={{ fontSize:"11px", color:C.muted }}>From Google Search Console, regular web search only (ads not included). Brand = searches containing "Skylo" or "Squeegee Boys". Google keeps rare searches private, so brand + non-brand add up to less than total clicks. Average rank is weighted by how often each search showed the site.</div>
+
+        <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"12px 14px" }}>
+          <div onClick={() => setGlossary(g => !g)} style={{ display:"flex", justifyContent:"space-between", cursor:"pointer", fontSize:"13px", fontWeight:"700", color:C.black, fontFamily:FONT }}><span>How to read this page</span><span style={{ color:C.muted, fontWeight:"500" }}>{glossary ? "▲" : "▼"}</span></div>
+          {glossary && <div style={{ display:"flex", flexDirection:"column", gap:"8px", marginTop:"8px" }}>
+            {SEO_GLOSSARY.map(([t, b]) => <div key={t} style={{ fontSize:"12px", color:C.black, lineHeight:1.45 }}><b>{t}:</b> {b}</div>)}
+          </div>}
+        </div>
+        <div style={{ fontSize:"11px", color:C.muted }}>From Google Search Console, regular web search only. Google keeps rare searches private, so brand + non-brand add up to less than total clicks. Average rank is weighted by how often each search showed the site.</div>
         {s.loading && <div style={{ fontSize:"11px", color:C.muted }}>Refreshing...</div>}
       </>)}
-      {d && d.from === range.from && d.daily.length === 0 && conn.connected && <div style={{ fontSize:"13px", color:C.muted }}>No search data for this range yet — tap Sync now, or pick an earlier range (Google runs 2–3 days behind).</div>}
+      {d && d.from === range.from && days === 0 && conn.connected && <div style={{ fontSize:"13px", color:C.muted }}>No search data for this range yet — tap Sync now, or pick an earlier range (Google runs 2–3 days behind).</div>}
     </div>
   );
 }
@@ -6224,7 +6308,7 @@ function MarketingTab({ token }) {
         </div>
         <AttributionSettings att={att} token={token} onSaved={() => setBump(b => b + 1)}/>
         <div style={{ fontSize:"11px", color:C.muted }}>{REVENUE_NOTE}</div>
-        <SubTabs tabs={[["meta","Meta Ads"],["google","Google Ads"],["lsa","Local Services"],["website","Website"],["search","Google Search"]]} active={sub} setActive={setSub}/>
+        <SubTabs tabs={[["meta","Meta Ads"],["google","Google Ads"],["lsa","Local Services"],["website","Website"],["search","SEO"]]} active={sub} setActive={setSub}/>
 
         {sub === "search" && <SearchConsolePanel range={range} token={token}/>}
 
