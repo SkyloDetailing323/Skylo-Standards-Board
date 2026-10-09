@@ -67,9 +67,12 @@ const C = {
   offWhite:"#1d1d1f",
   muted:   "#6e6e73",
   green:   "#34c759",
-  gold:    "#ff9f0a",
-  orange:  "#ff9500",
-  purple:  "#af52de",
+  // Owner rule (Oct 2026): only Skylo blue and white -- green for good, red
+  // for bad. These three used to be gold/orange/purple accents; they're now
+  // shades of the brand blue so old call sites pick it up.
+  gold:    "#0077d4",
+  orange:  "#0092f9",
+  purple:  "#005fb0",
   red:     "#ff3b30",
 };
 
@@ -198,7 +201,7 @@ const SERVICE_PLANS = [
   { id:"weekly",    label:"Weekly",     freq:"52x/yr",  pts:120, ltv:5850 },
 ];
 const PLAN_MAP = Object.fromEntries(SERVICE_PLANS.map(p => [p.id, p]));
-const PLAN_COLORS = { biannual:C.green, quarterly:C.blue, bimonthly:C.purple, monthly:C.blue, biweekly:C.gold, weekly:C.orange };
+const PLAN_COLORS = { biannual:C.blue, quarterly:C.blue, bimonthly:C.blue, monthly:C.blue, biweekly:C.blue, weekly:C.blue };
 
 const JOURNEY_TIERS = [
   { id:"bronze",   name:"BRONZE",   icon:"🥉", minPts:0,    maxPts:2499,   color:"#cd7f32", bg:"#1a1000", reward:"Tier 1 — $150",   perks:["$150 Skylo Cash","Badge tracking","Weekly upsells"] },
@@ -446,8 +449,9 @@ function getDateRangeBounds(preset, customStart="", customEnd="") {
 // this is the one place to change if a preset is ever added/renamed.
 const DATE_RANGE_PRESETS = [["today","Today"],["yesterday","Yesterday"],["wtd","WTD"],["last_week","Last Week"],["mtd","MTD"],["last_month","Last Month"],["ytd","YTD"],["custom","Custom"]];
 function DateRangePicker({ label="📊 Time Period", color=C.blue, preset, setPreset, customStart, setCustomStart, customEnd, setCustomEnd, children }) {
+  color = C.blue; // one accent everywhere (owner: blue and white)
   return (
-    <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${color}`, borderRadius:"16px", padding:"16px 18px" }}>
+    <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"14px 16px" }}>
       <Label color={color}>{label}</Label>
       <div style={{ display:"flex", gap:"6px", flexWrap:"wrap" }}>
         {DATE_RANGE_PRESETS.map(([id,lbl])=>(
@@ -468,6 +472,72 @@ function DateRangePicker({ label="📊 Time Period", color=C.blue, preset, setPr
     </div>
   );
 }
+
+// ─── PAGE TOOLS + RANK ROWS ──────────────────────────────────────────────────
+// Top-right buttons for a tab's less-used actions (Repair from HCP, Log ...).
+// Tapping one drops its panel open under the bar; tapping again closes it.
+// tools: [{ id, label, icon, primary, render: () => JSX }]
+function PageTools({ tools, left }) {
+  const [openId, setOpenId] = useState(null);
+  const open = tools.find(t=>t.id===openId);
+  return (
+    <div style={{ display:"flex", flexDirection:"column", gap:"10px" }}>
+      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:"8px", flexWrap:"wrap" }}>
+        <div style={{ minWidth:0 }}>{left}</div>
+        <div style={{ display:"flex", gap:"8px", marginLeft:"auto", flexWrap:"wrap", justifyContent:"flex-end" }}>
+          {tools.map(t=>{
+            const on = t.id===openId;
+            return (
+              <button key={t.id} onClick={()=>setOpenId(on?null:t.id)} aria-expanded={on} style={{ display:"flex", alignItems:"center", gap:"6px", background:t.primary||on?C.blue:C.white, color:t.primary||on?"#fff":C.blue, border:`1px solid ${t.primary||on?C.blue:C.border}`, padding:"8px 14px", borderRadius:"980px", cursor:"pointer", fontFamily:FONT, fontWeight:"600", fontSize:"14px", whiteSpace:"nowrap" }}>
+                {t.icon&&<span>{t.icon}</span>}{t.label}<span style={{ fontSize:"10px", transform:on?"rotate(180deg)":"none", transition:"transform .2s" }}>▾</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+      {open&&<div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"16px", boxShadow:"0 8px 30px rgba(0,0,0,0.08)" }}>{open.render(()=>setOpenId(null))}</div>}
+    </div>
+  );
+}
+
+// Leaderboard as rounded "bubble" rows (rank, initials, name, total + chip).
+// rows: [{ id, name, value, chip?, sub? }] already sorted best-first.
+function RankRows({ rows, currentId, empty="Nothing logged in this range." }) {
+  if (!rows.length) return <div style={{ background:C.card, borderRadius:"16px", padding:"20px", textAlign:"center", color:C.muted, fontSize:"14px" }}>{empty}</div>;
+  return (
+    <div style={{ display:"flex", flexDirection:"column", gap:"8px" }}>
+      {rows.map((r,i)=>{
+        const me = r.id===currentId;
+        const initials = (r.name||"?").split(/\s+/).map(w=>w[0]).slice(0,2).join("").toUpperCase();
+        return (
+          <div key={r.id} style={{ display:"flex", alignItems:"center", gap:"12px", background:C.card, border:`1px solid ${me?C.blue:"rgba(0,0,0,0.04)"}`, borderRadius:"18px", padding:"12px 14px", boxShadow:"0 1px 3px rgba(0,0,0,0.05)" }}>
+            <div style={{ width:"26px", textAlign:"center", fontFamily:FONT, fontWeight:"700", fontSize:i<3?"18px":"14px", color:C.muted, flexShrink:0 }}>{i<3?["🥇","🥈","🥉"][i]:i+1}</div>
+            <div style={{ width:"38px", height:"38px", borderRadius:"50%", background:C.blueLt, color:C.blue, display:"flex", alignItems:"center", justifyContent:"center", fontFamily:FONT, fontWeight:"600", fontSize:"13px", flexShrink:0 }}>{initials}</div>
+            <div style={{ flex:1, minWidth:0 }}>
+              <div style={{ fontFamily:FONT, fontWeight:"600", fontSize:"16px", color:C.black, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{r.name}{me&&<span style={{ color:C.blue, fontSize:"12px", marginLeft:"6px" }}>You</span>}</div>
+              {r.sub&&<div style={{ fontSize:"12px", color:C.muted, marginTop:"1px" }}>{r.sub}</div>}
+            </div>
+            <div style={{ display:"flex", alignItems:"center", gap:"8px", flexShrink:0 }}>
+              <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"18px", color:C.black }}>{r.value}</div>
+              {r.chip!=null&&<div style={{ background:C.blueLt, color:C.blue, borderRadius:"980px", padding:"4px 10px", fontFamily:FONT, fontWeight:"600", fontSize:"12px", whiteSpace:"nowrap" }}>{r.chip}</div>}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// Title above a list of rows.
+function ListTitle({ children, right }) {
+  return (
+    <div style={{ display:"flex", alignItems:"baseline", justifyContent:"space-between", gap:"8px", padding:"4px 4px 0" }}>
+      <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"20px", color:C.black, letterSpacing:"-0.02em" }}>{children}</div>
+      {right&&<div style={{ fontSize:"13px", color:C.muted }}>{right}</div>}
+    </div>
+  );
+}
+
 const TEAM_LEAD_OVERRIDE_PCT_PARTIAL = 0.05; // 5% if lead + 2/3 of team hits quota
 const TEAM_LEAD_OVERRIDE_PCT_FULL    = 0.10; // 10% if lead + ALL of team hits quota
 
@@ -777,18 +847,18 @@ function PinPad({ onSubmit }) {
 // ─── BADGE GRID ───────────────────────────────────────────────────────────────
 function BadgeGrid({ earned }) {
   const cats = ["Prestige","Revenue","Clean Streak","Performance","Character","Tenure","Trophy"];
-  const catColors = { Prestige:C.gold, Revenue:C.green, "Clean Streak":C.blue, Performance:C.purple, Character:C.orange, Tenure:C.muted, Trophy:"#ff6ef7" };
+  const catColors = { Prestige:C.gold, Revenue:C.green, "Clean Streak":C.blue, Performance:C.purple, Character:C.orange, Tenure:C.muted, Trophy:"#0092f9" };
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:"24px" }}>
       {/* Rotating Trophies info */}
       <div style={{ background:"#ff6ef718", border:"1px solid #ff6ef744", borderRadius:"16px", padding:"12px 16px" }}>
-        <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"13px", color:"#ff6ef7", letterSpacing:"-0.01em", marginBottom:"6px" }}>🏆 ROTATING MONTHLY TROPHIES</div>
+        <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"13px", color:"#0092f9", letterSpacing:"-0.01em", marginBottom:"6px" }}>🏆 ROTATING MONTHLY TROPHIES</div>
         <div style={{ fontSize:"12px", color:C.muted }}>These badges are passed to whoever is in the lead each month — no points, pure bragging rights.</div>
         <div style={{ display:"flex", gap:"8px", flexWrap:"wrap", marginTop:"10px" }}>
           {ROTATING_TROPHIES.map(t=>(
-            <div key={t.id} style={{ background:earned?.includes(t.id)?"#ff6ef722":"rgba(0,0,0,0.2)", border:`1px solid ${earned?.includes(t.id)?"#ff6ef7":"#333"}`, borderRadius:"8px", padding:"6px 12px", opacity:earned?.includes(t.id)?1:0.5 }}>
+            <div key={t.id} style={{ background:earned?.includes(t.id)?"#0092f922":"rgba(0,0,0,0.2)", border:`1px solid ${earned?.includes(t.id)?"#0092f9":"#333"}`, borderRadius:"8px", padding:"6px 12px", opacity:earned?.includes(t.id)?1:0.5 }}>
               <span style={{ fontSize:"16px" }}>{t.icon}</span>
-              <span style={{ fontFamily:FONT, fontWeight:"700", fontSize:"12px", color:earned?.includes(t.id)?"#ff6ef7":C.muted, marginLeft:"6px" }}>{t.name}</span>
+              <span style={{ fontFamily:FONT, fontWeight:"700", fontSize:"12px", color:earned?.includes(t.id)?"#0092f9":C.muted, marginLeft:"6px" }}>{t.name}</span>
             </div>
           ))}
         </div>
@@ -823,19 +893,9 @@ function BadgeGrid({ earned }) {
 
 // ─── UPSELL LEADERBOARD ───────────────────────────────────────────────────────
 function UpsellLeaderboard({ techs, upsells, jobs=[], currentId }) {
-  const wk = getWeekKey();
-  const byWeek = {};
-  upsells.forEach(u=>{ if(!byWeek[u.week_key])byWeek[u.week_key]={}; byWeek[u.week_key][u.tech_id]=(byWeek[u.week_key][u.tech_id]||0)+u.amount; });
-  const allWeeks = Object.keys(byWeek).sort((a,b)=>b.localeCompare(a));
-  const [selectedWeek, setSelectedWeek] = useState(wk);
   const allTime = {};
   upsells.forEach(u=>{ allTime[u.tech_id]=(allTime[u.tech_id]||0)+u.amount; });
 
-  // Selected week data
-  const wkData = byWeek[selectedWeek]||{};
-  const ranked = [...techs].map(t=>({...t,amt:wkData[t.id]||0,all:allTime[t.id]||0})).sort((a,b)=>b.amt-a.amt);
-  const top = ranked[0]?.amt||1;
-  const weekTotal = ranked.reduce((s,t)=>s+t.amt,0);
 
   // Date range — same WTD/Last Week/MTD/Last Month/YTD/Custom control as
   // Revenue's Time Period panel (getDateRangeBounds). Filters by each entry's
@@ -857,158 +917,33 @@ function UpsellLeaderboard({ techs, upsells, jobs=[], currentId }) {
   const noDateEntries = upsellsWithDate.filter(u => !u.resolvedDate);
   const noDateTotal = noDateEntries.reduce((s,u)=>s+(u.amount||0),0);
 
+  const rangeByTech = {};
+  rangeInRange.forEach(u => { rangeByTech[u.tech_id] = (rangeByTech[u.tech_id] || 0) + (u.amount || 0); });
+  const rangeRanked = techs.map(t => ({ ...t, amt: rangeByTech[t.id] || 0 })).filter(t => t.amt > 0).sort((a, b) => b.amt - a.amt);
+  const rangeTotal = rangeRanked.reduce((s,t)=>s+t.amt,0);
+  const upsellRow = (t, amt) => ({ id:t.id, name:t.name, value:`$${Math.round(amt).toLocaleString()}`, chip:`${Math.round(amt*UPSELL_PTS_PER_DOLLAR).toLocaleString()} pts` });
   return (
-    <div style={{ display:"flex", flexDirection:"column", gap:"20px" }}>
-
-      {/* Week selector */}
-      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"14px 18px" }}>
-        <Label color={C.green}>📅 Select Week</Label>
-        <select
-          value={selectedWeek}
-          onChange={e=>setSelectedWeek(e.target.value)}
-          style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"10px 14px", borderRadius:"16px", fontSize:"14px", fontFamily:FONT, fontWeight:"700", width:"100%", cursor:"pointer" }}
-        >
-          {allWeeks.length === 0 && <option value={wk}>{formatWeekLabel(wk)} — Current Week</option>}
-          {allWeeks.map(w=>(
-            <option key={w} value={w}>{formatWeekLabel(w)}{w===wk?" — Current":""}</option>
-          ))}
-        </select>
-      </div>
-
-      {/* Selected week breakdown */}
-      <div style={{ background:C.card, border:`1px solid ${selectedWeek===wk?C.blue:C.border}`, borderRadius:"16px", overflow:"hidden" }}>
-        <div style={{ padding:"14px 18px", borderBottom:`1px solid ${C.border}`, background:C.cardLt, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-          <div>
-            <div style={{ fontFamily:FONT, fontWeight:"600", fontSize:"16px", color:C.black }}>{formatWeekLabel(selectedWeek)}</div>
-            {selectedWeek===wk&&<div style={{ fontSize:"11px", color:C.blue, letterSpacing:"-0.01em", textTransform:"none", marginTop:"2px" }}>Current Week</div>}
-          </div>
-          <div style={{ textAlign:"right" }}>
-            <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"24px", color:C.green }}>${weekTotal.toLocaleString()}</div>
-            <div style={{ fontSize:"11px", color:C.muted, letterSpacing:"-0.01em" }}>TEAM TOTAL</div>
-          </div>
-        </div>
-        <div style={{ padding:"14px 18px", display:"flex", flexDirection:"column", gap:"8px" }}>
-          {ranked.filter(t=>t.amt>0).map((t,idx)=>{
-            const isMe=t.id===currentId; const pct=top>0?Math.round((t.amt/top)*100):0;
-            return (
-              <div key={t.id} style={{ background:idx===0?`${C.green}12`:isMe?`${C.blue}12`:"transparent", border:`1px solid ${idx===0?C.green:isMe?`${C.blue}44`:C.border}`, borderRadius:"16px", padding:"10px 12px" }}>
-                <div style={{ display:"flex", alignItems:"center", gap:"12px", marginBottom:"6px" }}>
-                  <div style={{ fontFamily:FONT, fontWeight:"700", fontStyle:"normal", fontSize:idx===0?"28px":idx<3?"22px":"16px", color:idx===0?C.green:idx===1?"#a8c0d6":idx===2?"#cd7f32":C.muted, width:"30px", textAlign:"center", lineHeight:1 }}>{medal(idx)}</div>
-                  <div style={{ width:"36px", height:"36px", borderRadius:"50%", background:`${C.blue}22`, border:`1px solid ${C.blue}44`, display:"flex", alignItems:"center", justifyContent:"center", fontFamily:FONT, fontSize:"12px", fontWeight:"600", color:C.blue, flexShrink:0 }}>{t.avatar}</div>
-                  <div style={{ flex:1 }}>
-                    <div style={{ fontFamily:FONT, fontWeight:"700", fontStyle:"normal", fontSize:"16px", color:C.black }}>{t.name}{isMe&&<span style={{ color:C.blue, fontSize:"11px", marginLeft:"6px", fontStyle:"normal" }}>YOU</span>}</div>
-                    <div style={{ fontSize:"11px", color:C.muted }}>+{Math.round(t.amt*UPSELL_PTS_PER_DOLLAR)} pts this week</div>
-                  </div>
-                  <div style={{ textAlign:"right" }}>
-                    <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"24px", color:idx===0?C.green:C.black }}>${t.amt.toLocaleString()}</div>
-                  </div>
-                </div>
-                <Bar pct={pct} color={idx===0?C.green:C.blue} h={5}/>
-              </div>
-            );
-          })}
-          {ranked.filter(t=>t.amt===0).length>0&&(
-            <div style={{ borderTop:`1px dashed ${C.border}`, paddingTop:"8px", marginTop:"4px" }}>
-              <div style={{ fontSize:"11px", color:C.muted, letterSpacing:"-0.01em", textTransform:"none", fontFamily:FONT, marginBottom:"6px" }}>No upsells logged yet this week</div>
-              {ranked.filter(t=>t.amt===0).map(t=>{
-                const isMe=t.id===currentId;
-                return (
-                  <div key={t.id} style={{ display:"flex", alignItems:"center", gap:"10px", padding:"6px 8px", opacity:0.5 }}>
-                    <div style={{ width:"36px", height:"36px", borderRadius:"50%", background:C.cardLt, border:`1px solid ${C.border}`, display:"flex", alignItems:"center", justifyContent:"center", fontFamily:FONT, fontSize:"12px", fontWeight:"600", color:C.muted }}>{t.avatar}</div>
-                    <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"14px", color:C.muted }}>{t.name}{isMe&&" — YOU"}</div>
-                    <div style={{ marginLeft:"auto", fontFamily:FONT, fontWeight:"600", fontSize:"14px", color:C.muted }}>$0</div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-          {weekTotal===0&&<div style={{ fontSize:"13px", color:C.muted, textAlign:"center", padding:"12px" }}>No upsells logged for this week yet</div>}
-        </div>
-      </div>
-
-      {/* Running totals pinned at bottom */}
-      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", overflow:"hidden" }}>
-        <div style={{ padding:"14px 18px", borderBottom:`1px solid ${C.border}`, background:C.cardLt }}>
-          <Label color={C.green}>💰 Running Totals — All Time</Label>
-        </div>
-        <div style={{ padding:"14px 18px", display:"flex", flexDirection:"column", gap:"10px" }}>
-          {[...techs].sort((a,b)=>(allTime[b.id]||0)-(allTime[a.id]||0)).map((t,i)=>{
-            const amt=allTime[t.id]||0; const topAmt=Math.max(...techs.map(x=>allTime[x.id]||0))||1; const pct=Math.round((amt/topAmt)*100);
-            return (
-              <div key={t.id}>
-                <div style={{ display:"flex", justifyContent:"space-between", marginBottom:"5px" }}>
-                  <span style={{ fontSize:"13px", fontWeight:"600", color:t.id===currentId?C.blue:C.black }}>{medal(i)} {t.name}{t.id===currentId?" — YOU":""}</span>
-                  <div style={{ textAlign:"right" }}>
-                    <span style={{ fontFamily:FONT, fontWeight:"600", fontSize:"14px", color:C.black }}>${amt.toLocaleString()}</span>
-                    <span style={{ fontSize:"11px", color:C.green, marginLeft:"8px" }}>{Math.round(amt*UPSELL_PTS_PER_DOLLAR).toLocaleString()} pts</span>
-                  </div>
-                </div>
-                <Bar pct={pct} color={C.green}/>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* Date Range */}
-      <DateRangePicker label="📅 Date Range" color={C.green} preset={rangePreset} setPreset={setRangePreset} customStart={cStart} setCustomStart={setCStart} customEnd={cEnd} setCustomEnd={setCEnd}>
-        <div style={{ fontSize:"11px", color:C.green, fontFamily:FONT, fontWeight:"700", marginTop:"8px" }}>
-          {rangeStart} → {rangeEnd} · matched by exact completion date · ${rangeInRange.reduce((s,u)=>s+(u.amount||0),0).toLocaleString()} · {rangeInRange.length} entr{rangeInRange.length!==1?"ies":"y"}
-        </div>
-        {noDateEntries.length>0&&(
-          <div style={{ fontSize:"11px", color:C.muted, marginTop:"6px" }}>
-            ⚠ {noDateEntries.length} entr{noDateEntries.length!==1?"ies":"y"} totaling ${noDateTotal.toLocaleString()} {noDateEntries.length!==1?"have":"has"} no matched completion date (manually entered, not tied to an HCP job) — excluded from every range above, not just this one.
-          </div>
-        )}
+    <div style={{ display:"flex", flexDirection:"column", gap:"14px" }}>
+      <DateRangePicker label="📅 Date Range" preset={rangePreset} setPreset={setRangePreset} customStart={cStart} setCustomStart={setCStart} customEnd={cEnd} setCustomEnd={setCEnd}>
+        <div style={{ fontSize:"12px", color:C.muted, marginTop:"8px" }}>{fmtShortDate(rangeStart)} – {fmtShortDate(rangeEnd)} · by job completion date</div>
       </DateRangePicker>
-
-      {(() => {
-        const rangeByTech = {};
-        rangeInRange.forEach(u => { rangeByTech[u.tech_id] = (rangeByTech[u.tech_id] || 0) + (u.amount || 0); });
-        const rangeRanked = techs
-          .map(t => ({ ...t, amt: rangeByTech[t.id] || 0 }))
-          .filter(t => t.amt > 0)
-          .sort((a, b) => b.amt - a.amt);
-        const rangeTop = rangeRanked[0]?.amt || 1;
-        return (
-          <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", overflow:"hidden" }}>
-            <div style={{ padding:"14px 18px", borderBottom:`1px solid ${C.border}`, background:C.cardLt }}>
-              <Label color={C.green}>💰 Upsells · {rangeStart} → {rangeEnd}</Label>
-            </div>
-            <div style={{ padding:"14px 18px", display:"flex", flexDirection:"column", gap:"8px" }}>
-              {rangeRanked.length===0 && <div style={{ fontSize:"13px", color:C.muted, textAlign:"center", padding:"12px" }}>No upsells logged in this range.</div>}
-              {rangeRanked.map((t,i)=>{
-                const pct = Math.round((t.amt/rangeTop)*100);
-                return (
-                  <div key={t.id}>
-                    <div style={{ display:"flex", justifyContent:"space-between", marginBottom:"5px" }}>
-                      <span style={{ fontSize:"13px", color:t.id===currentId?C.blue:C.black }}>{medal(i)} {t.name}{t.id===currentId?" — YOU":""}</span>
-                      <span style={{ fontFamily:FONT, fontWeight:"600", fontSize:"14px", color:C.black }}>${t.amt.toLocaleString()}</span>
-                    </div>
-                    <Bar pct={pct} color={C.green}/>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        );
-      })()}
+      <ListTitle right={`$${Math.round(rangeTotal).toLocaleString()} team total`}>Upsells</ListTitle>
+      <RankRows rows={rangeRanked.map(t=>upsellRow(t,t.amt))} currentId={currentId} empty="No upsells in this range yet."/>
+      {noDateEntries.length>0&&(
+        <div style={{ fontSize:"12px", color:C.muted, padding:"0 4px" }}>
+          {noDateEntries.length} entr{noDateEntries.length!==1?"ies":"y"} totaling ${noDateTotal.toLocaleString()} {noDateEntries.length!==1?"aren't":"isn't"} tied to an HCP job, so {noDateEntries.length!==1?"they're":"it's"} only in the all-time totals.
+        </div>
+      )}
+      <ListTitle>All Time</ListTitle>
+      <RankRows rows={[...techs].filter(t=>(allTime[t.id]||0)>0).sort((a,b)=>(allTime[b.id]||0)-(allTime[a.id]||0)).map(t=>upsellRow(t,allTime[t.id]||0))} currentId={currentId} empty="No upsells logged yet."/>
     </div>
   );
 }
 
 // ─── SWITCHOVER LEADERBOARD ───────────────────────────────────────────────────
 function SwitchoverLeaderboard({ techs, switchovers, currentId }) {
-  const [rankBy, setRankBy] = useState("count");
-  const wk = getWeekKey();
-  const byWeek = {};
-  switchovers.forEach(s=>{ if(!byWeek[s.week_key])byWeek[s.week_key]={}; if(!byWeek[s.week_key][s.tech_id])byWeek[s.week_key][s.tech_id]=[]; byWeek[s.week_key][s.tech_id].push({plan:s.plan_id}); });
-  const allWeeks = Object.keys(byWeek).sort((a,b)=>b.localeCompare(a));
-  const wkData = byWeek[wk]||{};
   const allCount={}, allPts={};
   switchovers.forEach(s=>{ allCount[s.tech_id]=(allCount[s.tech_id]||0)+1; allPts[s.tech_id]=(allPts[s.tech_id]||0)+(PLAN_MAP[s.plan_id]?.pts||0); });
-  const ranked = [...techs].map(t=>{ const e=wkData[t.id]||[]; return {...t,count:e.length,pts:e.reduce((s,x)=>s+(PLAN_MAP[x.plan]?.pts||0),0),allCount:allCount[t.id]||0,allPts:allPts[t.id]||0,entries:e}; }).sort((a,b)=>rankBy==="count"?b.count-a.count:b.pts-a.pts);
-  const top=ranked[0]?.[rankBy==="count"?"count":"pts"]||1;
 
   // Date range — same WTD/Last Week/MTD/Last Month/YTD/Custom control as
   // Revenue's Time Period panel (getDateRangeBounds). Entries are only
@@ -1039,105 +974,27 @@ function SwitchoverLeaderboard({ techs, switchovers, currentId }) {
     .filter(t => t.total > 0)
     .sort((a, b) => b.total - a.total);
 
+  const ptsOf = byPlan => Object.entries(byPlan).reduce((s,[planId,n])=>s+n*(PLAN_MAP[planId]?.pts||0),0);
+  const planList = byPlan => Object.entries(byPlan).sort((a,b)=>b[1]-a[1]).map(([planId,count])=>`${count} ${PLAN_MAP[planId]?.label||planId}`).join(", ");
   return (
-    <div style={{ display:"flex", flexDirection:"column", gap:"24px" }}>
-      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", overflow:"hidden" }}>
-        <div style={{ padding:"14px 18px", borderBottom:`1px solid ${C.border}` }}><Label color={C.purple}>🔄 All-Time Switchovers</Label></div>
-        <div style={{ padding:"14px 18px", display:"flex", flexDirection:"column", gap:"8px" }}>
-          {[...techs].sort((a,b)=>(allPts[b.id]||0)-(allPts[a.id]||0)).map((t,i)=>(
-            <div key={t.id} style={{ display:"flex", justifyContent:"space-between" }}>
-              <span style={{ fontSize:"13px", color:t.id===currentId?C.blue:C.black }}>{medal(i)} {t.name}{t.id===currentId?" — YOU":""}</span>
-              <span style={{ fontFamily:FONT, fontWeight:"600", fontSize:"13px", color:C.black }}>{allCount[t.id]||0} switchovers · {(allPts[t.id]||0).toLocaleString()} pts</span>
-            </div>
-          ))}
-        </div>
-      </div>
-      <div>
-        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:"12px" }}>
-          <Label>This Week · {formatWeekLabel(wk)}</Label>
-          <div style={{ display:"flex", gap:"6px" }}>
-            {[["count","COUNT"],["pts","POINTS"]].map(([id,label])=>(
-              <button key={id} onClick={()=>setRankBy(id)} style={{ background:rankBy===id?C.blue:"none", border:`1px solid ${rankBy===id?C.blue:C.border}`, color:rankBy===id?C.white:C.muted, padding:"4px 10px", borderRadius:"8px", cursor:"pointer", fontSize:"11px", fontFamily:FONT, fontWeight:"700", letterSpacing:"-0.01em" }}>{label}</button>
-            ))}
-          </div>
-        </div>
-        <div style={{ display:"flex", flexDirection:"column", gap:"8px" }}>
-          {ranked.map((t,idx)=>{
-            const isMe=t.id===currentId; const val=rankBy==="count"?t.count:t.pts; const pct=top>0?Math.round((val/top)*100):0;
-            return (
-              <div key={t.id} style={{ background:isMe?`${C.blue}18`:C.card, border:`1px solid ${isMe?C.blue:C.border}`, borderRadius:"16px", padding:"14px 18px" }}>
-                <div style={{ display:"flex", alignItems:"center", gap:"12px", marginBottom:"10px" }}>
-                  <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:idx<3?"22px":"14px", color:C.muted, width:"28px", textAlign:"center" }}>{medal(idx)}</div>
-                  <div style={{ width:"38px", height:"38px", borderRadius:"50%", background:`${C.blue}22`, border:`1px solid ${C.blue}44`, display:"flex", alignItems:"center", justifyContent:"center", fontFamily:FONT, fontSize:"12px", fontWeight:"600", color:C.blue, flexShrink:0 }}>{t.avatar}</div>
-                  <div style={{ flex:1 }}>
-                    <div style={{ fontFamily:FONT, fontWeight:"600", fontSize:"16px", color:C.black }}>{t.name}{isMe&&<span style={{ color:C.blue, fontSize:"11px", marginLeft:"6px" }}>YOU</span>}</div>
-                    <div style={{ fontSize:"11px", color:C.muted }}>All-time: {t.allCount} switchovers · {t.allPts.toLocaleString()} pts</div>
-                  </div>
-                  <div style={{ textAlign:"right" }}>
-                    <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"24px", color:t.count>0?C.white:C.border }}>{t.count}</div>
-                    <div style={{ fontSize:"11px", color:C.purple }}>+{t.pts} pts</div>
-                  </div>
-                </div>
-                <Bar pct={pct} color={C.purple}/>
-                {t.entries.length>0&&(
-                  <div style={{ display:"flex", flexWrap:"wrap", gap:"5px", marginTop:"10px" }}>
-                    {t.entries.map((e,i)=>{ const plan=PLAN_MAP[e.plan]; const pc=PLAN_COLORS[e.plan]||C.muted; return plan?(<span key={i} style={{ background:`${pc}22`, border:`1px solid ${pc}55`, borderLeft:`3px solid ${pc}`, borderRadius:"3px", padding:"2px 8px", fontSize:"11px", color:C.black, fontFamily:FONT, fontWeight:"700" }}>{plan.label} +{plan.pts}pts</span>):null; })}
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* Date Range */}
-      <DateRangePicker label="📅 Date Range" color={C.purple} preset={rangePreset} setPreset={setRangePreset} customStart={cStart} setCustomStart={setCStart} customEnd={cEnd} setCustomEnd={setCEnd}>
-        <div style={{ fontSize:"11px", color:C.purple, fontFamily:FONT, fontWeight:"700", marginTop:"8px" }}>
-          {rangeStart} → {rangeEnd} · matched by week (switchovers are logged by week, not exact day)
-        </div>
+    <div style={{ display:"flex", flexDirection:"column", gap:"14px" }}>
+      <DateRangePicker label="📅 Date Range" preset={rangePreset} setPreset={setRangePreset} customStart={cStart} setCustomStart={setCStart} customEnd={cEnd} setCustomEnd={setCEnd}>
+        <div style={{ fontSize:"12px", color:C.muted, marginTop:"8px" }}>{fmtShortDate(rangeStart)} – {fmtShortDate(rangeEnd)} · switchovers are matched by week</div>
       </DateRangePicker>
-
-      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", overflow:"hidden" }}>
-        <div style={{ padding:"14px 18px", borderBottom:`1px solid ${C.border}`, background:C.cardLt }}>
-          <Label color={C.purple}>🔄 Switchovers by Plan Type · {rangeStart} → {rangeEnd}</Label>
-        </div>
-        <div style={{ overflowX:"auto" }}>
-          <table style={{ width:"100%", borderCollapse:"collapse", fontSize:"13px" }}>
-            <thead>
-              <tr>
-                <th style={{ padding:"8px 18px", textAlign:"left", color:C.muted, fontWeight:"700", letterSpacing:"-0.01em", fontFamily:FONT, fontSize:"11px", borderBottom:`1px solid ${C.border}`, whiteSpace:"nowrap" }}>TECH</th>
-                <th style={{ padding:"8px 18px", textAlign:"left", color:C.muted, fontWeight:"700", letterSpacing:"-0.01em", fontFamily:FONT, fontSize:"11px", borderBottom:`1px solid ${C.border}` }}>BREAKDOWN</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rangeRanked.length===0 && (
-                <tr><td colSpan={2} style={{ padding:"16px 18px", color:C.muted, textAlign:"center" }}>No switchovers logged in this range.</td></tr>
-              )}
-              {rangeRanked.map((t,i)=>{
-                const breakdown = Object.entries(t.byPlan).sort((a,b)=>b[1]-a[1]).map(([planId,count])=>`${count} ${PLAN_MAP[planId]?.label||planId}`).join(", ");
-                return (
-                  <tr key={t.id} style={{ borderBottom:`1px solid ${C.border}` }}>
-                    <td style={{ padding:"10px 18px", color:t.id===currentId?C.blue:C.black, fontWeight:"700", fontFamily:FONT, whiteSpace:"nowrap" }}>{medal(i)} {t.name}{t.id===currentId?" — YOU":""}</td>
-                    <td style={{ padding:"10px 18px", color:C.black }}>{breakdown} <span style={{ color:C.muted, fontSize:"11px" }}>({t.total} total)</span></td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"14px 18px" }}>
-        <Label color={C.purple}>Plan Values</Label>
+      <ListTitle right={`${rangeRanked.reduce((s,t)=>s+t.total,0)} team total`}>Switchovers</ListTitle>
+      <RankRows rows={rangeRanked.map(t=>({ id:t.id, name:t.name, value:`${t.total}`, chip:`${ptsOf(t.byPlan).toLocaleString()} pts`, sub:planList(t.byPlan) }))} currentId={currentId} empty="No switchovers in this range yet."/>
+      <ListTitle>All Time</ListTitle>
+      <RankRows rows={[...techs].filter(t=>(allCount[t.id]||0)>0).sort((a,b)=>(allPts[b.id]||0)-(allPts[a.id]||0)).map(t=>({ id:t.id, name:t.name, value:`${allCount[t.id]||0}`, chip:`${(allPts[t.id]||0).toLocaleString()} pts` }))} currentId={currentId} empty="No switchovers logged yet."/>
+      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"14px 16px" }}>
+        <Label>Plan Values</Label>
         <div style={{ display:"flex", flexWrap:"wrap", gap:"6px" }}>
-          {SERVICE_PLANS.map(p=>{ const pc=PLAN_COLORS[p.id]; return (
-            <div key={p.id} style={{ background:`${pc}15`, border:`1px solid ${pc}44`, borderLeft:`3px solid ${pc}`, borderRadius:"8px", padding:"4px 10px", fontSize:"12px" }}>
+          {SERVICE_PLANS.map(p=>(
+            <div key={p.id} style={{ background:C.cardLt, borderRadius:"980px", padding:"5px 12px", fontSize:"12px" }}>
               <span style={{ fontFamily:FONT, fontWeight:"600", color:C.black }}>{p.label} </span>
               <span style={{ color:C.muted }}>{p.freq} </span>
-              <span style={{ color:pc, fontFamily:FONT, fontWeight:"700" }}>+{p.pts}pts </span>
-              <span style={{ color:C.green, fontFamily:FONT }}>${p.ltv.toLocaleString()}/yr LTV</span>
+              <span style={{ color:C.blue, fontFamily:FONT, fontWeight:"600" }}>+{p.pts} pts</span>
             </div>
-          ); })}
+          ))}
         </div>
       </div>
     </div>
@@ -1146,99 +1003,32 @@ function SwitchoverLeaderboard({ techs, switchovers, currentId }) {
 
 // ─── REVIEW LEADERBOARD ───────────────────────────────────────────────────────
 function ReviewLeaderboard({ techs, reviews, currentId }) {
-  const mk = getMonthKey();
   const byMonth = {};
   reviews.forEach(r=>{ if(!byMonth[r.month_key])byMonth[r.month_key]={}; byMonth[r.month_key][r.tech_id]=(byMonth[r.month_key][r.tech_id]||0)+r.count; });
-  const allMonths = Object.keys(byMonth).sort((a,b)=>b.localeCompare(a));
-  const [selectedMonth, setSelectedMonth] = useState(mk);
-  const allTime = {};
-  reviews.forEach(r=>{ allTime[r.tech_id]=(allTime[r.tech_id]||0)+r.count; });
 
-  const mData = byMonth[selectedMonth]||{};
-  const ranked = [...techs].map(t=>({...t,cnt:mData[t.id]||0})).sort((a,b)=>b.cnt-a.cnt);
-  const top = ranked[0]?.cnt||1;
-  const monthTotal = ranked.reduce((s,t)=>s+t.cnt,0);
 
+  // Reviews are logged per month, so a range covers every month it touches.
+  // Points are per month (10+ in one month earns the bonus).
+  const [rangePreset, setRangePreset] = useState("mtd");
+  const [cStart, setCStart] = useState("");
+  const [cEnd, setCEnd] = useState("");
+  const { start: rangeStart, end: rangeEnd } = getDateRangeBounds(rangePreset, cStart, cEnd);
+  const monthsInRange = Object.keys(byMonth).filter(m => m >= rangeStart.slice(0,7) && m <= rangeEnd.slice(0,7));
+  const sumFor = (id, months) => months.reduce((acc,m)=>{ const n=byMonth[m]?.[id]||0; return { cnt:acc.cnt+n, pts:acc.pts+n*REVIEW_PTS+(n>=10?REVIEW_BONUS_PTS:0) }; }, { cnt:0, pts:0 });
+  const allMonthKeys = Object.keys(byMonth);
+  const rows = months => techs.map(t=>({ t, ...sumFor(t.id, months) })).filter(r=>r.cnt>0).sort((a,b)=>b.cnt-a.cnt)
+    .map(r=>({ id:r.t.id, name:r.t.name, value:`${r.cnt} ⭐`, chip:`${r.pts.toLocaleString()} pts` }));
+  const rangeRows = rows(monthsInRange);
   return (
-    <div style={{ display:"flex", flexDirection:"column", gap:"20px" }}>
-      {/* Points info */}
-      <div style={{ background:`${C.gold}18`, border:`1px solid ${C.gold}44`, borderRadius:"16px", padding:"12px 18px", display:"flex", gap:"24px", flexWrap:"wrap" }}>
-        <div><span style={{ fontFamily:FONT, fontWeight:"700", fontSize:"20px", color:C.gold }}>+{REVIEW_PTS}</span><span style={{ fontSize:"12px", color:C.muted, marginLeft:"6px" }}>pts per review</span></div>
-        <div><span style={{ fontFamily:FONT, fontWeight:"700", fontSize:"20px", color:C.gold }}>+{REVIEW_BONUS_PTS}</span><span style={{ fontSize:"12px", color:C.muted, marginLeft:"6px" }}>bonus at 10+ in a month</span></div>
-      </div>
-
-      {/* Month selector */}
-      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"14px 18px" }}>
-        <Label color={C.gold}>📅 Select Month</Label>
-        <select
-          value={selectedMonth}
-          onChange={e=>setSelectedMonth(e.target.value)}
-          style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"10px 14px", borderRadius:"16px", fontSize:"14px", fontFamily:FONT, fontWeight:"700", width:"100%", cursor:"pointer" }}
-        >
-          {allMonths.length === 0 && <option value={mk}>{formatMonthLabel(mk)} — Current Month</option>}
-          {allMonths.map(m=>(
-            <option key={m} value={m}>{formatMonthLabel(m)}{m===mk?" — Current":""}</option>
-          ))}
-        </select>
-      </div>
-
-      {/* Selected month breakdown */}
-      <div style={{ background:C.card, border:`1px solid ${selectedMonth===mk?C.gold:C.border}`, borderRadius:"16px", overflow:"hidden" }}>
-        <div style={{ padding:"14px 18px", borderBottom:`1px solid ${C.border}`, background:C.cardLt, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-          <div>
-            <div style={{ fontFamily:FONT, fontWeight:"600", fontSize:"16px", color:C.black }}>{formatMonthLabel(selectedMonth)}</div>
-            {selectedMonth===mk&&<div style={{ fontSize:"11px", color:C.gold, letterSpacing:"-0.01em", textTransform:"none", marginTop:"2px" }}>Current Month</div>}
-          </div>
-          <div style={{ textAlign:"right" }}>
-            <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"24px", color:C.gold }}>{monthTotal} ⭐</div>
-            <div style={{ fontSize:"11px", color:C.muted, letterSpacing:"-0.01em" }}>TEAM TOTAL</div>
-          </div>
-        </div>
-        <div style={{ padding:"14px 18px", display:"flex", flexDirection:"column", gap:"10px" }}>
-          {ranked.map((t,idx)=>{
-            const isMe=t.id===currentId; const pct=top>0?Math.round((t.cnt/top)*100):0; const bonus=t.cnt>=10;
-            return (
-              <div key={t.id} style={{ background:isMe?`${C.blue}18`:"transparent", border:isMe?`1px solid ${C.blue}44`:"1px solid transparent", borderRadius:"16px", padding:"10px 12px" }}>
-                <div style={{ display:"flex", alignItems:"center", gap:"12px", marginBottom:"8px" }}>
-                  <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:idx<3?"20px":"13px", color:C.muted, width:"26px", textAlign:"center" }}>{medal(idx)}</div>
-                  <div style={{ width:"36px", height:"36px", borderRadius:"50%", background:`${C.blue}22`, border:`1px solid ${C.blue}44`, display:"flex", alignItems:"center", justifyContent:"center", fontFamily:FONT, fontSize:"12px", fontWeight:"600", color:C.blue, flexShrink:0 }}>{t.avatar}</div>
-                  <div style={{ flex:1 }}>
-                    <div style={{ fontFamily:FONT, fontWeight:"600", fontSize:"15px", color:C.black }}>{t.name}{isMe&&<span style={{ color:C.blue, fontSize:"11px", marginLeft:"6px" }}>YOU</span>}</div>
-                    <div style={{ fontSize:"11px", color:C.muted }}>+{(t.cnt*REVIEW_PTS)+(bonus?REVIEW_BONUS_PTS:0)} pts{bonus?" 🔥":""}</div>
-                  </div>
-                  <div style={{ textAlign:"right" }}>
-                    <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"22px", color:t.cnt>0?C.gold:C.border }}>{t.cnt} ⭐</div>
-                  </div>
-                </div>
-                <Bar pct={pct} color={C.gold} h={4}/>
-                {bonus&&<div style={{ marginTop:"6px" }}><Pill color={C.gold}>🔥 Bonus unlocked</Pill></div>}
-              </div>
-            );
-          })}
-          {monthTotal===0&&<div style={{ fontSize:"13px", color:C.muted, textAlign:"center", padding:"12px" }}>No reviews logged for this month</div>}
-        </div>
-      </div>
-
-      {/* Running totals pinned at bottom */}
-      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", overflow:"hidden" }}>
-        <div style={{ padding:"14px 18px", borderBottom:`1px solid ${C.border}`, background:C.cardLt }}>
-          <Label color={C.gold}>⭐ Running Totals — All Time</Label>
-        </div>
-        <div style={{ padding:"14px 18px", display:"flex", flexDirection:"column", gap:"10px" }}>
-          {[...techs].sort((a,b)=>(allTime[b.id]||0)-(allTime[a.id]||0)).map((t,i)=>{
-            const cnt=allTime[t.id]||0; const topCnt=Math.max(...techs.map(x=>allTime[x.id]||0))||1; const pct=Math.round((cnt/topCnt)*100);
-            return (
-              <div key={t.id}>
-                <div style={{ display:"flex", justifyContent:"space-between", marginBottom:"5px" }}>
-                  <span style={{ fontSize:"13px", color:t.id===currentId?C.blue:C.black }}>{medal(i)} {t.name}{t.id===currentId?" — YOU":""}</span>
-                  <span style={{ fontFamily:FONT, fontWeight:"600", fontSize:"14px", color:C.black }}>{cnt} ⭐</span>
-                </div>
-                <Bar pct={pct} color={C.gold}/>
-              </div>
-            );
-          })}
-        </div>
-      </div>
+    <div style={{ display:"flex", flexDirection:"column", gap:"14px" }}>
+      <div style={{ fontSize:"13px", color:C.muted, padding:"0 4px" }}>+{REVIEW_PTS} pts per 5-star review · +{REVIEW_BONUS_PTS} bonus at 10+ in a month</div>
+      <DateRangePicker label="📅 Date Range" preset={rangePreset} setPreset={setRangePreset} customStart={cStart} setCustomStart={setCStart} customEnd={cEnd} setCustomEnd={setCEnd}>
+        <div style={{ fontSize:"12px", color:C.muted, marginTop:"8px" }}>{fmtShortDate(rangeStart)} – {fmtShortDate(rangeEnd)} · reviews are logged by month</div>
+      </DateRangePicker>
+      <ListTitle right={`${monthsInRange.reduce((s,m)=>s+Object.values(byMonth[m]).reduce((a,b)=>a+b,0),0)} team total`}>5-Star Reviews</ListTitle>
+      <RankRows rows={rangeRows} currentId={currentId} empty="No reviews in this range yet."/>
+      <ListTitle>All Time</ListTitle>
+      <RankRows rows={rows(allMonthKeys)} currentId={currentId} empty="No reviews logged yet."/>
     </div>
   );
 }
@@ -1415,93 +1205,10 @@ function ReportsTab({ techs, jobs, upsells=[], timeEntries=[], tipEntries=[], te
 
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:"16px" }}>
-      {/* Period selector */}
-      <DateRangePicker label="📊 Time Period" color={C.blue} preset={preset} setPreset={setPreset} customStart={cStart} setCustomStart={setCStart} customEnd={cEnd} setCustomEnd={setCEnd}>
-        <div style={{ marginTop:"8px", fontSize:"11px", color:C.blue, fontFamily:FONT, fontWeight:"700" }}>
-            {start} → {end} · {inRange.length} job{inRange.length!==1?"s":""}
-          </div>
-      </DateRangePicker>
-
-      {inRange.length===0?(
-        <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"32px", textAlign:"center", color:C.muted, fontSize:"13px" }}>
-          No jobs found for this period. The HCP sync runs every 5 minutes.
-        </div>
-      ):(
-        <>
-          {/* Metric cards */}
-          <div style={{ display:"grid", gridTemplateColumns:"repeat(2,1fr)", gap:"10px" }}>
-            {[
-              { label:"Serviced Revenue", value:`$${Math.round(totalRevenue).toLocaleString()}`, color:C.green,                                              sub:`${inRange.length} jobs` },
-              { label:"Tips",            value:`$${Math.round(totalTips).toLocaleString()}`,   color:C.gold,                                               sub:"separate from revenue" },
-              { label:"Hours",           value:totalHours>0?totalHours.toFixed(1):"—",            color:C.blue,                                               sub:totalHours>0?`${(totalHours/Math.max(inRange.length,1)).toFixed(1)}h/job avg`:"Enter hours below" },
-              { label:"Rev / Hour",   value:totalHours>0?`$${revPerHr.toFixed(2)}`:"—",        color:totalHours>0?(revPerHr>=75?C.green:C.orange):C.muted, sub:"Target: >$75/hr" },
-              { label:"Upsell $",     value:`$${Math.round(totalUpsells).toLocaleString()}`,   color:C.gold,                                               sub:`of $${Math.round(totalRevenue).toLocaleString()} revenue` },
-              { label:"Upsell Rate",  value:`${upsellPct.toFixed(1)}%`,                        color:upsellPct>=10?C.green:C.orange,                       sub:"Target: >10%" },
-              { label:"Labor Cost %", value:totalLabor>0?`${laborPct.toFixed(1)}%`:"—",        color:totalLabor>0?(laborPct<=LABOR_TARGET_PCT?C.green:C.orange):C.muted,  sub:`Goal: ${LABOR_TARGET_PCT}% or lower` },
-            ].map(s=>(
-              <div key={s.label} style={{ ...metricStyle, borderTop:`3px solid ${s.color}` }}>
-                <div style={{ fontSize:"11px", color:C.muted, letterSpacing:"-0.01em", textTransform:"none", fontFamily:FONT, fontWeight:"700", marginBottom:"8px" }}>{s.label}</div>
-                <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"28px", color:s.color, lineHeight:1 }}>{s.value}</div>
-                {s.sub&&<div style={{ fontSize:"11px", color:C.muted, marginTop:"5px" }}>{s.sub}</div>}
-              </div>
-            ))}
-          </div>
-
-          {/* Per-tech breakdown — admin / all-techs view only */}
-          {techRows.length>0&&(
-            <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", overflow:"hidden" }}>
-              <div style={{ padding:"14px 18px", borderBottom:`1px solid ${C.border}`, background:C.cardLt }}>
-                <Label color={C.blue}>Per-Tech Breakdown</Label>
-              </div>
-              <div style={{ padding:"14px 18px", display:"flex", flexDirection:"column", gap:"10px" }}>
-                {techRows.map((t,i)=>(
-                  <div key={t.id} style={{ background:C.cardLt, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"12px 14px" }}>
-                    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:"8px" }}>
-                      <div style={{ fontFamily:FONT, fontWeight:"700", fontStyle:"normal", fontSize:"16px", color:C.black }}>{medal(i)} {t.name}{t.is_active===false&&<ArchivedTag/>}</div>
-                      <div style={{ textAlign:"right" }}>
-                        <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"22px", color:C.green, lineHeight:1 }}>${Math.round(t.rev).toLocaleString()}</div>
-                        <div style={{ fontSize:"11px", color:C.muted, letterSpacing:"-0.01em", textTransform:"none", marginBottom:"2px" }}>serviced</div>
-                        {t.tips>0&&<div style={{ fontFamily:FONT, fontWeight:"600", fontSize:"14px", color:C.gold }}>${t.tips.toFixed(0)} tips</div>}
-                      </div>
-                    </div>
-                    <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:"6px" }}>
-                      {[
-                        { l:"Hours",    v:t.hrs.toFixed(1),             c:C.blue   },
-                        { l:"Rev/hr",   v:`$${t.revPerHr.toFixed(0)}`,  c:C.purple },
-                        { l:"Upsells",  v:`$${Math.round(t.ups)}`,      c:C.gold   },
-                        { l:"Upsell %", v:`${t.upsellPct.toFixed(1)}%`, c:t.upsellPct>=10?C.green:C.orange },
-                      ].map(s=>(
-                        <div key={s.l} style={{ background:C.white, borderRadius:"8px", padding:"6px", textAlign:"center" }}>
-                          <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"14px", color:s.c }}>{s.v}</div>
-                          <div style={{ fontSize:"11px", color:C.muted, textTransform:"none", letterSpacing:"-0.01em" }}>{s.l}</div>
-                        </div>
-                      ))}
-                    </div>
-                    {t.wkBreakdown?.length>0&&(
-                      <div style={{ marginTop:"8px", borderTop:`1px solid ${C.border}`, paddingTop:"8px", display:"flex", flexDirection:"column", gap:"3px" }}>
-                        {t.wkBreakdown.map(w=>(
-                          <div key={w.wk} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"4px 8px", background:C.white, borderRadius:"8px" }}>
-                            <div style={{ fontSize:"11px", color:C.muted, fontFamily:FONT, fontWeight:"700" }}>{formatWeekLabel(w.wk)} · {w.count} job{w.count!==1?"s":""}</div>
-                            <div style={{ display:"flex", gap:"8px", alignItems:"center" }}>
-                              <span style={{ fontFamily:FONT, fontWeight:"700", fontSize:"13px", color:C.green }}>${Math.round(w.rev).toLocaleString()}</span>
-                              {w.tips>0&&<span style={{ fontFamily:FONT, fontWeight:"700", fontSize:"12px", color:C.gold }}>+${w.tips.toFixed(0)} tips</span>}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </>
-      )}
-
-      {/* Repair Revenue — admin only */}
-      {techId===null && (
-        <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"20px", display:"flex", flexDirection:"column", gap:"12px" }}>
-          <Label color={C.orange}>Repair Revenue from HCP</Label>
+      {/* Repair Revenue — admin only, tucked in the top-right Tools */}
+      {techId===null && <PageTools tools={[{ id:"repair", label:"Repair from HCP", icon:"🔧", render:()=>(
+        <div style={{ display:"flex", flexDirection:"column", gap:"12px" }}>
+          <div style={{ fontFamily:FONT, fontWeight:"600", fontSize:"16px", color:C.black }}>Repair Revenue from HCP</div>
           <div style={{ fontSize:"12px", color:C.muted }}>Re-scans completed jobs and their invoices across a custom date range and rewrites revenue to the board. Use this to fix missing or wrong revenue.</div>
           <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"8px" }}>
             {[["FROM", repairRevFrom, setRepairRevFrom], ["TO", repairRevTo, setRepairRevTo]].map(([lbl, val, set]) => (
@@ -1511,7 +1218,7 @@ function ReportsTab({ techs, jobs, upsells=[], timeEntries=[], tipEntries=[], te
               </div>
             ))}
           </div>
-          <button onClick={repairRevenueFromHCP} disabled={repairingRev} style={{ background:repairingRev?"#333":C.orange, border:"none", color:C.white, padding:"13px", borderRadius:"16px", cursor:repairingRev?"not-allowed":"pointer", fontSize:"13px", fontWeight:"700", letterSpacing:"-0.01em", fontFamily:FONT, width:"100%", textTransform:"none" }}>
+          <button onClick={repairRevenueFromHCP} disabled={repairingRev} style={{ background:repairingRev?C.border:C.orange, border:"none", color:C.white, padding:"13px", borderRadius:"16px", cursor:repairingRev?"not-allowed":"pointer", fontSize:"13px", fontWeight:"700", letterSpacing:"-0.01em", fontFamily:FONT, width:"100%", textTransform:"none" }}>
             {repairingRev ? "Scanning HCP — this may take ~20 sec..." : "Repair Revenue"}
           </button>
           {repairRevResult && (
@@ -1525,7 +1232,7 @@ function ReportsTab({ techs, jobs, upsells=[], timeEntries=[], tipEntries=[], te
                     <button onClick={()=>setRevExpanded(v=>!v)} style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"5px 10px", borderRadius:"8px", cursor:"pointer", fontFamily:FONT, fontWeight:"700", fontSize:"11px", letterSpacing:"-0.01em" }}>
                       {revExpanded ? "COLLAPSE" : "VIEW FULL REPORT"}
                     </button>
-                    <button onClick={exportRevenueCSV} style={{ background:C.green, border:"none", color:C.black, padding:"5px 10px", borderRadius:"8px", cursor:"pointer", fontFamily:FONT, fontWeight:"700", fontSize:"11px", letterSpacing:"-0.01em" }}>
+                    <button onClick={exportRevenueCSV} style={{ background:C.blue, border:"none", color:C.white, padding:"5px 10px", borderRadius:"8px", cursor:"pointer", fontFamily:FONT, fontWeight:"700", fontSize:"11px", letterSpacing:"-0.01em" }}>
                       EXPORT CSV
                     </button>
                   </div>
@@ -1558,7 +1265,90 @@ function ReportsTab({ techs, jobs, upsells=[], timeEntries=[], tipEntries=[], te
             </div>
           )}
         </div>
+      )}]}/>}
+      {/* Period selector */}
+      <DateRangePicker label="📊 Time Period" color={C.blue} preset={preset} setPreset={setPreset} customStart={cStart} setCustomStart={setCStart} customEnd={cEnd} setCustomEnd={setCEnd}>
+        <div style={{ marginTop:"8px", fontSize:"11px", color:C.blue, fontFamily:FONT, fontWeight:"700" }}>
+            {start} → {end} · {inRange.length} job{inRange.length!==1?"s":""}
+          </div>
+      </DateRangePicker>
+
+      {inRange.length===0?(
+        <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"32px", textAlign:"center", color:C.muted, fontSize:"13px" }}>
+          No jobs found for this period. The HCP sync runs every 5 minutes.
+        </div>
+      ):(
+        <>
+          {/* Metric cards */}
+          <div style={{ display:"grid", gridTemplateColumns:"repeat(2,1fr)", gap:"10px" }}>
+            {[
+              { label:"Serviced Revenue", value:`$${Math.round(totalRevenue).toLocaleString()}`, color:C.green,                                              sub:`${inRange.length} jobs` },
+              { label:"Tips",            value:`$${Math.round(totalTips).toLocaleString()}`,   color:C.gold,                                               sub:"separate from revenue" },
+              { label:"Hours",           value:totalHours>0?totalHours.toFixed(1):"—",            color:C.blue,                                               sub:totalHours>0?`${(totalHours/Math.max(inRange.length,1)).toFixed(1)}h/job avg`:"Enter hours below" },
+              { label:"Rev / Hour",   value:totalHours>0?`$${revPerHr.toFixed(2)}`:"—",        color:totalHours>0?(revPerHr>=75?C.green:C.red):C.muted, sub:"Target: >$75/hr" },
+              { label:"Upsell $",     value:`$${Math.round(totalUpsells).toLocaleString()}`,   color:C.gold,                                               sub:`of $${Math.round(totalRevenue).toLocaleString()} revenue` },
+              { label:"Upsell Rate",  value:`${upsellPct.toFixed(1)}%`,                        color:upsellPct>=10?C.green:C.red,                       sub:"Target: >10%" },
+              { label:"Labor Cost %", value:totalLabor>0?`${laborPct.toFixed(1)}%`:"—",        color:totalLabor>0?(laborPct<=LABOR_TARGET_PCT?C.green:C.red):C.muted,  sub:`Goal: ${LABOR_TARGET_PCT}% or lower` },
+            ].map(s=>(
+              <div key={s.label} style={{ ...metricStyle }}>
+                <div style={{ fontSize:"11px", color:C.muted, letterSpacing:"-0.01em", textTransform:"none", fontFamily:FONT, fontWeight:"700", marginBottom:"8px" }}>{s.label}</div>
+                <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"28px", color:s.color, lineHeight:1 }}>{s.value}</div>
+                {s.sub&&<div style={{ fontSize:"11px", color:C.muted, marginTop:"5px" }}>{s.sub}</div>}
+              </div>
+            ))}
+          </div>
+
+          {/* Per-tech breakdown — admin / all-techs view only */}
+          {techRows.length>0&&(
+            <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", overflow:"hidden" }}>
+              <div style={{ padding:"14px 18px", borderBottom:`1px solid ${C.border}`, background:C.cardLt }}>
+                <Label color={C.blue}>Per-Tech Breakdown</Label>
+              </div>
+              <div style={{ padding:"14px 18px", display:"flex", flexDirection:"column", gap:"10px" }}>
+                {techRows.map((t,i)=>(
+                  <div key={t.id} style={{ background:C.cardLt, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"12px 14px" }}>
+                    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:"8px" }}>
+                      <div style={{ fontFamily:FONT, fontWeight:"700", fontStyle:"normal", fontSize:"16px", color:C.black }}>{medal(i)} {t.name}{t.is_active===false&&<ArchivedTag/>}</div>
+                      <div style={{ textAlign:"right" }}>
+                        <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"22px", color:C.green, lineHeight:1 }}>${Math.round(t.rev).toLocaleString()}</div>
+                        <div style={{ fontSize:"11px", color:C.muted, letterSpacing:"-0.01em", textTransform:"none", marginBottom:"2px" }}>serviced</div>
+                        {t.tips>0&&<div style={{ fontFamily:FONT, fontWeight:"600", fontSize:"14px", color:C.gold }}>${t.tips.toFixed(0)} tips</div>}
+                      </div>
+                    </div>
+                    <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:"6px" }}>
+                      {[
+                        { l:"Hours",    v:t.hrs.toFixed(1),             c:C.blue   },
+                        { l:"Rev/hr",   v:`$${t.revPerHr.toFixed(0)}`,  c:C.purple },
+                        { l:"Upsells",  v:`$${Math.round(t.ups)}`,      c:C.gold   },
+                        { l:"Upsell %", v:`${t.upsellPct.toFixed(1)}%`, c:t.upsellPct>=10?C.green:C.red },
+                      ].map(s=>(
+                        <div key={s.l} style={{ background:C.white, borderRadius:"8px", padding:"6px", textAlign:"center" }}>
+                          <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"14px", color:s.c }}>{s.v}</div>
+                          <div style={{ fontSize:"11px", color:C.muted, textTransform:"none", letterSpacing:"-0.01em" }}>{s.l}</div>
+                        </div>
+                      ))}
+                    </div>
+                    {t.wkBreakdown?.length>0&&(
+                      <div style={{ marginTop:"8px", borderTop:`1px solid ${C.border}`, paddingTop:"8px", display:"flex", flexDirection:"column", gap:"3px" }}>
+                        {t.wkBreakdown.map(w=>(
+                          <div key={w.wk} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"4px 8px", background:C.white, borderRadius:"8px" }}>
+                            <div style={{ fontSize:"11px", color:C.muted, fontFamily:FONT, fontWeight:"700" }}>{formatWeekLabel(w.wk)} · {w.count} job{w.count!==1?"s":""}</div>
+                            <div style={{ display:"flex", gap:"8px", alignItems:"center" }}>
+                              <span style={{ fontFamily:FONT, fontWeight:"700", fontSize:"13px", color:C.green }}>${Math.round(w.rev).toLocaleString()}</span>
+                              {w.tips>0&&<span style={{ fontFamily:FONT, fontWeight:"700", fontSize:"12px", color:C.gold }}>+${w.tips.toFixed(0)} tips</span>}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </>
       )}
+
 
     </div>
   );
@@ -2139,7 +1929,7 @@ function JourneyCard({ tech, rank, total, onClick, expanded, upsells, quota, job
                 <span style={{ fontFamily:FONT, fontWeight:"700", fontSize:"22px", color:C.green }}>${totalPay.toFixed(2)}</span>
               </div>
               {nextPayTier&&(
-                <div style={{ marginTop:"8px", background:nextPayTier.amt===null?`${C.green}18`:`${C.gold}18`, border:`1px solid ${nextPayTier.amt===null?C.green:C.gold}44`, borderRadius:"10px", padding:"6px 10px", fontSize:"11px", color:nextPayTier.amt===null?C.green:C.gold, fontFamily:FONT, fontWeight:"700" }}>
+                <div style={{ marginTop:"8px", background:nextPayTier.amt===null?`${C.green}18`:`${C.gold}18`, border:`1px solid ${nextPayTier.amt===null?C.green:C.red}44`, borderRadius:"10px", padding:"6px 10px", fontSize:"11px", color:nextPayTier.amt===null?C.green:C.red, fontFamily:FONT, fontWeight:"700" }}>
                   {nextPayTier.amt===null
                     ? `🔥 ${nextPayTier.label}`
                     : `💡 Upsell $${nextPayTier.amt.toFixed(0)} more to unlock ${nextPayTier.label}`}
@@ -2337,7 +2127,7 @@ const money = n => `$${Number(n||0).toLocaleString(undefined,{maximumFractionDig
 
 function OpsCard({ title, color, pay, status, statusColor, children }) {
   return (
-    <div style={{ background:C.white, border:`1px solid ${C.border}`, borderTop:`3px solid ${color}`, borderRadius:"16px", padding:"18px", boxShadow:"0 2px 8px rgba(0,0,0,0.06)" }}>
+    <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"18px", boxShadow:"0 2px 8px rgba(0,0,0,0.06)" }}>
       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:"10px", marginBottom:"10px" }}>
         <Label color={color}>{title}</Label>
         <div style={{ textAlign:"right" }}>
@@ -2578,8 +2368,8 @@ const CREWS = [
   { id:"red",    label:"Red crew",   days:"1235", color:"#e53935" },
   { id:"blue",   label:"Blue crew",  days:"3456", color:"#1e40af" },
   { id:"green",  label:"Green crew", days:"1246", color:"#16a34a" },
-  { id:"other",  label:"Other days", days:null,   color:"#8b5cf6" },
-  { id:"bb",     label:"BB (commercial)", days:null, color:"#ff9f0a" },
+  { id:"other",  label:"Other days", days:null,   color:"#005fb0" },
+  { id:"bb",     label:"BB (commercial)", days:null, color:"#0077d4" },
   { id:"aux",    label:"AUX (backup)",    days:null, color:"#64748b" },
 ];
 const CREW_BY_ID = Object.fromEntries(CREWS.map(c=>[c.id,c]));
@@ -4018,6 +3808,27 @@ function AdminTimeSheetTab({ techs, timeEntries, refreshAll, showToast, lockedTe
 
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:"16px" }}>
+      <PageTools tools={[{ id:"import", label:"Bulk Import", icon:"📥", render:()=>(
+        <div style={{ display:"flex", flexDirection:"column", gap:"12px" }}>
+          <div style={{ fontFamily:FONT, fontWeight:"600", fontSize:"16px", color:C.black }}>Bulk Import — One-Time Backfill</div>
+        <div style={{ fontSize:"12px", color:C.muted, display:"flex", flexDirection:"column", gap:"4px" }}>
+          <div>Two line formats, mix freely — one entry per line:</div>
+          <div>• Per-session: <code>Tech Name, YYYY-MM-DD, HH:MM, HH:MM</code> (24-hour, Mountain Time). Same tech + date twice = two sessions that day (e.g. a lunch break).</div>
+          <div>• Weekly total (historical, no daily breakdown available): <code>Tech Name: Month Day TotalHours</code> — day must be a <strong>Sunday</strong> (weeks run Sun–Sat). Spread evenly across 4 synthetic Mon–Thu sessions so daily numbers stay plausible while the weekly total still rolls up correctly.</div>
+        </div>
+        <textarea value={bulkText} onChange={e=>setBulkText(e.target.value)} rows={8} placeholder={"Riley Lyon, 2026-06-02, 08:15, 16:30\nTom Lorenc, 2026-06-02, 07:30, 15:00\nJaMuar Hill: July 4 37.18"} style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"10px", borderRadius:"10px", fontSize:"12px", fontFamily:"monospace", width:"100%", boxSizing:"border-box", resize:"vertical" }}/>
+        <button onClick={runImport} disabled={importing||!bulkText.trim()} style={{ background:importing?C.border:C.orange, border:"none", color:C.white, padding:"13px", borderRadius:"16px", cursor:(importing||!bulkText.trim())?"not-allowed":"pointer", fontSize:"13px", fontWeight:"700", letterSpacing:"-0.01em", fontFamily:FONT, width:"100%", textTransform:"none" }}>
+          {importing ? "Importing..." : "Import Sessions"}
+        </button>
+        {importResult && (
+          importResult.ok
+            ? <div style={{ fontSize:"12px", color:C.green }}>✅ Imported {importResult.count} session{importResult.count===1?"":"s"}.</div>
+            : <div style={{ background:"#ef444418", border:"1px solid #ef4444", borderRadius:"10px", padding:"10px", fontSize:"11px", color:"#ff3b30", maxHeight:"200px", overflowY:"auto", display:"flex", flexDirection:"column", gap:"4px" }}>
+                {importResult.errors.map((e,i)=><div key={i}>{e}</div>)}
+              </div>
+        )}
+        </div>
+      )}]}/>
       <DateRangePicker label="🕒 Time Sheet" color={C.blue} preset={rangePreset} setPreset={setRangePreset} customStart={cStart} setCustomStart={setCStart} customEnd={cEnd} setCustomEnd={setCEnd}>
         <div style={{ fontSize:"11px", color:C.blue, fontFamily:FONT, fontWeight:"700", marginTop:"8px" }}>
           {start} → {end} · {rankedTechs.length} tech{rankedTechs.length!==1?"s":""} with hours
@@ -4041,25 +3852,6 @@ function AdminTimeSheetTab({ techs, timeEntries, refreshAll, showToast, lockedTe
 
       <AdminTimeEditor techs={techs} timeEntries={timeEntries} start={start} end={end} refreshAll={refreshAll} showToast={showToast} lockedTechId={lockedTechId}/>
 
-      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"20px", display:"flex", flexDirection:"column", gap:"12px" }}>
-        <Label color={C.orange}>Bulk Import — One-Time Backfill</Label>
-        <div style={{ fontSize:"12px", color:C.muted, display:"flex", flexDirection:"column", gap:"4px" }}>
-          <div>Two line formats, mix freely — one entry per line:</div>
-          <div>• Per-session: <code>Tech Name, YYYY-MM-DD, HH:MM, HH:MM</code> (24-hour, Mountain Time). Same tech + date twice = two sessions that day (e.g. a lunch break).</div>
-          <div>• Weekly total (historical, no daily breakdown available): <code>Tech Name: Month Day TotalHours</code> — day must be a <strong>Sunday</strong> (weeks run Sun–Sat). Spread evenly across 4 synthetic Mon–Thu sessions so daily numbers stay plausible while the weekly total still rolls up correctly.</div>
-        </div>
-        <textarea value={bulkText} onChange={e=>setBulkText(e.target.value)} rows={8} placeholder={"Riley Lyon, 2026-06-02, 08:15, 16:30\nTom Lorenc, 2026-06-02, 07:30, 15:00\nJaMuar Hill: July 4 37.18"} style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"10px", borderRadius:"10px", fontSize:"12px", fontFamily:"monospace", width:"100%", boxSizing:"border-box", resize:"vertical" }}/>
-        <button onClick={runImport} disabled={importing||!bulkText.trim()} style={{ background:importing?"#333":C.orange, border:"none", color:C.white, padding:"13px", borderRadius:"16px", cursor:(importing||!bulkText.trim())?"not-allowed":"pointer", fontSize:"13px", fontWeight:"700", letterSpacing:"-0.01em", fontFamily:FONT, width:"100%", textTransform:"none" }}>
-          {importing ? "Importing..." : "Import Sessions"}
-        </button>
-        {importResult && (
-          importResult.ok
-            ? <div style={{ fontSize:"12px", color:C.green }}>✅ Imported {importResult.count} session{importResult.count===1?"":"s"}.</div>
-            : <div style={{ background:"#ef444418", border:"1px solid #ef4444", borderRadius:"10px", padding:"10px", fontSize:"11px", color:"#ff3b30", maxHeight:"200px", overflowY:"auto", display:"flex", flexDirection:"column", gap:"4px" }}>
-                {importResult.errors.map((e,i)=><div key={i}>{e}</div>)}
-              </div>
-        )}
-      </div>
     </div>
   );
 }
@@ -4134,18 +3926,39 @@ function AdminUpsellEntry({ techs, refreshAll, showToast, upsells, jobs=[] }) {
     setRepairing(false);
   }
 
+  // What the board shows: its own range (default this month), separate from
+  // the repair range inside Tools.
+  const [viewPreset, setViewPreset] = useState("mtd");
+  const [viewCStart, setViewCStart] = useState("");
+  const [viewCEnd, setViewCEnd] = useState("");
+  const { start: viewFrom, end: viewTo } = getDateRangeBounds(viewPreset, viewCStart, viewCEnd);
+
+  // Filters by each entry's real completion date (jobs.job_date, joined via
+  // hcp_job_id). Manually-entered rows with no hcp_job_id have no date to
+  // match and are excluded, surfaced in the note below rather than dropped.
+  const jobDateByHcpId = {};
+  jobs.forEach(j => { if (j.hcp_job_id && !jobDateByHcpId[j.hcp_job_id]) jobDateByHcpId[j.hcp_job_id] = j.job_date; });
+  const upsellsWithDate = (upsells||[]).map(u => ({ ...u, resolvedDate: u.hcp_job_id ? (jobDateByHcpId[u.hcp_job_id] || null) : null }));
+  const rangeInRange = upsellsWithDate.filter(u => u.resolvedDate && u.resolvedDate >= viewFrom && u.resolvedDate <= viewTo);
+  const noDateEntries = upsellsWithDate.filter(u => !u.resolvedDate);
+  const noDateTotal = noDateEntries.reduce((s,u)=>s+(u.amount||0),0);
+  const rangeByTech = {};
+  rangeInRange.forEach(u => { rangeByTech[u.tech_id] = (rangeByTech[u.tech_id]||0) + (u.amount||0); });
+  const rangeRanked = techs.map(t=>({...t, amt: rangeByTech[t.id]||0})).filter(t=>t.amt>0).sort((a,b)=>b.amt-a.amt);
+  const teamTotal = rangeRanked.reduce((s,t)=>s+t.amt,0);
+
   return (
-    <div style={{ display:"flex", flexDirection:"column", gap:"16px" }}>
-      {/* ── Repair / Backfill ── */}
-      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"20px", display:"flex", flexDirection:"column", gap:"12px" }}>
-        <Label color={C.orange}>Repair Upsells from HCP</Label>
+    <div style={{ display:"flex", flexDirection:"column", gap:"14px" }}>
+      <PageTools tools={[{ id:"repair", label:"Repair from HCP", icon:"🔧", render:()=>(
+        <div style={{ display:"flex", flexDirection:"column", gap:"12px" }}>
+          <div style={{ fontFamily:FONT, fontWeight:"600", fontSize:"16px", color:C.black }}>Repair Upsells from HCP</div>
         <div style={{ fontSize:"12px", color:C.muted }}>Scans every "Additional Upgrades" line item across a custom date range and writes the real amounts to the board. Use this to fix missing or wrong upsells.</div>
         <DateRangePicker label="📅 Date Range" color={C.orange} preset={repairPreset} setPreset={setRepairPreset} customStart={repairCStart} setCustomStart={setRepairCStart} customEnd={repairCEnd} setCustomEnd={setRepairCEnd}>
           <div style={{ fontSize:"11px", color:C.orange, fontFamily:FONT, fontWeight:"700", marginTop:"8px" }}>
             {repairFrom} → {repairTo}
           </div>
         </DateRangePicker>
-        <button onClick={repairFromHCP} disabled={repairing} style={{ background:repairing?"#333":C.orange, border:"none", color:C.white, padding:"13px", borderRadius:"16px", cursor:repairing?"not-allowed":"pointer", fontSize:"13px", fontWeight:"700", letterSpacing:"-0.01em", fontFamily:FONT, width:"100%", textTransform:"none" }}>
+        <button onClick={repairFromHCP} disabled={repairing} style={{ background:repairing?C.border:C.orange, border:"none", color:C.white, padding:"13px", borderRadius:"16px", cursor:repairing?"not-allowed":"pointer", fontSize:"13px", fontWeight:"700", letterSpacing:"-0.01em", fontFamily:FONT, width:"100%", textTransform:"none" }}>
           {repairing ? "Scanning HCP — this may take ~20 sec..." : "Repair Upsells"}
         </button>
         {repairResult && (
@@ -4159,7 +3972,7 @@ function AdminUpsellEntry({ techs, refreshAll, showToast, upsells, jobs=[] }) {
                   <button onClick={()=>setUpsExpanded(v=>!v)} style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"5px 10px", borderRadius:"8px", cursor:"pointer", fontFamily:FONT, fontWeight:"700", fontSize:"11px", letterSpacing:"-0.01em" }}>
                     {upsExpanded ? "COLLAPSE" : "VIEW FULL REPORT"}
                   </button>
-                  <button onClick={exportUpsellsCSV} style={{ background:C.green, border:"none", color:C.black, padding:"5px 10px", borderRadius:"8px", cursor:"pointer", fontFamily:FONT, fontWeight:"700", fontSize:"11px", letterSpacing:"-0.01em" }}>
+                  <button onClick={exportUpsellsCSV} style={{ background:C.blue, border:"none", color:C.white, padding:"5px 10px", borderRadius:"8px", cursor:"pointer", fontFamily:FONT, fontWeight:"700", fontSize:"11px", letterSpacing:"-0.01em" }}>
                     EXPORT CSV
                   </button>
                 </div>
@@ -4193,42 +4006,20 @@ function AdminUpsellEntry({ techs, refreshAll, showToast, upsells, jobs=[] }) {
             )}
           </div>
         )}
-      </div>
+        </div>
+      )}]}/>
 
-      {(() => {
-        // Same range the Repair Upsells button above uses — changing FROM/TO
-        // updates this board too, instead of a separate hardcoded all-time sum.
-        // Filters by each entry's real completion date (jobs.job_date, joined
-        // via hcp_job_id), same exact-date approach as the tech-facing Upsells
-        // tab. Manually-entered rows with no hcp_job_id have no date to match
-        // against and are excluded, surfaced via the warning below rather than
-        // silently dropped.
-        const jobDateByHcpId = {};
-        jobs.forEach(j => { if (j.hcp_job_id && !jobDateByHcpId[j.hcp_job_id]) jobDateByHcpId[j.hcp_job_id] = j.job_date; });
-        const upsellsWithDate = (upsells||[]).map(u => ({ ...u, resolvedDate: u.hcp_job_id ? (jobDateByHcpId[u.hcp_job_id] || null) : null }));
-        const rangeInRange = upsellsWithDate.filter(u => u.resolvedDate && u.resolvedDate >= repairFrom && u.resolvedDate <= repairTo);
-        const noDateEntries = upsellsWithDate.filter(u => !u.resolvedDate);
-        const noDateTotal = noDateEntries.reduce((s,u)=>s+(u.amount||0),0);
-        const rangeByTech = {};
-        rangeInRange.forEach(u => { rangeByTech[u.tech_id] = (rangeByTech[u.tech_id]||0) + (u.amount||0); });
-        const rangeRanked = [...techs].map(t=>({...t, amt: rangeByTech[t.id]||0})).sort((a,b)=>b.amt-a.amt);
-        return (
-          <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"16px 18px" }}>
-            <Label color={C.green}>Upsell Totals · {repairFrom} → {repairTo}</Label>
-            {noDateEntries.length>0&&(
-              <div style={{ background:C.cardLt, borderRadius:"10px", padding:"8px 12px", fontSize:"11px", color:C.muted, marginBottom:"10px" }}>
-                ⚠ {noDateEntries.length} entr{noDateEntries.length!==1?"ies":"y"} totaling ${noDateTotal.toLocaleString()} {noDateEntries.length!==1?"have":"has"} no matched completion date (manually entered, not tied to an HCP job) — excluded from this range.
-              </div>
-            )}
-            {rangeRanked.map((t,i)=>(
-              <div key={t.id} style={{ display:"flex", justifyContent:"space-between", marginBottom:"8px" }}>
-                <span style={{ fontSize:"13px", color:C.black }}>{medal(i)} {t.name}</span>
-                <span style={{ fontFamily:FONT, fontWeight:"600", color:C.green }}>${t.amt.toLocaleString()} · {Math.round(t.amt*UPSELL_PTS_PER_DOLLAR)} pts</span>
-              </div>
-            ))}
-          </div>
-        );
-      })()}
+      <DateRangePicker label="📅 Date Range" preset={viewPreset} setPreset={setViewPreset} customStart={viewCStart} setCustomStart={setViewCStart} customEnd={viewCEnd} setCustomEnd={setViewCEnd}>
+        <div style={{ fontSize:"12px", color:C.muted, marginTop:"8px" }}>{fmtShortDate(viewFrom)} – {fmtShortDate(viewTo)} · by job completion date</div>
+      </DateRangePicker>
+
+      <ListTitle right={`$${Math.round(teamTotal).toLocaleString()} team total`}>Upsells</ListTitle>
+      <RankRows rows={rangeRanked.map(t=>({ id:t.id, name:t.name, value:`$${Math.round(t.amt).toLocaleString()}`, chip:`${Math.round(t.amt*UPSELL_PTS_PER_DOLLAR).toLocaleString()} pts` }))} empty="No upsells in this range."/>
+      {noDateEntries.length>0&&(
+        <div style={{ fontSize:"12px", color:C.muted, padding:"0 4px" }}>
+          {noDateEntries.length} entr{noDateEntries.length!==1?"ies":"y"} totaling ${noDateTotal.toLocaleString()} {noDateEntries.length!==1?"aren't":"isn't"} tied to an HCP job, so {noDateEntries.length!==1?"they're":"it's"} not in any date range.
+        </div>
+      )}
     </div>
   );
 }
@@ -4281,9 +4072,10 @@ function AdminReviewEntry({ techs, reviews, saving, setSaving, refreshAll, showT
     .sort((a, b) => b.count - a.count);
 
   return (
-    <div style={{ display:"flex", flexDirection:"column", gap:"16px" }}>
-    <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"20px", display:"flex", flexDirection:"column", gap:"14px" }}>
-      <Label color={C.gold}>Log 5-Star Reviews</Label>
+    <div style={{ display:"flex", flexDirection:"column", gap:"14px" }}>
+      <PageTools tools={[{ id:"log", label:"Log Reviews", icon:"＋", primary:true, render:()=>(
+        <div style={{ display:"flex", flexDirection:"column", gap:"14px" }}>
+          <div style={{ fontFamily:FONT, fontWeight:"600", fontSize:"16px", color:C.black }}>Log 5-Star Reviews</div>
       <div style={{ fontSize:"12px", color:C.muted }}>+{REVIEW_PTS} pts each · +{REVIEW_BONUS_PTS} bonus at 10+ · Log current or any past month</div>
 
       <div style={{ background:C.cardLt, borderRadius:"10px", padding:"8px 12px", fontSize:"12px", color:C.muted }}>
@@ -4322,29 +4114,16 @@ function AdminReviewEntry({ techs, reviews, saving, setSaving, refreshAll, showT
           </div>
         </div>
       ))}
-      <button onClick={handleSave} disabled={saving} style={{ background:saving?"#333":C.gold, border:"none", color:saving?"#666":C.black, padding:"13px", borderRadius:"16px", cursor:saving?"not-allowed":"pointer", fontSize:"13px", fontWeight:"700", letterSpacing:"-0.01em", fontFamily:FONT, width:"100%", textTransform:"none" }}>{saving?"Saving...":"Save Reviews"}</button>
-    </div>
+      <button onClick={handleSave} disabled={saving} style={{ background:saving?C.border:C.gold, border:"none", color:C.white, padding:"13px", borderRadius:"16px", cursor:saving?"not-allowed":"pointer", fontSize:"13px", fontWeight:"700", letterSpacing:"-0.01em", fontFamily:FONT, width:"100%", textTransform:"none" }}>{saving?"Saving...":"Save Reviews"}</button>
+        </div>
+      )}]}/>
 
-    <DateRangePicker label="📅 Date Range" color={C.gold} preset={rangePreset} setPreset={setRangePreset} customStart={cStart} setCustomStart={setCStart} customEnd={cEnd} setCustomEnd={setCEnd}>
-      <div style={{ fontSize:"11px", color:C.gold, fontFamily:FONT, fontWeight:"700", marginTop:"8px" }}>
-        {rangeStart} → {rangeEnd} · matched by month (reviews are logged by month, not exact day)
-      </div>
-    </DateRangePicker>
+      <DateRangePicker label="📅 Date Range" preset={rangePreset} setPreset={setRangePreset} customStart={cStart} setCustomStart={setCStart} customEnd={cEnd} setCustomEnd={setCEnd}>
+        <div style={{ fontSize:"12px", color:C.muted, marginTop:"8px" }}>{fmtShortDate(rangeStart)} – {fmtShortDate(rangeEnd)} · reviews are logged by month</div>
+      </DateRangePicker>
 
-    <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", overflow:"hidden" }}>
-      <div style={{ padding:"14px 18px", borderBottom:`1px solid ${C.border}`, background:C.cardLt }}>
-        <Label color={C.gold}>⭐ Review Totals · {rangeStart} → {rangeEnd}</Label>
-      </div>
-      <div style={{ padding:"14px 18px", display:"flex", flexDirection:"column", gap:"8px" }}>
-        {rangeRanked.length===0 && <div style={{ fontSize:"13px", color:C.muted, textAlign:"center", padding:"12px" }}>No reviews logged in this range.</div>}
-        {rangeRanked.map((t,i)=>(
-          <div key={t.id} style={{ display:"flex", justifyContent:"space-between" }}>
-            <span style={{ fontSize:"13px", color:C.black }}>{medal(i)} {t.name}</span>
-            <span style={{ fontFamily:FONT, fontWeight:"600", fontSize:"13px", color:C.black }}>{t.count} ⭐</span>
-          </div>
-        ))}
-      </div>
-    </div>
+      <ListTitle right={`${rangeRanked.reduce((s,t)=>s+t.count,0)} team total`}>5-Star Reviews</ListTitle>
+      <RankRows rows={rangeRanked.map(t=>({ id:t.id, name:t.name, value:`${t.count} ⭐` }))} empty="No reviews logged in this range."/>
     </div>
   );
 }
@@ -4387,14 +4166,24 @@ function AdminTipEntry({ techs, tipEntries, refreshAll, showToast }) {
     setSaving(false);
   }
 
-  const recent = [...tipEntries].sort((a,b)=>(b.created_at||"").localeCompare(a.created_at||"")).slice(0,25);
   const techById = Object.fromEntries(techs.map(t=>[t.id,t]));
   const selStyle = (val) => ({ background:C.cardLt, border:`1px solid ${C.border}`, color:val?C.black:C.muted, padding:"10px 14px", borderRadius:"16px", fontSize:"14px", fontFamily:FONT, fontWeight:"700", width:"100%", boxSizing:"border-box", cursor:"pointer" });
 
+  const [rangePreset, setRangePreset] = useState("mtd");
+  const [cStart, setCStart] = useState("");
+  const [cEnd, setCEnd] = useState("");
+  const { start: rangeStart, end: rangeEnd } = getDateRangeBounds(rangePreset, cStart, cEnd);
+  const inRange = tipEntries.filter(t => t.work_date >= rangeStart && t.work_date <= rangeEnd);
+  const byTech = {};
+  inRange.forEach(t => { byTech[t.tech_id] = (byTech[t.tech_id]||0) + (t.amount||0); });
+  const ranked = techs.filter(t=>byTech[t.id]>0).sort((a,b)=>byTech[b.id]-byTech[a.id]);
+  const recent = [...inRange].sort((a,b)=>(b.work_date||"").localeCompare(a.work_date||"")||(b.created_at||"").localeCompare(a.created_at||""));
+
   return (
-    <div style={{ display:"flex", flexDirection:"column", gap:"16px" }}>
-      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"20px", display:"flex", flexDirection:"column", gap:"12px" }}>
-        <Label color={C.gold}>Log a Tip</Label>
+    <div style={{ display:"flex", flexDirection:"column", gap:"14px" }}>
+      <PageTools tools={[{ id:"log", label:"Log Tip", icon:"＋", primary:true, render:()=>(
+        <div style={{ display:"flex", flexDirection:"column", gap:"12px" }}>
+          <div style={{ fontFamily:FONT, fontWeight:"600", fontSize:"16px", color:C.black }}>Log a Tip</div>
         <div style={{ fontSize:"12px", color:C.muted }}>Manual entry only — this is the source of truth for tip totals everywhere in the app (Reports, Payroll, etc.).</div>
         <select value={form.techId} onChange={e=>setForm(f=>({...f,techId:e.target.value}))} style={selStyle(form.techId)}>
           <option value="">— Select Tech —</option>
@@ -4411,13 +4200,21 @@ function AdminTipEntry({ techs, tipEntries, refreshAll, showToast }) {
             <input type="number" min="0" step="0.01" placeholder="e.g. 20.00" value={form.amount} onChange={e=>setForm(f=>({...f,amount:e.target.value}))} style={{ flex:1, background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"10px 14px", borderRadius:"16px", fontSize:"16px", fontFamily:FONT, fontWeight:"600", boxSizing:"border-box" }}/>
           </div>
         </div>
-        <button onClick={logTip} disabled={saving} style={{ background:saving?"#333":C.gold, border:"none", color:C.black, padding:"13px", borderRadius:"16px", cursor:saving?"not-allowed":"pointer", fontFamily:FONT, fontWeight:"700", fontSize:"13px", letterSpacing:"-0.01em", textTransform:"none" }}>{saving?"Saving...":"Log Tip"}</button>
-      </div>
+        <button onClick={logTip} disabled={saving} style={{ background:saving?C.border:C.blue, border:"none", color:C.white, padding:"13px", borderRadius:"16px", cursor:saving?"not-allowed":"pointer", fontFamily:FONT, fontWeight:"700", fontSize:"13px", letterSpacing:"-0.01em", textTransform:"none" }}>{saving?"Saving...":"Log Tip"}</button>
+        </div>
+      )}]}/>
+
+      <DateRangePicker label="📅 Date Range" preset={rangePreset} setPreset={setRangePreset} customStart={cStart} setCustomStart={setCStart} customEnd={cEnd} setCustomEnd={setCEnd}>
+        <div style={{ fontSize:"12px", color:C.muted, marginTop:"8px" }}>{fmtShortDate(rangeStart)} – {fmtShortDate(rangeEnd)}</div>
+      </DateRangePicker>
+
+      <ListTitle right={`$${inRange.reduce((s,t)=>s+(t.amount||0),0).toFixed(2)} team total`}>Tips</ListTitle>
+      <RankRows rows={ranked.map(t=>({ id:t.id, name:t.name, value:`$${byTech[t.id].toFixed(2)}` }))} empty="No tips in this range."/>
 
       <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", overflow:"hidden" }}>
-        <div style={{ padding:"14px 18px", borderBottom:`1px solid ${C.border}` }}><Label color={C.gold}>Recent Tips</Label></div>
+        <div style={{ padding:"14px 18px", borderBottom:`1px solid ${C.border}` }}><Label>Tips in this range</Label></div>
         <div style={{ padding:"14px 18px", display:"flex", flexDirection:"column", gap:"8px" }}>
-          {recent.length===0 && <div style={{ fontSize:"13px", color:C.muted, textAlign:"center", padding:"12px" }}>No tips logged yet.</div>}
+          {recent.length===0 && <div style={{ fontSize:"13px", color:C.muted, textAlign:"center", padding:"12px" }}>No tips in this range.</div>}
           {recent.map(t=>(
             <div key={t.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"6px 0", borderBottom:`1px solid ${C.border}` }}>
               <span style={{ fontSize:"13px", color:C.black }}>{techById[t.tech_id]?.name||"Unknown"} · {fmtShortDate(t.work_date)}</span>
@@ -4624,7 +4421,7 @@ function RideAlongTab({ techs, rideAlongs, schedules, onSave, onSaveSchedule, sa
                   <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"22px", color:C.black }}>{tech?.name}</div>
                   <div style={{ fontSize:"13px", color:C.muted }}>{formatDate(next)}</div>
                 </div>
-                <button onClick={()=>{ setSelectedTech(scheduleMap[next]); setSelectedDate(next); setView("new"); }} style={{ background:C.blue, border:"none", color:C.black, padding:"10px 18px", borderRadius:"8px", cursor:"pointer", fontFamily:FONT, fontWeight:"700", fontSize:"13px", letterSpacing:"-0.01em" }}>START SESSION →</button>
+                <button onClick={()=>{ setSelectedTech(scheduleMap[next]); setSelectedDate(next); setView("new"); }} style={{ background:C.blue, border:"none", color:C.white, padding:"10px 18px", borderRadius:"8px", cursor:"pointer", fontFamily:FONT, fontWeight:"700", fontSize:"13px", letterSpacing:"-0.01em" }}>START SESSION →</button>
               </div>
             );
           })()}
@@ -4712,7 +4509,7 @@ function RideAlongTab({ techs, rideAlongs, schedules, onSave, onSaveSchedule, sa
             <textarea value={generalNotes} onChange={e=>setGeneralNotes(e.target.value)} placeholder="Overall session notes, things to work on, wins, action items for next ride-along..." style={{...inp, minHeight:"100px"}}/>
           </div>
 
-          <button onClick={handleSaveRideAlong} disabled={saving||!selectedTech||!selectedDate} style={{ background:saving||!selectedTech||!selectedDate?"#333":C.green, border:"none", color:saving||!selectedTech||!selectedDate?"#666":C.black, padding:"14px", borderRadius:"16px", cursor:saving||!selectedTech||!selectedDate?"not-allowed":"pointer", fontFamily:FONT, fontWeight:"700", fontSize:"14px", letterSpacing:"-0.01em", textTransform:"none" }}>
+          <button onClick={handleSaveRideAlong} disabled={saving||!selectedTech||!selectedDate} style={{ background:saving||!selectedTech||!selectedDate?C.border:C.green, border:"none", color:saving||!selectedTech||!selectedDate?"#666":C.black, padding:"14px", borderRadius:"16px", cursor:saving||!selectedTech||!selectedDate?"not-allowed":"pointer", fontFamily:FONT, fontWeight:"700", fontSize:"14px", letterSpacing:"-0.01em", textTransform:"none" }}>
             {saving?"SAVING...":"SAVE RIDE-ALONG SESSION"}
           </button>
         </div>
@@ -4923,8 +4720,8 @@ const PHASE_LABELS = {
 
 const STAGE_CONFIG = {
   classroom:      { label:"Classroom",      color:"#2b9cf0", icon:"📚" },
-  field_training: { label:"Field Training", color:"#7c3aed", icon:"🔧" },
-  cert_pending:   { label:"Cert Pending",   color:"#ff9f0a", icon:"⏳" },
+  field_training: { label:"Field Training", color:"#005fb0", icon:"🔧" },
+  cert_pending:   { label:"Cert Pending",   color:"#0077d4", icon:"⏳" },
   cert_passed:    { label:"Certified",      color:"#34c759", icon:"✅" },
   active:         { label:"Active",         color:"#34c759", icon:"⭐" },
   hard_fail:      { label:"Hard Fail",      color:"#ff3b30", icon:"🚫" },
@@ -7066,7 +6863,7 @@ function SplitJobsAdmin({ techs, pendingSplits, refreshAll, showToast }) {
     <div style={{ display:"flex", flexDirection:"column", gap:"16px" }}>
       <div style={{ background:C.cardLt, borderRadius:"10px", padding:"12px 16px", fontSize:"12px", color:C.muted, lineHeight:"1.6" }}>
         These jobs have <strong style={{color:C.black}}>multiple techs</strong> with no confirmed revenue split on record — they are currently
-        using <strong style={{color:"#ff9f0a"}}>equal split</strong> as a placeholder. Enter the correct percentages below,
+        using <strong style={{color:"#0077d4"}}>equal split</strong> as a placeholder. Enter the correct percentages below,
         hit <strong style={{color:C.black}}>Save Split</strong>, then re-run <strong style={{color:C.black}}>Repair Upsells</strong> for that date to apply.
       </div>
       {splitJobs.filter(sj => !dismissedJobIds.has(sj.jobId)).length === 0 ? (
@@ -7112,7 +6909,7 @@ function SplitJobsAdmin({ techs, pendingSplits, refreshAll, showToast }) {
             })}
             {sj.totalUpsells > 0 && (
               <div style={{ borderTop:`1px solid ${C.border}`, paddingTop:"12px", display:"flex", flexDirection:"column", gap:"8px" }}>
-                <div style={{ fontSize:"11px", color:"#ff9f0a", fontWeight:"700", letterSpacing:"-0.01em", fontFamily:FONT, textTransform:"none" }}>
+                <div style={{ fontSize:"11px", color:"#0077d4", fontWeight:"700", letterSpacing:"-0.01em", fontFamily:FONT, textTransform:"none" }}>
                   Upsell Credit — ${(+sj.totalUpsells).toFixed(2)} total
                 </div>
                 <select
@@ -7127,7 +6924,7 @@ function SplitJobsAdmin({ techs, pendingSplits, refreshAll, showToast }) {
                   })}
                 </select>
                 {!upsellAttrib[sj.jobId] && (
-                  <div style={{ fontSize:"11px", color:"#ff9f0a" }}>⚠ Not set — will split by revenue % until confirmed</div>
+                  <div style={{ fontSize:"11px", color:"#0077d4" }}>⚠ Not set — will split by revenue % until confirmed</div>
                 )}
               </div>
             )}
@@ -7142,7 +6939,7 @@ function SplitJobsAdmin({ techs, pendingSplits, refreshAll, showToast }) {
                   <button
                     onClick={() => saveSplit(sj)}
                     disabled={rowDisabled}
-                    style={{ background: rowDisabled ? "#333" : "#ff9f0a", border:"none", color: rowDisabled ? "#666" : C.black, padding:"8px 20px", borderRadius:"12px", cursor: rowDisabled ? "not-allowed" : "pointer", fontFamily:FONT, fontWeight:"700", fontSize:"12px", letterSpacing:"-0.01em", textTransform:"none" }}
+                    style={{ background: rowDisabled ? "#333" : "#0077d4", border:"none", color: rowDisabled ? "#666" : C.black, padding:"8px 20px", borderRadius:"12px", cursor: rowDisabled ? "not-allowed" : "pointer", fontFamily:FONT, fontWeight:"700", fontSize:"12px", letterSpacing:"-0.01em", textTransform:"none" }}
                   >{rowSaving ? "Applying..." : "Save & Apply"}</button>
                 );
               })()}
@@ -8322,7 +8119,7 @@ function CallbacksPanel({ techs, jobs, callbacks, refreshAll, showToast }) {
   const [saving, setSaving] = useState(false);
   const inp={ background:C.white, border:`1px solid ${C.border}`, color:C.black, padding:"10px 14px", borderRadius:"10px", fontSize:"14px", fontFamily:FONT, width:"100%", boxSizing:"border-box" };
   const sel=(val)=>({...inp, color:val?C.black:C.muted});
-  const btn=(color)=>({ background:saving?C.border:color||C.blue, border:"none", color:C.black, padding:"13px", borderRadius:"24px", cursor:saving?"not-allowed":"pointer", fontSize:"13px", fontWeight:"700", fontStyle:"normal", letterSpacing:"-0.01em", fontFamily:FONT, width:"100%", textTransform:"none" });
+  const btn=(color)=>({ background:saving?C.border:color||C.blue, border:"none", color:C.white, padding:"13px", borderRadius:"24px", cursor:saving?"not-allowed":"pointer", fontSize:"13px", fontWeight:"700", fontStyle:"normal", letterSpacing:"-0.01em", fontFamily:FONT, width:"100%", textTransform:"none" });
   // The jobs a tech did recently, newest first -- picking one fills in the
   // date and client, and tells us who else was on it (split job).
   function recentJobsFor(techId, days) {
@@ -8767,7 +8564,7 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
 
   const inp={ background:C.white, border:`1px solid ${C.border}`, color:C.black, padding:"10px 14px", borderRadius:"10px", fontSize:"14px", fontFamily:FONT, width:"100%", boxSizing:"border-box" };
   const sel=(val)=>({...inp, color:val?C.black:C.muted});
-  const btn=(color)=>({ background:saving?C.border:color||C.blue, border:"none", color:C.black, padding:"13px", borderRadius:"24px", cursor:saving?"not-allowed":"pointer", fontSize:"13px", fontWeight:"700", fontStyle:"normal", letterSpacing:"-0.01em", fontFamily:FONT, width:"100%", textTransform:"none" });
+  const btn=(color)=>({ background:saving?C.border:color||C.blue, border:"none", color:C.white, padding:"13px", borderRadius:"24px", cursor:saving?"not-allowed":"pointer", fontSize:"13px", fontWeight:"700", fontStyle:"normal", letterSpacing:"-0.01em", fontFamily:FONT, width:"100%", textTransform:"none" });
 
   const adminNavSections = [
     { label:"Analytics", items:[
@@ -8836,9 +8633,9 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
         {pendingSplits.length > 0 && tab !== "splits" && (()=>{
           const count = new Set(pendingSplits.map(r => r.hcp_job_id)).size;
           return (
-            <div style={{ background:"rgba(245,158,11,0.1)", border:"1px solid #f59e0b", borderRadius:"12px", padding:"12px 16px", marginBottom:"16px", display:"flex", justifyContent:"space-between", alignItems:"center", gap:"12px" }}>
+            <div style={{ background:C.blueLt, border:"1px solid rgba(0,146,249,0.25)", borderRadius:"16px", padding:"12px 16px", marginBottom:"16px", display:"flex", justifyContent:"space-between", alignItems:"center", gap:"12px" }}>
               <div>
-                <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"14px", color:"#ff9f0a", letterSpacing:"-0.01em" }}>
+                <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"14px", color:"#0077d4", letterSpacing:"-0.01em" }}>
                   ⚠ {count} job{count !== 1 ? "s" : ""} need split confirmation
                 </div>
                 <div style={{ fontSize:"12px", color:C.muted, marginTop:"2px" }}>
@@ -8847,7 +8644,7 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
               </div>
               <button
                 onClick={() => setTab("splits")}
-                style={{ background:"#ff9f0a", border:"none", color:C.black, padding:"8px 18px", borderRadius:"10px", cursor:"pointer", fontFamily:FONT, fontWeight:"700", fontSize:"12px", letterSpacing:"-0.01em", textTransform:"none", whiteSpace:"nowrap", flexShrink:0 }}
+                style={{ background:"#0077d4", border:"none", color:C.white, padding:"8px 18px", borderRadius:"10px", cursor:"pointer", fontFamily:FONT, fontWeight:"700", fontSize:"12px", letterSpacing:"-0.01em", textTransform:"none", whiteSpace:"nowrap", flexShrink:0 }}
               >Review Now</button>
             </div>
           );
@@ -8912,9 +8709,26 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
         {tab==="reviews"&&(
           <AdminReviewEntry techs={techs} reviews={reviews} saving={saving} setSaving={setSaving} refreshAll={refreshAll} showToast={showToast}/>
         )}
-        {tab==="switchovers"&&(
-          <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"20px", display:"flex", flexDirection:"column", gap:"12px" }}>
-            <Label color={C.purple}>Log a Switchover</Label>
+        {tab==="switchovers"&&(() => {
+          const { start: swStart, end: swEnd } = getDateRangeBounds(swRangePreset, swCStart, swCEnd);
+          const swFromWk = dateToWeekKey(swStart);
+          const swInRange = switchovers.filter(s => s.week_key >= swFromWk && s.week_key <= swEnd);
+          const swByTech = {};
+          swInRange.forEach(s => {
+            if (!swByTech[s.tech_id]) swByTech[s.tech_id] = { total: 0, byPlan: {} };
+            swByTech[s.tech_id].total++;
+            swByTech[s.tech_id].byPlan[s.plan_id] = (swByTech[s.tech_id].byPlan[s.plan_id] || 0) + 1;
+          });
+          const swRanked = techs
+            .map(t => ({ ...t, total: swByTech[t.id]?.total || 0, byPlan: swByTech[t.id]?.byPlan || {} }))
+            .filter(t => t.total > 0)
+            .sort((a, b) => b.total - a.total);
+          return (
+            <>
+              <div style={{ display:"flex", flexDirection:"column", gap:"14px" }}>
+              <PageTools tools={[{ id:"log", label:"Log Switchover", icon:"＋", primary:true, render:()=>(
+                <div style={{ display:"flex", flexDirection:"column", gap:"12px" }}>
+                  <div style={{ fontFamily:FONT, fontWeight:"600", fontSize:"16px", color:C.black }}>Log a Switchover</div>
             <div style={{ background:C.cardLt, borderRadius:"10px", padding:"8px 12px", fontSize:"12px", color:C.muted }}>
               {formatLastEntered(mostRecentTimestamp(switchovers)) ? (
                 <>Last entered: <strong style={{ color:C.black }}>{formatLastEntered(mostRecentTimestamp(switchovers))}</strong> — everything before that is already logged.</>
@@ -8938,65 +8752,18 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
               <div style={{ fontSize:"12px", color:C.muted }}>Pays ${switchoverPay({plan_id:swForm.planId,with_exterior:swForm.exterior})} · counts today ({fmtShortDate(mtDateStr(Date.now()))}) on payroll</div>
             )}
             <button onClick={logSwitchover} disabled={saving} style={btn(C.purple)}>{saving?"Saving...":"Log Switchover"}</button>
-          </div>
-        )}
-        {tab==="switchovers"&&(() => {
-          const { start: swStart, end: swEnd } = getDateRangeBounds(swRangePreset, swCStart, swCEnd);
-          const swFromWk = dateToWeekKey(swStart);
-          const swInRange = switchovers.filter(s => s.week_key >= swFromWk && s.week_key <= swEnd);
-          const swByTech = {};
-          swInRange.forEach(s => {
-            if (!swByTech[s.tech_id]) swByTech[s.tech_id] = { total: 0, byPlan: {} };
-            swByTech[s.tech_id].total++;
-            swByTech[s.tech_id].byPlan[s.plan_id] = (swByTech[s.tech_id].byPlan[s.plan_id] || 0) + 1;
-          });
-          const swRanked = techs
-            .map(t => ({ ...t, total: swByTech[t.id]?.total || 0, byPlan: swByTech[t.id]?.byPlan || {} }))
-            .filter(t => t.total > 0)
-            .sort((a, b) => b.total - a.total);
-          return (
-            <>
-              <div style={{ marginTop:"16px" }}>
-                <DateRangePicker label="📅 Date Range" color={C.purple} preset={swRangePreset} setPreset={setSwRangePreset} customStart={swCStart} setCustomStart={setSwCStart} customEnd={swCEnd} setCustomEnd={setSwCEnd}>
-                  <div style={{ fontSize:"11px", color:C.purple, fontFamily:FONT, fontWeight:"700", marginTop:"8px" }}>
-                    {swStart} → {swEnd} · matched by week (switchovers are logged by week, not exact day)
-                  </div>
-                </DateRangePicker>
+                </div>
+              )}]}/>
+              <DateRangePicker label="📅 Date Range" preset={swRangePreset} setPreset={setSwRangePreset} customStart={swCStart} setCustomStart={setSwCStart} customEnd={swCEnd} setCustomEnd={setSwCEnd}>
+                <div style={{ fontSize:"12px", color:C.muted, marginTop:"8px" }}>{fmtShortDate(swStart)} – {fmtShortDate(swEnd)} · switchovers are matched by week</div>
+              </DateRangePicker>
+              <ListTitle right={`${swRanked.reduce((s,t)=>s+t.total,0)} team total`}>Switchovers</ListTitle>
+              <RankRows rows={swRanked.map(t=>({ id:t.id, name:t.name, value:`${t.total}`, sub:Object.entries(t.byPlan).sort((a,b)=>b[1]-a[1]).map(([planId,count])=>`${count} ${PLAN_MAP[planId]?.label||planId}`).join(", ") }))} empty="No switchovers logged in this range."/>
               </div>
 
               <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", overflow:"hidden", marginTop:"16px" }}>
                 <div style={{ padding:"14px 18px", borderBottom:`1px solid ${C.border}`, background:C.cardLt }}>
-                  <Label color={C.purple}>🔄 Switchovers by Plan Type · {swStart} → {swEnd}</Label>
-                </div>
-                <div style={{ overflowX:"auto" }}>
-                  <table style={{ width:"100%", borderCollapse:"collapse", fontSize:"13px" }}>
-                    <thead>
-                      <tr>
-                        <th style={{ padding:"8px 18px", textAlign:"left", color:C.muted, fontWeight:"700", letterSpacing:"-0.01em", fontFamily:FONT, fontSize:"11px", borderBottom:`1px solid ${C.border}`, whiteSpace:"nowrap" }}>TECH</th>
-                        <th style={{ padding:"8px 18px", textAlign:"left", color:C.muted, fontWeight:"700", letterSpacing:"-0.01em", fontFamily:FONT, fontSize:"11px", borderBottom:`1px solid ${C.border}` }}>BREAKDOWN</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {swRanked.length===0 && (
-                        <tr><td colSpan={2} style={{ padding:"16px 18px", color:C.muted, textAlign:"center" }}>No switchovers logged in this range.</td></tr>
-                      )}
-                      {swRanked.map((t,i)=>{
-                        const breakdown = Object.entries(t.byPlan).sort((a,b)=>b[1]-a[1]).map(([planId,count])=>`${count} ${PLAN_MAP[planId]?.label||planId}`).join(", ");
-                        return (
-                          <tr key={t.id} style={{ borderBottom:`1px solid ${C.border}` }}>
-                            <td style={{ padding:"10px 18px", color:C.black, fontWeight:"700", fontFamily:FONT, whiteSpace:"nowrap" }}>{medal(i)} {t.name}</td>
-                            <td style={{ padding:"10px 18px", color:C.black }}>{breakdown} <span style={{ color:C.muted, fontSize:"11px" }}>({t.total} total)</span></td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-
-              <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", overflow:"hidden", marginTop:"16px" }}>
-                <div style={{ padding:"14px 18px", borderBottom:`1px solid ${C.border}`, background:C.cardLt }}>
-                  <Label color={C.purple}>Individual Entries · {swStart} → {swEnd}</Label>
+                  <Label>Individual Entries · {fmtShortDate(swStart)} – {fmtShortDate(swEnd)}</Label>
                 </div>
                 <div style={{ padding:"14px 18px", display:"flex", flexDirection:"column", gap:"6px" }}>
                   {swInRange.length===0 && <div style={{ fontSize:"13px", color:C.muted }}>No switchover entries in this range.</div>}
@@ -9168,7 +8935,7 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
                 </label>
                 <div style={{ marginTop:"12px", paddingTop:"12px", borderTop:`1px solid ${C.border}` }}>
                   {archivingId!==t.id ? (
-                    <button onClick={()=>startArchive(t)} disabled={saving} style={{ background:"none", border:"1px solid #f59e0b", color:"#ff9f0a", padding:"7px 16px", borderRadius:"10px", cursor:saving?"not-allowed":"pointer", fontFamily:FONT, fontWeight:"600", fontSize:"12px", letterSpacing:"-0.01em", textTransform:"none" }}>
+                    <button onClick={()=>startArchive(t)} disabled={saving} style={{ background:"none", border:"1px solid #0077d4", color:"#0077d4", padding:"7px 16px", borderRadius:"10px", cursor:saving?"not-allowed":"pointer", fontFamily:FONT, fontWeight:"600", fontSize:"12px", letterSpacing:"-0.01em", textTransform:"none" }}>
                       📦 Archive {t.name}
                     </button>
                   ) : (
@@ -9198,7 +8965,7 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
                         </div>
                       )}
                       <div style={{ display:"flex", gap:"8px" }}>
-                        <button onClick={()=>archiveTech(t)} disabled={saving} style={{ background:"#ff9f0a", border:"none", color:C.white, padding:"7px 16px", borderRadius:"10px", cursor:saving?"not-allowed":"pointer", fontFamily:FONT, fontWeight:"600", fontSize:"12px", letterSpacing:"-0.01em", textTransform:"none" }}>
+                        <button onClick={()=>archiveTech(t)} disabled={saving} style={{ background:"#0077d4", border:"none", color:C.white, padding:"7px 16px", borderRadius:"10px", cursor:saving?"not-allowed":"pointer", fontFamily:FONT, fontWeight:"600", fontSize:"12px", letterSpacing:"-0.01em", textTransform:"none" }}>
                           {saving?"Saving...":`Archive ${t.name}`}
                         </button>
                         <button onClick={()=>setArchivingId(null)} disabled={saving} style={{ background:"none", border:`1px solid ${C.border}`, color:C.muted, padding:"7px 16px", borderRadius:"10px", cursor:"pointer", fontFamily:FONT, fontWeight:"600", fontSize:"12px", letterSpacing:"-0.01em", textTransform:"none" }}>
@@ -9213,7 +8980,7 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
             {/* Archived techs */}
             {techs.filter(t=>t.is_active===false).length>0&&(
               <div style={{ background:"#fff8e6", border:"1px solid #f59e0b44", borderTop:"3px solid #f59e0b", borderRadius:"16px", padding:"16px 18px" }}>
-                <div style={{ fontSize:"11px", color:"#ff9f0a", letterSpacing:"-0.01em", textTransform:"none", fontFamily:FONT, fontWeight:"600", marginBottom:"12px" }}>📦 Archived Techs — Revenue still counted in totals</div>
+                <div style={{ fontSize:"11px", color:"#0077d4", letterSpacing:"-0.01em", textTransform:"none", fontFamily:FONT, fontWeight:"600", marginBottom:"12px" }}>📦 Archived Techs — Revenue still counted in totals</div>
                 <div style={{ display:"flex", flexDirection:"column", gap:"8px" }}>
                   {techs.filter(t=>t.is_active===false).map(t=>(
                     <div key={t.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", background:"#fff", border:"1px solid #f59e0b33", borderRadius:"10px", padding:"10px 14px" }}>
@@ -9227,7 +8994,7 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
                         {t.leave_reason==="fired"&&(
                           <div style={{ fontSize:"11px", color:C.black, marginTop:"4px" }}>
                             <strong>{FIRE_CATEGORIES.find(c=>c.value===t.fire_category)?.label||"No reason given"}</strong>{t.fire_notes&&` — ${t.fire_notes}`}
-                            <div style={{ fontSize:"11px", fontWeight:"700", marginTop:"2px", color:t.fire_approval==="approved"?C.green:t.fire_approval==="denied"?"#ff3b30":"#ff9f0a" }}>
+                            <div style={{ fontSize:"11px", fontWeight:"700", marginTop:"2px", color:t.fire_approval==="approved"?C.green:t.fire_approval==="denied"?"#ff3b30":"#0077d4" }}>
                               {t.fire_approval==="approved"?"✅ FIRING APPROVED — doesn't count against the ops bonus":t.fire_approval==="denied"?"❌ FIRING DENIED — counts as a loss":"⏳ WAITING FOR ADMIN APPROVAL"}
                             </div>
                             {t.fire_approval==="pending"&&!isManager&&(
@@ -9537,7 +9304,7 @@ create policy "public access" on jobs for all using (true) with check (true);
 create unique index if not exists jobs_hcp_job_id_key on jobs(hcp_job_id);
 alter table jobs add column if not exists tips numeric default 0;`}
         </code><br/>
-        <button onClick={()=>{setDbError(null);setLoading(true);loadAll().then(()=>setLoading(false));}} style={{ background:C.blue, border:"none", color:C.black, padding:"12px 28px", borderRadius:"24px", cursor:"pointer", fontFamily:FONT, fontSize:"14px", fontWeight:"700", fontStyle:"normal", letterSpacing:"-0.01em" }}>RETRY</button>
+        <button onClick={()=>{setDbError(null);setLoading(true);loadAll().then(()=>setLoading(false));}} style={{ background:C.blue, border:"none", color:C.white, padding:"12px 28px", borderRadius:"24px", cursor:"pointer", fontFamily:FONT, fontSize:"14px", fontWeight:"700", fontStyle:"normal", letterSpacing:"-0.01em" }}>RETRY</button>
       </div>
     </div>
   );
