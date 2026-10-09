@@ -126,13 +126,17 @@ export function freqFromVisits(times) {
 // scheduled_start, completed_at, job_created_at, total_cents, tip_cents, tags }.
 // revenueByJob: { hcp_job_id: revenue without tips } from the app's jobs table
 // (falls back to total - tip). now: ms.
-export function buildSales(jobs, { tag, revenueByJob = {}, now = Date.now() }) {
+// overrides: { hcp_job_id: "trevor"|"ethan"|"none" } -- an owner's call, which
+// wins over the tag; repKey is this rep's key ("trevor").
+export function buildSales(jobs, { tag, revenueByJob = {}, now = Date.now(), overrides = {}, repKey = null }) {
   const want = String(tag).toLowerCase();
+  const credited = j => overrides[j.hcp_job_id] ? overrides[j.hcp_job_id] === repKey
+    : (j.tags || []).some(t => String(t).trim().toLowerCase() === want);
   const byCustomer = {};
   for (const j of jobs) (byCustomer[j.hcp_customer_id || j.hcp_job_id] ||= []).push(j);
   const sales = [];
   for (const j of jobs) {
-    if (!isDone(j) || !(j.tags || []).some(t => String(t).trim().toLowerCase() === want)) continue;
+    if (!isDone(j) || !credited(j)) continue;
     const mine = byCustomer[j.hcp_customer_id || j.hcp_job_id];
     const first = new Date(j.scheduled_start || j.completed_at).getTime();
     // Visits booked with this sale (created within a day of it) -- not the
@@ -183,4 +187,27 @@ export function monthPoints(sales, month) {
   const gross = earned.reduce((a, s) => a + s.points, 0);
   const back = chargebacks.reduce((a, s) => a + s.points, 0);
   return { earned, chargebacks, gross, back, net: gross - back };
+}
+
+// Sales to double-check (HCP can't say who created a job, so credit rests on
+// the "sold by" tag). evidence: rows from sales_credit_evidence -- completed
+// first visits with a "sold by" tag or a new customer's untagged first job,
+// plus the last GHL team member who texted the customer before booking.
+// Jobs an owner already decided (overrides) drop off.
+//   mismatch: tagged to this rep, but GHL shows someone else working it
+//   missed:   no "sold by" tag, but GHL shows this rep working it
+//   untagged: a new customer's first job with no "sold by" tag at all
+export function reviewList(evidence, overrides, repKey) {
+  const out = { mismatch: [], missed: [], untagged: [] };
+  const first = n => String(n || "").trim().split(/\s+/)[0].toLowerCase();
+  for (const e of evidence || []) {
+    if (overrides[e.hcp_job_id]) continue;
+    const ghl = e.ghl_rep ? first(e.ghl_rep) : null;
+    const row = { ...e, done_on: mtDay(e.completed_at), month: mtDay(e.completed_at).slice(0, 7) };
+    if (e.sold_by === repKey) { if (ghl && ghl !== repKey) out.mismatch.push(row); }
+    else if (!e.sold_by && ghl === repKey) out.missed.push(row);
+    else if (!e.sold_by && e.is_new) out.untagged.push(row);
+  }
+  for (const k of Object.keys(out)) out[k].sort((a, b) => a.done_on < b.done_on ? 1 : -1);
+  return out;
 }

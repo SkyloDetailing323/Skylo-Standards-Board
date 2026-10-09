@@ -9,7 +9,9 @@
 // GET ?type=sales_deals&rep=trevor
 //   Trevor's sales for his points bonus: every HCP job of every customer who
 //   has a job tagged "sold by trevor", plus each tagged job's revenue without
-//   tips. salesPoints.js (buildSales) does the rest in the browser.
+//   tips; owner overrides (sales_credit_overrides) and, for owners, the
+//   review evidence (sales_credit_evidence). salesPoints.js does the rest.
+// POST ?type=sales_credit  owners: who sold a job, overriding the tag.
 //   A rep with selfTechId can also open their own sales report from their
 //   tech login (rep is forced to theirs; nothing else is allowed).
 // Header: Authorization: Bearer <login token>
@@ -70,18 +72,27 @@ async function restIn(path, col, ids) {
 // them apart. Only a booking's first visit carries tags, so the tagged jobs
 // are the sales; the customers' other jobs show the plan's later visits
 // (frequency and the chargeback window).
-async function salesJobs(rep) {
+async function salesJobs(repKey, rep) {
   const cols = "hcp_job_id,hcp_customer_id,first_name,last_name,work_status,scheduled_start,completed_at,job_created_at,total_cents,tip_cents,raw";
-  const tagged = await rest(`hcp_sales_jobs?select=${cols}&raw->>tags=ilike.*${encodeURIComponent(rep.salesTag)}*`);
-  const customers = [...new Set(tagged.map(j => j.hcp_customer_id).filter(Boolean))];
+  const [tagged, overrides, evidence] = await Promise.all([
+    rest(`hcp_sales_jobs?select=${cols}&raw->>tags=ilike.*${encodeURIComponent(rep.salesTag)}*`),
+    rest("sales_credit_overrides?select=hcp_job_id,rep,set_by,set_at"),
+    // Last ~100 days is plenty to review (and stays under the 1,000-row cap).
+    rpc("sales_credit_evidence", { p_from: new Date(Date.now() - 100 * 864e5).toISOString() }),
+  ]);
+  // Jobs an owner credited to this rep without the tag.
+  const extraIds = overrides.filter(o => o.rep === repKey).map(o => o.hcp_job_id).filter(id => !tagged.some(j => j.hcp_job_id === id));
+  const extra = extraIds.length ? await restIn(`hcp_sales_jobs?select=${cols}`, "hcp_job_id", extraIds) : [];
+  const sales = [...tagged, ...extra];
+  const customers = [...new Set(sales.map(j => j.hcp_customer_id).filter(Boolean))];
   const others = customers.length ? await restIn(`hcp_sales_jobs?select=${cols}`, "hcp_customer_id", customers) : [];
   const all = {};
-  for (const j of [...tagged, ...others]) all[j.hcp_job_id] = j;
+  for (const j of [...sales, ...others]) all[j.hcp_job_id] = j;
   const jobs = Object.values(all).map(({ raw, ...j }) => ({ ...j, tags: raw?.tags || [] }));
-  const revRows = tagged.length ? await restIn("jobs?select=hcp_job_id,revenue", "hcp_job_id", tagged.map(j => j.hcp_job_id)) : [];
+  const revRows = sales.length ? await restIn("jobs?select=hcp_job_id,revenue", "hcp_job_id", sales.map(j => j.hcp_job_id)) : [];
   const revenue = {};
   for (const r of revRows) revenue[r.hcp_job_id] = (revenue[r.hcp_job_id] || 0) + (Number(r.revenue) || 0);
-  return { jobs, revenue };
+  return { jobs, revenue, overrides, evidence: evidence || [] };
 }
 
 const isDate = s => /^\d{4}-\d{2}-\d{2}$/.test(s || "");
@@ -116,6 +127,26 @@ exports.handler = async (event) => {
     });
     if (!res.ok) return json(500, { error: `Couldn't save (HTTP ${res.status})` });
     return json(200, { ok: true, attribution: value });
+  }
+
+  // POST ?type=sales_credit  body: { hcp_job_id, rep: "trevor"|"ethan"|"none"|null }
+  // An owner's call on who sold a job; wins over the HCP "sold by" tag.
+  // rep null clears it (back to the tag).
+  if (event.httpMethod === "POST" && q.type === "sales_credit") {
+    let b; try { b = JSON.parse(event.body || "{}"); } catch { return json(400, { error: "Bad JSON" }); }
+    const id = String(b.hcp_job_id || "");
+    if (!/^job_[A-Za-z0-9]+$/.test(id)) return json(400, { error: "Bad job id" });
+    const H = { "Content-Type": "application/json", apikey: process.env.SUPABASE_KEY, Authorization: `Bearer ${process.env.SUPABASE_KEY}` };
+    const url = `${process.env.SUPABASE_URL}/rest/v1/sales_credit_overrides`;
+    const res = b.rep == null
+      ? await fetch(`${url}?hcp_job_id=eq.${id}`, { method: "DELETE", headers: { ...H, Prefer: "return=minimal" } })
+      : ["trevor", "ethan", "none"].includes(b.rep)
+        ? await fetch(`${url}?on_conflict=hcp_job_id`, { method: "POST", headers: { ...H, Prefer: "resolution=merge-duplicates,return=minimal" },
+            body: JSON.stringify({ hcp_job_id: id, rep: b.rep, set_by: who.name || who.role, set_at: new Date().toISOString() }) })
+        : null;
+    if (!res) return json(400, { error: "rep must be trevor, ethan, none or null" });
+    if (!res.ok) return json(500, { error: `Couldn't save (HTTP ${res.status})` });
+    return json(200, { ok: true });
   }
 
   if (!isDate(q.from) || !isDate(q.to)) return json(400, { error: "from and to dates are required" });
@@ -153,7 +184,10 @@ exports.handler = async (event) => {
     }
     if (q.type === "sales_deals") {
       if (!REPS[q.rep]?.salesTag) return json(400, { error: "No points bonus for this rep" });
-      return json(200, { rep: q.rep, tag: REPS[q.rep].salesTag, ...(await salesJobs(REPS[q.rep])) });
+      const data = await salesJobs(q.rep, REPS[q.rep]);
+      // The review list (evidence + overrides) is for owners only.
+      if (who.role !== "owner") { delete data.evidence; }
+      return json(200, { rep: q.rep, tag: REPS[q.rep].salesTag, ...data });
     }
     return json(400, { error: "Unknown report type" });
   } catch (e) {

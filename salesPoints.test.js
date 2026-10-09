@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { rowFor, pointsFor, tierFor, POINTS_TABLE, freqFromTags, freqFromVisits, buildSales, monthPoints } from "./salesPoints.js";
+import { rowFor, pointsFor, tierFor, POINTS_TABLE, freqFromTags, freqFromVisits, buildSales, monthPoints, reviewList } from "./salesPoints.js";
 
 test("exact table rows", () => {
   assert.equal(pointsFor(145, "weekly"), 116);
@@ -127,4 +127,31 @@ test("an existing plan's visits don't make a rebooked one-off a new plan sale", 
     job("h2", "hal", "2026-10-19", { created: "2026-05-20" }), job("h3", "hal", "2026-11-02", { created: "2026-05-20" }),
   ];
   assert.equal(buildSales(jobs, { tag: "sold by trevor", now: NOW })[0].freq, "one_time");
+});
+
+test("an owner's call wins over the tag", () => {
+  const jobs = [
+    job("i1", "ivy", "2026-10-02", { done: true, tags: ["sold by trevor"] }),
+    job("j1", "jon", "2026-10-03", { done: true, tags: ["NEW"] }),
+  ];
+  const ids = o => buildSales(jobs, { tag: "sold by trevor", now: NOW, repKey: "trevor", overrides: o }).map(s => s.hcp_job_id).sort();
+  assert.deepEqual(ids({}), ["i1"]);
+  assert.deepEqual(ids({ i1: "ethan" }), []);
+  assert.deepEqual(ids({ j1: "trevor" }), ["i1", "j1"]);
+  assert.deepEqual(ids({ i1: "none", j1: "trevor" }), ["j1"]);
+});
+
+test("review list: tag vs GHL mismatch, missed tag, untagged new customer; decided jobs drop off", () => {
+  const ev = [
+    { hcp_job_id: "a", completed_at: D("2026-10-02"), sold_by: "trevor", is_new: true, ghl_rep: "Ethan Hamilton" },
+    { hcp_job_id: "b", completed_at: D("2026-10-03"), sold_by: "trevor", is_new: true, ghl_rep: "Trevor Prince" },
+    { hcp_job_id: "c", completed_at: D("2026-10-04"), sold_by: null, is_new: false, ghl_rep: "Trevor Prince" },
+    { hcp_job_id: "d", completed_at: D("2026-10-05"), sold_by: null, is_new: true, ghl_rep: null },
+    { hcp_job_id: "e", completed_at: D("2026-10-06"), sold_by: null, is_new: true, ghl_rep: null },
+    { hcp_job_id: "f", completed_at: D("2026-10-06"), sold_by: null, is_new: false, ghl_rep: null },
+  ];
+  const r = reviewList(ev, { e: "none" }, "trevor");
+  assert.deepEqual(r.mismatch.map(x => x.hcp_job_id), ["a"]);
+  assert.deepEqual(r.missed.map(x => x.hcp_job_id), ["c"]);
+  assert.deepEqual(r.untagged.map(x => x.hcp_job_id), ["d"]);
 });
