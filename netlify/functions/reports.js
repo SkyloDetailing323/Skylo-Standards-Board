@@ -5,6 +5,7 @@
 // this checks the caller is an owner and runs them with the service key.
 //
 // GET ?type=marketing&from=YYYY-MM-DD&to=YYYY-MM-DD
+// GET ?type=search&from=...&to=...   (organic Google search, Search Console)
 // GET ?type=sales&rep=trevor|ethan&from=...&to=...
 //   A rep with selfTechId can also open their own sales report from their
 //   tech login (rep is forced to theirs; nothing else is allowed).
@@ -39,6 +40,66 @@ async function syncState(key) {
   });
   const rows = res.ok ? await res.json() : [];
   return rows[0] || null;
+}
+
+// GET from the REST API, paging past the 1000-row cap.
+async function rest(path) {
+  const out = [];
+  for (let offset = 0; ; offset += 1000) {
+    const res = await fetch(`${process.env.SUPABASE_URL}/rest/v1/${path}&limit=1000&offset=${offset}`, {
+      headers: { apikey: process.env.SUPABASE_KEY, Authorization: `Bearer ${process.env.SUPABASE_KEY}` },
+    });
+    if (!res.ok) throw new Error(`${path.split("?")[0]} failed (HTTP ${res.status}): ${(await res.text()).slice(0, 300)}`);
+    const rows = await res.json();
+    out.push(...rows);
+    if (rows.length < 1000) return out;
+  }
+}
+
+// Searches for the business by name. Everything else is "non-brand": people
+// looking for a detailer who didn't already know Skylo.
+const BRAND = /skylo|squeegee\s*boy/i;
+const shiftDay = (d, n) => { const x = new Date(d + "T12:00:00Z"); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); };
+
+// Sum Search Console rows by key; position is averaged weighted by impressions.
+function rollup(rows, key) {
+  const m = {};
+  for (const r of rows) {
+    const k = key ? r[key] : "all";
+    const a = m[k] ||= { [key || "key"]: k, clicks: 0, impressions: 0, pw: 0 };
+    a.clicks += r.clicks; a.impressions += r.impressions; a.pw += (Number(r.position) || 0) * r.impressions;
+  }
+  return Object.values(m).map(({ pw, ...a }) => ({ ...a, position: a.impressions ? Math.round((pw / a.impressions) * 10) / 10 : null }));
+}
+
+async function searchReport(from, to) {
+  const len = Math.round((new Date(to) - new Date(from)) / 864e5) + 1;
+  const pFrom = shiftDay(from, -len), pTo = shiftDay(from, -1);
+  const between = (a, b) => `day=gte.${a}&day=lte.${b}`;
+  const [daily, prev, queries, pages, status, state, tok] = await Promise.all([
+    rest(`gsc_daily?select=day,clicks,impressions,position&${between(from, to)}&order=day`),
+    rest(`gsc_daily?select=clicks,impressions,position&${between(pFrom, pTo)}`),
+    rest(`gsc_queries_daily?select=query,clicks,impressions,position&${between(from, to)}`),
+    rest(`gsc_pages_daily?select=page,clicks,impressions,position&${between(from, to)}`),
+    rest("gsc_page_status?select=page,verdict,coverage,last_crawl_at,checked_at&order=page"),
+    syncState("gsc_last_run"),
+    fetch(`${process.env.SUPABASE_URL}/rest/v1/integration_tokens?key=eq.google_ads_refresh_token&select=meta`, {
+      headers: { apikey: process.env.SUPABASE_KEY, Authorization: `Bearer ${process.env.SUPABASE_KEY}` },
+    }).then(r => r.ok ? r.json() : []).then(r => r[0] || null).catch(() => null),
+  ]);
+  const q = rollup(queries, "query").map(x => ({ ...x, brand: BRAND.test(x.query) }));
+  const sum = (rows, f) => rows.filter(f).reduce((a, x) => ({ clicks: a.clicks + x.clicks, impressions: a.impressions + x.impressions }), { clicks: 0, impressions: 0 });
+  return {
+    from, to, prev_from: pFrom, prev_to: pTo,
+    totals: rollup(daily)[0] || { clicks: 0, impressions: 0, position: null },
+    prev: rollup(prev)[0] || { clicks: 0, impressions: 0, position: null },
+    brand: sum(q, x => x.brand), non_brand: sum(q, x => !x.brand),
+    daily: daily.map(d => ({ d: d.day, clicks: d.clicks, impressions: d.impressions })),
+    queries: q.sort((a, b) => b.impressions - a.impressions).slice(0, 300),
+    pages: rollup(pages, "page").sort((a, b) => b.impressions - a.impressions).slice(0, 50),
+    page_status: status,
+    connection: { google_connected: !!tok, connected: /webmasters/.test(tok?.meta?.scope || ""), last_sync: state?.updated_at || null, last_result: state?.value || null },
+  };
 }
 
 const isDate = s => /^\d{4}-\d{2}-\d{2}$/.test(s || "");
@@ -102,6 +163,7 @@ exports.handler = async (event) => {
         },
       });
     }
+    if (q.type === "search") return json(200, await searchReport(q.from, q.to));
     if (q.type === "sales") {
       const rep = REPS[q.rep];
       if (!rep) return json(400, { error: "Unknown rep" });
