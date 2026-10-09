@@ -200,15 +200,16 @@ exports.handler = async (event) => {
 
   // GET ?type=ad_trends -- every Meta ad week by week (spend, views, clicks,
   // leads, bookings, revenue) plus each ad's start date, status and 28-day
-  // frequency. adTrends.js grades it and spots slides in the browser.
+  // frequency, and which ad set each ad is in. adTrends.js grades it and spots slides in the browser.
   if (q.type === "ad_trends") {
     try {
       const since = new Date(Date.now() - 400 * 864e5).toISOString().slice(0, 10);
-      const [rows, ads] = await Promise.all([
+      const [rows, ads, adsets] = await Promise.all([
         rest(`rpc/ad_trends?p_since=${since}`),
         rest("meta_ads?select=ad_id,ad_name,campaign_id,created_time,status,reach_28d,frequency_28d"),
+        rest("rpc/meta_ad_adsets?select=*"),
       ]);
-      return json(200, { rows, ads });
+      return json(200, { rows, ads, adsets });
     } catch (e) {
       console.error("reports ad_trends:", e.message);
       return json(500, { error: e.message });

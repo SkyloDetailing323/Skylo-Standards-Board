@@ -5,7 +5,7 @@ import { computeOpsMonth, monthRange, mountainDate, CALLBACK_TIERS, QUOTA_TIERS,
 import { techDriverDays, weeklyDriverScore, findUnassignedDriving, DRIVER_CONFIG } from "./driverScoring.js";
 import { buildFordImport } from "./fordReports.js";
 import { techWeekCard, techScoreCard, teamSummary, scoreWindow, truckScore, isTruckExempt, TECH_SCORE_CONFIG } from "./techScores.js";
-import { AD_HEALTH, groupAds, trend, grade, metrics, sumWeeks, rolling, adAdvice, marketShift } from "./adTrends.js";
+import { AD_HEALTH, groupAds, trend, grade, metrics, sumWeeks, rolling, adAdvice, marketShift, toAdSets } from "./adTrends.js";
 import { LABOR_TARGET_PCT, payrollTaxRate, tipsPaidByMonth, qbLaborMonth } from "./laborCost.js";
 import { formKind, scoreToteCheck, scoreTechAudit, latestPerDay, auditDays, weeklyAuditPct, auditWeekStart, toteCharges, submissionPhotoUrls } from "./auditScoring.js";
 
@@ -5993,16 +5993,17 @@ function AdHealth({ token, margin }) {
   const s = useGrowthReport({ type:"ad_trends" }, token);
   const [showAll, setShowAll] = useState(false);
   const [openId, setOpenId] = useState(null);
+  const [setId, setSetId] = useState(null);
   const breakeven = margin > 0 ? 1 / margin : 2;
-  const ads = useMemo(() => {
-    if (!s.data) return [];
+  const { sets, adsBySet } = useMemo(() => {
+    if (!s.data) return { sets:[], adsBySet:{} };
     const meta = Object.fromEntries((s.data.ads || []).map(a => [a.ad_id, a]));
+    const adsetOf = Object.fromEntries((s.data.adsets || []).map(a => [a.ad_id, a]));
     const grouped = groupAds(s.data.rows || [], today);
     const market = marketShift(grouped.map(ad => trend(ad)));
     const all = metrics(sumWeeks(grouped.flatMap(ad => ad.weeks.slice(-AD_HEALTH.windowWeeks))));
     const typical = { cpl: all.cpl, bookRate: all.bookRate };
-    return grouped.map(ad => {
-      const m = meta[ad.ad_id] || {};
+    const score = (ad, m) => {
       const started = m.created_time ? mountainDate(m.created_time) : ad.firstWeek;
       const weeksRunning = started ? Math.max(1, Math.round((new Date(today) - new Date(started)) / (7 * 864e5))) : null;
       const t = trend(ad, AD_HEALTH, market);
@@ -6011,57 +6012,98 @@ function AdHealth({ token, margin }) {
       const advice = adAdvice(m4, g, t, breakeven, typical, { frequency28d: m.frequency_28d != null ? Number(m.frequency_28d) : null, weeksRunning, market });
       const spark = rolling(ad).slice(-12).map(r => r.cpl);
       return { ...ad, meta:m, started, weeksRunning, t, g, advice, spark, recentSpend: sumWeeks(ad.weeks.slice(-AD_HEALTH.windowWeeks)).spend };
-    }).filter(a => a.recentSpend > 0 || a.meta.status === "ACTIVE")
-      .sort((a, b) => ({ dropping:0, slipping:1, steady:2, improving:3, new:4, quiet:5 }[a.t.status] - ({ dropping:0, slipping:1, steady:2, improving:3, new:4, quiet:5 }[b.t.status])) || b.recentSpend - a.recentSpend);
+    };
+    const live = a => a.recentSpend > 0 || a.meta.status === "ACTIVE";
+    const ads = grouped.map(ad => score(ad, meta[ad.ad_id] || {})).filter(live);
+    const setOf = id => adsetOf[id]?.adset_id || id;
+    const adsBySet = {};
+    for (const a of ads) (adsBySet[setOf(a.ad_id)] ||= []).push(a);
+    for (const k in adsBySet) adsBySet[k].sort(byHealth);
+    // An ad set's start = its first ad's; it's active if any ad is; how often
+    // people saw it = its ads' 28-day frequency, weighted by recent spend.
+    const sets = groupAds(toAdSets(s.data.rows || [], adsetOf), today).map(set => {
+      const kids = grouped.filter(ad => setOf(ad.ad_id) === set.ad_id).map(ad => meta[ad.ad_id] || {});
+      const kidSpend = Object.fromEntries((adsBySet[set.ad_id] || []).map(a => [a.ad_id, a.recentSpend]));
+      const times = kids.map(m => m.created_time).filter(Boolean).sort();
+      const fq = kids.filter(m => m.frequency_28d != null && kidSpend[m.ad_id] > 0);
+      const fqSpend = fq.reduce((t, m) => t + kidSpend[m.ad_id], 0);
+      const m = {
+        created_time: times[0] || null,
+        status: kids.some(k => k.status === "ACTIVE") ? "ACTIVE" : kids[0]?.status,
+        frequency_28d: fqSpend > 0 ? fq.reduce((t, k) => t + Number(k.frequency_28d) * kidSpend[k.ad_id], 0) / fqSpend : null,
+      };
+      return { ...score(set, m), adCount:(adsBySet[set.ad_id] || []).length };
+    }).filter(live).sort(byHealth);
+    return { sets, adsBySet };
   }, [s.data, today, breakeven]);
   const gradeChip = { green:[C.green, "rgba(52,199,89,0.12)"], yellow:["#b8860b", "rgba(255,204,0,0.18)"], red:[C.red, "rgba(255,59,48,0.1)"], none:[C.muted, C.cardLt] };
   const statusChip = { dropping:["📉 Dropping fast", C.red], slipping:["📉 Slipping", "#b8860b"], improving:["📈 Improving", C.green], steady:["Steady", C.muted], new:["New — learning", C.blue], quiet:["Barely spending", C.muted] };
   const fmtWk = wk => wk ? fmtShortDate(wk) : "—";
-  const shown = showAll ? ads : ads.slice(0, 8);
+  const openSet = setId ? sets.find(x => x.ad_id === setId) : null;
+  const pick = id => { setSetId(id); setOpenId(null); setShowAll(false); };
+  // One card. On an ad set, tapping the card opens its ads and "Why?" shows
+  // the note; on an ad (or the open ad set) the whole card shows the note.
+  const card = (a, { drill, sub }) => {
+    const [gc, gbg] = gradeChip[a.g.grade];
+    const [st, sc] = statusChip[a.t.status];
+    const r = a.t.recent;
+    const open = openId === a.ad_id;
+    const toggle = ev => { ev.stopPropagation(); setOpenId(id => id === a.ad_id ? null : a.ad_id); };
+    return (
+      <div key={a.ad_id} onMouseEnter={drill ? undefined : () => setOpenId(a.ad_id)} onMouseLeave={() => setOpenId(id => id === a.ad_id ? null : id)} onClick={drill ? () => pick(a.ad_id) : toggle}
+        style={{ position:"relative", cursor:"pointer", background:C.card, border:`1px solid ${open ? C.blue : "rgba(0,0,0,0.04)"}`, borderRadius:"18px", padding:"14px 16px", boxShadow:"0 1px 3px rgba(0,0,0,0.05)", display:"flex", flexDirection:"column", gap:"8px" }}>
+        <div style={{ display:"flex", justifyContent:"space-between", gap:"10px", alignItems:"flex-start" }}>
+          <div style={{ minWidth:0 }}>
+            <div style={{ fontFamily:FONT, fontWeight:"600", fontSize:"16px", color:C.black }}>{a.ad_name || a.ad_id}{drill && <span style={{ color:C.blue }}> ›</span>}</div>
+            <div style={{ fontSize:"12px", color:C.muted }}>{sub ? `${sub} · ` : ""}started {fmtWk(a.started)}{a.weeksRunning ? ` (${a.weeksRunning} wk)` : ""}{a.meta.status && a.meta.status !== "ACTIVE" ? ` · ${a.meta.status.toLowerCase().replace(/_/g, " ")}` : ""}</div>
+          </div>
+          <Sparkline values={a.spark} color={a.t.status === "dropping" ? C.red : a.t.status === "slipping" ? "#b8860b" : C.blue}/>
+        </div>
+        <div style={{ display:"flex", gap:"6px", flexWrap:"wrap", alignItems:"center" }}>
+          <span style={{ background:gbg, color:gc, borderRadius:"980px", padding:"4px 10px", fontSize:"12px", fontWeight:"600" }}>{r.roasUp != null && a.g.grade !== "none" ? `${r.roasUp.toFixed(2)}x upfront · ` : ""}{a.g.note}</span>
+          <span style={{ color:sc, fontSize:"13px", fontWeight:"600" }}>{st}</span>
+          {a.t.slideSince && <span style={{ fontSize:"12px", color:C.muted }}>since week of {fmtWk(a.t.slideSince)}</span>}
+          <span onClick={toggle} onMouseEnter={drill ? () => setOpenId(a.ad_id) : undefined} style={{ marginLeft:"auto", fontSize:"12px", color:C.blue, padding:"4px 2px" }}>ⓘ Why?</span>
+        </div>
+        <div style={{ fontSize:"12px", color:C.muted }}>
+          Last 4 wk: {usd(r.spend)} spent · {r.platformLeads || r.leads || 0} leads · {r.booked || 0} booked · {r.cpl != null ? `${money2(r.cpl)}/lead` : "no leads"}{r.cpm != null ? ` · ${money2(r.cpm)} per 1k views` : ""}{r.ctr != null ? ` · ${(r.ctr * 100).toFixed(2)}% click` : ""}{a.meta.frequency_28d != null ? ` · seen ${Number(a.meta.frequency_28d).toFixed(1)}× each` : ""}
+          {a.t.peakWeek && <> · best 4 wk (from {fmtWk(a.t.peakWeek)}): {a.t.base.cpl != null ? `${money2(a.t.base.cpl)}/lead` : "—"}</>}
+        </div>
+        {open && (
+          <div role="tooltip" onClick={ev => ev.stopPropagation()} style={{ position:"absolute", left:"8px", right:"8px", top:"calc(100% - 6px)", zIndex:30, background:C.white, border:`1px solid ${C.border}`, borderRadius:"16px", boxShadow:"0 12px 32px rgba(0,0,0,0.16)", padding:"12px 14px", display:"flex", flexDirection:"column", gap:"6px", cursor:"default" }}>
+            <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"14px", color:gc === C.muted ? C.black : gc }}>{a.advice.label}{a.t.status === "slipping" || a.t.status === "dropping" ? " · 📉 slipping" : ""}</div>
+            <div style={{ fontSize:"14px", color:C.black }}>{a.advice.why}</div>
+            <div style={{ fontSize:"14px", color:C.black }}><b>Do:</b> {a.advice.todo}</div>
+          </div>
+        )}
+      </div>
+    );
+  };
+  const backBtn = { alignSelf:"flex-start", background:C.white, color:C.blue, border:`1px solid ${C.border}`, borderRadius:"980px", padding:"8px 14px", fontSize:"14px", fontWeight:"600", fontFamily:FONT, cursor:"pointer" };
+  const kids = openSet ? adsBySet[openSet.ad_id] || [] : [];
+  const shown = showAll ? sets : sets.slice(0, 8);
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:"10px" }}>
-      <ListTitle right="last 4 weeks vs each ad's best 4">Ad health</ListTitle>
+      <ListTitle right="last 4 weeks vs each one's best 4">{openSet ? openSet.ad_name : "Ad set health"}</ListTitle>
       <ReportState s={s}/>
-      {s.data && ads.length === 0 && <div style={{ fontSize:"13px", color:C.muted }}>No Meta ads with spend in the last 4 weeks.</div>}
-      {shown.map(a => {
-        const [gc, gbg] = gradeChip[a.g.grade];
-        const [st, sc] = statusChip[a.t.status];
-        const r = a.t.recent;
-        return (
-          <div key={a.ad_id} onMouseEnter={() => setOpenId(a.ad_id)} onMouseLeave={() => setOpenId(id => id === a.ad_id ? null : id)} onClick={() => setOpenId(id => id === a.ad_id ? null : a.ad_id)}
-            style={{ position:"relative", cursor:"pointer", background:C.card, border:`1px solid ${openId === a.ad_id ? C.blue : "rgba(0,0,0,0.04)"}`, borderRadius:"18px", padding:"14px 16px", boxShadow:"0 1px 3px rgba(0,0,0,0.05)", display:"flex", flexDirection:"column", gap:"8px" }}>
-            <div style={{ display:"flex", justifyContent:"space-between", gap:"10px", alignItems:"flex-start" }}>
-              <div style={{ minWidth:0 }}>
-                <div style={{ fontFamily:FONT, fontWeight:"600", fontSize:"16px", color:C.black }}>{a.ad_name || a.ad_id}</div>
-                <div style={{ fontSize:"12px", color:C.muted }}>{a.campaign_name || "—"} · started {fmtWk(a.started)}{a.weeksRunning ? ` (${a.weeksRunning} wk)` : ""}{a.meta.status && a.meta.status !== "ACTIVE" ? ` · ${a.meta.status.toLowerCase().replace(/_/g, " ")}` : ""}</div>
-              </div>
-              <Sparkline values={a.spark} color={a.t.status === "dropping" ? C.red : a.t.status === "slipping" ? "#b8860b" : C.blue}/>
-            </div>
-            <div style={{ display:"flex", gap:"6px", flexWrap:"wrap", alignItems:"center" }}>
-              <span style={{ background:gbg, color:gc, borderRadius:"980px", padding:"4px 10px", fontSize:"12px", fontWeight:"600" }}>{r.roasUp != null && a.g.grade !== "none" ? `${r.roasUp.toFixed(2)}x upfront · ` : ""}{a.g.note}</span>
-              <span style={{ color:sc, fontSize:"13px", fontWeight:"600" }}>{st}</span>
-              {a.t.slideSince && <span style={{ fontSize:"12px", color:C.muted }}>since week of {fmtWk(a.t.slideSince)}</span>}
-              <span style={{ marginLeft:"auto", fontSize:"12px", color:C.blue }}>ⓘ Why?</span>
-            </div>
-            <div style={{ fontSize:"12px", color:C.muted }}>
-              Last 4 wk: {usd(r.spend)} spent · {r.cpl != null ? `${money2(r.cpl)}/lead` : "no leads"} · {r.cpm != null ? `${money2(r.cpm)} per 1k views` : ""}{r.ctr != null ? ` · ${(r.ctr * 100).toFixed(2)}% click` : ""}{a.meta.frequency_28d != null ? ` · seen ${Number(a.meta.frequency_28d).toFixed(1)}× each` : ""}
-              {a.t.peakWeek && <> · best 4 wk (from {fmtWk(a.t.peakWeek)}): {a.t.base.cpl != null ? `${money2(a.t.base.cpl)}/lead` : "—"}</>}
-            </div>
-            {openId === a.ad_id && (
-              <div role="tooltip" onClick={ev => ev.stopPropagation()} style={{ position:"absolute", left:"8px", right:"8px", top:"calc(100% - 6px)", zIndex:30, background:C.white, border:`1px solid ${C.border}`, borderRadius:"16px", boxShadow:"0 12px 32px rgba(0,0,0,0.16)", padding:"12px 14px", display:"flex", flexDirection:"column", gap:"6px", cursor:"default" }}>
-                <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"14px", color:gc === C.muted ? C.black : gc }}>{a.advice.label}{a.t.status === "slipping" || a.t.status === "dropping" ? " · 📉 slipping" : ""}</div>
-                <div style={{ fontSize:"14px", color:C.black }}>{a.advice.why}</div>
-                <div style={{ fontSize:"14px", color:C.black }}><b>Do:</b> {a.advice.todo}</div>
-              </div>
-            )}
-          </div>
-        );
-      })}
-      {ads.length > 8 && <button onClick={() => setShowAll(v => !v)} style={{ alignSelf:"flex-start", background:C.white, color:C.blue, border:`1px solid ${C.border}`, borderRadius:"980px", padding:"8px 14px", fontSize:"14px", fontWeight:"600", fontFamily:FONT, cursor:"pointer" }}>{showAll ? "Show fewer" : `Show all ${ads.length} ads`}</button>}
-      <div style={{ fontSize:"12px", color:C.muted }}>Graded on the last 4 full weeks: red under break-even ({breakeven.toFixed(2)}x at your margin), yellow up to {AD_HEALTH.greenRoas}x, green above; under ${AD_HEALTH.minSpend} spent or {AD_HEALTH.minLeads} leads isn't graded yet. "Slipping" means its cost per lead rose 25%+ more than your ads did overall since its own best 4 weeks (or upfront ROAS fell 25%+), or Meta is charging it 25%+ more per view than the rest while clicks drop. That's usually weeks before it turns red. The line shows cost per lead, 4-week average, last 12 weeks. Hover over an ad (or tap it) to see why it's that color.</div>
+      {s.data && sets.length === 0 && <div style={{ fontSize:"13px", color:C.muted }}>No Meta ad sets with spend in the last 4 weeks.</div>}
+      {openSet ? (<>
+        <button onClick={() => pick(null)} style={backBtn}>‹ All ad sets</button>
+        {card(openSet, { sub:`${openSet.campaign_name || "—"} · ${openSet.adCount} ad${openSet.adCount === 1 ? "" : "s"}` })}
+        <ListTitle right={`${kids.length} ad${kids.length === 1 ? "" : "s"}`}>Ads in this set</ListTitle>
+        {kids.map(a => card(a, {}))}
+        {kids.length === 0 && <div style={{ fontSize:"13px", color:C.muted }}>No ads in this set spent anything in the last 4 weeks.</div>}
+      </>) : (<>
+        {shown.map(a => card(a, { drill:true, sub:`${a.campaign_name || "—"} · ${a.adCount} ad${a.adCount === 1 ? "" : "s"}` }))}
+        {sets.length > 8 && <button onClick={() => setShowAll(v => !v)} style={backBtn}>{showAll ? "Show fewer" : `Show all ${sets.length} ad sets`}</button>}
+      </>)}
+      <div style={{ fontSize:"12px", color:C.muted }}>{openSet ? "Each ad is graded on its own; the ad set above adds them all up. " : "Tap an ad set to see each ad in it. "}Graded on the last 4 full weeks: red under break-even ({breakeven.toFixed(2)}x at your margin), yellow up to {AD_HEALTH.greenRoas}x, green above; under ${AD_HEALTH.minSpend} spent or {AD_HEALTH.minLeads} leads isn't graded yet. "Slipping" means its cost per lead rose 25%+ more than your ads did overall since its own best 4 weeks (or upfront ROAS fell 25%+), or Meta is charging it 25%+ more per view than the rest while clicks drop. That's usually weeks before it turns red. The line shows cost per lead, 4-week average, last 12 weeks. Hover or tap "Why?" to see why it's that color.</div>
     </div>
   );
 }
+
+const HEALTH_ORDER = { dropping:0, slipping:1, steady:2, improving:3, new:4, quiet:5 };
+const byHealth = (a, b) => HEALTH_ORDER[a.t.status] - HEALTH_ORDER[b.t.status] || b.recentSpend - a.recentSpend;
 
 const GSC_STEPS = [
   "Google Cloud (project Skylo Tip Sync) → APIs & Services → Library → enable \"Google Search Console API\".",

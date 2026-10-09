@@ -2,7 +2,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { groupAds, grade, adAdvice, trend, metrics, sumWeeks, weekStart, marketShift } from "./adTrends.js";
+import { groupAds, grade, adAdvice, trend, metrics, sumWeeks, weekStart, marketShift, toAdSets } from "./adTrends.js";
 
 const wk = (w, o) => ({ ad_id: "a", ad_name: "PC sign", campaign_id: "c", campaign_name: "Park City", wk: w, spend: 140, impressions: 6000, link_clicks: 45, platform_leads: 8, leads: 0, booked: 0, upfront: 0, sold: 0, ...o });
 
@@ -80,4 +80,19 @@ test("advice: one why + one do, for each color", () => {
   assert.match(a.why, /too new to judge/);
   a = adv(m({ leads: 0, booked: 0, bookRate: null, roasUp: 0 }));
   assert.match(a.todo, /Reconnect this ad's form to GHL/);
+});
+
+test("toAdSets rolls ads up to their ad set and keeps unknown ads", () => {
+  const rows = [
+    { ad_id: "a1", ad_name: "Sign", wk: "2026-09-07", spend: 100, leads: 4 },
+    { ad_id: "a2", ad_name: "Truck", wk: "2026-09-07", spend: 50, leads: 1 },
+    { ad_id: "zz", ad_name: "Lost", wk: "2026-09-07", spend: 10, leads: 0 },
+  ];
+  const sets = toAdSets(rows, { a1: { adset_id: "s1", adset_name: "Park City" }, a2: { adset_id: "s1", adset_name: "Park City" } });
+  const g = groupAds(sets, "2026-09-16");
+  const pc = g.find(a => a.ad_id === "s1");
+  assert.equal(pc.ad_name, "Park City");
+  assert.equal(pc.weeks[0].spend, 150);
+  assert.equal(pc.weeks[0].leads, 5);
+  assert.ok(g.find(a => a.ad_id === "zz"));
 });

@@ -167,3 +167,14 @@ export function adAdvice(m, g, t, breakeven, typical = {}, info = {}, cfg = AD_H
   if (sliding && (mk.cpm || 0) >= 0.15) return out(`${lead}: costs rose with the fall ad market more than anything this ad did.`, g.grade === "red" ? "Lower its budget or pause it until costs settle." : "Keep it running and watch it another week.");
   return out(`${lead}.`, g.grade === "red" ? "Cut its budget in half and test a new creative; pause it if it's still red in 2 weeks." : "Test a new creative against it to find a stronger version.");
 }
+
+// Rolls ad_trends rows up to ad sets. adsetOf: { ad_id: { adset_id,
+// adset_name, campaign_id, campaign_name } } (meta_ad_adsets). Rows for an ad
+// with no known ad set keep their own ad id, so nothing goes missing.
+// -> rows shaped like ad_trends rows, ready for groupAds.
+export function toAdSets(rows, adsetOf = {}) {
+  return (rows || []).map(r => {
+    const s = adsetOf[r.ad_id];
+    return s?.adset_id ? { ...r, ad_id: s.adset_id, ad_name: s.adset_name || s.adset_id, campaign_id: s.campaign_id || r.campaign_id, campaign_name: s.campaign_name || r.campaign_name } : r;
+  });
+}
