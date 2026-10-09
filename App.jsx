@@ -1,5 +1,6 @@
-import { useState, useEffect, useCallback, Fragment } from "react";
+import { useState, useEffect, useCallback, useMemo, Fragment } from "react";
 import { TEST_QUESTIONS, TESTS, TEST_KEYS, questionsFor, shuffle } from "./trainingTest.js";
+import { tierFor, BONUS_TIERS, FREQ_LABEL, CHARGEBACK_SERVICES, buildSales, monthPoints, reviewList } from "./salesPoints.js";
 import { computeOpsMonth, monthRange, mountainDate, CALLBACK_TIERS, QUOTA_TIERS, RETENTION_TIERS, NON_ROUTE_VEHICLES, OPS_EXCLUDED_TITLES } from "./opsBonus.js";
 import { techDriverDays, weeklyDriverScore, findUnassignedDriving, DRIVER_CONFIG } from "./driverScoring.js";
 import { buildFordImport } from "./fordReports.js";
@@ -6201,6 +6202,116 @@ function FunnelBlock({ k, label, revenue }) {
 // rep key). reports.js enforces the same list (REPS[...].selfTechId).
 const SALES_SELF_VIEW = { "4641f4da-a16f-411b-8688-8b81ac06eda7": "trevor" };
 
+// Trevor's monthly points bonus (math in salesPoints.js). A sale is a
+// completed HCP job tagged "sold by trevor", counted in the month it was
+// completed; points from ticket price x frequency; plans that stop inside the
+// chargeback window come back off in the month the first visit was missed.
+// The month's net points pick one tier.
+function SalesPointsBonus({ token, canReview=false }) {
+  const thisMonth = mountainDate(new Date().toISOString()).slice(0, 7);
+  const [month, setMonth] = useState(thisMonth);
+  const today = mountainDate(new Date().toISOString());
+  const [bump, setBump] = useState(0);
+  const [saving, setSaving] = useState(null);
+  const [showUntagged, setShowUntagged] = useState(false);
+  const s = useGrowthReport({ type:"sales_deals", rep:"trevor", from:"2026-06-01", to:today, v:bump }, token);
+  const overrides = useMemo(() => Object.fromEntries((s.data?.overrides || []).map(o => [o.hcp_job_id, o.rep])), [s.data]);
+  const sales = useMemo(() => s.data ? buildSales(s.data.jobs || [], { tag:s.data.tag, revenueByJob:s.data.revenue || {}, overrides, repKey:"trevor" }) : [], [s.data, overrides]);
+  const review = useMemo(() => canReview && s.data?.evidence ? reviewList(s.data.evidence, overrides, "trevor") : null, [s.data, overrides, canReview]);
+  async function credit(jobId, rep) {
+    setSaving(jobId);
+    try {
+      const r = await fetch("/.netlify/functions/reports?type=sales_credit", { method:"POST", headers:{ Authorization:`Bearer ${token || ""}`, "Content-Type":"application/json" }, body:JSON.stringify({ hcp_job_id:jobId, rep }) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+      setBump(b => b + 1);
+    } catch(e) { window.alert("Couldn't save: " + e.message); }
+    setSaving(null);
+  }
+  const pick = (jobId, current) => (
+    <div style={{ display:"flex", gap:"6px", flexWrap:"wrap", marginTop:"6px" }}>
+      {[["trevor","Trevor"],["ethan","Ethan"],["none","Not a sale"]].map(([k,l]) => (
+        <button key={k} disabled={saving===jobId} onClick={() => credit(jobId, k)} style={{ background:current===k?C.blue:C.white, color:current===k?"#fff":C.blue, border:`1px solid ${current===k?C.blue:C.border}`, borderRadius:"980px", padding:"5px 12px", fontSize:"13px", fontWeight:"600", fontFamily:FONT, cursor:"pointer" }}>{l}</button>
+      ))}
+      {current && <button disabled={saving===jobId} onClick={() => credit(jobId, null)} style={{ background:"none", border:"none", color:C.muted, fontSize:"12px", cursor:"pointer", fontFamily:FONT }}>Undo (use the tag)</button>}
+    </div>
+  );
+  const reviewRow = (e, why) => (
+    <div key={e.hcp_job_id} style={{ background:C.card, border:"1px solid rgba(0,0,0,0.04)", borderRadius:"16px", padding:"12px 14px", boxShadow:"0 1px 3px rgba(0,0,0,0.05)" }}>
+      <div style={{ display:"flex", justifyContent:"space-between", gap:"8px" }}>
+        <div style={{ fontFamily:FONT, fontWeight:"600", fontSize:"15px", color:C.black }}>{e.customer || "Unknown client"}</div>
+        <div style={{ fontFamily:FONT, fontWeight:"600", fontSize:"14px", color:C.black }}>{money2(Number(e.price))}</div>
+      </div>
+      <div style={{ fontSize:"12px", color:C.muted, marginTop:"2px" }}>Completed {fmtShortDate(e.done_on)} · {why}</div>
+      {pick(e.hcp_job_id, overrides[e.hcp_job_id])}
+    </div>
+  );
+  const m = monthPoints(sales, month);
+  const t = tierFor(Math.max(0, m.net));
+  const shift = n => { const [y, mo] = month.split("-").map(Number); const d = new Date(Date.UTC(y, mo - 1 + n, 1)); setMonth(d.toISOString().slice(0, 7)); };
+  const label = new Date(month + "-15T12:00:00Z").toLocaleDateString("en-US", { month:"long", year:"numeric", timeZone:"UTC" });
+  const top = BONUS_TIERS[BONUS_TIERS.length - 1].points;
+  const arrow = { background:C.white, border:`1px solid ${C.border}`, borderRadius:"50%", width:"34px", height:"34px", display:"flex", alignItems:"center", justifyContent:"center", fontSize:"13px", cursor:"pointer", fontFamily:FONT, color:C.blue };
+  const statusText = d => d.status === "cleared" ? <span style={{ color:C.green }}>Cleared</span>
+    : d.status === "pending" ? <span style={{ color:C.muted }}>{d.completed} of {d.needed} services</span>
+    : d.status === "charged_back" ? <span style={{ color:C.red }}>Charged back {fmtShortDate(d.chargeback_on)}</span>
+    : <span style={{ color:C.muted }}>—</span>;
+  const freqText = d => `${FREQ_LABEL[d.freq] || d.freq}${d.freq_source === "visits" ? " (from schedule)" : ""}`;
+  return (
+    <div style={{ display:"flex", flexDirection:"column", gap:"10px" }}>
+      <SectionTitle>Bonus points</SectionTitle>
+      <div style={{ display:"flex", gap:"10px", alignItems:"center" }}>
+        <button onClick={() => shift(-1)} style={arrow}>◀</button>
+        <div style={{ fontFamily:FONT, fontWeight:"600", fontSize:"16px", color:C.black, minWidth:"130px", textAlign:"center" }}>{label}</div>
+        <button onClick={() => shift(1)} disabled={month >= thisMonth} style={{ ...arrow, opacity:month >= thisMonth ? 0.4 : 1, cursor:month >= thisMonth ? "default" : "pointer" }}>▶</button>
+      </div>
+      <ReportState s={s}/>
+      {s.data && (<>
+        <TileGrid>
+          <StatTile label="Net points" value={m.net.toLocaleString()} sub={`${m.gross.toLocaleString()} earned${m.back ? ` − ${m.back.toLocaleString()} charged back` : ""}`}/>
+          <StatTile label="Current tier" value={t.tier ? `Tier ${t.tier}` : "None yet"} sub={t.tier ? `${BONUS_TIERS[t.tier - 1].points.toLocaleString()}+ points` : "Tier 1 at 1,400 points"}/>
+          <StatTile label="Points to next tier" value={t.next ? t.toNext.toLocaleString() : "Top tier"} sub={t.next ? `Tier ${t.next.tier} pays ${usd(t.next.pay)}` : "Highest bonus reached"}/>
+          <StatTile label="Bonus earned" value={usd(t.pay)} sub={month === thisMonth ? "so far this month" : "for the month"}/>
+        </TileGrid>
+        <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"12px 14px" }}>
+          <div style={{ height:"10px", background:C.cardLt, borderRadius:"5px", overflow:"hidden" }}>
+            <div style={{ width:`${Math.min(100, Math.max(0, m.net) / top * 100)}%`, height:"100%", background:t.tier ? C.green : C.blue, borderRadius:"5px" }}/>
+          </div>
+          <div style={{ display:"grid", gridTemplateColumns:`repeat(${BONUS_TIERS.length}, 1fr)`, gap:"4px", marginTop:"8px" }}>
+            {BONUS_TIERS.map(b => (
+              <div key={b.tier} style={{ textAlign:"center", fontSize:"11px", color:m.net >= b.points ? C.green : C.muted, fontWeight:t.tier === b.tier ? "700" : "500" }}>
+                <div>Tier {b.tier}</div><div>{b.points.toLocaleString()} pts</div><div>{usd(b.pay)}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+        {review && (review.mismatch.length + review.missed.length + review.untagged.length > 0) && (<>
+          <ListTitle right="last 100 days">Needs a look</ListTitle>
+          <div style={{ fontSize:"12px", color:C.muted, marginTop:"-4px" }}>HCP can't tell us who booked a job, so credit comes from the "sold by" tag. These don't line up with who was on the calls and texts with the customer in GHL, or have no tag. Pick who sold it; your pick wins over the tag.</div>
+          {review.mismatch.map(e => reviewRow(e, <span style={{ color:C.red }}>Tagged Trevor, but {e.ghl_rep} was talking to them</span>))}
+          {review.missed.map(e => reviewRow(e, <span style={{ color:C.red }}>No "sold by" tag, but Trevor was talking to them</span>))}
+          {review.untagged.length > 0 && (
+            <button onClick={() => setShowUntagged(v => !v)} style={{ alignSelf:"flex-start", background:C.white, color:C.blue, border:`1px solid ${C.border}`, borderRadius:"980px", padding:"8px 14px", fontSize:"14px", fontWeight:"600", fontFamily:FONT, cursor:"pointer" }}>
+              {showUntagged ? "Hide" : "Show"} {review.untagged.length} new customer{review.untagged.length === 1 ? "" : "s"} with no "sold by" tag
+            </button>
+          )}
+          {showUntagged && review.untagged.map(e => reviewRow(e, e.ghl_rep ? `No "sold by" tag · ${e.ghl_rep} was talking to them` : `No "sold by" tag · ${(e.tags||[]).join(", ") || "no tags at all"}`))}
+        </>)}
+        <ListTitle right={`${m.earned.length} sale${m.earned.length === 1 ? "" : "s"}`}>Sales completed in {label.split(" ")[0]}</ListTitle>
+        <RankRows rows={m.earned.map(d => ({ id:d.hcp_job_id, name:d.name, value:`${d.points.toLocaleString()} pts`,
+          sub:<>{fmtShortDate(d.done_on)} · {money2(d.price)} · {freqText(d)}{d.returning ? " · returning" : ""} · {statusText(d)}{overrides[d.hcp_job_id] ? " · credited by an owner" : ""}</> }))} empty={`No sales completed in ${label} yet.`}/>
+        {m.chargebacks.length > 0 && (<>
+          <ListTitle right={`−${m.back.toLocaleString()} pts`}>Chargebacks</ListTitle>
+          <RankRows rows={m.chargebacks.map(d => ({ id:"cb" + d.hcp_job_id, name:d.name, value:`−${d.points.toLocaleString()} pts`, bad:true,
+            sub:`${FREQ_LABEL[d.freq]} sold ${fmtShortDate(d.done_on)} · stopped after ${d.completed} of ${d.needed} services · first missed visit ${fmtShortDate(d.chargeback_on)}` }))}/>
+        </>)}
+        <div style={{ fontSize:"12px", color:C.muted }}>A sale is a completed HCP job tagged "sold by trevor", counted in the month it was completed. Points = first-visit price (no tips) × frequency from the points table; frequency comes from the job's plan tag, or else the client's scheduled visits over the next 6 months. A plan has to finish its first {Object.entries(CHARGEBACK_SERVICES).filter(([f,n])=>n>1).map(([f,n])=>`${n} ${FREQ_LABEL[f].toLowerCase()}`).join(", ")} services; if it stops sooner, the points come off in the month of the first missed visit.</div>
+        {s.loading && <div style={{ fontSize:"11px", color:C.muted }}>Refreshing...</div>}
+      </>)}
+    </div>
+  );
+}
+
 function SalesTab({ token, onlyRep=null }) {
   const [range, setRange] = useState(() => rangeFor("month"));
   const [rep, setRep] = useState(onlyRep || "trevor");
@@ -6209,6 +6320,8 @@ function SalesTab({ token, onlyRep=null }) {
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:"12px" }}>
       {!onlyRep && <SubTabs tabs={[["trevor","Trevor · Inbound"],["ethan","Ethan · Commercial"]]} active={rep} setActive={setRep}/>}
+      {rep === "trevor" && <SalesPointsBonus token={token} canReview={!onlyRep}/>}
+      {rep === "trevor" && <SectionTitle>Sales activity</SectionTitle>}
       <GrowthRange range={range} setRange={setRange}/>
       <ReportState s={s}/>
       {d && d.rep?.toLowerCase() === rep && (<>
