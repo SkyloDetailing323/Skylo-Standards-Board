@@ -315,6 +315,10 @@ export const TEST_QUESTIONS = [
     q:"How do you create a new job in HCP?",
     correct:"Schedule page, tap the plus in the top right, choose Job",
     wrong:["Customers page, tap the customer's name, then choose New Invoice", "Tap the plus on the bottom bar and choose Estimate", "Ask Will to put it in from the office"] },
+  { id:"q90", test:"perfect_day", covers:["item_59"], topic:"Pre-Job",
+    q:"How many door hangers and customer satisfaction cards should the truck be stocked with?",
+    correct:"3 door hangers and 1 customer satisfaction card per job",
+    wrong:["1 door hanger and 1 customer satisfaction card per job", "3 door hangers per job, and satisfaction cards only if a client asks", "A full pack of door hangers and 3 satisfaction cards per day"] },
   // ── Added for the separate Miscellaneous test ─────────────────────────────
   { id:"q77", test:"misc", covers:["misc_13"], topic:"Google Reviews",
     q:"When you ask for a Google review, what do you ask the client to mention in it?",
@@ -357,13 +361,50 @@ export const TEST_QUESTIONS = [
   { id:"q89", test:"misc", covers:["misc_11"], topic:"Rainy Days",
     q:"A client wants to reschedule for rain, but the weather app shows it letting up in a couple of hours. What do you do?",
     correct:"Reassure them their vehicle will be clean and keep the appointment", wrong:["Reschedule them for the next sunny day", "Offer to do the interior only", "Ask them to call the office to decide"] },
+  // ── RVs & Boats (Miscellaneous) ───────────────────────────────────────────
+  { id:"q91", test:"rv_boats", covers:["misc_27"], topic:"RVs & Boats",
+    q:"Besides your normal towels, equipment, and tote, what two things do you grab for an RV job?",
+    correct:"The RV/boat bucket and the ladder from the unit", wrong:["The extractor and the deck cleaner", "Extra wax and a second foam cannon", "The air compressor and the pumice stone"] },
+  { id:"q92", test:"rv_boats", covers:["misc_28"], topic:"RVs & Boats",
+    q:"What's different about an RV job compared to a car?",
+    correct:"We don't do interior cleanings on RVs", wrong:["We skip the tires on RVs", "RVs are dried before they're rinsed", "RVs get a hand wax instead of Bead Up"] },
+  { id:"q93", test:"rv_boats", covers:["misc_28"], topic:"RVs & Boats",
+    q:"How do you apply the Bead Up sealant on an RV?",
+    correct:"Spray it on one side of the rag, wipe it on, and remove it with the dry side, in small sections",
+    wrong:["Spray it on the whole RV at once, then rinse it off", "Spray it directly on the paint and let it air dry", "Apply it with a wax applicator in circles, skipping the decals"] },
+  { id:"q94", test:"rv_boats", covers:["misc_29"], topic:"RVs & Boats",
+    q:"Which of these is NOT in the boat bucket?",
+    correct:"Tar remover", wrong:["Boat milk (white)", "Deck cleaner (dark blue)", "Hard water remover (light blue)"] },
+  { id:"q95", test:"rv_boats", covers:["misc_30"], topic:"RVs & Boats",
+    q:"What's the most important and longest step of a boat exterior?",
+    correct:"Removing all the hard water spots", wrong:["The first foam cannon wash", "Hand waxing the boat", "Rinsing it before the first wash"] },
+  { id:"q96", test:"rv_boats", covers:["misc_30"], topic:"RVs & Boats",
+    q:"How do you remove hard water spots on a boat?",
+    correct:"Hard water remover and a magic eraser, in small sections, in a cross-hatch pattern",
+    wrong:["Wax and a microfiber, in circles over the whole boat", "Deck cleaner and the drill brush, one side at a time", "Exterior soap and a wash mitt, then let it air dry"] },
+  { id:"q97", test:"rv_boats", covers:["misc_30"], topic:"RVs & Boats",
+    q:"Why do you rinse off the hard water remover frequently?",
+    correct:"So the sun doesn't bake it into the paint", wrong:["So you can see the spots better", "To save chemical for the next section", "So the wax goes on smoother later"] },
+  { id:"q98", test:"rv_boats", covers:["misc_31"], topic:"RVs & Boats",
+    q:"On a boat interior, why do you clean the towers and higher-up areas first?",
+    correct:"So crumbs, bugs, and dirt don't fall into areas you've already cleaned",
+    wrong:["Because they take the longest to dry", "So the client sees progress right away", "Because the extractor needs time to heat up"] },
+  { id:"q99", test:"rv_boats", covers:["misc_31"], topic:"RVs & Boats",
+    q:"How do you clean the floor padding on a boat?",
+    correct:"Pre-wet it, apply deck cleaner, scrub with the flat-head drill brush, then extract while steaming",
+    wrong:["Spray it with LVP and wipe it dry", "Vacuum it and spray deodorizer", "Apply boat milk and let it air dry in the sun"] },
 ];
 
 // Two written tests, taken separately. Every question has a `test` key.
-// The Miscellaneous test leaves out the equipment troubleshooting items.
+// The Miscellaneous test leaves out the equipment troubleshooting items, and
+// RVs & Boats has its own optional test.
 export const TESTS = {
   perfect_day: { key:"perfect_day", name:"Perfect Day Test",   short:"Perfect Day",   covers:"the Perfect Day rubric" },
   misc:        { key:"misc",        name:"Miscellaneous Test", short:"Miscellaneous", covers:"the Miscellaneous section" },
+  // Optional: not part of apprentice training. Assigned to Detail Pros moving
+  // up to Senior Detail Pro. oneShot: one try, 100% to pass, no retakes; a
+  // miss means the supervisor reviews and resends it.
+  rv_boats:    { key:"rv_boats",    name:"RVs & Boats Test",   short:"RVs & Boats",   covers:"RV and boat jobs", optional:true, oneShot:true },
 };
 export const TEST_KEYS = Object.keys(TESTS);
 export const questionsFor = key => TEST_QUESTIONS.filter(q => q.test === key);

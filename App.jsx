@@ -3397,14 +3397,17 @@ function TechDashboard({ tech, techs, upsells, switchovers, reviews, callbacks, 
       ...(tech.is_lead?[["myteam","👥","My Team"]]:[]),
     ]},
     ...(SALES_SELF_VIEW[tech.id]||CALLBACK_ENTRY_TECHS.has(tech.id)?[{ label:"Sales", items:[
-      ...(SALES_SELF_VIEW[tech.id]?[["mysales","🤝","My Sales"]]:[]),
+      ...(SALES_SELF_VIEW[tech.id]?[["mysales","🤝","My Sales"],["rvcrew","🚤","RV & Boat Techs"]]:[]),
       ...(CALLBACK_ENTRY_TECHS.has(tech.id)?[["callbacks","📞","Callbacks"]]:[]),
     ] }]:[]),
     ...(!isApprenticeTech(tech)?[{ label:"Forms", items:[["forms","📝","Forms"]] }]:[]),
     { label:"Training", items:[
       ["training","📋","Perfect Day Training"],
+      ["rvguide","🚤","RVs & Boats Guide"],
       ["auditscores","📊","My Audits"],
+      ...(["detail_pro","senior_detail_pro"].includes(tech.title)?[["mytests","📝","Assigned Tests"]]:[]),
     ]},
+    ...(canAssignTests(tech)?[{ label:"Development", items:[["seniorcert","🚤","RV & Boat Cert"]] }]:[]),
   ];
 
   return (
@@ -3675,6 +3678,10 @@ function TechDashboard({ tech, techs, upsells, switchovers, reviews, callbacks, 
           <TeamLeadPanel tech={tech} techs={techs} upsells={upsells} switchovers={switchovers} reviews={reviews} callbacks={callbacks||[]} quota={q} jobs={jobs}/>
         )}
         {tab==="training"&&<PerfectDayTrainingPanel tech={tech} techs={techs}/>}
+        {tab==="rvguide"&&<RvBoatGuide/>}
+        {tab==="mytests"&&<MyAssignedTests tech={tech}/>}
+        {tab==="rvcrew"&&SALES_SELF_VIEW[tech.id]&&<RvBoatCrew techs={techs}/>}
+        {tab==="seniorcert"&&canAssignTests(tech)&&<SeniorCertPanel techs={techs} reviewerName={tech.name} refreshAll={refreshAll} showToast={showToast}/>}
         {tab==="forms"&&<FormsTab me={tech} role="tech"/>}
         {tab==="auditscores"&&<AuditScoresTab techs={techs} token={token} techId={tech.id} jobs={jobs||[]} callbacks={callbacks||[]} reviews={reviews||[]} switchovers={switchovers||[]} quota={q}/>}
         {tab==="mysales"&&SALES_SELF_VIEW[tech.id]&&<SalesTab token={token} onlyRep={SALES_SELF_VIEW[tech.id]}/>}
@@ -4804,6 +4811,48 @@ function RideAlongTab({ techs, rideAlongs, schedules, onSave, onSaveSchedule, sa
 
 // ─── EMPLOYEE DEVELOPMENT ────────────────────────────────────────────────────
 
+// ─── RVs & BOATS GUIDE ───────────────────────────────────────────────────────
+// The RV and boat procedures (bucket, checklists, step-by-step), open to every
+// tech and admin. Content comes from the rubric (phase misc_rv_boats) so it
+// stays in one place; the seed copy is the fallback if the fetch fails.
+// Separate from the RVs & Boats test, which only admins and the Field
+// Supervisor control.
+function RvBoatGuide() {
+  const [items, setItems] = useState(null);
+  const [openId, setOpenId] = useState(null);
+  useEffect(() => {
+    sb("rubric_items?phase=eq.misc_rv_boats&select=id,sort_order,description,script_text&order=sort_order")
+      .then(r => setItems(r && r.length ? r : RUBRIC_ITEMS_SEED.filter(i => i.phase === "misc_rv_boats")))
+      .catch(() => setItems(RUBRIC_ITEMS_SEED.filter(i => i.phase === "misc_rv_boats")));
+  }, []);
+  if (!items) return <div style={{ fontSize:"13px", color:C.muted }}>Loading…</div>;
+  const groups = [["🚐 RVs", items.filter(i => /^RV/i.test(i.description))], ["🚤 Boats", items.filter(i => /^Boat/i.test(i.description))]];
+  return (
+    <div style={{ display:"flex", flexDirection:"column", gap:"14px" }}>
+      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"16px", fontSize:"13px", color:C.black, lineHeight:1.5 }}>
+        <div style={{ fontFamily:FONT, fontWeight:"800", fontSize:"18px", marginBottom:"6px" }}>RVs & Boats Guide</div>
+        RVs and boats use different chemicals and a different bucket than cars. Here's what to bring and how to do each job, step by step. Only <b>Senior Detail Pros</b> are scheduled on RV and boat jobs.
+      </div>
+      {groups.map(([label, list]) => list.length > 0 && (
+        <div key={label} style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", overflow:"hidden" }}>
+          <div style={{ background:C.cardLt, padding:"10px 16px", fontFamily:FONT, fontWeight:"800", fontSize:"14px", color:C.blue }}>{label}</div>
+          {list.map(item => {
+            const open = openId === item.id;
+            return (
+              <div key={item.id} style={{ borderTop:`1px solid ${C.border}40` }}>
+                <button onClick={() => setOpenId(open ? null : item.id)} style={{ width:"100%", textAlign:"left", background:"transparent", border:"none", padding:"12px 16px", cursor:"pointer", display:"flex", justifyContent:"space-between", alignItems:"center", gap:"8px", fontFamily:FONT, fontSize:"14px", fontWeight:"700", color:C.black }}>
+                  <span>{item.description}</span><span style={{ color:C.blue, fontSize:"12px" }}>{open ? "▲" : "▼"}</span>
+                </button>
+                {open && <div style={{ padding:"0 16px 14px", fontSize:"13px", color:C.black, whiteSpace:"pre-wrap", lineHeight:1.55 }}>{item.script_text}</div>}
+              </div>
+            );
+          })}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 const RUBRIC_ITEMS_SEED = [
   { id:"item_01", sort_order:1, section:"daily", phase:"night_before", description:"Manual night-before text reminder sent to next day's clients", has_script:true, script_text:"Hey [Client Name] this is [Tech Name] from Skylo Detailing, I am the one who will be doing your car tomorrow! Just wanted to give you one last reminder about the appointment and let you know I'll be there around [9/12/3], and if you could have your personal belongings taken out of the vehicle that would be greatly appreciated, see you tomorrow!" },
   { id:"item_02", sort_order:2, section:"daily", phase:"night_before", description:"Checked schedule/route to confirm first job location and departure time from home/unit", has_script:false, script_text:"" },
@@ -4811,58 +4860,59 @@ const RUBRIC_ITEMS_SEED = [
   { id:"item_04", sort_order:4, section:"daily", phase:"pre_job", description:"Chemicals topped off/full", has_script:false, script_text:"" },
   { id:"item_05", sort_order:5, section:"daily", phase:"pre_job", description:"Equipment, totes, and bucket checked and stocked", has_script:false, script_text:"" },
   { id:"item_06", sort_order:6, section:"daily", phase:"pre_job", description:"Truck stocked with proper towel count", has_script:false, script_text:"" },
-  { id:"item_07", sort_order:7, section:"daily", phase:"pre_job", description:"Water tank checked full (topped off if not)", has_script:false, script_text:"" },
-  { id:"item_08", sort_order:8, section:"daily", phase:"pre_job", description:"Generator gas checked full (topped off if not)", has_script:false, script_text:"" },
-  { id:"item_09", sort_order:9, section:"daily", phase:"pre_job", description:"Departed with enough time to arrive 10 min early to first job", has_script:false, script_text:"" },
-  { id:"item_10", sort_order:10, section:"daily", phase:"pre_job", description:"On My Way text sent via HCP automated feature (timing option matching drive time from warehouse)", has_script:true, script_text:"[Tech Name] is scheduled to arrive in [15/30/45] minutes" },
-  { id:"item_11", sort_order:11, section:"daily", phase:"arrival", description:"Correct arrival greeting/introduction script used", has_script:true, script_text:"Hey [Client Name], my name is [Tech Name] and I will be the one taking care of your premium detail today. If you could come out we can do the pre-job inspection to make sure we are taking care of everything you wanted today. (If client doesn't come out: tech does the pre-job inspection alone and texts the client about any concerns or upsells found.)" },
-  { id:"item_12", sort_order:12, section:"daily", phase:"arrival", description:"Pre-premium-detail inspection walkthrough completed with client, including upsell script if applicable", has_script:true, script_text:"Open all doors and explain what will be done today based on the job's line items. Upsell moment if something is found not on the line items: \"Hey, I noticed there are some [stains on the seat / carpet / pet hair in the carpet] and that will need some extra time and equipment to get that all out. I can go ahead and do that for [$25/$50/$75] today, is that something you'd be interested in?\" If client pushes back: explain the surface will be cleaned as part of the standard detail, but getting it all the way out requires an extra 30-45 minutes and heavier-duty equipment, which is why it's an additional charge." },
-  { id:"item_13", sort_order:13, section:"daily", phase:"arrival", description:"Before pics taken", has_script:false, script_text:"" },
-  { id:"item_56", sort_order:14, section:"daily", phase:"arrival", description:"Time estimate for the job given", has_script:false, script_text:"" },
-  { id:"item_57", sort_order:15, section:"daily", phase:"arrival", description:"Asked order of vehicles, time each vehicle is needed by, and any concerns", has_script:false, script_text:"" },
-  { id:"item_14", sort_order:16, section:"daily", phase:"sequencing", description:"Correct interior/exterior order chosen based on weather (exterior first in AM if hot/sunny, exterior last if last job of day)", has_script:false, script_text:"" },
-  { id:"item_15", sort_order:17, section:"daily", phase:"cleaning", description:"Trash and floor mats removed", has_script:false, script_text:"" },
-  { id:"item_16", sort_order:18, section:"daily", phase:"cleaning", description:"Full vehicle air compressed", has_script:false, script_text:"" },
-  { id:"item_17", sort_order:19, section:"daily", phase:"cleaning", description:"Vacuumed (or LVP used if air compressor already cleared majority of dirt/debris)", has_script:false, script_text:"" },
-  { id:"item_18", sort_order:20, section:"daily", phase:"cleaning", description:"Interior cleaned starting driver seat, back seat driver side, trunk, back seat passenger side, passenger seat", has_script:false, script_text:"" },
-  { id:"item_19", sort_order:21, section:"daily", phase:"mid_job", description:"Mid-job update text sent with before/after photo of dirtiest area", has_script:true, script_text:"Hey [Client Name], your premium detail is coming along well! Here's a before and after of those [stains/issue] we removed in your seats. I should be done in about [time], so if you can be available to come walk through the car with me then that would be awesome!" },
-  { id:"item_20", sort_order:22, section:"daily", phase:"mid_job", description:"Timing awareness communicated to next client (early/late notice) if applicable", has_script:false, script_text:"" },
-  { id:"item_21", sort_order:23, section:"daily", phase:"interior_finish", description:"Mats dried and returned", has_script:false, script_text:"" },
-  { id:"item_22", sort_order:24, section:"daily", phase:"interior_finish", description:"Windows cleaned", has_script:false, script_text:"" },
-  { id:"item_23", sort_order:25, section:"daily", phase:"interior_finish", description:"Door jambs cleaned (if exterior is on the job)", has_script:false, script_text:"" },
-  { id:"item_24", sort_order:26, section:"daily", phase:"interior_finish", description:"Interior checklist completed", has_script:false, script_text:"" },
-  { id:"item_25", sort_order:27, section:"daily", phase:"interior_finish", description:"After pics taken (interior)", has_script:false, script_text:"" },
-  { id:"item_26", sort_order:28, section:"daily", phase:"exterior", description:"Pre-rinse completed (mist down, cool and prime surface)", has_script:false, script_text:"" },
-  { id:"item_27", sort_order:29, section:"daily", phase:"exterior", description:"Tires sprayed and scrubbed, rinsed off", has_script:false, script_text:"" },
-  { id:"item_28", sort_order:30, section:"daily", phase:"exterior", description:"Foam applied (full car if shaded/cool, panel-by-panel if hot)", has_script:false, script_text:"" },
-  { id:"item_29", sort_order:31, section:"daily", phase:"exterior", description:"Wash wands used to scrub down full vehicle", has_script:false, script_text:"" },
-  { id:"item_30", sort_order:32, section:"daily", phase:"exterior", description:"Rinsed off and thoroughly dried", has_script:false, script_text:"" },
-  { id:"item_31", sort_order:33, section:"daily", phase:"exterior", description:"Windows touched up with exterior towel", has_script:false, script_text:"" },
-  { id:"item_32", sort_order:34, section:"daily", phase:"exterior", description:"Rims dried, excess water/dirt removed from rims and tire face", has_script:false, script_text:"" },
-  { id:"item_33", sort_order:35, section:"daily", phase:"exterior", description:"Tire shine applied", has_script:false, script_text:"" },
-  { id:"item_58", sort_order:36, section:"daily", phase:"exterior", description:"Wax applied if needed (after completing the full exterior)", has_script:false, script_text:"" },
-  { id:"item_34", sort_order:37, section:"daily", phase:"exterior", description:"Exterior checklist completed", has_script:false, script_text:"" },
-  { id:"item_35", sort_order:38, section:"daily", phase:"exterior", description:"After pics taken (exterior), attached in HCP", has_script:false, script_text:"" },
-  { id:"item_36", sort_order:39, section:"daily", phase:"closeout", description:"Correct walkthrough script used with client", has_script:true, script_text:"Hey [Client Name], I am just finishing up with a few last-minute touches, could you come out so we can walk through it together? Once they come out: Ok so your premium detail is looking awesome, I want to show you how it came out. If you see anything I missed please point it out so I can get it taken care of, 4 eyes are better than 2. We started off by taking out all the trash from the vehicle, then we did a full air compressor blow-out on your vents, seats, carpets and surfaces to get all the dirt and debris out of there, then we did a full vacuum on the vehicle including seats, carpets, all compartments and the trunk, then we cleaned, disinfected, and protected all hard surfaces such as the dash, console, cupholders, door panels, etc., then we did the interior windows and windshield. Then on the exterior we deep cleaned all the tires, rims, and wheel wells, we did a foam bath with a hand wash that removed all contaminants, bugs, and debris from your paint, touched up the windows, and finished off with a tire dressing on the wheel face." },
-  { id:"item_37", sort_order:40, section:"daily", phase:"closeout", description:"Tap-to-pay invoice completed", has_script:false, script_text:"" },
-  { id:"item_38", sort_order:41, section:"daily", phase:"closeout", description:"Google review ask made via AirDrop, with a picture added", has_script:true, script_text:"We're doing a competition with our company for a monthly prize of the most Google reviews. If you wouldn't mind leaving me a quick 5-star review it would help me out a lot. I can AirDrop you the link right now. I'll just be cleaning up the equipment, so if you could fill it out and mention my name, that would be amazing!" },
-  { id:"item_39", sort_order:42, section:"daily", phase:"closeout", description:"Referral ask made", has_script:true, script_text:"Is there any friends, family, or neighbors that you could think of that would love this service? If so, would you mind giving me their number or address so I could reach out to them? You get $20 off your next service for any referral that books and pays for the detail!" },
-  { id:"item_40", sort_order:43, section:"daily", phase:"no_show", description:"30-second video walkthrough recorded and sent (interior: front seats, vacuum/LVP, windows, back area; exterior: rims, tires, wheel wells, windows, grill, back end)", has_script:false, script_text:"" },
-  { id:"item_41", sort_order:44, section:"daily", phase:"no_show", description:"Google review link sent via text (same wording as #41)", has_script:true, script_text:"Hey, if you loved your premium detail and thought I did a great job I would love it if you could leave me a 5-star rating on Google, here's the link, and if you just mention my name it would help a ton with a competition we're currently running!" },
-  { id:"item_42", sort_order:45, section:"daily", phase:"no_show", description:"Referral ask sent via text (same wording as #42)", has_script:true, script_text:"Is there any friends, family, or neighbors that you could think of that would love this service? If so, would you mind giving me their number or address so I could reach out to them? You get $20 off your next service for any referral that books and pays for the detail!" },
-  { id:"item_43", sort_order:46, section:"daily", phase:"job_closeout", description:"3 door hangers placed", has_script:false, script_text:"" },
-  { id:"item_44", sort_order:47, section:"daily", phase:"job_closeout", description:"Customer satisfaction card placed", has_script:false, script_text:"" },
-  { id:"item_45", sort_order:48, section:"daily", phase:"job_closeout", description:"Photos of door hangers/card attached in HCP", has_script:false, script_text:"" },
-  { id:"item_46", sort_order:49, section:"daily", phase:"job_closeout", description:"On My Way text sent to next client", has_script:false, script_text:"" },
-  { id:"item_47", sort_order:50, section:"daily", phase:"end_of_day", description:"All trash removed from truck", has_script:false, script_text:"" },
-  { id:"item_48", sort_order:51, section:"daily", phase:"end_of_day", description:"All personal belongings removed from truck", has_script:false, script_text:"" },
-  { id:"item_49", sort_order:52, section:"daily", phase:"end_of_day", description:"Totes and exterior bucket emptied/cleaned out", has_script:false, script_text:"" },
-  { id:"item_50", sort_order:53, section:"daily", phase:"end_of_day", description:"Water tank refilled", has_script:false, script_text:"" },
-  { id:"item_51", sort_order:54, section:"daily", phase:"end_of_day", description:"Clean towels returned to correct bin", has_script:false, script_text:"" },
-  { id:"item_52", sort_order:55, section:"daily", phase:"end_of_day", description:"Dirty towels placed in correct dirty bin", has_script:false, script_text:"" },
-  { id:"item_53", sort_order:56, section:"daily", phase:"end_of_day", description:"Next day's schedule checked", has_script:false, script_text:"" },
-  { id:"item_54", sort_order:57, section:"daily", phase:"end_of_day", description:"Night-before texts sent for next day's clients (same script as #1)", has_script:true, script_text:"Hey [Client Name] this is [Tech Name] from Skylo Detailing, I am the one who will be doing your car tomorrow! Just wanted to give you one last reminder about the appointment and let you know I'll be there around [9/12/3], and if you could have your personal belongings taken out of the vehicle that would be greatly appreciated, see you tomorrow!" },
-  { id:"item_55", sort_order:58, section:"daily", phase:"end_of_day", description:"First job location confirmed for next day (to plan departure/arrival time)", has_script:false, script_text:"" },
+  { id:"item_59", sort_order:7, section:"daily", phase:"pre_job", description:"Truck stocked with 3 door hangers per job, as well as a customer satisfaction card per job", has_script:false, script_text:"" },
+  { id:"item_07", sort_order:8, section:"daily", phase:"pre_job", description:"Water tank checked full (topped off if not)", has_script:false, script_text:"" },
+  { id:"item_08", sort_order:9, section:"daily", phase:"pre_job", description:"Generator gas checked full (topped off if not)", has_script:false, script_text:"" },
+  { id:"item_09", sort_order:10, section:"daily", phase:"pre_job", description:"Departed with enough time to arrive 10 min early to first job", has_script:false, script_text:"" },
+  { id:"item_10", sort_order:11, section:"daily", phase:"pre_job", description:"On My Way text sent via HCP automated feature (timing option matching drive time from warehouse)", has_script:true, script_text:"[Tech Name] is scheduled to arrive in [15/30/45] minutes" },
+  { id:"item_11", sort_order:12, section:"daily", phase:"arrival", description:"Correct arrival greeting/introduction script used", has_script:true, script_text:"Hey [Client Name], my name is [Tech Name] and I will be the one taking care of your premium detail today. If you could come out we can do the pre-job inspection to make sure we are taking care of everything you wanted today. (If client doesn't come out: tech does the pre-job inspection alone and texts the client about any concerns or upsells found.)" },
+  { id:"item_12", sort_order:13, section:"daily", phase:"arrival", description:"Pre-premium-detail inspection walkthrough completed with client, including upsell script if applicable", has_script:true, script_text:"Open all doors and explain what will be done today based on the job's line items. Upsell moment if something is found not on the line items: \"Hey, I noticed there are some [stains on the seat / carpet / pet hair in the carpet] and that will need some extra time and equipment to get that all out. I can go ahead and do that for [$25/$50/$75] today, is that something you'd be interested in?\" If client pushes back: explain the surface will be cleaned as part of the standard detail, but getting it all the way out requires an extra 30-45 minutes and heavier-duty equipment, which is why it's an additional charge." },
+  { id:"item_13", sort_order:14, section:"daily", phase:"arrival", description:"Before pics taken", has_script:false, script_text:"" },
+  { id:"item_56", sort_order:15, section:"daily", phase:"arrival", description:"Time estimate for the job given", has_script:false, script_text:"" },
+  { id:"item_57", sort_order:16, section:"daily", phase:"arrival", description:"Asked order of vehicles, time each vehicle is needed by, and any concerns", has_script:false, script_text:"" },
+  { id:"item_14", sort_order:17, section:"daily", phase:"sequencing", description:"Correct interior/exterior order chosen based on weather (exterior first in AM if hot/sunny, exterior last if last job of day)", has_script:false, script_text:"" },
+  { id:"item_15", sort_order:18, section:"daily", phase:"cleaning", description:"Trash and floor mats removed", has_script:false, script_text:"" },
+  { id:"item_16", sort_order:19, section:"daily", phase:"cleaning", description:"Full vehicle air compressed", has_script:false, script_text:"" },
+  { id:"item_17", sort_order:20, section:"daily", phase:"cleaning", description:"Vacuumed (or LVP used if air compressor already cleared majority of dirt/debris)", has_script:false, script_text:"" },
+  { id:"item_18", sort_order:21, section:"daily", phase:"cleaning", description:"Interior cleaned starting driver seat, back seat driver side, trunk, back seat passenger side, passenger seat", has_script:false, script_text:"" },
+  { id:"item_19", sort_order:22, section:"daily", phase:"mid_job", description:"Mid-job update text sent with before/after photo of dirtiest area", has_script:true, script_text:"Hey [Client Name], your premium detail is coming along well! Here's a before and after of those [stains/issue] we removed in your seats. I should be done in about [time], so if you can be available to come walk through the car with me then that would be awesome!" },
+  { id:"item_20", sort_order:23, section:"daily", phase:"mid_job", description:"Timing awareness communicated to next client (early/late notice) if applicable", has_script:false, script_text:"" },
+  { id:"item_21", sort_order:24, section:"daily", phase:"interior_finish", description:"Mats dried and returned", has_script:false, script_text:"" },
+  { id:"item_22", sort_order:25, section:"daily", phase:"interior_finish", description:"Windows cleaned", has_script:false, script_text:"" },
+  { id:"item_23", sort_order:26, section:"daily", phase:"interior_finish", description:"Door jambs cleaned (if exterior is on the job)", has_script:false, script_text:"" },
+  { id:"item_24", sort_order:27, section:"daily", phase:"interior_finish", description:"Interior checklist completed", has_script:false, script_text:"" },
+  { id:"item_25", sort_order:28, section:"daily", phase:"interior_finish", description:"After pics taken (interior)", has_script:false, script_text:"" },
+  { id:"item_26", sort_order:29, section:"daily", phase:"exterior", description:"Pre-rinse completed (mist down, cool and prime surface)", has_script:false, script_text:"" },
+  { id:"item_27", sort_order:30, section:"daily", phase:"exterior", description:"Tires sprayed and scrubbed, rinsed off", has_script:false, script_text:"" },
+  { id:"item_28", sort_order:31, section:"daily", phase:"exterior", description:"Foam applied (full car if shaded/cool, panel-by-panel if hot)", has_script:false, script_text:"" },
+  { id:"item_29", sort_order:32, section:"daily", phase:"exterior", description:"Wash wands used to scrub down full vehicle", has_script:false, script_text:"" },
+  { id:"item_30", sort_order:33, section:"daily", phase:"exterior", description:"Rinsed off and thoroughly dried", has_script:false, script_text:"" },
+  { id:"item_31", sort_order:34, section:"daily", phase:"exterior", description:"Windows touched up with exterior towel", has_script:false, script_text:"" },
+  { id:"item_32", sort_order:35, section:"daily", phase:"exterior", description:"Rims dried, excess water/dirt removed from rims and tire face", has_script:false, script_text:"" },
+  { id:"item_33", sort_order:36, section:"daily", phase:"exterior", description:"Tire shine applied", has_script:false, script_text:"" },
+  { id:"item_58", sort_order:37, section:"daily", phase:"exterior", description:"Wax applied if needed (after completing the full exterior)", has_script:false, script_text:"" },
+  { id:"item_34", sort_order:38, section:"daily", phase:"exterior", description:"Exterior checklist completed", has_script:false, script_text:"" },
+  { id:"item_35", sort_order:39, section:"daily", phase:"exterior", description:"After pics taken (exterior), attached in HCP", has_script:false, script_text:"" },
+  { id:"item_36", sort_order:40, section:"daily", phase:"closeout", description:"Correct walkthrough script used with client", has_script:true, script_text:"Hey [Client Name], I am just finishing up with a few last-minute touches, could you come out so we can walk through it together? Once they come out: Ok so your premium detail is looking awesome, I want to show you how it came out. If you see anything I missed please point it out so I can get it taken care of, 4 eyes are better than 2. We started off by taking out all the trash from the vehicle, then we did a full air compressor blow-out on your vents, seats, carpets and surfaces to get all the dirt and debris out of there, then we did a full vacuum on the vehicle including seats, carpets, all compartments and the trunk, then we cleaned, disinfected, and protected all hard surfaces such as the dash, console, cupholders, door panels, etc., then we did the interior windows and windshield. Then on the exterior we deep cleaned all the tires, rims, and wheel wells, we did a foam bath with a hand wash that removed all contaminants, bugs, and debris from your paint, touched up the windows, and finished off with a tire dressing on the wheel face." },
+  { id:"item_37", sort_order:41, section:"daily", phase:"closeout", description:"Tap-to-pay invoice completed", has_script:false, script_text:"" },
+  { id:"item_38", sort_order:42, section:"daily", phase:"closeout", description:"Google review ask made via AirDrop, with a picture added", has_script:true, script_text:"We're doing a competition with our company for a monthly prize of the most Google reviews. If you wouldn't mind leaving me a quick 5-star review it would help me out a lot. I can AirDrop you the link right now. I'll just be cleaning up the equipment, so if you could fill it out and mention my name, that would be amazing!" },
+  { id:"item_39", sort_order:43, section:"daily", phase:"closeout", description:"Referral ask made", has_script:true, script_text:"Is there any friends, family, or neighbors that you could think of that would love this service? If so, would you mind giving me their number or address so I could reach out to them? You get $20 off your next service for any referral that books and pays for the detail!" },
+  { id:"item_40", sort_order:44, section:"daily", phase:"no_show", description:"30-second video walkthrough recorded and sent (interior: front seats, vacuum/LVP, windows, back area; exterior: rims, tires, wheel wells, windows, grill, back end)", has_script:false, script_text:"" },
+  { id:"item_41", sort_order:45, section:"daily", phase:"no_show", description:"Google review link sent via text (same wording as #41)", has_script:true, script_text:"Hey, if you loved your premium detail and thought I did a great job I would love it if you could leave me a 5-star rating on Google, here's the link, and if you just mention my name it would help a ton with a competition we're currently running!" },
+  { id:"item_42", sort_order:46, section:"daily", phase:"no_show", description:"Referral ask sent via text (same wording as #42)", has_script:true, script_text:"Is there any friends, family, or neighbors that you could think of that would love this service? If so, would you mind giving me their number or address so I could reach out to them? You get $20 off your next service for any referral that books and pays for the detail!" },
+  { id:"item_43", sort_order:47, section:"daily", phase:"job_closeout", description:"3 door hangers placed", has_script:false, script_text:"" },
+  { id:"item_44", sort_order:48, section:"daily", phase:"job_closeout", description:"Customer satisfaction card placed", has_script:false, script_text:"" },
+  { id:"item_45", sort_order:49, section:"daily", phase:"job_closeout", description:"Photos of door hangers/card attached in HCP", has_script:false, script_text:"" },
+  { id:"item_46", sort_order:50, section:"daily", phase:"job_closeout", description:"On My Way text sent to next client", has_script:false, script_text:"" },
+  { id:"item_47", sort_order:51, section:"daily", phase:"end_of_day", description:"All trash removed from truck", has_script:false, script_text:"" },
+  { id:"item_48", sort_order:52, section:"daily", phase:"end_of_day", description:"All personal belongings removed from truck", has_script:false, script_text:"" },
+  { id:"item_49", sort_order:53, section:"daily", phase:"end_of_day", description:"Totes and exterior bucket emptied/cleaned out", has_script:false, script_text:"" },
+  { id:"item_50", sort_order:54, section:"daily", phase:"end_of_day", description:"Water tank refilled", has_script:false, script_text:"" },
+  { id:"item_51", sort_order:55, section:"daily", phase:"end_of_day", description:"Clean towels returned to correct bin", has_script:false, script_text:"" },
+  { id:"item_52", sort_order:56, section:"daily", phase:"end_of_day", description:"Dirty towels placed in correct dirty bin", has_script:false, script_text:"" },
+  { id:"item_53", sort_order:57, section:"daily", phase:"end_of_day", description:"Next day's schedule checked", has_script:false, script_text:"" },
+  { id:"item_54", sort_order:58, section:"daily", phase:"end_of_day", description:"Night-before texts sent for next day's clients (same script as #1)", has_script:true, script_text:"Hey [Client Name] this is [Tech Name] from Skylo Detailing, I am the one who will be doing your car tomorrow! Just wanted to give you one last reminder about the appointment and let you know I'll be there around [9/12/3], and if you could have your personal belongings taken out of the vehicle that would be greatly appreciated, see you tomorrow!" },
+  { id:"item_55", sort_order:59, section:"daily", phase:"end_of_day", description:"First job location confirmed for next day (to plan departure/arrival time)", has_script:false, script_text:"" },
   { id:"misc_01", sort_order:101, section:"misc", phase:"misc_unit", description:"Getting into the unit / opening the garage doors", has_script:true, script_text:"On arrival, the garage and door should be shut and locked.\n\n1. Find the key box hanging from the clear door on the right side. Your trainer will give you the key box code.\n2. Unlock the key box and take the key out.\n3. Unlock the left side black garage door and prop it open so it doesn't lock on you again.\n4. Put the key back into the key box BEFORE entering the unit.\n5. Enter through the left side door you propped open and open the garage from the inside.\n\nWhen you leave, close the garage and exit through the right side garage door." },
   { id:"misc_02", sort_order:102, section:"misc", phase:"misc_unit", description:"Where to park the Mavs", has_script:true, script_text:"If you are standing at the entrance of the garage: Big Bertha goes in the back left of the unit. 4 more Mavs across the back row, 3 Mavs in the 2nd row, then 2 in the 3rd row, then 2 in the front row.\n\nThere is no specific order — when you get back to the unit, fill in the next open space closest to the back of the garage." },
   { id:"misc_03", sort_order:103, section:"misc", phase:"misc_unit", description:"How many towels to take", has_script:true, script_text:"No matter the job, always be prepared for a schedule change, unexpected dirty cars, and upsells.\n\n• LVP: 2–3 per car\n• Exterior: 2 in summer, 3 in winter\n• Window: 1 per car\n• Shmuck: 3 per car\n• Rinseless: 1–2 in summer, at least 3–4 in winter\n• Wax: 1–2" },
@@ -4889,6 +4939,11 @@ const RUBRIC_ITEMS_SEED = [
   { id:"misc_24", sort_order:124, section:"misc", phase:"misc_troubleshooting", description:"Troubleshooting: Air compressor", has_script:false, script_text:"" },
   { id:"misc_25", sort_order:125, section:"misc", phase:"misc_troubleshooting", description:"Troubleshooting: Vacuum", has_script:false, script_text:"" },
   { id:"misc_26", sort_order:126, section:"misc", phase:"misc_troubleshooting", description:"Troubleshooting: Extractor", has_script:false, script_text:"" },
+  { id:"misc_27", sort_order:127, section:"misc", phase:"misc_rv_boats", description:"RV pre-job checklist & bucket", has_script:true, script_text:"RVs and boats use different chemicals and a different bucket. When prepping for an RV, grab the RV/boat bucket, and grab the ladder at the unit to reach the tall areas of the RV.\n\nBring:\n• Ladder\n• RV/boat bucket: Bead Up spray sealant, hard water remover, magic eraser, exterior soap, wash wand\n• Your regular everyday count of towels, equipment, and tote" },
+  { id:"misc_28", sort_order:128, section:"misc", phase:"misc_rv_boats", description:"RV exterior cleaning", has_script:true, script_text:"Cleaning an RV is very similar to cleaning a car. The only difference is that we do not do interior cleanings on RVs.\n\n1. Clean the tires with tire cleaner, a tire brush, and a wheel barrel brush, then rinse.\n2. Rinse down the RV from top to bottom.\n3. Foam cannon and bucket wash the RV from top to bottom. Rinse throughout the bucket wash if the sun is drying the exterior soap too quickly.\n4. Rinse off completely from top to bottom.\n5. Dry from top to bottom with an exterior rag.\n6. Apply the Bead Up sealant: spray it onto one side of your rag (your \"wet side\") and remove it with the dry side. Work in small sections or panels so you can keep track of what you've done. It's safe on decals.\n7. Go through the exterior checklist. Make sure there are no streaks on the windows or the paint after the sealant was applied." },
+  { id:"misc_29", sort_order:129, section:"misc", phase:"misc_rv_boats", description:"Boat pre-job checklist & bucket", has_script:true, script_text:"Bring your regular everyday count of towels, equipment, and tote, plus the boat bucket:\n• Hard water remover (light blue)\n• Boat milk (white)\n• Deck cleaner (dark blue)\n• Magic eraser\n• Exterior soap\n• Wash wand" },
+  { id:"misc_30", sort_order:130, section:"misc", phase:"misc_rv_boats", description:"Boat exterior cleaning", has_script:true, script_text:"Cleaning a boat is pretty different from cleaning a car or an RV. These jobs are nice because they're high revenue, you're in one spot all day, and boat owners usually tip well!\n\n1. Make sure all personal items are removed.\n2. Start with a regular exterior detail: rinse with water, foam cannon and bucket wash, then rinse again. This gets the surface clean and ready for hard water spot removal.\n3. Remove all hard water spots. This is the most important and longest step. Use the hard water spot remover and a magic eraser in small sections, in a cross-hatch pattern, and go over every part of the boat. Rinse the hard water remover off frequently, or the sun will bake it into the paint.\n4. Do another foam cannon and bucket wash.\n5. Hand wax the exterior. Split the boat into 4 sections. Apply and remove the wax on one section, then move to the next, until the whole boat is waxed.\n6. Walk around the boat and complete the checklist. Make sure there are no hard water spots, wax streaks, or missed areas." },
+  { id:"misc_31", sort_order:131, section:"misc", phase:"misc_rv_boats", description:"Boat interior cleaning", has_script:true, script_text:"1. If the client hasn't already, remove all items from the interior. Don't miss any cubbies. Remove all cushions and put them somewhere safe where they won't get damaged.\n2. Bring everything you'll need onto the boat at once: your tote and supplies, boat milk (white), deck cleaner (dark blue), vacuum, all purpose, etc. This saves a lot of trips back and forth to the truck.\n3. Air compress the boat if needed and if you prefer. Not every tech does, but it helps break up dirt and crumbs in cubbies, cracks, and crevices.\n4. Clean any towers or props higher up first, so crumbs, bugs, dirt, and chemicals don't fall into the boat after you've vacuumed and wiped down.\n5. Vacuum the entire boat, starting at one end and finishing at the other. Always work in a set order (top to bottom, front to back) so you don't miss any sections. LVP or all purpose can help break up debris and tough stains before vacuuming.\n6. LVP wipe-down of every hard surface: cubbies, cockpit, side walls, seats and cushions, leather, vinyl, plastic, etc. If the LVP leaves streaks, clear them with glass cleaner.\n7. Extract the floor padding. Fill the extractor and heat the water, pre-wet the pad, apply deck cleaner, scrub and foam it up with the flat-head drill brush, then extract with the vacuum head while pulling the steam trigger.\n8. Clean the windows. No streaks or hard water marks left on the glass.\n9. Finish with any touch-ups: vacuum, LVP, extraction, etc.\n10. Go through the interior boat checklist and check every cubby and area so the customer is 100% satisfied." },
 ];
 
 const PHASE_LABELS = {
@@ -4899,6 +4954,7 @@ const PHASE_LABELS = {
   no_show:"Client Not Home Protocol", job_closeout:"Job Close-Out", end_of_day:"End of Day",
   misc_unit:"Unit, Trucks & Towels", misc_hcp:"Housecall Pro", misc_customers:"Clients",
   misc_upsells:"Upsells & Add-Ons", misc_troubleshooting:"Troubleshooting Equipment",
+  misc_rv_boats:"RVs & Boats",
 };
 
 const STAGE_CONFIG = {
@@ -4928,7 +4984,7 @@ async function scheduleCheckins(techId, startDate) {
     { milestone:"week_1",  days:7  },
     { milestone:"week_2",  days:14 },
     { milestone:"week_4",  days:28 },
-    { milestone:"week_6",  days:42 },
+    { milestone:"week_8",  days:56 },
     { milestone:"week_12", days:84 },
   ];
   const base = new Date(startDate + "T12:00:00Z");
@@ -4941,7 +4997,7 @@ async function scheduleCheckins(techId, startDate) {
   }
 }
 
-// Check-ins (week 1, 2, 4, 6, 12) count from the day a tech finishes
+// Check-ins (week 1, 2, 4, 8, 12) count from the day a tech finishes
 // onboarding, not their hire date. Apprentices have no check-ins until the
 // Final Onboarding Cert is signed; anyone hired straight in at another title
 // still counts from their start date.
@@ -4958,11 +5014,14 @@ function checkinBaseDate(t) {
 // complete after TRAINING_MIN_DAYS full Perfect Days plus all misc reps.
 const TRAINING_MIN_DAYS = 8;
 const MISC_REPS = 3;
+// RV and boat jobs are rare, so those items are reference only: trainers can
+// still check them off, but they don't count toward finishing training.
+const MISC_OPTIONAL_PHASES = new Set(["misc_rv_boats"]);
 const TRAINING_PACE = { ahead:"Ahead of pace", on_track:"On track", behind:"Behind pace" };
 
 function trainingProgress(items, checks) {
   const daily = items.filter(i => (i.section || "daily") === "daily");
-  const misc = items.filter(i => i.section === "misc");
+  const misc = items.filter(i => i.section === "misc" && !MISC_OPTIONAL_PHASES.has(i.phase));
   const dailyIds = new Set(daily.map(i => i.id)), miscIds = new Set(misc.map(i => i.id));
   const perDay = {}, miscCount = {};
   for (const c of checks) {
@@ -5100,7 +5159,10 @@ function PerfectDayTrainingPanel({ tech=null, techs=[], admin=false, fixedSubjec
     byPhase[item.phase].push(item);
   }
   const miscByPhase = {}, miscPhases = [];
-  for (const item of prog.misc) {
+  // Every misc item, including reference-only groups (RVs & Boats) that
+  // prog.misc leaves out of the training count.
+  const allMisc = (rubricItems || []).filter(i => i.section === "misc");
+  for (const item of allMisc) {
     const p = item.phase || "misc";
     if (!miscByPhase[p]) { miscByPhase[p] = []; miscPhases.push(p); }
     miscByPhase[p].push(item);
@@ -5252,7 +5314,7 @@ function PerfectDayTrainingPanel({ tech=null, techs=[], admin=false, fixedSubjec
           )}
           {miscPhases.map(phase => (
             <div key={phase} style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", overflow:"hidden" }}>
-              <div style={{ background:C.cardLt, padding:"10px 16px", ...heading, fontSize:"13px", color:C.gold }}>{PHASE_LABELS[phase] || (phase==="misc" ? "Miscellaneous" : phase)}</div>
+              <div style={{ background:C.cardLt, padding:"10px 16px", ...heading, fontSize:"13px", color:C.gold }}>{PHASE_LABELS[phase] || (phase==="misc" ? "Miscellaneous" : phase)}{MISC_OPTIONAL_PHASES.has(phase) && <span style={{ fontSize:"11px", color:C.muted, fontWeight:"600", letterSpacing:"0", textTransform:"none", marginLeft:"8px" }}>Reference — log reps when it comes up; not required to finish training</span>}</div>
               {miscByPhase[phase].map(item => {
                 const reps = checks.filter(c => c.rubric_item_id===item.id).sort((a,b)=>a.day_date.localeCompare(b.day_date));
                 const doneToday = !!dayChecks[item.id], complete = reps.length >= MISC_REPS;
@@ -5264,7 +5326,7 @@ function PerfectDayTrainingPanel({ tech=null, techs=[], admin=false, fixedSubjec
                       </div>
                       <div style={{ flex:1 }}>
                         <div style={{ fontSize:"13px", color:complete ? C.muted : C.black }}>
-                          <span style={{ fontFamily:FONT, fontWeight:"700", color:C.muted, marginRight:"4px" }}>#{prog.misc.indexOf(item)+1}</span>
+                          <span style={{ fontFamily:FONT, fontWeight:"700", color:C.muted, marginRight:"4px" }}>#{allMisc.indexOf(item)+1}</span>
                           {item.description}
                         </div>
                         {reps.length > 0 && <div style={{ fontSize:"11px", color:C.muted, marginTop:"2px" }}>Done {reps.map(r => fmtDay(r.day_date)).join(" · ")}{doneToday && training ? " — logged for this day" : ""}</div>}
@@ -5347,15 +5409,15 @@ function PerfectDayTrainingPanel({ tech=null, techs=[], admin=false, fixedSubjec
 const fmtWhen = iso => iso ? new Date(iso).toLocaleDateString("en-US", { month:"short", day:"numeric", year:"numeric", timeZone:"America/Denver" }) : "";
 const QUESTION_BY_ID = Object.fromEntries(TEST_QUESTIONS.map(q => [q.id, q]));
 // Tests taken before the split (no test_key) covered both rubrics, so a pass
-// on one of those counts for both tests.
-const passedTestFor = (tests, key) => tests.find(t => t.status === "passed" && (t.test_key === key || !t.test_key));
+// on one of those counts for both required tests (not the RVs & Boats test).
+const passedTestFor = (tests, key) => tests.find(t => t.status === "passed" && (t.test_key === key || (!t.test_key && !TESTS[key]?.optional)));
 const testName = t => t.test_key ? TESTS[t.test_key]?.name || "Written test" : "Written test (both rubrics)";
 
 // The apprentice takes the test on the administrator's device. Questions come
 // one at a time with the four answers shuffled; after each round only the
 // missed questions come back (re-shuffled) until every one is answered right.
 // Right answers are never shown while the test is running.
-function WrittenTestRunner({ trainee, adminUser, onExit, self=false, testKey="perfect_day" }) {
+function WrittenTestRunner({ trainee, adminUser, onExit, self=false, testKey="perfect_day", onFinished }) {
   const T = TESTS[testKey];
   const QS = questionsFor(testKey);
   const [test, setTest] = useState(null);
@@ -5387,17 +5449,28 @@ function WrittenTestRunner({ trainee, adminUser, onExit, self=false, testKey="pe
     const wrong = order.filter(o => picks[o.id] !== QUESTION_BY_ID[o.id].correct).map(o => ({ id:o.id, picked:picks[o.id] }));
     const rounds = [...(test.rounds || []), { round:roundNo, asked:roundIds, wrong, at:new Date().toISOString() }];
     const passed = wrong.length === 0;
-    const patch = { rounds, ...(roundNo === 1 ? { first_try_correct:roundIds.length - wrong.length } : {}), ...(passed ? { status:"passed", completed_at:new Date().toISOString() } : {}) };
+    // One-shot tests end after the first try either way. A miss is saved as
+    // "abandoned" (the only other finished status the table allows); the
+    // assignment row records that it was a fail.
+    const finished = passed || T.oneShot;
+    const patch = { rounds, ...(roundNo === 1 ? { first_try_correct:roundIds.length - wrong.length } : {}), ...(finished ? { status:passed ? "passed" : "abandoned", completed_at:new Date().toISOString() } : {}) };
     setSaving(true);
     try {
       if (test.id) await sb(`training_tests?id=eq.${test.id}`, { method:"PATCH", prefer:"return=minimal", body:JSON.stringify(patch) });
       setTest(t => ({ ...t, ...patch }));
+      if (finished && onFinished) await onFinished({ passed, testId:test.id, score:roundIds.length - wrong.length, total:roundIds.length });
       setResult({ asked:roundIds.length, wrong });
     } catch(e) { window.alert("Couldn't save answers — check the connection and tap Submit again. " + e.message); }
     setSaving(false);
   }
 
   async function quit() {
+    if (T.oneShot) {
+      if (!window.confirm("Stop this test? You only get one try, so stopping counts as not passed.")) return;
+      if (test?.id && test.status === "in_progress") await sb(`training_tests?id=eq.${test.id}`, { method:"PATCH", prefer:"return=minimal", body:JSON.stringify({ status:"abandoned", completed_at:new Date().toISOString() }) }).catch(() => {});
+      if (onFinished) await onFinished({ passed:false, testId:test?.id || null, score:0, total:QS.length }).catch(() => {});
+      return onExit();
+    }
     if (!window.confirm("Stop this test? It will be saved as not finished and they'll start over next time.")) return;
     if (test?.id && test.status === "in_progress") await sb(`training_tests?id=eq.${test.id}`, { method:"PATCH", prefer:"return=minimal", body:JSON.stringify({ status:"abandoned", completed_at:new Date().toISOString() }) }).catch(()=>{});
     onExit();
@@ -5411,7 +5484,9 @@ function WrittenTestRunner({ trainee, adminUser, onExit, self=false, testKey="pe
     <div style={wrap}>
       <div style={{ ...h, fontSize:"22px" }}>📝 {T.name} — {trainee.name}</div>
       <div style={{ fontSize:"13px", color:C.black, lineHeight:1.6 }}>
-        {self
+        {T.oneShot
+          ? <>{QS.length} multiple-choice questions on {T.covers}. Take your time — no notes or help.<br/><br/>You need <b>100%</b> to pass, and there are <b>no retakes</b>. If you miss even one question, it goes to your supervisor, who reviews your answers and resends the test.</>
+          : self
           ? <>{QS.length} multiple-choice questions on {T.covers}. Take your time — no notes or help.<br/><br/>You need <b>100%</b> to pass. After you submit you'll see your score, and any questions you missed come back (in a new order) until you get every one right.</>
           : <>{QS.length} multiple-choice questions covering {T.covers}. Hand the phone to {trainee.name.split(" ")[0]} once you start.<br/><br/>To pass they need <b>100%</b>. After the first try, any missed questions come back (in a new order) until every one is right. The right answers are never shown.</>}
       </div>
@@ -5426,10 +5501,14 @@ function WrittenTestRunner({ trainee, adminUser, onExit, self=false, testKey="pe
       <div style={wrap}>
         <div style={{ ...h, fontSize:"13px", color:C.purple, letterSpacing:"-0.01em" }}>{roundNo === 1 ? "FIRST TRY" : `RETAKE ${roundNo - 1}`}</div>
         <div style={{ ...h, fontSize:"40px", color:passed ? C.green : C.black }}>{result.asked - result.wrong.length}/{result.asked}</div>
-        {passed ? (<>
+        {!passed && T.oneShot ? (<>
+          <div style={{ fontSize:"15px", color:C.red, fontWeight:"700" }}>Not passed — you needed 100%.</div>
+          <div style={{ fontSize:"13px", color:C.black }}>Your answers went to your supervisor. They'll go over them with you and resend the test.</div>
+          <button onClick={onExit} style={big(C.blue)}>Done</button>
+        </>) : passed ? (<>
           <div style={{ fontSize:"15px", color:C.green, fontWeight:"700" }}>✅ {T.name} passed{roundNo > 1 ? ` after ${roundNo - 1} retake${roundNo > 2 ? "s" : ""}` : " — 100% on the first try!"}</div>
           {test.first_try_correct != null && roundNo > 1 && <div style={{ fontSize:"13px", color:C.muted }}>First try: {test.first_try_correct}/{test.total_questions}</div>}
-          <div style={{ fontSize:"13px", color:C.black }}>{self ? "Next up: the other written test if you haven't passed it yet, then your practical Perfect Day test with Will." : `Hand the phone back to ${adminUser?.name || "Will"}. Both written tests have to be passed before the practical.`}</div>
+          <div style={{ fontSize:"13px", color:C.black }}>{T.optional ? (self ? "Nice work — your supervisor will review it and advance you." : `Hand the phone back to ${adminUser?.name || "Will"}.`) : self ? "Next up: the other written test if you haven't passed it yet, then your practical Perfect Day test with Will." : `Hand the phone back to ${adminUser?.name || "Will"}. Both written tests have to be passed before the practical.`}</div>
           <button onClick={onExit} style={big(C.green)}>Done</button>
         </>) : (<>
           <div style={{ fontSize:"14px", color:C.black }}>{result.wrong.length} question{result.wrong.length===1?"":"s"} missed. Retake {result.wrong.length===1?"it":"them"} until every answer is right.</div>
@@ -5659,7 +5738,7 @@ function FinalDayResults({ trainee, prog, tests, evals, evalResults, rubricItems
         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:"8px" }}>
           <div style={small}>1 · WRITTEN TESTS</div>
         </div>
-        {TEST_KEYS.map(key => {
+        {TEST_KEYS.filter(k => !TESTS[k].optional).map(key => {
           const p = passedTestFor(tests, key);
           const tried = tests.some(t => t.test_key === key);
           return (
@@ -6423,7 +6502,7 @@ function TrainingOverviewTab({ techs, currentUser, refreshAll }) {
             {lastNote?.pace === "behind" && <span style={{ color:C.red }}>Behind pace</span>}
             {notes.some(n => n.trainee_id === t.id && n.incident) && <span style={{ color:C.red }}>⚠️ Incident noted</span>}
             {(() => { const mine = tests.filter(x => x.trainee_id === t.id); return prog.complete && !(passedTestFor(mine, "perfect_day") && passedTestFor(mine, "misc")); })() && <span style={{ color:C.green, fontWeight:"700" }}>{t.classroom_complete ? "✅ Ready for the written tests" : "✅ Field training done · classroom day not marked"}</span>}
-            {(() => { const mine = tests.filter(x => x.trainee_id === t.id); return TEST_KEYS.map(k => { const pt = passedTestFor(mine, k); return pt ? <span key={k} style={{ color:C.purple }}>📝 {TESTS[k].short} passed · {pt.first_try_correct}/{pt.total_questions} first try</span> : null; }); })()}
+            {(() => { const mine = tests.filter(x => x.trainee_id === t.id); return TEST_KEYS.filter(k => !TESTS[k].optional).map(k => { const pt = passedTestFor(mine, k); return pt ? <span key={k} style={{ color:C.purple }}>📝 {TESTS[k].short} passed · {pt.first_try_correct}/{pt.total_questions} first try</span> : null; }); })()}
             {(() => { const es = evals.filter(e => e.tech_id === t.id); if (!es.length) return null; const p = es.find(e => e.overall_result === "pass"); return <span style={{ color:p ? C.green : C.red, fontWeight:"700" }}>{p ? (t.title === "detail_pro" ? "🎓 Promoted to Detail Pro" : "🏁 Practical passed") : `🏁 Practical failed ×${es.length}`}</span>; })()}
           </div>
         </div>
@@ -6571,7 +6650,255 @@ function TestQuestionBank() {
   );
 }
 
-function DevelopmentTab({ techs, rideAlongs, refreshAll, showToast }) {
+// ─── ASSIGNED TESTS: RVs & BOATS → SENIOR DETAIL PRO ─────────────────────────
+// Only owners/managers (admin panel) and the Field Supervisor see this. They
+// assign the RVs & Boats test to a Detail Pro; the tech takes it from their
+// own login; the reviewer checks the results and signs off, which promotes
+// the tech to Senior Detail Pro.
+const SENIOR_TEST_KEY = "rv_boats";
+const canAssignTests = tech => tech?.title === "field_supervisor";
+// Assignment status: assigned → submitted (passed, waiting for review) or
+// failed (missed one or more; reviewer resends) → approved. Resending adds a
+// new row so every attempt stays on record.
+const openAssignment = (assignments, techId) => assignments.find(a => a.tech_id === techId && a.status === "assigned");
+
+// Every answer from a test, round by round. Rounds store only the wrong
+// picks, so any asked question not in `wrong` was answered correctly.
+function TestAnswers({ test }) {
+  const [round, setRound] = useState(0);
+  const rounds = test?.rounds || [];
+  if (!rounds.length) return null;
+  const r = rounds[Math.min(round, rounds.length - 1)];
+  const wrong = Object.fromEntries((r.wrong || []).map(w => [w.id, w.picked]));
+  return (
+    <div style={{ display:"flex", flexDirection:"column", gap:"8px" }}>
+      {rounds.length > 1 && (
+        <div style={{ display:"flex", gap:"6px", flexWrap:"wrap" }}>
+          {rounds.map((x, i) => <button key={i} onClick={() => setRound(i)} style={{ background:i === round ? C.blue : C.cardLt, color:i === round ? C.white : C.black, border:`1px solid ${C.border}`, padding:"5px 10px", borderRadius:"12px", cursor:"pointer", fontSize:"11px", fontWeight:"700" }}>{x.round === 1 ? "First try" : `Retake ${x.round - 1}`} · {x.asked.length - x.wrong.length}/{x.asked.length}</button>)}
+        </div>
+      )}
+      {r.asked.map((id, i) => {
+        const q = QUESTION_BY_ID[id]; if (!q) return null;
+        const missed = id in wrong;
+        return (
+          <div key={id} style={{ background:missed ? `${C.red}08` : `${C.green}08`, border:`1px solid ${missed ? C.red : C.green}40`, borderRadius:"8px", padding:"8px 10px", fontSize:"12px" }}>
+            <div style={{ color:C.black, fontWeight:"700" }}>{i + 1}. {q.q}</div>
+            {missed
+              ? <><div style={{ color:C.red, marginTop:"3px" }}>✗ Answered: {wrong[id] || "(no answer)"}</div><div style={{ color:C.green, marginTop:"2px" }}>✓ Right answer: {q.correct}</div></>
+              : <div style={{ color:C.green, marginTop:"3px" }}>✓ Answered: {q.correct}</div>}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// Read-only list of who can be scheduled on RV and boat jobs.
+function RvBoatCrew({ techs }) {
+  const crew = techs.filter(t => t.is_active !== false && t.title === "senior_detail_pro").sort((a, b) => a.name.localeCompare(b.name));
+  return (
+    <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"14px 16px", display:"flex", flexDirection:"column", gap:"8px" }}>
+      <Label color={C.purple}>🚤 Certified for RVs & Boats · {crew.length}</Label>
+      <div style={{ fontSize:"12px", color:C.muted }}>Senior Detail Pros can be scheduled on RV and boat jobs. Detail Pros are residential vehicles only.</div>
+      {crew.length === 0 && <div style={{ fontSize:"13px", color:C.muted }}>No one yet.</div>}
+      {crew.map(t => <div key={t.id} style={{ fontSize:"14px", color:C.black }}>✅ {t.name}</div>)}
+    </div>
+  );
+}
+
+function SeniorCertPanel({ techs, reviewerName, refreshAll, showToast }) {
+  const [assignments, setAssignments] = useState([]);
+  const [tests, setTests] = useState({});
+  const [loading, setLoading] = useState(true);
+  const [pick, setPick] = useState("");
+  const [confirmBox, setConfirmBox] = useState({});
+  const [showAns, setShowAns] = useState({});
+  const [busy, setBusy] = useState(null);
+  const toast = showToast || ((m) => window.alert(m));
+  const T = TESTS[SENIOR_TEST_KEY];
+
+  async function load() {
+    try {
+      const [a, t] = await Promise.all([
+        sb(`test_assignments?test_key=eq.${SENIOR_TEST_KEY}&select=*&order=assigned_at.desc`),
+        sb(`training_tests?test_key=eq.${SENIOR_TEST_KEY}&select=id,trainee_id,status,rounds,first_try_correct,total_questions,started_at,completed_at`),
+      ]);
+      setAssignments(a || []); setTests(Object.fromEntries((t || []).map(x => [x.id, x])));
+    } catch(e) { toast("Couldn't load the RV & Boat Cert: " + e.message, false); }
+    setLoading(false);
+  }
+  useEffect(() => { load(); }, []);
+
+  const byId = Object.fromEntries(techs.map(t => [t.id, t]));
+  // Latest assignment per tech decides where they show up.
+  const latest = {};
+  for (const a of assignments) if (a.status !== "cancelled" && !latest[a.tech_id]) latest[a.tech_id] = a;
+  const latestList = Object.values(latest);
+  const waiting = latestList.filter(a => a.status === "assigned");
+  const ready = latestList.filter(a => a.status === "submitted");
+  const failed = latestList.filter(a => a.status === "failed");
+  const done = assignments.filter(a => a.status === "approved");
+  const eligible = techs.filter(t => t.is_active !== false && t.title === "detail_pro" && !["assigned", "submitted"].includes(latest[t.id]?.status)).sort((x, y) => x.name.localeCompare(y.name));
+  const fmt = iso => iso ? new Date(iso).toLocaleDateString("en-US", { month:"short", day:"numeric" }) : "";
+
+  async function send(techId, msg) {
+    setBusy("send:" + techId);
+    try {
+      await sb("test_assignments", { method:"POST", prefer:"return=minimal", body:JSON.stringify({ tech_id:techId, test_key:SENIOR_TEST_KEY, assigned_by:reviewerName }) });
+      toast(msg || `📝 ${T.name} sent to ${byId[techId]?.name}`); setPick(""); await load();
+    } catch(e) { toast("Error: " + e.message, false); }
+    setBusy(null);
+  }
+  async function update(a, patch, msg) {
+    setBusy(a.id);
+    try {
+      await sb(`test_assignments?id=eq.${a.id}`, { method:"PATCH", prefer:"return=minimal", body:JSON.stringify(patch) });
+      if (msg) toast(msg); await load();
+    } catch(e) { toast("Error: " + e.message, false); }
+    setBusy(null);
+  }
+  async function advance(a) {
+    const t = byId[a.tech_id];
+    if (!confirmBox[a.id]) return toast("Check the box first", false);
+    if (!window.confirm(`Advance ${t?.name} to Senior Detail Pro? They'll show as certified for RV and boat jobs.`)) return;
+    setBusy(a.id);
+    try {
+      await sb(`test_assignments?id=eq.${a.id}`, { method:"PATCH", prefer:"return=minimal", body:JSON.stringify({ status:"approved", reviewed_by:reviewerName, reviewed_at:new Date().toISOString(), signature:reviewerName }) });
+      // Only promote a Detail Pro; never change anyone else's title.
+      if (t?.title === "detail_pro") await sb(`techs?id=eq.${t.id}`, { method:"PATCH", prefer:"return=minimal", body:JSON.stringify({ title:"senior_detail_pro" }) });
+      toast(`🎉 ${t?.name} is now a Senior Detail Pro`);
+      refreshAll && await refreshAll(); await load();
+    } catch(e) { toast("Error: " + e.message, false); }
+    setBusy(null);
+  }
+
+  const card = { background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"14px 16px", display:"flex", flexDirection:"column", gap:"10px" };
+  const sm = (bg) => ({ background:bg, border:"none", color:C.white, padding:"8px 12px", borderRadius:"10px", cursor:"pointer", fontSize:"12px", fontWeight:"700", fontFamily:FONT });
+  const result = (a, color) => {
+    const t = byId[a.tech_id], test = tests[a.test_id];
+    return (
+      <div key={a.id} style={{ borderTop:`1px solid ${C.border}40`, paddingTop:"10px", display:"flex", flexDirection:"column", gap:"8px" }}>
+        <div style={{ fontSize:"14px", color:C.black, fontWeight:"700" }}>{t?.name || "Unknown tech"}</div>
+        <div style={{ fontSize:"13px", color, fontWeight:"700" }}>{a.score}/{a.total} · {a.status === "submitted" ? "Passed" : "Not passed"} · {fmt(a.submitted_at)}</div>
+        {test && <button onClick={() => setShowAns(s => ({ ...s, [a.id]:!s[a.id] }))} style={{ alignSelf:"flex-start", background:"transparent", border:"none", color:C.blue, cursor:"pointer", fontSize:"12px", fontWeight:"700", padding:0 }}>{showAns[a.id] ? "▲ Hide answers" : "▼ View their answers"}</button>}
+        {test && showAns[a.id] && <TestAnswers test={test}/>}
+        {a.status === "submitted" ? (<>
+          <label style={{ display:"flex", alignItems:"center", gap:"10px", padding:"8px", background:`${C.blue}08`, borderRadius:"10px", cursor:"pointer", fontSize:"13px", color:C.black }}>
+            <input type="checkbox" checked={!!confirmBox[a.id]} onChange={e => setConfirmBox(s => ({ ...s, [a.id]:e.target.checked }))} style={{ width:"16px", height:"16px" }}/>
+            Advance {t?.name?.split(" ")[0] || "them"} to Senior Detail Pro (certified for RVs & boats)
+          </label>
+          <button onClick={() => advance(a)} disabled={busy === a.id || !confirmBox[a.id]} style={{ ...sm(confirmBox[a.id] ? C.green : C.border), alignSelf:"flex-start" }}>Confirm → Senior Detail Pro</button>
+        </>) : (
+          <button onClick={() => send(a.tech_id, `📝 Test resent to ${t?.name}`)} disabled={busy === "send:" + a.tech_id} style={{ ...sm(C.blue), alignSelf:"flex-start" }}>Resend the test</button>
+        )}
+      </div>
+    );
+  };
+  if (loading) return <div style={{ fontSize:"13px", color:C.muted }}>Loading…</div>;
+
+  return (
+    <div style={{ display:"flex", flexDirection:"column", gap:"14px" }}>
+      <div style={{ fontSize:"12px", color:C.muted }}>
+        Detail Pros service residential vehicles only. To move up to <b>Senior Detail Pro</b> (RVs and boats), send them the {T.name}. They get one try and need 100%. If they pass, review it here and advance them. If they miss any, go over their answers with them and resend it.
+      </div>
+
+      <div style={card}>
+        <Label color={C.blue}>Send the {T.name}</Label>
+        <div style={{ display:"flex", gap:"8px", flexWrap:"wrap" }}>
+          <select value={pick} onChange={e => setPick(e.target.value)} style={{ flex:1, minWidth:"180px", background:C.white, border:`1px solid ${C.border}`, color:C.black, padding:"10px", borderRadius:"10px", fontSize:"14px", fontFamily:FONT }}>
+            <option value="">Select a Detail Pro…</option>
+            {eligible.map(t => <option key={t.id} value={t.id}>{t.name}{latest[t.id]?.status === "failed" ? " (didn't pass last time)" : ""}</option>)}
+          </select>
+          <button onClick={() => pick && send(pick)} disabled={!pick || busy === "send:" + pick} style={sm(pick ? C.blue : C.border)}>Send test</button>
+        </div>
+      </div>
+
+      <div style={card}>
+        <Label color={C.green}>Passed — ready to advance · {ready.length}</Label>
+        {ready.length === 0 && <div style={{ fontSize:"12px", color:C.muted }}>Nothing to review yet.</div>}
+        {ready.map(a => result(a, C.green))}
+      </div>
+
+      <div style={card}>
+        <Label color={C.red}>Didn't pass · {failed.length}</Label>
+        {failed.length === 0 && <div style={{ fontSize:"12px", color:C.muted }}>No one right now.</div>}
+        {failed.map(a => result(a, C.red))}
+      </div>
+
+      <div style={card}>
+        <Label color={C.gold}>Waiting on the tech · {waiting.length}</Label>
+        {waiting.length === 0 && <div style={{ fontSize:"12px", color:C.muted }}>No open tests.</div>}
+        {waiting.map(a => (
+          <div key={a.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:"8px", fontSize:"13px", color:C.black }}>
+            <span><b>{byId[a.tech_id]?.name || "Unknown tech"}</b> · sent {fmt(a.assigned_at)} by {a.assigned_by || "—"}{Object.values(tests).some(x => x.trainee_id === a.tech_id && x.started_at > a.assigned_at) ? <span style={{ color:C.red }}> · started but didn't finish</span> : ""}</span>
+            <span style={{ display:"flex", gap:"6px" }}>
+              {Object.values(tests).some(x => x.trainee_id === a.tech_id && x.started_at > a.assigned_at) && <button onClick={async () => { await update(a, { status:"cancelled", reviewed_by:reviewerName, reviewed_at:new Date().toISOString() }); await send(a.tech_id, `📝 Test resent to ${byId[a.tech_id]?.name}`); }} disabled={busy === a.id} style={sm(C.blue)}>Resend</button>}
+              <button onClick={() => window.confirm("Cancel this test?") && update(a, { status:"cancelled", reviewed_by:reviewerName, reviewed_at:new Date().toISOString() }, "Test cancelled")} disabled={busy === a.id} style={{ background:"transparent", border:`1px solid ${C.border}`, color:C.muted, padding:"6px 10px", borderRadius:"10px", cursor:"pointer", fontSize:"11px" }}>Cancel</button>
+            </span>
+          </div>
+        ))}
+      </div>
+
+      {done.length > 0 && (
+        <div style={card}>
+          <Label color={C.purple}>Advanced · {done.length}</Label>
+          {done.map(a => <div key={a.id} style={{ fontSize:"13px", color:C.black }}><b>{byId[a.tech_id]?.name || "Unknown tech"}</b> · {a.score}/{a.total} · advanced by {a.reviewed_by} on {fmt(a.reviewed_at)}</div>)}
+        </div>
+      )}
+
+      <RvBoatCrew techs={techs}/>
+    </div>
+  );
+}
+
+// What the tech sees: their RVs & Boats test, if one was sent to them.
+function MyAssignedTests({ tech }) {
+  const [a, setA] = useState(null);
+  const [started, setStarted] = useState(false);
+  const [taking, setTaking] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+  async function load() {
+    try {
+      const as = await sb(`test_assignments?tech_id=eq.${tech.id}&test_key=eq.${SENIOR_TEST_KEY}&status=neq.cancelled&select=*&order=assigned_at.desc&limit=1`);
+      const cur = as?.[0] || null;
+      setA(cur);
+      // One try: if they already opened this test (e.g. closed the app
+      // mid-test), they can't start it again until it's resent.
+      if (cur?.status === "assigned") {
+        const ts = await sb(`training_tests?trainee_id=eq.${tech.id}&test_key=eq.${SENIOR_TEST_KEY}&started_at=gt.${encodeURIComponent(cur.assigned_at)}&select=id&limit=1`);
+        setStarted(!!(ts && ts.length));
+      } else setStarted(false);
+    } catch(e) {}
+    setLoaded(true);
+  }
+  useEffect(() => { load(); }, [tech.id]);
+  async function finished(r) {
+    if (!a) return;
+    await sb(`test_assignments?id=eq.${a.id}`, { method:"PATCH", prefer:"return=minimal", body:JSON.stringify({ status:r.passed ? "submitted" : "failed", test_id:r.testId || null, score:r.score, total:r.total, submitted_at:new Date().toISOString() }) });
+  }
+  if (taking) return <WrittenTestRunner self testKey={SENIOR_TEST_KEY} trainee={tech} onFinished={finished} onExit={() => { setTaking(false); load(); }}/>;
+  const T = TESTS[SENIOR_TEST_KEY];
+  const box = { background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"16px", display:"flex", flexDirection:"column", gap:"10px" };
+  if (!loaded) return <div style={{ fontSize:"13px", color:C.muted }}>Loading…</div>;
+  if (!a) return <div style={box}><div style={{ fontSize:"13px", color:C.muted }}>You don't have any tests assigned right now.</div></div>;
+  return (
+    <div style={box}>
+      <Label color={C.blue}>📝 {T.name}</Label>
+      {a.status === "approved" && <div style={{ fontSize:"14px", color:C.green, fontWeight:"700" }}>✅ Approved by {a.reviewed_by}. You're a Senior Detail Pro, certified for RVs and boats!</div>}
+      {a.status === "submitted" && <div style={{ fontSize:"14px", color:C.black }}>✅ Passed {a.score}/{a.total}. {a.assigned_by || "Your supervisor"} will review it and advance you.</div>}
+      {a.status === "failed" && <div style={{ fontSize:"14px", color:C.black }}>Not passed ({a.score}/{a.total}). {a.assigned_by || "Your supervisor"} will go over your answers with you and resend the test.</div>}
+      {a.status === "assigned" && started && <div style={{ fontSize:"14px", color:C.black }}>You already started this test without finishing it. You only get one try, so ask {a.assigned_by || "your supervisor"} to resend it.</div>}
+      {a.status === "assigned" && !started && <>
+        <div style={{ fontSize:"13px", color:C.black }}>
+          {a.assigned_by || "Your supervisor"} sent you this test: {questionsFor(SENIOR_TEST_KEY).length} questions on RV and boat jobs. You get <b>one try</b> and need <b>100%</b> to pass. Read the RVs & Boats Guide first!
+        </div>
+        <button onClick={() => setTaking(true)} style={{ background:C.blue, border:"none", color:C.white, padding:"12px", borderRadius:"22px", cursor:"pointer", fontSize:"14px", fontWeight:"700", fontFamily:FONT }}>Start the test</button>
+      </>}
+    </div>
+  );
+}
+
+function DevelopmentTab({ techs, rideAlongs, refreshAll, showToast, currentUser }) {
   const inp = { background:C.white, border:`1px solid ${C.border}`, color:C.black, padding:"10px 14px", borderRadius:"10px", fontSize:"14px", fontFamily:FONT, width:"100%", boxSizing:"border-box" };
   const sel = (val) => ({...inp, color:val ? C.black : C.muted });
   const btn = (color) => ({ background:color||C.blue, border:"none", color:C.white, padding:"11px 18px", borderRadius:"20px", cursor:"pointer", fontSize:"12px", fontWeight:"700", fontStyle:"normal", letterSpacing:"-0.01em", fontFamily:FONT, textTransform:"none" });
@@ -6727,7 +7054,7 @@ function DevelopmentTab({ techs, rideAlongs, refreshAll, showToast }) {
 
       {/* Sub-view switcher */}
       <div style={{ display:"flex", gap:"8px", flexWrap:"wrap" }}>
-        {[["signoff","📋 Training Sign-Off"],["cert","🏆 Final Onboarding Cert"],["checkins","📅 Check-Ins"],["tests","📝 Written Tests"]].map(([id,label]) => (
+        {[["signoff","📋 Training Sign-Off"],["cert","🏆 Final Onboarding Cert"],["checkins","📅 Check-Ins"],["tests","📝 Written Tests"],["senior","🚤 RV & Boat Cert"]].map(([id,label]) => (
           <button key={id} onClick={() => setDevView(id)} style={{ ...btnSm(devView===id ? C.blue : C.cardLt), color:devView===id ? C.white : C.black, flex:1, minWidth:"120px", border:`1px solid ${devView===id ? C.blue : C.border}` }}>{label}</button>
         ))}
       </div>
@@ -6869,6 +7196,7 @@ function DevelopmentTab({ techs, rideAlongs, refreshAll, showToast }) {
 
       {/* ── C. CHECK-INS ── */}
       {devView==="tests" && <TestQuestionBank/>}
+      {devView==="senior" && <SeniorCertPanel techs={techs} reviewerName={currentUser?.name || "Admin"} refreshAll={refreshAll} showToast={showToast}/>}
 
       {devView==="checkins" && (
         <div style={{ display:"flex", flexDirection:"column", gap:"12px" }}>
@@ -8792,6 +9120,7 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
     { label:"Development", items:[
       ["training","🎓","Detail Apprentice Training"],
       ["development","📋","Development"],
+      ["rvguide","🚤","RVs & Boats Guide"],
     ]},
     { label:"Management", items:[
       ["add","➕","Add Tech"],
@@ -8879,8 +9208,9 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
         {tab==="sales"&&!isManager&&GROWTH_TABS_ON&&<SalesTab token={currentUser?.token}/>}
         {tab==="training"&&<TrainingOverviewTab techs={techs} currentUser={currentUser} refreshAll={refreshAll}/>}
 
+        {tab==="rvguide"&&<RvBoatGuide/>}
         {tab==="development"&&(
-          <DevelopmentTab techs={techs} rideAlongs={rideAlongs||[]} refreshAll={refreshAll} showToast={showToast}/>
+          <DevelopmentTab techs={techs} rideAlongs={rideAlongs||[]} refreshAll={refreshAll} showToast={showToast} currentUser={currentUser}/>
         )}
 
         {tab==="upsells"&&(
