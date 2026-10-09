@@ -608,6 +608,10 @@ function HamburgerBtn({ onClick }) {
 }
 
 function SideNav({ sections, active, setActive, open, onClose, name, role }) {
+  const activeSec = sections.findIndex(sec=>sec.items.some(([id])=>id===active));
+  const [openSec, setOpenSec] = useState(activeSec);
+  // Re-open the current page's group each time the menu is opened.
+  useEffect(()=>{ if (open) setOpenSec(activeSec); }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <>
       {open&&<div onClick={onClose} style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.28)", backdropFilter:"blur(2px)", WebkitBackdropFilter:"blur(2px)", zIndex:300 }}/>}
@@ -621,19 +625,35 @@ function SideNav({ sections, active, setActive, open, onClose, name, role }) {
           <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"24px", color:C.black, lineHeight:1.1, letterSpacing:"-0.02em" }}>{name}</div>
           {role&&<div style={{ fontSize:"13px", color:C.muted, marginTop:"2px", fontFamily:FONT }}>{role}</div>}
         </div>
-        {/* Nav sections */}
-        <div style={{ flex:1, padding:"0 10px 24px" }}>
-          {sections.map((sec,si)=>(
-            <div key={si} style={{ paddingTop:"10px" }}>
-              {sec.label&&<div style={{ padding:"8px 10px 4px", fontSize:"12px", color:C.muted, fontFamily:FONT, fontWeight:"600" }}>{sec.label}</div>}
-              {sec.items.map(([id,icon,label])=>(
-                <button key={id} onClick={()=>{ setActive(id); onClose(); }} style={{ width:"100%", display:"flex", alignItems:"center", gap:"10px", padding:"8px 10px", background:active===id?C.blue:"none", border:"none", borderRadius:"8px", cursor:"pointer", fontFamily:FONT, fontWeight:"500", fontSize:"15px", color:active===id?"#fff":C.black, textAlign:"left", transition:"background 0.12s" }}>
-                  <span style={{ fontSize:"16px", width:"22px", textAlign:"center" }}>{icon}</span>
-                  {label}
-                </button>
-              ))}
-            </div>
-          ))}
+        {/* Nav sections: each group is a dropdown; one open at a time. The
+            group holding the current page opens by default. Unlabeled groups
+            and one-item groups show their items directly. */}
+        <div style={{ flex:1, padding:"4px 10px 24px" }}>
+          {sections.map((sec,si)=>{
+            const flat = !sec.label || sec.items.length===1;
+            const isOpen = flat || openSec===si;
+            const hasActive = sec.items.some(([id])=>id===active);
+            const item = ([id,icon,label])=>(
+              <button key={id} onClick={()=>{ setActive(id); onClose(); }} style={{ width:"100%", display:"flex", alignItems:"center", gap:"10px", padding:flat?"9px 10px":"8px 10px 8px 22px", background:active===id?C.blue:"none", border:"none", borderRadius:"8px", cursor:"pointer", fontFamily:FONT, fontWeight:"500", fontSize:"15px", color:active===id?"#fff":C.black, textAlign:"left", transition:"background 0.12s" }}>
+                <span style={{ fontSize:"16px", width:"22px", textAlign:"center" }}>{icon}</span>
+                {label}
+              </button>
+            );
+            return (
+              <div key={si} style={{ paddingTop:"2px" }}>
+                {!flat&&(
+                  <button onClick={()=>setOpenSec(isOpen?null:si)} aria-expanded={isOpen} style={{ width:"100%", display:"flex", alignItems:"center", justifyContent:"space-between", padding:"10px 10px", background:"none", border:"none", borderRadius:"8px", cursor:"pointer", fontFamily:FONT, fontWeight:"600", fontSize:"15px", color:C.black, textAlign:"left" }}>
+                    <span style={{ display:"flex", alignItems:"center", gap:"8px" }}>
+                      {sec.label}
+                      {hasActive&&!isOpen&&<span style={{ width:"6px", height:"6px", borderRadius:"50%", background:C.blue }}/>}
+                    </span>
+                    <span style={{ color:C.muted, fontSize:"12px", transform:isOpen?"rotate(90deg)":"none", transition:"transform .2s" }}>❯</span>
+                  </button>
+                )}
+                {isOpen&&<div style={{ paddingBottom:flat?0:"6px" }}>{sec.items.map(item)}</div>}
+              </div>
+            );
+          })}
         </div>
       </div>
     </>
@@ -8753,17 +8773,19 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
     { label:"Analytics", items:[
       ["reports","📊","Reports"],
       ["leaderboard","🏆","Leaderboard"],
-      ["payroll","💵","Payroll"],
       ["operations","📈","Operations Progress"],
+    ]},
+    { label:"Payroll & Time", items:[
+      ["payroll","💵","Payroll"],
+      ["timesheet","🕒","Time Sheet"],
+      ["tips","💵","Log Tips"],
       ["schedule","🗓","Work Schedule"],
+      ["trucks","🚚","Trucks"],
     ]},
     { label:"Team Activity", items:[
       ["upsells","💰","Upsells"],
       ["reviews","⭐","Reviews"],
       ["switchovers","🔄","Switchovers"],
-      ["timesheet","🕒","Time Sheet"],
-      ["trucks","🚚","Trucks"],
-      ["tips","💵","Log Tips"],
       ["callbacks","📞","Callbacks"],
       ["ridealong","🚗","Ride-Alongs"],
       ["forms","📝","Forms"],
