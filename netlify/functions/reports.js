@@ -83,11 +83,13 @@ async function searchReport(from, to) {
   const len = Math.round((new Date(to) - new Date(from)) / 864e5) + 1;
   const pFrom = shiftDay(from, -len), pTo = shiftDay(from, -1);
   const between = (a, b) => `day=gte.${a}&day=lte.${b}`;
-  const [daily, prev, queries, pages, status, state, tok] = await Promise.all([
+  const [daily, prev, queries, pages, prevQueries, prevPages, status, state, tok] = await Promise.all([
     rest(`gsc_daily?select=day,clicks,impressions,position&${between(from, to)}&order=day`),
     rest(`gsc_daily?select=clicks,impressions,position&${between(pFrom, pTo)}`),
     rest(`gsc_queries_daily?select=query,clicks,impressions,position&${between(from, to)}`),
     rest(`gsc_pages_daily?select=page,clicks,impressions,position&${between(from, to)}`),
+    rest(`gsc_queries_daily?select=query,clicks,impressions&${between(pFrom, pTo)}`),
+    rest(`gsc_pages_daily?select=page,clicks,impressions&${between(pFrom, pTo)}`),
     rest("gsc_page_status?select=page,verdict,coverage,last_crawl_at,checked_at&order=page"),
     syncState("gsc_last_run"),
     fetch(`${process.env.SUPABASE_URL}/rest/v1/integration_tokens?key=eq.google_ads_refresh_token&select=meta`, {
@@ -101,10 +103,15 @@ async function searchReport(from, to) {
     totals: rollup(daily)[0] || { clicks: 0, impressions: 0, position: null },
     prev: rollup(prev)[0] || { clicks: 0, impressions: 0, position: null },
     brand: sum(q, x => x.brand), non_brand: sum(q, x => !x.brand),
+    prev_non_brand: sum(prevQueries, x => !BRAND.test(x.query)),
+    // The website button on the Google Business Profile (Maps listing) links
+    // with utm_campaign=gbp, so its clicks show up as that page.
+    prev_maps: sum(prevPages, x => /utm_campaign=gbp/i.test(x.page)),
     daily: daily.map(d => ({ d: d.day, clicks: d.clicks, impressions: d.impressions })),
     queries: q.sort((a, b) => b.impressions - a.impressions).slice(0, 300),
     pages: rollup(pages, "page").sort((a, b) => b.impressions - a.impressions).slice(0, 50),
-    page_status: status,
+    // Tracking links (?utm_...) aren't real pages, so Google never indexes them.
+    page_status: status.filter(p => !p.page.includes("?")),
     connection: { google_connected: !!tok, connected: /webmasters/.test(tok?.meta?.scope || ""), last_sync: state?.updated_at || null, last_result: state?.value || null },
   };
 }
