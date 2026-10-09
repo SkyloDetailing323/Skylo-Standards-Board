@@ -12,6 +12,7 @@
 //   tips; owner overrides (sales_credit_overrides) and, for owners, the
 //   review evidence (sales_credit_review_rows). salesPoints.js does the rest.
 // POST ?type=sales_credit  owners: who sold a job, overriding the tag.
+// GET ?type=ad_trends  owners: Meta ads week by week (adTrends.js).
 //   A rep with selfTechId can also open their own sales report from their
 //   tech login (rep is forced to theirs; nothing else is allowed).
 // Header: Authorization: Bearer <login token>
@@ -147,6 +148,23 @@ exports.handler = async (event) => {
     if (!res) return json(400, { error: "rep must be trevor, ethan, none or null" });
     if (!res.ok) return json(500, { error: `Couldn't save (HTTP ${res.status})` });
     return json(200, { ok: true });
+  }
+
+  // GET ?type=ad_trends -- every Meta ad week by week (spend, views, clicks,
+  // leads, bookings, revenue) plus each ad's start date, status and 28-day
+  // frequency. adTrends.js grades it and spots slides in the browser.
+  if (q.type === "ad_trends") {
+    try {
+      const since = new Date(Date.now() - 400 * 864e5).toISOString().slice(0, 10);
+      const [rows, ads] = await Promise.all([
+        rest(`rpc/ad_trends?p_since=${since}`),
+        rest("meta_ads?select=ad_id,ad_name,campaign_id,created_time,status,reach_28d,frequency_28d"),
+      ]);
+      return json(200, { rows, ads });
+    } catch (e) {
+      console.error("reports ad_trends:", e.message);
+      return json(500, { error: e.message });
+    }
   }
 
   if (!isDate(q.from) || !isDate(q.to)) return json(400, { error: "from and to dates are required" });
