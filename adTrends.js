@@ -72,6 +72,29 @@ export function grade(m, breakeven, cfg = AD_HEALTH) {
   return { grade: "green", note: "Great" };
 }
 
+// Plain-English "why is it this color" for the hover box. m = last 4 weeks'
+// metrics(), g = grade(). typical = { cpl, bookRate } across all ads, to say
+// what's holding a yellow back. -> { headline, lines[] }
+export function gradeExplain(m, g, breakeven, typical = {}, cfg = AD_HEALTH) {
+  const $ = x => `$${Math.round(x).toLocaleString()}`, x = v => `${(v || 0).toFixed(2)}x`;
+  const back = `${$(m.roasUp * m.spend || 0)} in first visits on ${$(m.spend)} spent (${x(m.roasUp)})`;
+  const funnel = `${m.leads} leads reached GHL${m.cpl != null ? ` at ${$(m.cpl)} each (Meta's count)` : ""}, ${m.booked} booked${m.bookRate != null ? ` (${Math.round(m.bookRate * 100)}%)` : ""}${m.ticket ? `, avg first job ${$(m.ticket)}` : ""}.`;
+  // What's holding it back, compared with the account.
+  const weak = [];
+  if (m.bookRate != null && typical.bookRate && m.bookRate < typical.bookRate * 0.75) weak.push(`it books ${Math.round(m.bookRate * 100)}% of leads vs ${Math.round(typical.bookRate * 100)}% for your ads overall — faster follow-up would move it most`);
+  if (m.cpl != null && typical.cpl && m.cpl > typical.cpl * 1.3) weak.push(`its leads cost ${$(m.cpl)} vs ${$(typical.cpl)} typical — a stronger hook or wider audience would lower that`);
+  if (m.ticket && m.ticket < 250) weak.push(`its jobs are small (${$(m.ticket)} avg) — push bigger packages or plans`);
+  if (g.grade === "none") {
+    if (m.spend < cfg.minSpend || Math.max(m.leads || 0, m.platformLeads || 0) < cfg.minLeads)
+      return { headline: "Grey: not enough data yet", lines: [`It needs at least ${$(cfg.minSpend)} spent and ${cfg.minLeads} leads in 4 weeks to grade fairly. So far: ${$(m.spend)} and ${Math.max(m.leads || 0, m.platformLeads || 0)} leads.`] };
+    return { headline: "Grey: its leads aren't reaching GHL", lines: [`Meta counted ${m.platformLeads} leads, but none reached GHL, so the app can't see bookings or revenue. Check the form is connected to GHL.`] };
+  }
+  if (g.grade === "green") return { headline: `Green because it's earning ${x(m.roasUp)} — at or above ${cfg.greenRoas}x`, lines: [`${back}.`, funnel, "Keep it running; if its cost per lead starts climbing, it'll show as slipping here first."] };
+  if (g.grade === "red") return { headline: `Red because it's losing money: ${x(m.roasUp)} is under break-even ${x(breakeven)}`, lines: [`${back}. Every dollar needs to bring back ${x(breakeven)} in first visits to cover the job's costs.`, funnel, ...(weak.length ? [`Biggest drag: ${weak[0]}.`] : [])] };
+  if ((m.roasUp || 0) < breakeven) return { headline: `Yellow because plans pay it back: ${x(m.roasSold)} counting plan visits`, lines: [`Up front it's only ${x(m.roasUp)} (under break-even ${x(breakeven)}), but the plans it sold bring ${x(m.roasSold)} once their first visits are counted.`, funnel] };
+  return { headline: `Yellow because it's making money (${x(m.roasUp)}) but under ${cfg.greenRoas}x`, lines: [`${back}.`, funnel, weak.length ? `To push it green: ${weak.join("; ")}.` : `To push it green: more bookings per lead or bigger first jobs.`] };
+}
+
 const pct = (now, before) => (now != null && before != null && before > 0 ? now / before - 1 : null);
 
 // Rolling 4-week metrics for each week (that week and the 3 before it).

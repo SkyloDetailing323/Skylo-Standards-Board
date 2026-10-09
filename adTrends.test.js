@@ -2,7 +2,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { groupAds, grade, trend, reasons, metrics, sumWeeks, weekStart, marketShift } from "./adTrends.js";
+import { groupAds, grade, gradeExplain, trend, reasons, metrics, sumWeeks, weekStart, marketShift } from "./adTrends.js";
 
 const wk = (w, o) => ({ ad_id: "a", ad_name: "PC sign", campaign_id: "c", campaign_name: "Park City", wk: w, spend: 140, impressions: 6000, link_clicks: 45, platform_leads: 8, leads: 0, booked: 0, upfront: 0, sold: 0, ...o });
 
@@ -61,4 +61,17 @@ test("market-wide price rise isn't blamed on one ad; booking problems are called
   assert.deepEqual(marketShift([{ peakWeek: "x", change: { cpl: 0.2, cpm: 0.3 } }, { peakWeek: "x", change: { cpl: 0.6, cpm: 0.4 } }, { peakWeek: "x", change: { cpl: 0.4, cpm: 0.2 } }]), { cpl: 0.4, cpm: 0.3, ads: 3 });
   const noBook = { ...t, recent: { ...t.recent, leads: 11, booked: 0, bookRate: 0 } };
   assert.ok(reasons(noBook).some(s => /11 leads reached GHL in 4 weeks but none booked/.test(s)));
+});
+
+test("hover text says why it's green, yellow, red or grey", () => {
+  const m = o => ({ spend: 1000, leads: 20, platformLeads: 25, booked: 4, bookRate: 0.2, cpl: 40, ticket: 300, roasUp: 2.5, roasSold: 2.5, ...o });
+  const ex = mm => gradeExplain(mm, grade(mm, 1.95), 1.95, { cpl: 30, bookRate: 0.25 });
+  assert.match(ex(m({ roasUp: 4.2 })).headline, /^Green because it's earning 4\.20x/);
+  assert.match(ex(m({ roasUp: 1.2, roasSold: 1.2 })).headline, /^Red because it's losing money: 1\.20x is under break-even 1\.95x/);
+  const y = ex(m({ bookRate: 0.1, booked: 2 }));
+  assert.match(y.headline, /^Yellow because it's making money/);
+  assert.ok(y.lines.some(l => /To push it green: it books 10% of leads vs 25%/.test(l)), y.lines.join(" | "));
+  assert.match(ex(m({ roasUp: 1.2, roasSold: 3.4 })).headline, /^Yellow because plans pay it back/);
+  assert.match(ex(m({ spend: 100 })).headline, /^Grey: not enough data/);
+  assert.match(ex(m({ leads: 0, roasUp: 0, booked: 0 })).headline, /^Grey: its leads aren't reaching GHL/);
 });

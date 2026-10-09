@@ -5,7 +5,7 @@ import { computeOpsMonth, monthRange, mountainDate, CALLBACK_TIERS, QUOTA_TIERS,
 import { techDriverDays, weeklyDriverScore, findUnassignedDriving, DRIVER_CONFIG } from "./driverScoring.js";
 import { buildFordImport } from "./fordReports.js";
 import { techWeekCard, techScoreCard, teamSummary, scoreWindow, truckScore, isTruckExempt, TECH_SCORE_CONFIG } from "./techScores.js";
-import { AD_HEALTH, groupAds, trend, grade, metrics, sumWeeks, rolling, reasons, marketShift } from "./adTrends.js";
+import { AD_HEALTH, groupAds, trend, grade, gradeExplain, metrics, sumWeeks, rolling, reasons, marketShift } from "./adTrends.js";
 import { LABOR_TARGET_PCT, payrollTaxRate, tipsPaidByMonth, qbLaborMonth } from "./laborCost.js";
 import { formKind, scoreToteCheck, scoreTechAudit, latestPerDay, auditDays, weeklyAuditPct, auditWeekStart, toteCharges, submissionPhotoUrls } from "./auditScoring.js";
 
@@ -5967,21 +5967,26 @@ function AdHealth({ token, margin }) {
   const today = mountainDate(new Date().toISOString());
   const s = useGrowthReport({ type:"ad_trends" }, token);
   const [showAll, setShowAll] = useState(false);
+  const [openId, setOpenId] = useState(null);
   const breakeven = margin > 0 ? 1 / margin : 2;
   const ads = useMemo(() => {
     if (!s.data) return [];
     const meta = Object.fromEntries((s.data.ads || []).map(a => [a.ad_id, a]));
     const grouped = groupAds(s.data.rows || [], today);
     const market = marketShift(grouped.map(ad => trend(ad)));
+    const all = metrics(sumWeeks(grouped.flatMap(ad => ad.weeks.slice(-AD_HEALTH.windowWeeks))));
+    const typical = { cpl: all.cpl, bookRate: all.bookRate };
     return grouped.map(ad => {
       const m = meta[ad.ad_id] || {};
       const started = m.created_time ? mountainDate(m.created_time) : ad.firstWeek;
       const weeksRunning = started ? Math.max(1, Math.round((new Date(today) - new Date(started)) / (7 * 864e5))) : null;
       const t = trend(ad, AD_HEALTH, market);
-      const g = grade(metrics(sumWeeks(ad.weeks.slice(-AD_HEALTH.windowWeeks))), breakeven);
+      const m4 = metrics(sumWeeks(ad.weeks.slice(-AD_HEALTH.windowWeeks)));
+      const g = grade(m4, breakeven);
+      const explain = gradeExplain(m4, g, breakeven, typical);
       const why = t.status === "slipping" || t.status === "dropping" || g.grade === "red" ? reasons(t, { frequency28d: m.frequency_28d != null ? Number(m.frequency_28d) : null, weeksRunning, market }) : [];
       const spark = rolling(ad).slice(-12).map(r => r.cpl);
-      return { ...ad, meta:m, started, weeksRunning, t, g, why, spark, recentSpend: sumWeeks(ad.weeks.slice(-AD_HEALTH.windowWeeks)).spend };
+      return { ...ad, meta:m, started, weeksRunning, t, g, explain, why, spark, recentSpend: sumWeeks(ad.weeks.slice(-AD_HEALTH.windowWeeks)).spend };
     }).filter(a => a.recentSpend > 0 || a.meta.status === "ACTIVE")
       .sort((a, b) => ({ dropping:0, slipping:1, steady:2, improving:3, new:4, quiet:5 }[a.t.status] - ({ dropping:0, slipping:1, steady:2, improving:3, new:4, quiet:5 }[b.t.status])) || b.recentSpend - a.recentSpend);
   }, [s.data, today, breakeven]);
@@ -5999,7 +6004,8 @@ function AdHealth({ token, margin }) {
         const [st, sc] = statusChip[a.t.status];
         const r = a.t.recent;
         return (
-          <div key={a.ad_id} style={{ background:C.card, border:"1px solid rgba(0,0,0,0.04)", borderRadius:"18px", padding:"14px 16px", boxShadow:"0 1px 3px rgba(0,0,0,0.05)", display:"flex", flexDirection:"column", gap:"8px" }}>
+          <div key={a.ad_id} onMouseEnter={() => setOpenId(a.ad_id)} onMouseLeave={() => setOpenId(id => id === a.ad_id ? null : id)} onClick={() => setOpenId(id => id === a.ad_id ? null : a.ad_id)}
+            style={{ position:"relative", cursor:"pointer", background:C.card, border:`1px solid ${openId === a.ad_id ? C.blue : "rgba(0,0,0,0.04)"}`, borderRadius:"18px", padding:"14px 16px", boxShadow:"0 1px 3px rgba(0,0,0,0.05)", display:"flex", flexDirection:"column", gap:"8px" }}>
             <div style={{ display:"flex", justifyContent:"space-between", gap:"10px", alignItems:"flex-start" }}>
               <div style={{ minWidth:0 }}>
                 <div style={{ fontFamily:FONT, fontWeight:"600", fontSize:"16px", color:C.black }}>{a.ad_name || a.ad_id}</div>
@@ -6011,22 +6017,27 @@ function AdHealth({ token, margin }) {
               <span style={{ background:gbg, color:gc, borderRadius:"980px", padding:"4px 10px", fontSize:"12px", fontWeight:"600" }}>{r.roasUp != null && a.g.grade !== "none" ? `${r.roasUp.toFixed(2)}x upfront · ` : ""}{a.g.note}</span>
               <span style={{ color:sc, fontSize:"13px", fontWeight:"600" }}>{st}</span>
               {a.t.slideSince && <span style={{ fontSize:"12px", color:C.muted }}>since week of {fmtWk(a.t.slideSince)}</span>}
+              <span style={{ marginLeft:"auto", fontSize:"12px", color:C.blue }}>ⓘ Why?</span>
             </div>
             <div style={{ fontSize:"12px", color:C.muted }}>
               Last 4 wk: {usd(r.spend)} spent · {r.cpl != null ? `${money2(r.cpl)}/lead` : "no leads"} · {r.cpm != null ? `${money2(r.cpm)} per 1k views` : ""}{r.ctr != null ? ` · ${(r.ctr * 100).toFixed(2)}% click` : ""}{a.meta.frequency_28d != null ? ` · seen ${Number(a.meta.frequency_28d).toFixed(1)}× each` : ""}
               {a.t.peakWeek && <> · best 4 wk (from {fmtWk(a.t.peakWeek)}): {a.t.base.cpl != null ? `${money2(a.t.base.cpl)}/lead` : "—"}</>}
             </div>
-            {a.why.length > 0 && (
-              <div style={{ background:C.cardLt, borderRadius:"12px", padding:"10px 12px", display:"flex", flexDirection:"column", gap:"4px" }}>
-                <div style={{ fontSize:"12px", fontWeight:"600", color:C.black }}>{a.t.status === "slipping" || a.t.status === "dropping" ? "Why it's sliding" : "Why it's losing money"}</div>
-                {a.why.map((w, i) => <div key={i} style={{ fontSize:"13px", color:C.black }}>• {w}</div>)}
+            {openId === a.ad_id && (
+              <div role="tooltip" onClick={ev => ev.stopPropagation()} style={{ position:"absolute", left:"8px", right:"8px", top:"calc(100% - 6px)", zIndex:30, background:C.white, border:`1px solid ${C.border}`, borderRadius:"16px", boxShadow:"0 12px 32px rgba(0,0,0,0.16)", padding:"12px 14px", display:"flex", flexDirection:"column", gap:"6px", cursor:"default" }}>
+                <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"14px", color:gc === C.muted ? C.black : gc }}>{a.explain.headline}</div>
+                {a.explain.lines.map((l, i) => <div key={i} style={{ fontSize:"13px", color:C.black }}>{l}</div>)}
+                {a.why.length > 0 && (<>
+                  <div style={{ fontSize:"12px", fontWeight:"600", color:C.black, marginTop:"4px" }}>{a.t.status === "slipping" || a.t.status === "dropping" ? `Why it's sliding${a.t.slideSince ? ` (since week of ${fmtWk(a.t.slideSince)})` : ""}` : "What's behind it"}</div>
+                  {a.why.map((w, i) => <div key={i} style={{ fontSize:"13px", color:C.black }}>• {w}</div>)}
+                </>)}
               </div>
             )}
           </div>
         );
       })}
       {ads.length > 8 && <button onClick={() => setShowAll(v => !v)} style={{ alignSelf:"flex-start", background:C.white, color:C.blue, border:`1px solid ${C.border}`, borderRadius:"980px", padding:"8px 14px", fontSize:"14px", fontWeight:"600", fontFamily:FONT, cursor:"pointer" }}>{showAll ? "Show fewer" : `Show all ${ads.length} ads`}</button>}
-      <div style={{ fontSize:"12px", color:C.muted }}>Graded on the last 4 full weeks: red under break-even ({breakeven.toFixed(2)}x at your margin), yellow up to {AD_HEALTH.greenRoas}x, green above; under ${AD_HEALTH.minSpend} spent or {AD_HEALTH.minLeads} leads isn't graded yet. "Slipping" means its cost per lead rose 25%+ more than your ads did overall since its own best 4 weeks (or upfront ROAS fell 25%+), or Meta is charging it 25%+ more per view than the rest while clicks drop. That's usually weeks before it turns red. The line shows cost per lead, 4-week average, last 12 weeks.</div>
+      <div style={{ fontSize:"12px", color:C.muted }}>Graded on the last 4 full weeks: red under break-even ({breakeven.toFixed(2)}x at your margin), yellow up to {AD_HEALTH.greenRoas}x, green above; under ${AD_HEALTH.minSpend} spent or {AD_HEALTH.minLeads} leads isn't graded yet. "Slipping" means its cost per lead rose 25%+ more than your ads did overall since its own best 4 weeks (or upfront ROAS fell 25%+), or Meta is charging it 25%+ more per view than the rest while clicks drop. That's usually weeks before it turns red. The line shows cost per lead, 4-week average, last 12 weeks. Hover over an ad (or tap it) to see why it's that color.</div>
     </div>
   );
 }
