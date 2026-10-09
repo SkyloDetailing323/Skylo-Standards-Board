@@ -80,6 +80,8 @@ const PP_ANCHOR_END = "2026-06-13"; // known bi-weekly period end: pay date Jun 
 // paid on the 10th of the next month.
 const PP_SEMI_MONTHLY_FROM = "2026-09-20";
 const PP_BRIDGE = { start:"2026-09-20", end:"2026-09-30", submit:"2026-10-07", payout:"2026-10-07" };
+// Labor cost goal (owner, Oct 2026): at or under this % of serviced revenue is green.
+const LABOR_TARGET_PCT = 29;
 const UPSELL_PTS_PER_DOLLAR = 0.5; // $2 = 1 pt
 const REVIEW_PTS = 5;
 const REVIEW_BONUS_PTS = 20; // bonus at 10+ reviews in a month
@@ -1415,7 +1417,7 @@ function ReportsTab({ techs, jobs, upsells=[], timeEntries=[], tipEntries=[], te
               { label:"Rev / Hour",   value:totalHours>0?`$${revPerHr.toFixed(2)}`:"—",        color:totalHours>0?(revPerHr>=75?C.green:C.orange):C.muted, sub:"Target: >$75/hr" },
               { label:"Upsell $",     value:`$${Math.round(totalUpsells).toLocaleString()}`,   color:C.gold,                                               sub:`of $${Math.round(totalRevenue).toLocaleString()} revenue` },
               { label:"Upsell Rate",  value:`${upsellPct.toFixed(1)}%`,                        color:upsellPct>=10?C.green:C.orange,                       sub:"Target: >10%" },
-              { label:"Labor Cost %", value:totalLabor>0?`${laborPct.toFixed(1)}%`:"—",        color:totalLabor>0?(laborPct<24?C.green:C.orange):C.muted,  sub:"Target: <24%" },
+              { label:"Labor Cost %", value:totalLabor>0?`${laborPct.toFixed(1)}%`:"—",        color:totalLabor>0?(laborPct<=LABOR_TARGET_PCT?C.green:C.orange):C.muted,  sub:`Goal: ${LABOR_TARGET_PCT}% or lower` },
             ].map(s=>(
               <div key={s.label} style={{ ...metricStyle, borderTop:`3px solid ${s.color}` }}>
                 <div style={{ fontSize:"11px", color:C.muted, letterSpacing:"-0.01em", textTransform:"none", fontFamily:FONT, fontWeight:"700", marginBottom:"8px" }}>{s.label}</div>
