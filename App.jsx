@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, Fragment } from "react";
 import { TEST_QUESTIONS, TESTS, TEST_KEYS, questionsFor, shuffle } from "./trainingTest.js";
+import { pointsFor, tierFor, rowFor, BONUS_TIERS, FREQ_LABEL } from "./salesPoints.js";
 import { computeOpsMonth, monthRange, mountainDate, CALLBACK_TIERS, QUOTA_TIERS, RETENTION_TIERS, NON_ROUTE_VEHICLES, OPS_EXCLUDED_TITLES } from "./opsBonus.js";
 import { techDriverDays, weeklyDriverScore, findUnassignedDriving, DRIVER_CONFIG } from "./driverScoring.js";
 import { buildFordImport } from "./fordReports.js";
@@ -6111,6 +6112,76 @@ function FunnelBlock({ k, label, revenue }) {
 // rep key). reports.js enforces the same list (REPS[...].selfTechId).
 const SALES_SELF_VIEW = { "4641f4da-a16f-411b-8688-8b81ac06eda7": "trevor" };
 
+// Trevor's monthly points bonus (math in salesPoints.js). Each new client he
+// closes earns points from ticket price x frequency; the month's total picks
+// one tier. Clawbacks for cancelled clients aren't set yet, so cancelled plans
+// are flagged but still counted.
+function SalesPointsBonus({ token }) {
+  const thisMonth = mountainDate(new Date().toISOString()).slice(0, 7);
+  const [month, setMonth] = useState(thisMonth);
+  const { start, end } = monthRange(month);
+  const s = useGrowthReport({ type:"sales_deals", rep:"trevor", from:start, to:end }, token);
+  const shift = n => { const [y, m] = month.split("-").map(Number); const d = new Date(Date.UTC(y, m - 1 + n, 1)); setMonth(d.toISOString().slice(0, 7)); };
+  const label = new Date(month + "-15T12:00:00Z").toLocaleDateString("en-US", { month:"long", year:"numeric", timeZone:"UTC" });
+  const deals = (s.data?.from === start ? s.data.deals : null) || [];
+  const scored = deals.map(d => ({ ...d, row:rowFor(d.price).price, points:pointsFor(d.price, d.freq) }));
+  const total = scored.reduce((a, d) => a + d.points, 0);
+  const t = tierFor(total);
+  const top = BONUS_TIERS[BONUS_TIERS.length - 1].points;
+  const arrow = { background:C.white, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"5px 12px", fontSize:"12px", fontWeight:"700", cursor:"pointer", fontFamily:FONT, color:C.black };
+  const th = { textAlign:"left", padding:"6px 8px", fontSize:"11px", color:C.muted, fontWeight:"600", whiteSpace:"nowrap" };
+  const td = { padding:"6px 8px", fontSize:"13px", color:C.black, borderTop:`1px solid ${C.border}`, whiteSpace:"nowrap" };
+  return (
+    <div style={{ display:"flex", flexDirection:"column", gap:"10px" }}>
+      <SectionTitle>Bonus points</SectionTitle>
+      <div style={{ display:"flex", gap:"6px", alignItems:"center" }}>
+        <button onClick={() => shift(-1)} style={arrow}>←</button>
+        <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"14px", color:C.black, minWidth:"120px", textAlign:"center" }}>{label}</div>
+        <button onClick={() => shift(1)} disabled={month >= thisMonth} style={{ ...arrow, opacity:month >= thisMonth ? 0.4 : 1, cursor:month >= thisMonth ? "default" : "pointer" }}>→</button>
+      </div>
+      <ReportState s={s}/>
+      {s.data?.from === start && (<>
+        <TileGrid>
+          <StatTile label="Net points this month" value={total.toLocaleString()} sub={`${scored.length} new client${scored.length === 1 ? "" : "s"}`}/>
+          <StatTile label="Current tier" value={t.tier ? `Tier ${t.tier}` : "None yet"} sub={t.tier ? `${BONUS_TIERS[t.tier - 1].points.toLocaleString()}+ points` : "Tier 1 at 1,400 points"}/>
+          <StatTile label="Points to next tier" value={t.next ? t.toNext.toLocaleString() : "Top tier"} sub={t.next ? `Tier ${t.next.tier} pays ${usd(t.next.pay)}` : "Highest bonus reached"}/>
+          <StatTile label="Bonus earned" value={usd(t.pay)} sub={month === thisMonth ? "so far this month" : "for the month"}/>
+        </TileGrid>
+        <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"12px 14px" }}>
+          <div style={{ position:"relative", height:"10px", background:C.cardLt, borderRadius:"5px", overflow:"hidden" }}>
+            <div style={{ width:`${Math.min(100, (total / top) * 100)}%`, height:"100%", background:t.tier ? C.green : C.blue, borderRadius:"5px" }}/>
+          </div>
+          <div style={{ display:"grid", gridTemplateColumns:`repeat(${BONUS_TIERS.length}, 1fr)`, gap:"4px", marginTop:"8px" }}>
+            {BONUS_TIERS.map(b => (
+              <div key={b.tier} style={{ textAlign:"center", fontSize:"11px", color:total >= b.points ? C.green : C.muted, fontWeight:t.tier === b.tier ? "700" : "500" }}>
+                <div>Tier {b.tier}</div><div>{b.points.toLocaleString()} pts</div><div>{usd(b.pay)}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"6px", overflowX:"auto" }}>
+          {scored.length === 0 ? <div style={{ padding:"10px", fontSize:"13px", color:C.muted }}>No new clients booked in {label} yet.</div> : (
+            <table style={{ width:"100%", borderCollapse:"collapse", fontFamily:FONT }}>
+              <thead><tr><th style={th}>Booked</th><th style={th}>Client</th><th style={th}>Ticket</th><th style={th}>Frequency</th><th style={{ ...th, textAlign:"right" }}>Points</th></tr></thead>
+              <tbody>{scored.map(d => (
+                <tr key={d.contact_id}>
+                  <td style={td}>{fmtDay(d.booked_on)}</td>
+                  <td style={td}>{d.name}</td>
+                  <td style={td}>{money2(d.price)}{d.row !== Math.floor(d.price) && <span style={{ color:C.muted, fontSize:"11px" }}> → ${d.row} row</span>}</td>
+                  <td style={td}>{FREQ_LABEL[d.freq] || (d.freq === "biannual" ? "Biannual (not in table)" : d.freq)}{d.plan_cancelled && <span style={{ color:C.red, fontSize:"11px", fontWeight:"700" }}> · plan cancelled</span>}</td>
+                  <td style={{ ...td, textAlign:"right", fontWeight:"700" }}>{d.points.toLocaleString()}</td>
+                </tr>
+              ))}</tbody>
+            </table>
+          )}
+        </div>
+        <div style={{ fontSize:"11px", color:C.muted }}>Points = the client's first-visit price (no tips) × how often they're booked, from the points table. Prices round down to the nearest table row ($145 minimum; over $1,000 keeps going up in $50 steps). Frequency comes from the client's maintenance plan in GHL, or the plan visits booked with the first visit in HCP; no plan = one-time. Counted in the month the first visit was booked. A client whose HCP job is canceled drops off. Tiers reset every month and only the highest tier reached pays. Updates hourly.</div>
+        {s.loading && <div style={{ fontSize:"11px", color:C.muted }}>Refreshing...</div>}
+      </>)}
+    </div>
+  );
+}
+
 function SalesTab({ token, onlyRep=null }) {
   const [range, setRange] = useState(() => rangeFor("month"));
   const [rep, setRep] = useState(onlyRep || "trevor");
@@ -6119,6 +6190,8 @@ function SalesTab({ token, onlyRep=null }) {
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:"12px" }}>
       {!onlyRep && <SubTabs tabs={[["trevor","Trevor · Inbound"],["ethan","Ethan · Commercial"]]} active={rep} setActive={setRep}/>}
+      {rep === "trevor" && <SalesPointsBonus token={token}/>}
+      {rep === "trevor" && <SectionTitle>Sales activity</SectionTitle>}
       <GrowthRange range={range} setRange={setRange}/>
       <ReportState s={s}/>
       {d && d.rep?.toLowerCase() === rep && (<>
