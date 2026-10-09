@@ -139,6 +139,11 @@ export function buildSales(jobs, { tag, revenueByJob = {}, now = Date.now(), ove
     if (!isDone(j) || !credited(j)) continue;
     const mine = byCustomer[j.hcp_customer_id || j.hcp_job_id];
     const first = new Date(j.scheduled_start || j.completed_at).getTime();
+    // Only the first visit of a booking is the sale. Sometimes the plan's
+    // later visits carry the tag too (copied when the series was made).
+    const madeAt = new Date(j.job_created_at || 0).getTime();
+    if (j.job_created_at && mine.some(x => x !== j && x.job_created_at && !isCanceled(x) && x.scheduled_start
+        && Math.abs(new Date(x.job_created_at).getTime() - madeAt) <= DAY && new Date(x.scheduled_start).getTime() < first - DAY)) continue;
     // Visits booked with this sale (created within a day of it) -- not the
     // visits of a plan the customer already had before Trevor rebooked them.
     const created = new Date(j.job_created_at || j.scheduled_start).getTime();

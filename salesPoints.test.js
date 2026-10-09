@@ -156,3 +156,12 @@ test("review list: tag vs GHL mismatch, missed tag, untagged new customer; decid
   assert.deepEqual(r.missed.map(x => x.hcp_job_id), ["c"]);
   assert.deepEqual(r.untagged.map(x => x.hcp_job_id), ["d"]);
 });
+
+test("a plan's later visit that kept the tag isn't a second sale", () => {
+  const jobs = [
+    job("k1", "kim", "2026-04-10", { done: true, created: "2026-04-01", tags: ["sold by trevor", "NEW", "Biannual"] }),
+    job("k2", "kim", "2026-10-09", { done: true, created: "2026-04-01", tags: ["sold by trevor", "Biannual"] }),
+    job("k3", "kim", "2026-10-20", { done: true, created: "2026-10-15", tags: ["sold by trevor", "RETURNING"] }),  // a new booking later: a sale
+  ];
+  assert.deepEqual(buildSales(jobs, { tag: "sold by trevor", now: NOW }).map(s => s.hcp_job_id).sort(), ["k1", "k3"]);
+});
