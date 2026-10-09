@@ -5702,16 +5702,16 @@ function DailyBars({ title, days, value, color = C.blue, fmt = v => v }) {
   );
 }
 
-function ConnectionCard({ title, connected, lastSync, steps, note, connectUrl, connectLabel, syncFn, token, onSynced }) {
+function ConnectionCard({ title, connected, lastSync, steps, note, connectUrl, connectLabel, syncFn, token, onSynced, syncDays=90 }) {
   const [open, setOpen] = useState(!connected);
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState(null);
   async function syncNow() {
     setSyncing(true); setSyncMsg(null);
     try {
-      const r = await fetch(`/.netlify/functions/${syncFn}?days=90`, { headers:{ Authorization:`Bearer ${token || ""}` } });
+      const r = await fetch(`/.netlify/functions/${syncFn}?days=${syncDays}`, { headers:{ Authorization:`Bearer ${token || ""}` } });
       const j = await r.json().catch(() => ({}));
-      setSyncMsg(j.ok ? `✅ Pulled ${j.rows} rows · ${j.sessions != null ? `${Number(j.sessions).toLocaleString()} visits` : `$${Math.round(j.spend || 0).toLocaleString()} spend`}${j.lsa?.ok ? ` · ${j.lsa.leads} LSA leads` : ""} (${j.since} → ${j.until})` : `⚠️ ${j.error || j.skipped || `HTTP ${r.status}`}`);
+      setSyncMsg(j.ok ? `✅ Pulled ${j.rows} rows · ${j.sessions != null ? `${Number(j.sessions).toLocaleString()} visits` : j.clicks != null ? `${Number(j.clicks).toLocaleString()} search clicks` : `$${Math.round(j.spend || 0).toLocaleString()} spend`}${j.lsa?.ok ? ` · ${j.lsa.leads} LSA leads` : ""} (${j.since} → ${j.until})` : `⚠️ ${j.error || j.skipped || `HTTP ${r.status}`}`);
       if (j.ok && onSynced) onSynced();
     } catch(e) { setSyncMsg(`⚠️ ${e.message}`); }
     setSyncing(false);
@@ -6031,6 +6031,94 @@ function AdHealth({ token, margin }) {
   );
 }
 
+const GSC_STEPS = [
+  "Google Cloud (project Skylo Tip Sync) → APIs & Services → Library → enable \"Google Search Console API\".",
+  "Make sure team@skylod.com is a user on skylod.com in Search Console (Settings → Users and permissions → Full or Owner).",
+  "Tap Reconnect Google below, sign in as team@skylod.com, and allow Search Console access.",
+  "Tap Sync now — it pulls the last 16 months of searches, then updates every morning.",
+];
+
+// A ranked list of searches or pages: name, clicks, impressions, CTR, position.
+function SearchTable({ rows, keyName, empty, limit = 15 }) {
+  const th = { textAlign:"right", padding:"6px 8px", fontSize:"11px", color:C.muted, fontWeight:"600", whiteSpace:"nowrap" };
+  const td = { textAlign:"right", padding:"6px 8px", fontSize:"13px", color:C.black, borderTop:`1px solid ${C.border}`, whiteSpace:"nowrap" };
+  const label = v => keyName === "page" ? (v.replace(/^https?:\/\/[^/]+/, "") || "/") : v;
+  return (
+    <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"6px", overflowX:"auto" }}>
+      {rows.length === 0 ? <div style={{ padding:"10px", fontSize:"13px", color:C.muted }}>{empty}</div> : (
+        <table style={{ width:"100%", borderCollapse:"collapse", fontFamily:FONT }}>
+          <thead><tr><th style={{ ...th, textAlign:"left" }}>{keyName === "page" ? "Page" : "Search"}</th><th style={th}>Clicks</th><th style={th}>Shown</th><th style={th}>Click rate</th><th style={th}>Avg rank</th></tr></thead>
+          <tbody>{rows.slice(0, limit).map(r => (
+            <tr key={r[keyName]}>
+              <td style={{ ...td, textAlign:"left", whiteSpace:"normal", wordBreak:"break-word" }}>{label(r[keyName])}</td>
+              <td style={td}>{r.clicks}</td><td style={td}>{r.impressions}</td><td style={td}>{pctOf(r.clicks, r.impressions)}</td>
+              <td style={td}>{r.position ?? "—"}</td>
+            </tr>
+          ))}</tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
+// Organic Google search for skylod.com (Search Console). Brand = searches for
+// Skylo by name; non-brand = people looking for a detailer who didn't already
+// know Skylo -- the number SEO work should grow.
+function SearchConsolePanel({ range, token }) {
+  const [bump, setBump] = useState(0);
+  const s = useGrowthReport({ type:"search", ...range, r:bump }, token);
+  const d = s.data, conn = d?.connection || {};
+  const change = (a, b) => b ? `${a >= b ? "▲" : "▼"} ${Math.abs(Math.round(((a - b) / b) * 100))}% vs previous ${d.daily.length || ""} days` : "no earlier data";
+  const nb = (d?.queries || []).filter(q => !q.brand);
+  const almost = nb.filter(q => q.position >= 4 && q.position <= 20).sort((a, b) => b.impressions - a.impressions);
+  const unclicked = nb.filter(q => q.position <= 10 && q.impressions >= 10 && q.clicks / q.impressions < 0.02).sort((a, b) => b.impressions - a.impressions);
+  const sm = conn.last_result?.sitemaps || [];
+  const notIndexed = (d?.page_status || []).filter(p => p.verdict && p.verdict !== "PASS");
+  return (
+    <div style={{ display:"flex", flexDirection:"column", gap:"12px" }}>
+      <ConnectionCard title="Google Search Console (organic search)" connected={conn.connected} lastSync={conn.last_sync} steps={conn.connected ? null : GSC_STEPS}
+        connectUrl={`/.netlify/functions/google-ads-auth?t=${encodeURIComponent(token || "")}`} connectLabel={conn.connected ? "Reconnect Google" : "Reconnect Google (adds Search Console)"}
+        syncFn={conn.connected ? "gsc-sync" : null} syncDays={480} token={token} onSynced={() => setBump(b => b + 1)}
+        note={conn.last_result?.ok === false ? `Last sync failed: ${conn.last_result.error}`
+          : conn.connected ? `Reading ${conn.last_result?.site || "skylod.com"}. Google's search data runs 2–3 days behind.`
+          : "Shows what people searched on Google to find skylod.com. Reconnecting Google adds it (same sign-in as Google Ads and Analytics)."}/>
+      <ReportState s={s}/>
+      {d && d.from === range.from && d.daily.length > 0 && (<>
+        <TileGrid>
+          <StatTile label="Clicks from Google search" value={d.totals.clicks.toLocaleString()} sub={change(d.totals.clicks, d.prev.clicks)}/>
+          <StatTile label="Times shown" value={d.totals.impressions.toLocaleString()} sub={change(d.totals.impressions, d.prev.impressions)}/>
+          <StatTile label="Click rate" value={pctOf(d.totals.clicks, d.totals.impressions)} sub={`was ${pctOf(d.prev.clicks, d.prev.impressions)}`}/>
+          <StatTile label="Average rank" value={d.totals.position ?? "—"} sub={d.prev.position ? `was ${d.prev.position} · lower is better` : "lower is better"}/>
+          <StatTile label="Non-brand clicks" value={d.non_brand.clicks} sub={`${d.non_brand.impressions.toLocaleString()} times shown · new people`}/>
+          <StatTile label="Brand clicks" value={d.brand.clicks} sub="searched Skylo by name"/>
+        </TileGrid>
+        <DailyBars title="Clicks from Google search per day" days={d.daily} value={x => x.clicks}/>
+
+        <SectionTitle>Top non-brand searches</SectionTitle>
+        <SearchTable rows={nb} keyName="query" empty="No non-brand searches in this range yet."/>
+        <SectionTitle>Almost on page one</SectionTitle>
+        <div style={{ fontSize:"12px", color:C.muted }}>Non-brand searches where skylod.com ranks #4–20. Improving the page that ranks for each is the cheapest way to get more free clicks.</div>
+        <SearchTable rows={almost} keyName="query" empty="None in this range."/>
+        <SectionTitle>Shown but not clicked</SectionTitle>
+        <div style={{ fontSize:"12px", color:C.muted }}>On page one, shown 10+ times, under 2% click rate. Usually fixed by rewriting that page's title and description.</div>
+        <SearchTable rows={unclicked} keyName="query" empty="None in this range."/>
+        <SectionTitle>Top pages</SectionTitle>
+        <SearchTable rows={d.pages} keyName="page" empty="No pages in this range."/>
+
+        <SectionTitle>Site health</SectionTitle>
+        <div style={{ background:notIndexed.length || sm.some(x => x.errors) ? `${C.red}10` : C.card, border:`1px solid ${notIndexed.length || sm.some(x => x.errors) ? C.red : C.border}`, borderRadius:"16px", padding:"12px 14px", fontSize:"13px", color:C.black, display:"flex", flexDirection:"column", gap:"6px" }}>
+          <div>{d.page_status.length ? (notIndexed.length ? `⚠️ ${notIndexed.length} of the ${d.page_status.length} most-seen pages aren't fully indexed by Google:` : `✅ All ${d.page_status.length} most-seen pages are indexed by Google.`) : "Page indexing is checked on the next sync."}</div>
+          {notIndexed.map(p => <div key={p.page} style={{ fontSize:"12px" }}>{p.page.replace(/^https?:\/\/[^/]+/, "") || "/"} — {p.coverage || p.verdict}</div>)}
+          <div>{sm.length ? sm.map(x => `Sitemap ${x.path.replace(/^https?:\/\/[^/]+/, "")}: ${x.errors ? `⚠️ ${x.errors} errors` : "✅ no errors"}${x.warnings ? `, ${x.warnings} warnings` : ""}${x.last_downloaded ? ` · read by Google ${fmtDay(x.last_downloaded.slice(0, 10))}` : ""}`).join(" · ") : "⚠️ No sitemap submitted — add one in Search Console → Sitemaps so Google finds every page."}</div>
+        </div>
+        <div style={{ fontSize:"11px", color:C.muted }}>From Google Search Console, regular web search only (ads not included). Brand = searches containing "Skylo" or "Squeegee Boys". Google keeps rare searches private, so brand + non-brand add up to less than total clicks. Average rank is weighted by how often each search showed the site.</div>
+        {s.loading && <div style={{ fontSize:"11px", color:C.muted }}>Refreshing...</div>}
+      </>)}
+      {d && d.from === range.from && d.daily.length === 0 && conn.connected && <div style={{ fontSize:"13px", color:C.muted }}>No search data for this range yet — tap Sync now, or pick an earlier range (Google runs 2–3 days behind).</div>}
+    </div>
+  );
+}
+
 function MarketingTab({ token }) {
   const [range, setRange] = useState(() => rangeFor("month"));
   const [sub, setSub] = useState("meta");
@@ -6061,7 +6149,9 @@ function MarketingTab({ token }) {
         </div>
         <AttributionSettings att={att} token={token} onSaved={() => setBump(b => b + 1)}/>
         <div style={{ fontSize:"11px", color:C.muted }}>{REVENUE_NOTE}</div>
-        <SubTabs tabs={[["meta","Meta Ads"],["google","Google Ads"],["lsa","Local Services"],["website","Website"]]} active={sub} setActive={setSub}/>
+        <SubTabs tabs={[["meta","Meta Ads"],["google","Google Ads"],["lsa","Local Services"],["website","Website"],["search","Google Search"]]} active={sub} setActive={setSub}/>
+
+        {sub === "search" && <SearchConsolePanel range={range} token={token}/>}
 
         {sub === "meta" && (<>
           <ConnectionCard title="Meta Ads spend" connected={conn.meta?.connected} lastSync={conn.meta?.last_sync} steps={conn.meta?.connected ? null : META_STEPS} syncFn="meta-ads-sync" token={token} onSynced={() => setBump(b => b + 1)}
