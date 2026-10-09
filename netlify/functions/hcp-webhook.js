@@ -85,6 +85,17 @@ exports.handler = async (event) => {
     return { statusCode: 200, body: "ok" };
   }
 
+  // Temporary (Oct 2026): keep the latest webhook's shape -- everything but
+  // the job itself, plus the job's field names -- to see whether HCP says who
+  // created/changed the job. ghl_sync_state "hcp_webhook_shape".
+  try {
+    const { job: _j, data: _d, ...rest } = payload;
+    const jobObj = payload.job || payload.data?.job || {};
+    await sbFetch("ghl_sync_state?on_conflict=key", { method: "POST", prefer: "resolution=merge-duplicates,return=minimal", body: JSON.stringify({ key: "hcp_webhook_shape", value: {
+      top: Object.keys(payload), data_keys: payload.data && typeof payload.data === "object" ? Object.keys(payload.data) : null, rest: JSON.stringify(rest).slice(0, 1500),
+      job_keys: Object.keys(jobObj), job_created_at: jobObj.created_at || null }, updated_at: new Date().toISOString() }) });
+  } catch (e) { console.error("webhook shape:", e.message); }
+
   const job = payload.job || payload.data?.job || payload;
   if (!job || !job.id) {
     console.log("No job in payload, keys:", Object.keys(payload));
