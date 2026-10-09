@@ -6131,6 +6131,21 @@ function SearchConsolePanel({ range, token }) {
         </div>
         <div style={note}>Green = on track, yellow = getting there, red = needs work. Tap ? on any score for what it means. Goals: {SEO_GOALS.nonBrandPerMonth}+ new-people clicks a month, every city page in the top {SEO_GOALS.cityTopRank}, {SEO_GOALS.pageOneClickRate}%+ click rate on page one.</div>
 
+        {d.free_jobs && !d.free_jobs.error && (() => {
+          const o = d.free_jobs.organic, m = d.free_jobs.maps, t = k => o[k] + m[k];
+          const split = k => `${k === "upfront" || k === "committed" ? usd(o[k]) : o[k]} search · ${k === "upfront" || k === "committed" ? usd(m[k]) : m[k]} Maps listing`;
+          return (<>
+            <SectionTitle>Free jobs from Google</SectionTitle>
+            <TileGrid>
+              <StatTile label="Leads" value={t("leads")} sub={split("leads")}/>
+              <StatTile label="Booked" value={`${t("booked")} · ${pctOf(t("booked"), t("leads"))}`} sub={split("booked")}/>
+              <StatTile label="Upfront revenue" value={usd(t("upfront"))} sub={split("upfront")}/>
+              <StatTile label="Committed revenue" value={usd(t("committed"))} sub="incl. plan minimums"/>
+            </TileGrid>
+            <div style={note}>Website quote requests that came from a free Google result or the Website button on your Maps listing, followed to HCP jobs the same way as the ad channels — no ad spend behind any of it. Calls straight from the Maps listing aren't counted (they never touch the website).</div>
+          </>);
+        })()}
+
         <SectionTitle>What to fix next</SectionTitle>
         <div style={{ display:"flex", flexDirection:"column", gap:"8px" }}>
           {fixes.length === 0 && <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"12px 14px", fontSize:"13px", color:C.muted }}>Nothing urgent in this range. 🎉</div>}
