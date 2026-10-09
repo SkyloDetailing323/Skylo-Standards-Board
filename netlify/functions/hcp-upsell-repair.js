@@ -103,7 +103,9 @@ exports.handler = async (event) => {
     return { statusCode: 405, body: JSON.stringify({ error: "POST only" }) };
   }
 
-  const DEADLINE = Date.now() + 22000;
+  // 22s keeps a normal (synchronous) call under Netlify's limit; the nightly
+  // background recheck calls this in-process and passes a longer budget.
+  const DEADLINE = Date.now() + (event.deadlineMs || 22000);
 
   let from, to;
   try {

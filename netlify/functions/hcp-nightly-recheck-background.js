@@ -3,8 +3,10 @@
 // period(s) from HCP so edits made in HCP after the job first synced (an
 // upsell removed, a price changed, a job reassigned) show up before payday.
 // It runs the same two repairs an owner can run by hand -- Repair Revenue
-// (hcp-revenue-repair) and the upsell repair (hcp-upsell-repair) -- over a
-// few days at a time so neither hits its 26s limit.
+// (hcp-revenue-repair) and the upsell repair (hcp-upsell-repair). They run
+// in-process here, not over HTTP: as background work this function has 15
+// minutes, while an HTTP call to them is cut off at ~26s -- which is what
+// made every call of the first run (Oct 9) fail with a 504.
 //
 // Open periods: the current pay period, plus the previous one until its pay
 // date has passed (10th/25th schedule, same as Payroll in App.jsx).
@@ -12,8 +14,11 @@
 
 const { canRunSync } = require("./lib/authToken");
 
-const SITE = "https://main--skylotechleaderboard.netlify.app";
-const CHUNK_DAYS = 4;
+const revenueRepair = require("./hcp-revenue-repair");
+const upsellRepair = require("./hcp-upsell-repair");
+
+const CHUNK_DAYS = 8;
+const UPSELL_BUDGET_MS = 4 * 60e3;
 // Never re-check periods already paid before this ran (Sep 20-30 was paid
 // Oct 7): changing them now would make the app disagree with what was paid.
 const FLOOR = "2026-10-01";
@@ -44,11 +49,19 @@ function rangesToCheck(today) {
   return out;
 }
 
-async function post(fn, body) {
-  const res = await fetch(`${SITE}/.netlify/functions/${fn}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-  const text = await res.text();
-  if (!res.ok) throw new Error(`${fn} ${body.from}..${body.to}: HTTP ${res.status} ${text.slice(0, 200)}`);
-  return text;
+const REPAIRS = { "hcp-revenue-repair": revenueRepair.handler, "hcp-upsell-repair": upsellRepair.handler };
+
+// Runs one repair for one range; one retry, since HCP occasionally times out.
+async function run(fn, range) {
+  let last;
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const res = await REPAIRS[fn]({ httpMethod: "POST", body: JSON.stringify(range), deadlineMs: UPSELL_BUDGET_MS });
+      if (res && res.statusCode === 200) return res.body;
+      last = `HTTP ${res && res.statusCode} ${String(res && res.body).slice(0, 200)}`;
+    } catch (e) { last = e.message; }
+  }
+  throw new Error(`${fn} ${range.from}..${range.to}: ${last}`);
 }
 
 async function saveState(value) {
@@ -68,7 +81,7 @@ exports.handler = async (event) => {
     // Revenue first, then upsells (the upsell repair also clears upsells
     // that were removed from the invoice in HCP).
     for (const fn of ["hcp-revenue-repair", "hcp-upsell-repair"]) {
-      try { await post(fn, r); } catch (e) { errors.push(e.message); console.error("nightly recheck:", e.message); }
+      try { await run(fn, r); } catch (e) { errors.push(e.message); console.error("nightly recheck:", e.message); }
     }
   }
   const result = { started_at: started, finished_at: new Date().toISOString(), ranges, errors };
