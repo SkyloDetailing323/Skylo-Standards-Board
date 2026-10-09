@@ -6,7 +6,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "node --test auditScoring.test.js driverScoring.test.js fordReports.test.js techScores.test.js"
+    "test": "node --test auditScoring.test.js driverScoring.test.js fordReports.test.js techScores.test.js laborCost.test.js"
   },
   "dependencies": {
     "react": "^18.2.0",

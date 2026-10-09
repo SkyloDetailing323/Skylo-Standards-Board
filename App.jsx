@@ -4,6 +4,7 @@ import { computeOpsMonth, monthRange, mountainDate, CALLBACK_TIERS, QUOTA_TIERS,
 import { techDriverDays, weeklyDriverScore, findUnassignedDriving, DRIVER_CONFIG } from "./driverScoring.js";
 import { buildFordImport } from "./fordReports.js";
 import { techWeekCard, techScoreCard, teamSummary, scoreWindow, truckScore, isTruckExempt, TECH_SCORE_CONFIG } from "./techScores.js";
+import { LABOR_TARGET_PCT, payrollTaxRate, tipsPaidByMonth, qbLaborMonth } from "./laborCost.js";
 import { formKind, scoreToteCheck, scoreTechAudit, latestPerDay, auditDays, weeklyAuditPct, auditWeekStart, toteCharges, submissionPhotoUrls } from "./auditScoring.js";
 
 // ─── SUPABASE CONFIG ──────────────────────────────────────────────────────────
@@ -83,8 +84,6 @@ const PP_ANCHOR_END = "2026-06-13"; // known bi-weekly period end: pay date Jun 
 // paid on the 10th of the next month.
 const PP_SEMI_MONTHLY_FROM = "2026-09-20";
 const PP_BRIDGE = { start:"2026-09-20", end:"2026-09-30", submit:"2026-10-07", payout:"2026-10-07" };
-// Labor cost goal (owner, Oct 2026): at or under this % of serviced revenue is green.
-const LABOR_TARGET_PCT = 29;
 const UPSELL_PTS_PER_DOLLAR = 0.5; // $2 = 1 pt
 const REVIEW_PTS = 5;
 const REVIEW_BONUS_PTS = 20; // bonus at 10+ reviews in a month
@@ -1047,7 +1046,19 @@ function TotalLeaderboard({ techs, upsells, switchovers, reviews, callbacks, job
 }
 
 // ─── REPORTS TAB ─────────────────────────────────────────────────────────────
-function ReportsTab({ techs, jobs, upsells=[], timeEntries=[], tipEntries=[], techId=null, refreshAll=async()=>{}, showToast=()=>{} }) {
+function ReportsTab({ techs, jobs, upsells=[], switchovers=[], timeEntries=[], tipEntries=[], techId=null, refreshAll=async()=>{}, showToast=()=>{}, token=null, isOwner=false }) {
+  // Monthly labor from QuickBooks (owners only) -- also gives the real
+  // payroll tax rate the live estimate uses.
+  const [qb, setQb] = useState({ months:[], error:null, loaded:false });
+  useEffect(() => {
+    if (!isOwner) return;
+    let live = true;
+    fetch("/.netlify/functions/labor-actuals", { headers:{ Authorization:`Bearer ${token||""}` } })
+      .then(async r => { const j = await r.json().catch(()=>({})); if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`); return j; })
+      .then(j => live && setQb({ months:j.months||[], error:null, loaded:true }))
+      .catch(e => live && setQb({ months:[], error:e.message, loaded:true }));
+    return () => { live = false; };
+  }, [isOwner, token]);
   const [preset, setPreset] = useState("wtd");
   const [cStart, setCStart] = useState("");
   const [cEnd,   setCEnd]   = useState("");
@@ -1149,11 +1160,13 @@ function ReportsTab({ techs, jobs, upsells=[], timeEntries=[], tipEntries=[], te
   const totalHours     = techId
     ? rangeHoursTotal(timeEntries, techId, start, end)
     : timeEntries.filter(e => e.work_date >= start && e.work_date <= end).reduce((s,e) => s+sessionHours(e), 0);
-  const commMap        = Object.fromEntries(techs.map(t => [t.id, (t.commission_rate||27)/100]));
-  const totalLabor     = inRange.reduce((s,j) => s+(j.revenue||0)*(commMap[j.tech_id]||0.27), 0);
+  const taxRate        = payrollTaxRate(qb.months);
+  const labor          = laborEstimate({ techs, jobs, switchovers, timeEntries, start, end, techId, taxRate });
+  const totalLabor     = labor.labor;
   const revPerHr       = totalHours > 0 ? totalRevenue/totalHours : 0;
   const upsellPct      = totalRevenue > 0 ? (totalUpsells/totalRevenue)*100 : 0;
-  const laborPct       = totalRevenue > 0 ? (totalLabor/totalRevenue)*100 : 0;
+  const laborPct       = labor.pct;
+  const qbMonths       = (() => { const tips = tipsPaidByMonth(tipEntries, getPayPeriods()); return qb.months.map(m => qbLaborMonth(m, tips[m.month])).reverse(); })();
 
   const allWkKeys = [...new Set(inRange.map(j=>j.week_key))].filter(Boolean).sort();
   const techRows = techId ? [] : techs.map(t => {
@@ -1258,7 +1271,7 @@ function ReportsTab({ techs, jobs, upsells=[], timeEntries=[], tipEntries=[], te
               { label:"Rev / Hour",   value:totalHours>0?`$${revPerHr.toFixed(2)}`:"—",        color:totalHours>0?(revPerHr>=75?C.green:C.red):C.muted, sub:"Target: >$75/hr" },
               { label:"Upsell $",     value:`$${Math.round(totalUpsells).toLocaleString()}`,   color:C.gold,                                               sub:`of $${Math.round(totalRevenue).toLocaleString()} revenue` },
               { label:"Upsell Rate",  value:`${upsellPct.toFixed(1)}%`,                        color:upsellPct>=10?C.green:C.red,                       sub:"Target: >10%" },
-              { label:"Labor Cost %", value:totalLabor>0?`${laborPct.toFixed(1)}%`:"—",        color:totalLabor>0?(laborPct<=LABOR_TARGET_PCT?C.green:C.red):C.muted,  sub:`Goal: ${LABOR_TARGET_PCT}% or lower` },
+              { label:"Labor Cost %", value:totalLabor>0?`${laborPct.toFixed(1)}%`:"—",        color:totalLabor>0?(laborPct<=LABOR_TARGET_PCT?C.green:C.red):C.muted,  sub:`Goal: ${LABOR_TARGET_PCT}% or lower · estimate` },
             ].map(s=>(
               <div key={s.label} style={{ ...metricStyle }}>
                 <div style={{ fontSize:"11px", color:C.muted, letterSpacing:"-0.01em", textTransform:"none", fontFamily:FONT, fontWeight:"700", marginBottom:"8px" }}>{s.label}</div>
@@ -1267,6 +1280,56 @@ function ReportsTab({ techs, jobs, upsells=[], timeEntries=[], tipEntries=[], te
               </div>
             ))}
           </div>
+
+          {/* Labor cost: what's in the estimate, and the QuickBooks actual by month */}
+          {techId===null&&(
+            <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"16px", display:"flex", flexDirection:"column", gap:"10px" }}>
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline" }}>
+                <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"17px", color:C.black }}>Labor Cost</div>
+                <div style={{ fontSize:"13px", color:C.muted }}>goal {LABOR_TARGET_PCT}% or lower</div>
+              </div>
+              {[
+                ["Commission", labor.commission],
+                ["Upsell bonuses", labor.upsellBonus],
+                ["Switchover bonuses", labor.switchBonus],
+                ["Training pay", labor.training],
+                [`Payroll taxes (${(taxRate*100).toFixed(1)}%${qb.months.length?" from QuickBooks":" est."})`, labor.taxes],
+              ].map(([l,v])=>(
+                <div key={l} style={{ display:"flex", justifyContent:"space-between", fontSize:"14px", color:C.black }}><span style={{ color:C.muted }}>{l}</span><span>${Math.round(v).toLocaleString()}</span></div>
+              ))}
+              <div style={{ display:"flex", justifyContent:"space-between", fontSize:"15px", fontWeight:"600", color:C.black, borderTop:`1px solid ${C.border}`, paddingTop:"8px" }}>
+                <span>${Math.round(labor.labor).toLocaleString()} of ${Math.round(labor.revenue).toLocaleString()} serviced</span>
+                <span style={{ color:labor.pct<=LABOR_TARGET_PCT?C.green:C.red }}>{labor.pct.toFixed(1)}%</span>
+              </div>
+              <div style={{ fontSize:"12px", color:C.muted }}>Tips aren't counted on either side. Salary, owner pay and office sales commission aren't crew labor.</div>
+              {isOwner&&(
+                <div style={{ marginTop:"6px", display:"flex", flexDirection:"column", gap:"8px" }}>
+                  <div style={{ fontFamily:FONT, fontWeight:"600", fontSize:"15px", color:C.black }}>Actual from QuickBooks</div>
+                  {qb.error&&<div style={{ fontSize:"13px", color:C.red }}>Couldn't load: {qb.error}</div>}
+                  {qb.loaded&&!qb.error&&qbMonths.length===0&&<div style={{ fontSize:"13px", color:C.muted }}>No months pulled yet.</div>}
+                  {qbMonths.length>=2&&(()=>{ const last=qbMonths.slice(0,3); const l=last.reduce((s,m)=>s+m.labor,0), r=last.reduce((s,m)=>s+m.revenue,0), pct=r>0?l/r*100:null; return (
+                    <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:"10px", background:C.blueLt, borderRadius:"14px", padding:"10px 14px" }}>
+                      <div>
+                        <div style={{ fontFamily:FONT, fontWeight:"600", fontSize:"15px", color:C.black }}>Last {last.length} months combined</div>
+                        <div style={{ fontSize:"12px", color:C.muted }}>${Math.round(l).toLocaleString()} of ${Math.round(r).toLocaleString()} · evens out the paydays</div>
+                      </div>
+                      <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"20px", color:pct!=null&&pct<=LABOR_TARGET_PCT?C.green:C.red }}>{pct==null?"—":`${pct.toFixed(1)}%`}</div>
+                    </div>
+                  ); })()}
+                  {qbMonths.map(m=>(
+                    <div key={m.month} style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:"10px", background:C.cardLt, borderRadius:"14px", padding:"10px 14px" }}>
+                      <div>
+                        <div style={{ fontFamily:FONT, fontWeight:"600", fontSize:"15px", color:C.black }}>{formatMonthLabel(m.month)}</div>
+                        <div style={{ fontSize:"12px", color:C.muted }}>${Math.round(m.labor).toLocaleString()} of ${Math.round(m.revenue).toLocaleString()} · ${Math.round(m.tips).toLocaleString()} tips taken out</div>
+                      </div>
+                      <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"20px", color:m.pct!=null&&m.pct<=LABOR_TARGET_PCT?C.green:C.red }}>{m.pct==null?"—":`${m.pct.toFixed(1)}%`}</div>
+                    </div>
+                  ))}
+                  <div style={{ fontSize:"12px", color:C.muted }}>Wages – COGS + Payroll Taxes – COGS + Training Pay, minus tips, over income minus tips. Books by pay date, so a month with three paydays runs high.</div>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Per-tech breakdown — admin / all-techs view only */}
           {techRows.length>0&&(
@@ -1357,6 +1420,39 @@ function trainingInfo(tech, jobs, timeEntries, techs=[]) {
   const base = tech.start_date || firstClock;
   const d = new Date(base+"T12:00:00Z"); d.setUTCDate(d.getUTCDate()+TRAINING_HELD_DAYS);
   return { firstJob, entries, day90:d.toISOString().split("T")[0], totalHours:entries.reduce((s,e)=>s+paidSessionHours(e),0) };
+}
+
+// Crew labor for a date range (see laborCost.js for what counts): commission,
+// upsell bonus (each pay period's tier rate on the upsells in range),
+// switchover bonuses, training pay ($7.50/hr when worked, the held $7.50/hr
+// on the day-90 date), times (1 + payroll tax rate). Tips are left out.
+// Bonuses follow Payroll: only from the 10th/25th schedule on.
+function laborEstimate({ techs, jobs, switchovers=[], timeEntries=[], start, end, techId=null, taxRate }) {
+  const who = techId ? techs.filter(t=>t.id===techId) : techs;
+  const commMap = Object.fromEntries(techs.map(t => [t.id, (t.commission_rate||27)/100]));
+  const inRange = jobs.filter(j => j.job_date>=start && j.job_date<=end && (!techId || j.tech_id===techId));
+  const revenue = inRange.reduce((s,j)=>s+(j.revenue||0),0);
+  const commission = inRange.reduce((s,j)=>s+(j.revenue||0)*(commMap[j.tech_id]||0.27),0);
+  let upsellBonus = 0;
+  for (const p of getPayPeriods().filter(p=>p.start>=PP_SEMI_MONTHLY_FROM && p.start<=end && p.end>=start)) {
+    const from = p.start>start?p.start:start, to = p.end<end?p.end:end;
+    for (const t of who) {
+      const amt = upsellAmountInRange(jobs, t.id, from, to);
+      if (amt>0) upsellBonus += amt*calcUpsellPay(upsellAmountInRange(jobs, t.id, p.start, p.end)).rate;
+    }
+  }
+  const switchBonus = switchovers.filter(sw=>(!techId||sw.tech_id===techId)&&switchoverDate(sw)>=PP_SEMI_MONTHLY_FROM&&switchoverDate(sw)>=start&&switchoverDate(sw)<=end).reduce((s,sw)=>s+(switchoverPay(sw)||0),0);
+  let training = 0;
+  for (const t of who) {
+    const tr = trainingInfo(t, jobs, timeEntries, techs);
+    if (!tr) continue;
+    training += tr.entries.filter(e=>e.work_date>=start&&e.work_date<=end).reduce((s,e)=>s+paidSessionHours(e),0)*TRAINING_RATE_NOW;
+    if (t.is_active!==false && tr.day90>=start && tr.day90<=end) training += tr.totalHours*TRAINING_RATE_HELD;
+  }
+  const wages = commission+upsellBonus+switchBonus+training;
+  const taxes = wages*taxRate;
+  const labor = wages+taxes;
+  return { revenue, commission, upsellBonus, switchBonus, training, wages, taxes, labor, pct: revenue>0 ? labor/revenue*100 : 0 };
 }
 
 // ─── PAYROLL TAB ──────────────────────────────────────────────────────────────
@@ -3406,7 +3502,7 @@ function TechDashboard({ tech, techs, upsells, switchovers, reviews, callbacks, 
           </div>
         )}
         {tab==="timesheet"&&<TimeSheetTab tech={tech} techs={techs} timeEntries={timeEntries} vehicles={vehicles} truckAssignments={truckAssignments} refreshAll={refreshAll} showToast={showToast} nowTick={nowTick}/>}
-        {tab==="reports"&&<ReportsTab techs={techs} jobs={jobs||[]} upsells={upsells||[]} timeEntries={timeEntries} tipEntries={tipEntries} techId={tech.id}/>}
+        {tab==="reports"&&<ReportsTab techs={techs} jobs={jobs||[]} upsells={upsells||[]} switchovers={switchovers||[]} timeEntries={timeEntries} tipEntries={tipEntries} techId={tech.id}/>}
         {tab==="leaderboard"&&<Leaderboard techs={techs} jobs={jobs||[]} upsells={upsells} reviews={reviews} callbacks={callbacks||[]} switchovers={switchovers} timeEntries={timeEntries}/>}
         {tab==="badges"&&<BadgeGrid earned={tech.badges}/>}
         {tab==="upsells"&&<UpsellLeaderboard techs={techs} upsells={upsells} jobs={jobs||[]} currentId={tech.id}/>}
@@ -9045,7 +9141,7 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
         )}
 
         {tab==="reports"&&(
-          <ReportsTab techs={techs} jobs={jobs||[]} upsells={upsells||[]} timeEntries={timeEntries} tipEntries={tipEntries} techId={null} refreshAll={refreshAll} showToast={showToast}/>
+          <ReportsTab techs={techs} jobs={jobs||[]} upsells={upsells||[]} switchovers={switchovers||[]} timeEntries={timeEntries} tipEntries={tipEntries} techId={null} refreshAll={refreshAll} showToast={showToast} token={currentUser?.token} isOwner={!isManager}/>
         )}
         {tab==="leaderboard"&&(
           <Leaderboard techs={activeTechs} jobs={jobs||[]} upsells={upsells} reviews={reviews} callbacks={callbacks||[]} switchovers={switchovers} timeEntries={timeEntries}/>
