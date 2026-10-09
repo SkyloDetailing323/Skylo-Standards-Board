@@ -5,7 +5,7 @@ import { computeOpsMonth, monthRange, mountainDate, CALLBACK_TIERS, QUOTA_TIERS,
 import { techDriverDays, weeklyDriverScore, findUnassignedDriving, DRIVER_CONFIG } from "./driverScoring.js";
 import { buildFordImport } from "./fordReports.js";
 import { techWeekCard, techScoreCard, teamSummary, scoreWindow, truckScore, isTruckExempt, TECH_SCORE_CONFIG } from "./techScores.js";
-import { AD_HEALTH, groupAds, trend, grade, gradeExplain, metrics, sumWeeks, rolling, reasons, marketShift } from "./adTrends.js";
+import { AD_HEALTH, groupAds, trend, grade, metrics, sumWeeks, rolling, adAdvice, marketShift } from "./adTrends.js";
 import { LABOR_TARGET_PCT, payrollTaxRate, tipsPaidByMonth, qbLaborMonth } from "./laborCost.js";
 import { formKind, scoreToteCheck, scoreTechAudit, latestPerDay, auditDays, weeklyAuditPct, auditWeekStart, toteCharges, submissionPhotoUrls } from "./auditScoring.js";
 
@@ -6008,10 +6008,9 @@ function AdHealth({ token, margin }) {
       const t = trend(ad, AD_HEALTH, market);
       const m4 = metrics(sumWeeks(ad.weeks.slice(-AD_HEALTH.windowWeeks)));
       const g = grade(m4, breakeven);
-      const explain = gradeExplain(m4, g, breakeven, typical);
-      const why = t.status === "slipping" || t.status === "dropping" || g.grade === "red" ? reasons(t, { frequency28d: m.frequency_28d != null ? Number(m.frequency_28d) : null, weeksRunning, market }) : [];
+      const advice = adAdvice(m4, g, t, breakeven, typical, { frequency28d: m.frequency_28d != null ? Number(m.frequency_28d) : null, weeksRunning, market });
       const spark = rolling(ad).slice(-12).map(r => r.cpl);
-      return { ...ad, meta:m, started, weeksRunning, t, g, explain, why, spark, recentSpend: sumWeeks(ad.weeks.slice(-AD_HEALTH.windowWeeks)).spend };
+      return { ...ad, meta:m, started, weeksRunning, t, g, advice, spark, recentSpend: sumWeeks(ad.weeks.slice(-AD_HEALTH.windowWeeks)).spend };
     }).filter(a => a.recentSpend > 0 || a.meta.status === "ACTIVE")
       .sort((a, b) => ({ dropping:0, slipping:1, steady:2, improving:3, new:4, quiet:5 }[a.t.status] - ({ dropping:0, slipping:1, steady:2, improving:3, new:4, quiet:5 }[b.t.status])) || b.recentSpend - a.recentSpend);
   }, [s.data, today, breakeven]);
@@ -6050,12 +6049,9 @@ function AdHealth({ token, margin }) {
             </div>
             {openId === a.ad_id && (
               <div role="tooltip" onClick={ev => ev.stopPropagation()} style={{ position:"absolute", left:"8px", right:"8px", top:"calc(100% - 6px)", zIndex:30, background:C.white, border:`1px solid ${C.border}`, borderRadius:"16px", boxShadow:"0 12px 32px rgba(0,0,0,0.16)", padding:"12px 14px", display:"flex", flexDirection:"column", gap:"6px", cursor:"default" }}>
-                <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"14px", color:gc === C.muted ? C.black : gc }}>{a.explain.headline}</div>
-                {a.explain.lines.map((l, i) => <div key={i} style={{ fontSize:"13px", color:C.black }}>{l}</div>)}
-                {a.why.length > 0 && (<>
-                  <div style={{ fontSize:"12px", fontWeight:"600", color:C.black, marginTop:"4px" }}>{a.t.status === "slipping" || a.t.status === "dropping" ? `Why it's sliding${a.t.slideSince ? ` (since week of ${fmtWk(a.t.slideSince)})` : ""}` : "What's behind it"}</div>
-                  {a.why.map((w, i) => <div key={i} style={{ fontSize:"13px", color:C.black }}>• {w}</div>)}
-                </>)}
+                <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"14px", color:gc === C.muted ? C.black : gc }}>{a.advice.label}{a.t.status === "slipping" || a.t.status === "dropping" ? " · 📉 slipping" : ""}</div>
+                <div style={{ fontSize:"14px", color:C.black }}>{a.advice.why}</div>
+                <div style={{ fontSize:"14px", color:C.black }}><b>Do:</b> {a.advice.todo}</div>
               </div>
             )}
           </div>
