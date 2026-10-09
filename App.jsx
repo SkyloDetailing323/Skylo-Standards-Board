@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, Fragment } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef, Fragment } from "react";
 import { TEST_QUESTIONS, TESTS, TEST_KEYS, questionsFor, shuffle } from "./trainingTest.js";
 import { tierFor, BONUS_TIERS, FREQ_LABEL, CHARGEBACK_SERVICES, buildSales, monthPoints, reviewList } from "./salesPoints.js";
 import { computeOpsMonth, monthRange, mountainDate, CALLBACK_TIERS, QUOTA_TIERS, RETENTION_TIERS, NON_ROUTE_VEHICLES, OPS_EXCLUDED_TITLES } from "./opsBonus.js";
@@ -5888,8 +5888,30 @@ function AttributionSettings({ att, token, onSaved }) {
   );
 }
 
-function MetaCampaigns({ campaigns }) {
+// Meta ads by ad set for the picked dates (marketing_report_core), with each
+// ad set's and ad's health from the last 4 full weeks (useAdHealth). Tap an
+// ad set to see its ads; hover or tap a health chip for the why and what to do.
+function MetaAdSets({ campaigns, token, margin }) {
   const [open, setOpen] = useState(null);
+  const h = useAdHealth(token, margin);
+  const sets = useMemo(() => {
+    const out = {}, F = ["spend","leads","booked","revenue_upfront","revenue_sold","revenue_serviced"];
+    const add = (t, x) => { for (const f of F) t[f] = (t[f] || 0) + Number(x[f] || 0); };
+    const loose = { id:"_none", name:"Leads with a campaign tag but no ad tag", ads:[], loose:true };
+    for (const c of campaigns) {
+      const left = Object.fromEntries(F.map(f => [f, Number(c[f] || 0)]));
+      for (const ad of c.ads || []) {
+        const m = h.adsetOf[ad.id];
+        const id = m?.adset_id || `${c.id}:${ad.adset || ""}`;
+        const set = out[id] ||= { id, name:m?.adset_name || ad.adset || "Unknown ad set", campaign:c.name || c.id, ads:[] };
+        add(set, ad); set.ads.push(ad);
+        for (const f of F) left[f] -= Number(ad[f] || 0);
+      }
+      if (left.leads > 0 || left.revenue_upfront > 0.5) add(loose, { ...left, spend:Math.max(0, left.spend) });
+    }
+    const list = Object.values(out).sort((x, y) => y.spend - x.spend || y.leads - x.leads);
+    return loose.leads > 0 ? [...list, loose] : list;
+  }, [campaigns, h.adsetOf]);
   if (!campaigns.length) return <div style={{ fontSize:"13px", color:C.muted }}>No Meta campaigns in this range.</div>;
   // Compact: headers wrap, cost columns rounded to whole dollars, so all
   // columns fit on a laptop screen without sideways scrolling.
@@ -5901,26 +5923,35 @@ function MetaCampaigns({ campaigns }) {
     Number(x.spend) > 0 ? `${(Number(x.revenue_upfront || 0) / Number(x.spend)).toFixed(2)}x / ${(Number(x.revenue_sold || 0) / Number(x.spend)).toFixed(2)}x` : "—",
   ];
   return (
-    <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", overflowX:"auto" }}>
-      <table style={{ width:"100%", borderCollapse:"collapse", minWidth:"700px" }}>
-        <thead><tr style={{ background:C.cardLt }}>
-          <th style={{ ...th, textAlign:"left" }}>Campaign / ad</th><th style={th}>Spend</th><th style={th}>Leads</th><th style={th}>CPL</th><th style={th}>Booked</th><th style={th}>$/BOOKING</th><th style={th}>Upfront</th><th style={th}>Committed</th><th style={th}>Completed</th><th style={th}>ROAS up / comm.</th>
-        </tr></thead>
-        <tbody>
-          {campaigns.map(c => (<Fragment key={c.id}>
-            <tr onClick={() => setOpen(open === c.id ? null : c.id)} style={{ borderTop:`1px solid ${C.border}`, cursor:"pointer" }}>
-              <td style={{ ...td, textAlign:"left", whiteSpace:"normal", fontWeight:"700" }}>{open === c.id ? "▾" : "▸"} {c.name || c.id}</td>
-              {row(c).map((v, i) => <td key={i} style={td}>{v}</td>)}
-            </tr>
-            {open === c.id && (c.ads || []).map(a => (
-              <tr key={a.id} style={{ background:C.blueXlt }}>
-                <td style={{ ...td, textAlign:"left", whiteSpace:"normal", paddingLeft:"24px" }}>{a.name || a.id}<div style={{ fontSize:"11px", color:C.muted }}>{a.adset}</div></td>
-                {row(a).map((v, i) => <td key={i} style={td}>{v}</td>)}
+    <div style={{ display:"flex", flexDirection:"column", gap:"6px" }}>
+      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", overflowX:"auto" }}>
+        <table style={{ width:"100%", borderCollapse:"collapse", minWidth:"820px" }}>
+          <thead><tr style={{ background:C.cardLt }}>
+            <th style={{ ...th, textAlign:"left" }}>Ad set / ad</th><th style={{ ...th, textAlign:"left" }}>Health (last 4 wk)</th><th style={th}>Spend</th><th style={th}>Leads</th><th style={th}>CPL</th><th style={th}>Booked</th><th style={th}>$/BOOKING</th><th style={th}>Upfront</th><th style={th}>Committed</th><th style={th}>Completed</th><th style={th}>ROAS up / comm.</th>
+          </tr></thead>
+          <tbody>
+            {sets.map(c => (<Fragment key={c.id}>
+              <tr onClick={c.loose ? undefined : () => setOpen(open === c.id ? null : c.id)} style={{ borderTop:`1px solid ${C.border}`, cursor:c.loose ? "default" : "pointer" }}>
+                <td style={{ ...td, textAlign:"left", whiteSpace:"normal", fontWeight:c.loose ? "400" : "700", color:c.loose ? C.muted : C.black }}>
+                  {!c.loose && (open === c.id ? "▾ " : "▸ ")}{c.name}
+                  {!c.loose && <div style={{ fontSize:"11px", color:C.muted, fontWeight:"400" }}>{c.campaign} · {c.ads.length} ad{c.ads.length === 1 ? "" : "s"}</div>}
+                </td>
+                <td style={{ ...td, textAlign:"left" }}>{!c.loose && <HealthChip x={h.sets[c.id]} loading={h.s.loading}/>}</td>
+                {row(c).map((v, i) => <td key={i} style={td}>{v}</td>)}
               </tr>
-            ))}
-          </Fragment>))}
-        </tbody>
-      </table>
+              {open === c.id && c.ads.map(a => (
+                <tr key={a.id} style={{ background:C.blueXlt }}>
+                  <td style={{ ...td, textAlign:"left", whiteSpace:"normal", paddingLeft:"24px" }}>{a.name || a.id}</td>
+                  <td style={{ ...td, textAlign:"left" }}><HealthChip x={h.ads[a.id]} loading={h.s.loading}/></td>
+                  {row(a).map((v, i) => <td key={i} style={td}>{v}</td>)}
+                </tr>
+              ))}
+            </Fragment>))}
+          </tbody>
+        </table>
+      </div>
+      {h.s.error && <div style={{ fontSize:"12px", color:C.red }}>Couldn't load ad health: {h.s.error}</div>}
+      <div style={{ fontSize:"12px", color:C.muted }}>Tap an ad set to see its ads. Numbers are for the dates picked above; health is always the last 4 full weeks: red under break-even ({h.breakeven.toFixed(2)}x upfront ROAS at your margin), yellow up to {AD_HEALTH.greenRoas}x, green above (under ${AD_HEALTH.minSpend} spent or {AD_HEALTH.minLeads} leads isn't graded). 📉 means it's slipping from its own best 4 weeks, usually weeks before it turns red. Hover or tap a health chip for why and what to do.</div>
     </div>
   );
 }
@@ -5988,15 +6019,15 @@ function Sparkline({ values, color=C.blue, w=120, h=32 }) {
   );
 }
 
-function AdHealth({ token, margin }) {
+// Health for every Meta ad and ad set over the last 4 full weeks (adTrends.js):
+// grade, trend vs its own best 4 weeks, start date, and a why / do note.
+// -> { s, breakeven, adsetOf, ads:{ad_id: x}, sets:{adset_id: x} }
+function useAdHealth(token, margin) {
   const today = mountainDate(new Date().toISOString());
   const s = useGrowthReport({ type:"ad_trends" }, token);
-  const [showAll, setShowAll] = useState(false);
-  const [openId, setOpenId] = useState(null);
-  const [setId, setSetId] = useState(null);
   const breakeven = margin > 0 ? 1 / margin : 2;
-  const { sets, adsBySet } = useMemo(() => {
-    if (!s.data) return { sets:[], adsBySet:{} };
+  const out = useMemo(() => {
+    if (!s.data) return { adsetOf:{}, ads:{}, sets:{} };
     const meta = Object.fromEntries((s.data.ads || []).map(a => [a.ad_id, a]));
     const adsetOf = Object.fromEntries((s.data.adsets || []).map(a => [a.ad_id, a]));
     const grouped = groupAds(s.data.rows || [], today);
@@ -6010,100 +6041,70 @@ function AdHealth({ token, margin }) {
       const m4 = metrics(sumWeeks(ad.weeks.slice(-AD_HEALTH.windowWeeks)));
       const g = grade(m4, breakeven);
       const advice = adAdvice(m4, g, t, breakeven, typical, { frequency28d: m.frequency_28d != null ? Number(m.frequency_28d) : null, weeksRunning, market });
-      const spark = rolling(ad).slice(-12).map(r => r.cpl);
-      return { ...ad, meta:m, started, weeksRunning, t, g, advice, spark, recentSpend: sumWeeks(ad.weeks.slice(-AD_HEALTH.windowWeeks)).spend };
+      return { meta:m, started, weeksRunning, t, g, advice, spark: rolling(ad).slice(-12).map(r => r.cpl) };
     };
-    const live = a => a.recentSpend > 0 || a.meta.status === "ACTIVE";
-    const ads = grouped.map(ad => score(ad, meta[ad.ad_id] || {})).filter(live);
-    const setOf = id => adsetOf[id]?.adset_id || id;
-    const adsBySet = {};
-    for (const a of ads) (adsBySet[setOf(a.ad_id)] ||= []).push(a);
-    for (const k in adsBySet) adsBySet[k].sort(byHealth);
-    // An ad set's start = its first ad's; it's active if any ad is; how often
-    // people saw it = its ads' 28-day frequency, weighted by recent spend.
-    const sets = groupAds(toAdSets(s.data.rows || [], adsetOf), today).map(set => {
-      const kids = grouped.filter(ad => setOf(ad.ad_id) === set.ad_id).map(ad => meta[ad.ad_id] || {});
-      const kidSpend = Object.fromEntries((adsBySet[set.ad_id] || []).map(a => [a.ad_id, a.recentSpend]));
-      const times = kids.map(m => m.created_time).filter(Boolean).sort();
-      const fq = kids.filter(m => m.frequency_28d != null && kidSpend[m.ad_id] > 0);
-      const fqSpend = fq.reduce((t, m) => t + kidSpend[m.ad_id], 0);
-      const m = {
-        created_time: times[0] || null,
-        status: kids.some(k => k.status === "ACTIVE") ? "ACTIVE" : kids[0]?.status,
-        frequency_28d: fqSpend > 0 ? fq.reduce((t, k) => t + Number(k.frequency_28d) * kidSpend[k.ad_id], 0) / fqSpend : null,
-      };
-      return { ...score(set, m), adCount:(adsBySet[set.ad_id] || []).length };
-    }).filter(live).sort(byHealth);
-    return { sets, adsBySet };
+    const ads = Object.fromEntries(grouped.map(ad => [ad.ad_id, score(ad, meta[ad.ad_id] || {})]));
+    // An ad set started with its first ad, is active if any ad is, and its
+    // 28-day frequency is its ads', weighted by their last-4-week spend.
+    const sets = Object.fromEntries(groupAds(toAdSets(s.data.rows || [], adsetOf), today).map(set => {
+      const kids = grouped.filter(ad => adsetOf[ad.ad_id]?.adset_id === set.ad_id);
+      const sp = Object.fromEntries(kids.map(k => [k.ad_id, sumWeeks(k.weeks.slice(-AD_HEALTH.windowWeeks)).spend]));
+      const km = kids.map(k => meta[k.ad_id] || {});
+      const fq = km.filter(m => m.frequency_28d != null && sp[m.ad_id] > 0), fqSpend = fq.reduce((t, m) => t + sp[m.ad_id], 0);
+      return [set.ad_id, score(set, {
+        created_time: km.map(m => m.created_time).filter(Boolean).sort()[0] || null,
+        status: km.some(m => m.status === "ACTIVE") ? "ACTIVE" : km[0]?.status,
+        frequency_28d: fqSpend > 0 ? fq.reduce((t, m) => t + Number(m.frequency_28d) * sp[m.ad_id], 0) / fqSpend : null,
+      })];
+    }));
+    return { adsetOf, ads, sets };
   }, [s.data, today, breakeven]);
-  const gradeChip = { green:[C.green, "rgba(52,199,89,0.12)"], yellow:["#b8860b", "rgba(255,204,0,0.18)"], red:[C.red, "rgba(255,59,48,0.1)"], none:[C.muted, C.cardLt] };
-  const statusChip = { dropping:["📉 Dropping fast", C.red], slipping:["📉 Slipping", "#b8860b"], improving:["📈 Improving", C.green], steady:["Steady", C.muted], new:["New — learning", C.blue], quiet:["Barely spending", C.muted] };
-  const fmtWk = wk => wk ? fmtShortDate(wk) : "—";
-  const openSet = setId ? sets.find(x => x.ad_id === setId) : null;
-  const pick = id => { setSetId(id); setOpenId(null); setShowAll(false); };
-  // One card. On an ad set, tapping the card opens its ads and "Why?" shows
-  // the note; on an ad (or the open ad set) the whole card shows the note.
-  const card = (a, { drill, sub }) => {
-    const [gc, gbg] = gradeChip[a.g.grade];
-    const [st, sc] = statusChip[a.t.status];
-    const r = a.t.recent;
-    const open = openId === a.ad_id;
-    const toggle = ev => { ev.stopPropagation(); setOpenId(id => id === a.ad_id ? null : a.ad_id); };
-    return (
-      <div key={a.ad_id} onMouseEnter={drill ? undefined : () => setOpenId(a.ad_id)} onMouseLeave={() => setOpenId(id => id === a.ad_id ? null : id)} onClick={drill ? () => pick(a.ad_id) : toggle}
-        style={{ position:"relative", cursor:"pointer", background:C.card, border:`1px solid ${open ? C.blue : "rgba(0,0,0,0.04)"}`, borderRadius:"18px", padding:"14px 16px", boxShadow:"0 1px 3px rgba(0,0,0,0.05)", display:"flex", flexDirection:"column", gap:"8px" }}>
-        <div style={{ display:"flex", justifyContent:"space-between", gap:"10px", alignItems:"flex-start" }}>
-          <div style={{ minWidth:0 }}>
-            <div style={{ fontFamily:FONT, fontWeight:"600", fontSize:"16px", color:C.black }}>{a.ad_name || a.ad_id}{drill && <span style={{ color:C.blue }}> ›</span>}</div>
-            <div style={{ fontSize:"12px", color:C.muted }}>{sub ? `${sub} · ` : ""}started {fmtWk(a.started)}{a.weeksRunning ? ` (${a.weeksRunning} wk)` : ""}{a.meta.status && a.meta.status !== "ACTIVE" ? ` · ${a.meta.status.toLowerCase().replace(/_/g, " ")}` : ""}</div>
-          </div>
-          <Sparkline values={a.spark} color={a.t.status === "dropping" ? C.red : a.t.status === "slipping" ? "#b8860b" : C.blue}/>
-        </div>
-        <div style={{ display:"flex", gap:"6px", flexWrap:"wrap", alignItems:"center" }}>
-          <span style={{ background:gbg, color:gc, borderRadius:"980px", padding:"4px 10px", fontSize:"12px", fontWeight:"600" }}>{r.roasUp != null && a.g.grade !== "none" ? `${r.roasUp.toFixed(2)}x upfront · ` : ""}{a.g.note}</span>
-          <span style={{ color:sc, fontSize:"13px", fontWeight:"600" }}>{st}</span>
-          {a.t.slideSince && <span style={{ fontSize:"12px", color:C.muted }}>since week of {fmtWk(a.t.slideSince)}</span>}
-          <span onClick={toggle} onMouseEnter={drill ? () => setOpenId(a.ad_id) : undefined} style={{ marginLeft:"auto", fontSize:"12px", color:C.blue, padding:"4px 2px" }}>ⓘ Why?</span>
-        </div>
-        <div style={{ fontSize:"12px", color:C.muted }}>
-          Last 4 wk: {usd(r.spend)} spent · {r.platformLeads || r.leads || 0} leads · {r.booked || 0} booked · {r.cpl != null ? `${money2(r.cpl)}/lead` : "no leads"}{r.cpm != null ? ` · ${money2(r.cpm)} per 1k views` : ""}{r.ctr != null ? ` · ${(r.ctr * 100).toFixed(2)}% click` : ""}{a.meta.frequency_28d != null ? ` · seen ${Number(a.meta.frequency_28d).toFixed(1)}× each` : ""}
-          {a.t.peakWeek && <> · best 4 wk (from {fmtWk(a.t.peakWeek)}): {a.t.base.cpl != null ? `${money2(a.t.base.cpl)}/lead` : "—"}</>}
-        </div>
-        {open && (
-          <div role="tooltip" onClick={ev => ev.stopPropagation()} style={{ position:"absolute", left:"8px", right:"8px", top:"calc(100% - 6px)", zIndex:30, background:C.white, border:`1px solid ${C.border}`, borderRadius:"16px", boxShadow:"0 12px 32px rgba(0,0,0,0.16)", padding:"12px 14px", display:"flex", flexDirection:"column", gap:"6px", cursor:"default" }}>
-            <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"14px", color:gc === C.muted ? C.black : gc }}>{a.advice.label}{a.t.status === "slipping" || a.t.status === "dropping" ? " · 📉 slipping" : ""}</div>
-            <div style={{ fontSize:"14px", color:C.black }}>{a.advice.why}</div>
-            <div style={{ fontSize:"14px", color:C.black }}><b>Do:</b> {a.advice.todo}</div>
-          </div>
-        )}
-      </div>
-    );
-  };
-  const backBtn = { alignSelf:"flex-start", background:C.white, color:C.blue, border:`1px solid ${C.border}`, borderRadius:"980px", padding:"8px 14px", fontSize:"14px", fontWeight:"600", fontFamily:FONT, cursor:"pointer" };
-  const kids = openSet ? adsBySet[openSet.ad_id] || [] : [];
-  const shown = showAll ? sets : sets.slice(0, 8);
-  return (
-    <div style={{ display:"flex", flexDirection:"column", gap:"10px" }}>
-      <ListTitle right="last 4 weeks vs each one's best 4">{openSet ? openSet.ad_name : "Ad set health"}</ListTitle>
-      <ReportState s={s}/>
-      {s.data && sets.length === 0 && <div style={{ fontSize:"13px", color:C.muted }}>No Meta ad sets with spend in the last 4 weeks.</div>}
-      {openSet ? (<>
-        <button onClick={() => pick(null)} style={backBtn}>‹ All ad sets</button>
-        {card(openSet, { sub:`${openSet.campaign_name || "—"} · ${openSet.adCount} ad${openSet.adCount === 1 ? "" : "s"}` })}
-        <ListTitle right={`${kids.length} ad${kids.length === 1 ? "" : "s"}`}>Ads in this set</ListTitle>
-        {kids.map(a => card(a, {}))}
-        {kids.length === 0 && <div style={{ fontSize:"13px", color:C.muted }}>No ads in this set spent anything in the last 4 weeks.</div>}
-      </>) : (<>
-        {shown.map(a => card(a, { drill:true, sub:`${a.campaign_name || "—"} · ${a.adCount} ad${a.adCount === 1 ? "" : "s"}` }))}
-        {sets.length > 8 && <button onClick={() => setShowAll(v => !v)} style={backBtn}>{showAll ? "Show fewer" : `Show all ${sets.length} ad sets`}</button>}
-      </>)}
-      <div style={{ fontSize:"12px", color:C.muted }}>{openSet ? "Each ad is graded on its own; the ad set above adds them all up. " : "Tap an ad set to see each ad in it. "}Graded on the last 4 full weeks: red under break-even ({breakeven.toFixed(2)}x at your margin), yellow up to {AD_HEALTH.greenRoas}x, green above; under ${AD_HEALTH.minSpend} spent or {AD_HEALTH.minLeads} leads isn't graded yet. "Slipping" means its cost per lead rose 25%+ more than your ads did overall since its own best 4 weeks (or upfront ROAS fell 25%+), or Meta is charging it 25%+ more per view than the rest while clicks drop. That's usually weeks before it turns red. The line shows cost per lead, 4-week average, last 12 weeks. Hover or tap "Why?" to see why it's that color.</div>
-    </div>
-  );
+  return { s, breakeven, ...out };
 }
 
-const HEALTH_ORDER = { dropping:0, slipping:1, steady:2, improving:3, new:4, quiet:5 };
-const byHealth = (a, b) => HEALTH_ORDER[a.t.status] - HEALTH_ORDER[b.t.status] || b.recentSpend - a.recentSpend;
+// Health chip for a table row: color = 4-week grade, 📉/📈 = trend. Hover
+// (or tap) shows the why / do note. The note is position:fixed so the
+// table's sideways scroll doesn't clip it.
+function HealthChip({ x, loading }) {
+  const [pos, setPos] = useState(null);
+  const ref = useRef(null);
+  useEffect(() => {
+    if (!pos) return;
+    const close = () => setPos(null);
+    window.addEventListener("scroll", close, true);
+    return () => window.removeEventListener("scroll", close, true);
+  }, [pos]);
+  if (!x) return <span style={{ fontSize:"12px", color:C.muted }}>{loading ? "…" : "—"}</span>;
+  const tone = { green:[C.green, "rgba(52,199,89,0.12)"], yellow:["#b8860b", "rgba(255,204,0,0.18)"], red:[C.red, "rgba(255,59,48,0.1)"], none:[C.muted, C.cardLt] }[x.g.grade];
+  const word = { green:"Great", yellow:x.g.note === "Making money" ? "Making money" : "Plans pay back", red:"Losing money", none:"Not graded" }[x.g.grade];
+  const arrow = { dropping:" 📉", slipping:" 📉", improving:" 📈" }[x.t.status] || "";
+  const r = x.t.recent;
+  const show = () => {
+    const b = ref.current.getBoundingClientRect(), w = Math.min(340, window.innerWidth - 16);
+    setPos({ left:Math.max(8, Math.min(b.left, window.innerWidth - w - 8)), w, ...(b.bottom + 220 > window.innerHeight ? { bottom:window.innerHeight - b.top + 6 } : { top:b.bottom + 6 }) });
+  };
+  return (
+    <span ref={ref} onMouseEnter={show} onMouseLeave={() => setPos(null)} onClick={ev => { ev.stopPropagation(); pos ? setPos(null) : show(); }}
+      style={{ display:"inline-block", background:tone[1], color:tone[0], borderRadius:"980px", padding:"3px 9px", fontSize:"12px", fontWeight:"600", cursor:"pointer", whiteSpace:"nowrap" }}>
+      {x.g.grade !== "none" && r.roasUp != null ? `${r.roasUp.toFixed(1)}x · ` : ""}{word}{arrow}
+      {pos && (
+        <span role="tooltip" onClick={ev => ev.stopPropagation()} style={{ position:"fixed", zIndex:60, left:pos.left, top:pos.top, bottom:pos.bottom, width:pos.w, background:C.white, border:`1px solid ${C.border}`, borderRadius:"16px", boxShadow:"0 12px 32px rgba(0,0,0,0.16)", padding:"12px 14px", display:"flex", flexDirection:"column", gap:"6px", whiteSpace:"normal", cursor:"default", textAlign:"left" }}>
+          <span style={{ display:"flex", justifyContent:"space-between", gap:"8px", alignItems:"center" }}>
+            <span style={{ fontFamily:FONT, fontWeight:"700", fontSize:"14px", color:tone[0] === C.muted ? C.black : tone[0] }}>{x.advice.label}{arrow ? ` ·${arrow} ${x.t.status}` : ""}</span>
+            <Sparkline values={x.spark} w={80} h={26} color={x.t.status === "dropping" ? C.red : x.t.status === "slipping" ? "#b8860b" : C.blue}/>
+          </span>
+          <span style={{ fontSize:"14px", color:C.black, fontWeight:"400" }}>{x.advice.why}</span>
+          <span style={{ fontSize:"14px", color:C.black, fontWeight:"400" }}><b>Do:</b> {x.advice.todo}</span>
+          <span style={{ fontSize:"12px", color:C.muted, fontWeight:"400" }}>
+            Started {x.started ? fmtShortDate(x.started) : "—"}{x.weeksRunning ? ` (${x.weeksRunning} wk)` : ""}{x.meta.status && x.meta.status !== "ACTIVE" ? ` · ${x.meta.status.toLowerCase().replace(/_/g, " ")}` : ""}
+            {" · "}last 4 wk {r.cpl != null ? `${money2(r.cpl)}/lead` : "no leads"}{x.t.peakWeek && x.t.base.cpl != null ? `, best ${money2(x.t.base.cpl)}/lead (from ${fmtShortDate(x.t.peakWeek)})` : ""}
+            {x.t.slideSince ? ` · slipping since ${fmtShortDate(x.t.slideSince)}` : ""}{x.meta.frequency_28d != null ? ` · seen ${Number(x.meta.frequency_28d).toFixed(1)}× each` : ""}
+          </span>
+        </span>
+      )}
+    </span>
+  );
+}
 
 const GSC_STEPS = [
   "Google Cloud (project Skylo Tip Sync) → APIs & Services → Library → enable \"Google Search Console API\".",
@@ -6233,9 +6234,8 @@ function MarketingTab({ token }) {
           <ChannelTiles ch={ch.meta} paid att={att}/>
           <DailyBars title="Meta leads per day" days={days} value={x => x.leads?.meta || 0}/>
           {Number(ch.meta.spend) > 0 && <DailyBars title="Meta spend per day" days={days} value={x => Number(x.spend?.meta || 0)} fmt={usd}/>}
-          <SectionTitle>Campaigns & ads</SectionTitle>
-          <AdHealth token={token} margin={Number(att?.gross_margin) || 0}/>
-          <MetaCampaigns campaigns={d.meta_campaigns || []}/>
+          <SectionTitle>Ad sets & ads</SectionTitle>
+          <MetaAdSets campaigns={d.meta_campaigns || []} token={token} margin={Number(att?.gross_margin) || 0}/>
           <div style={{ fontSize:"11px", color:C.muted }}>Leads and bookings come from GHL, matched to the exact ad by its tracking tag. {REVENUE_NOTE}</div>
         </>)}
 
