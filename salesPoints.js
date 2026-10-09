@@ -190,13 +190,16 @@ export function monthPoints(sales, month) {
 }
 
 // Sales to double-check (HCP can't say who created a job, so credit rests on
-// the "sold by" tag). evidence: rows from sales_credit_evidence -- completed
+// the "sold by" tag). evidence: rows from sales_credit_review_rows -- completed
 // first visits with a "sold by" tag or a new customer's untagged first job,
-// plus the last GHL team member who texted the customer before booking.
+// the last GHL team member on a call or text with the customer before booking,
+// and is_lead (came through Residential Leads/Estimates).
 // Jobs an owner already decided (overrides) drop off.
 //   mismatch: tagged to this rep, but GHL shows someone else working it
 //   missed:   no "sold by" tag, but GHL shows this rep working it
-//   untagged: a new customer's first job with no "sold by" tag at all
+//   untagged: a new customer's first job with no "sold by" tag that came in as
+//             a lead or that a team member talked to -- not the plan visits
+//             GHL's Pipeline Automation creates for existing plan clients
 export function reviewList(evidence, overrides, repKey) {
   const out = { mismatch: [], missed: [], untagged: [] };
   const first = n => String(n || "").trim().split(/\s+/)[0].toLowerCase();
@@ -206,7 +209,7 @@ export function reviewList(evidence, overrides, repKey) {
     const row = { ...e, done_on: mtDay(e.completed_at), month: mtDay(e.completed_at).slice(0, 7) };
     if (e.sold_by === repKey) { if (ghl && ghl !== repKey) out.mismatch.push(row); }
     else if (!e.sold_by && ghl === repKey) out.missed.push(row);
-    else if (!e.sold_by && e.is_new) out.untagged.push(row);
+    else if (!e.sold_by && e.is_new && (e.is_lead || ghl)) out.untagged.push(row);
   }
   for (const k of Object.keys(out)) out[k].sort((a, b) => a.done_on < b.done_on ? 1 : -1);
   return out;

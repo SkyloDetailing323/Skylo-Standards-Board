@@ -10,7 +10,7 @@
 //   Trevor's sales for his points bonus: every HCP job of every customer who
 //   has a job tagged "sold by trevor", plus each tagged job's revenue without
 //   tips; owner overrides (sales_credit_overrides) and, for owners, the
-//   review evidence (sales_credit_evidence). salesPoints.js does the rest.
+//   review evidence (sales_credit_review_rows). salesPoints.js does the rest.
 // POST ?type=sales_credit  owners: who sold a job, overriding the tag.
 //   A rep with selfTechId can also open their own sales report from their
 //   tech login (rep is forced to theirs; nothing else is allowed).
@@ -78,7 +78,7 @@ async function salesJobs(repKey, rep) {
     rest(`hcp_sales_jobs?select=${cols}&raw->>tags=ilike.*${encodeURIComponent(rep.salesTag)}*`),
     rest("sales_credit_overrides?select=hcp_job_id,rep,set_by,set_at"),
     // Last ~100 days is plenty to review (and stays under the 1,000-row cap).
-    rpc("sales_credit_evidence", { p_from: new Date(Date.now() - 100 * 864e5).toISOString() }),
+    rpc("sales_credit_review_rows", { p_from: new Date(Date.now() - 100 * 864e5).toISOString() }),
   ]);
   // Jobs an owner credited to this rep without the tag.
   const extraIds = overrides.filter(o => o.rep === repKey).map(o => o.hcp_job_id).filter(id => !tagged.some(j => j.hcp_job_id === id));

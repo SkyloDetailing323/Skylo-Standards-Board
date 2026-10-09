@@ -6197,15 +6197,15 @@ function SalesPointsBonus({ token, canReview=false }) {
         </div>
         {review && (review.mismatch.length + review.missed.length + review.untagged.length > 0) && (<>
           <ListTitle right="last 100 days">Needs a look</ListTitle>
-          <div style={{ fontSize:"12px", color:C.muted, marginTop:"-4px" }}>HCP can't tell us who booked a job, so credit comes from the "sold by" tag. These don't line up with who was texting the customer in GHL, or have no tag. Pick who sold it; your pick wins over the tag.</div>
-          {review.mismatch.map(e => reviewRow(e, <span style={{ color:C.red }}>Tagged Trevor, but {e.ghl_rep} was texting them</span>))}
-          {review.missed.map(e => reviewRow(e, <span style={{ color:C.red }}>No "sold by" tag, but Trevor was texting them</span>))}
+          <div style={{ fontSize:"12px", color:C.muted, marginTop:"-4px" }}>HCP can't tell us who booked a job, so credit comes from the "sold by" tag. These don't line up with who was on the calls and texts with the customer in GHL, or have no tag. Pick who sold it; your pick wins over the tag.</div>
+          {review.mismatch.map(e => reviewRow(e, <span style={{ color:C.red }}>Tagged Trevor, but {e.ghl_rep} was talking to them</span>))}
+          {review.missed.map(e => reviewRow(e, <span style={{ color:C.red }}>No "sold by" tag, but Trevor was talking to them</span>))}
           {review.untagged.length > 0 && (
             <button onClick={() => setShowUntagged(v => !v)} style={{ alignSelf:"flex-start", background:C.white, color:C.blue, border:`1px solid ${C.border}`, borderRadius:"980px", padding:"8px 14px", fontSize:"14px", fontWeight:"600", fontFamily:FONT, cursor:"pointer" }}>
               {showUntagged ? "Hide" : "Show"} {review.untagged.length} new customer{review.untagged.length === 1 ? "" : "s"} with no "sold by" tag
             </button>
           )}
-          {showUntagged && review.untagged.map(e => reviewRow(e, e.ghl_rep ? `No "sold by" tag · ${e.ghl_rep} was texting them` : `No "sold by" tag · ${(e.tags||[]).join(", ") || "no tags at all"}`))}
+          {showUntagged && review.untagged.map(e => reviewRow(e, e.ghl_rep ? `No "sold by" tag · ${e.ghl_rep} was talking to them` : `No "sold by" tag · ${(e.tags||[]).join(", ") || "no tags at all"}`))}
         </>)}
         <ListTitle right={`${m.earned.length} sale${m.earned.length === 1 ? "" : "s"}`}>Sales completed in {label.split(" ")[0]}</ListTitle>
         <RankRows rows={m.earned.map(d => ({ id:d.hcp_job_id, name:d.name, value:`${d.points.toLocaleString()} pts`,

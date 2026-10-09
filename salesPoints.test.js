@@ -146,7 +146,8 @@ test("review list: tag vs GHL mismatch, missed tag, untagged new customer; decid
     { hcp_job_id: "a", completed_at: D("2026-10-02"), sold_by: "trevor", is_new: true, ghl_rep: "Ethan Hamilton" },
     { hcp_job_id: "b", completed_at: D("2026-10-03"), sold_by: "trevor", is_new: true, ghl_rep: "Trevor Prince" },
     { hcp_job_id: "c", completed_at: D("2026-10-04"), sold_by: null, is_new: false, ghl_rep: "Trevor Prince" },
-    { hcp_job_id: "d", completed_at: D("2026-10-05"), sold_by: null, is_new: true, ghl_rep: null },
+    { hcp_job_id: "d", completed_at: D("2026-10-05"), sold_by: null, is_new: true, ghl_rep: null, is_lead: true },
+    { hcp_job_id: "g", completed_at: D("2026-10-05"), sold_by: null, is_new: true, ghl_rep: null, is_lead: false },   // plan-automation visit
     { hcp_job_id: "e", completed_at: D("2026-10-06"), sold_by: null, is_new: true, ghl_rep: null },
     { hcp_job_id: "f", completed_at: D("2026-10-06"), sold_by: null, is_new: false, ghl_rep: null },
   ];
