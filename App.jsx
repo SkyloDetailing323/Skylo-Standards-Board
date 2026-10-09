@@ -1457,6 +1457,31 @@ function laborEstimate({ techs, jobs, switchovers=[], timeEntries=[], start, end
   return { revenue, commission, upsellBonus, switchBonus, training, wages, taxes, labor, pct: revenue>0 ? labor/revenue*100 : 0 };
 }
 
+// Owners (Truxton, Casey) don't re-enter their PIN if this device had the
+// app open in the last 10 minutes (owner rule, Oct 2026). Only the owner
+// login is remembered; the login token itself still expires after 12 hours.
+// Signing out clears it. Browser storage can be off (private mode), so every
+// read/write is wrapped -- worst case they type the PIN.
+const OWNER_SESSION_KEY = "skylo_owner_session";
+const OWNER_IDLE_MS = 10 * 60 * 1000;
+function tokenExp(token) {
+  try { return JSON.parse(atob(String(token).split(".")[0].replace(/-/g, "+").replace(/_/g, "/"))).exp || 0; } catch { return 0; }
+}
+function loadOwnerSession() {
+  try {
+    const v = JSON.parse(localStorage.getItem(OWNER_SESSION_KEY) || "null");
+    if (!v?.user || v.user.role !== "owner") return null;
+    if (Date.now() - (v.lastActive || 0) > OWNER_IDLE_MS || tokenExp(v.user.token) <= Date.now() + 60_000) { localStorage.removeItem(OWNER_SESSION_KEY); return null; }
+    return v.user;
+  } catch { return null; }
+}
+function saveOwnerSession(user) {
+  try {
+    if (user?.role === "owner") localStorage.setItem(OWNER_SESSION_KEY, JSON.stringify({ user, lastActive: Date.now() }));
+    else localStorage.removeItem(OWNER_SESSION_KEY);
+  } catch {}
+}
+
 // ─── PAYROLL TAB ──────────────────────────────────────────────────────────────
 function PayrollTab({ techs, jobs, tipEntries=[], switchovers=[], timeEntries=[], token=null, canWaive=false }) {
   const allPeriods = getPayPeriods();
@@ -9500,8 +9525,21 @@ export default function App() {
   const [unmatchedTechs, setUnmatchedTechs] = useState([]);
   const [vehicles, setVehicles] = useState([]);
   const [truckAssignments, setTruckAssignments] = useState([]);
-  const [user, setUser] = useState(null);
+  const [user, setUser] = useState(loadOwnerSession);
   const [loading, setLoading] = useState(true);
+  // Keep the owner's "last on the app" fresh while the app is open and
+  // visible (every 30s and on any tap/key); forget it on sign out.
+  useEffect(() => {
+    saveOwnerSession(user);
+    if (user?.role !== "owner") return;
+    let last = 0;
+    const touch = () => { if (document.visibilityState === "visible" && Date.now() - last > 15_000) { last = Date.now(); saveOwnerSession(user); } };
+    const iv = setInterval(touch, 30_000);
+    const evs = ["pointerdown", "keydown"];
+    evs.forEach(e => window.addEventListener(e, touch, { passive:true }));
+    document.addEventListener("visibilitychange", touch);
+    return () => { clearInterval(iv); evs.forEach(e => window.removeEventListener(e, touch)); document.removeEventListener("visibilitychange", touch); };
+  }, [user]);
   const [dbError, setDbError] = useState(null);
 
   const [quota, setQuota] = useState(DEFAULT_QUOTA);
