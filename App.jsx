@@ -50,24 +50,26 @@ async function sbAll(path, pageSize = 1000) {
 }
 
 // ─── DESIGN TOKENS ────────────────────────────────────────────────────────────
+// Apple-style system font (San Francisco on iPhone/Mac).
+const FONT = '-apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Helvetica Neue", "Segoe UI", Roboto, sans-serif';
 const C = {
-  blue:    "#2b9cf0",
-  blueDk:  "#0077cc",
-  blueLt:  "#e8f4ff",
-  blueXlt: "#f0f8ff",
-  black:   "#0d2240",
-  dark:    "#f5f9ff",
+  blue:    "#0a84ff",
+  blueDk:  "#0071e3",
+  blueLt:  "#eaf3ff",
+  blueXlt: "#f5f9ff",
+  black:   "#1d1d1f",
+  dark:    "#f5f5f7",
   card:    "#ffffff",
-  cardLt:  "#f0f7ff",
-  border:  "#c5dff8",
+  cardLt:  "#f5f5f7",
+  border:  "#e5e5ea",
   white:   "#ffffff",
-  offWhite:"#0d2240",
-  muted:   "#6b93bb",
-  green:   "#00c853",
-  gold:    "#f59e0b",
-  orange:  "#ff6b35",
-  purple:  "#7c3aed",
-  red:     "#ef4444",
+  offWhite:"#1d1d1f",
+  muted:   "#6e6e73",
+  green:   "#34c759",
+  gold:    "#ff9f0a",
+  orange:  "#ff9500",
+  purple:  "#af52de",
+  red:     "#ff3b30",
 };
 
 const PP_ANCHOR_END = "2026-06-13"; // known bi-weekly period end: pay date Jun 19, submit Jun 17
@@ -440,19 +442,19 @@ function getDateRangeBounds(preset, customStart="", customEnd="") {
 const DATE_RANGE_PRESETS = [["today","Today"],["yesterday","Yesterday"],["wtd","WTD"],["last_week","Last Week"],["mtd","MTD"],["last_month","Last Month"],["ytd","YTD"],["custom","Custom"]];
 function DateRangePicker({ label="📊 Time Period", color=C.blue, preset, setPreset, customStart, setCustomStart, customEnd, setCustomEnd, children }) {
   return (
-    <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${color}`, borderRadius:"12px", padding:"16px 18px" }}>
+    <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${color}`, borderRadius:"16px", padding:"16px 18px" }}>
       <Label color={color}>{label}</Label>
       <div style={{ display:"flex", gap:"6px", flexWrap:"wrap" }}>
         {DATE_RANGE_PRESETS.map(([id,lbl])=>(
-          <button key={id} onClick={()=>setPreset(id)} style={{ background:preset===id?color:C.cardLt, border:`1px solid ${preset===id?color:C.border}`, color:preset===id?C.white:C.muted, padding:"6px 14px", borderRadius:"4px", cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", fontSize:"11px", letterSpacing:"1px" }}>{lbl}</button>
+          <button key={id} onClick={()=>setPreset(id)} style={{ background:preset===id?color:C.cardLt, border:`1px solid ${preset===id?color:C.border}`, color:preset===id?C.white:C.muted, padding:"6px 14px", borderRadius:"8px", cursor:"pointer", fontFamily:FONT, fontWeight:"700", fontSize:"11px", letterSpacing:"-0.01em" }}>{lbl}</button>
         ))}
       </div>
       {preset==="custom"&&(
         <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"8px", marginTop:"12px" }}>
           {[["From",customStart,setCustomStart],["To",customEnd,setCustomEnd]].map(([lbl,val,set])=>(
             <div key={lbl}>
-              <div style={{ fontSize:"10px", color:C.muted, marginBottom:"4px" }}>{lbl}</div>
-              <input type="date" value={val} onChange={e=>set(e.target.value)} style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"8px", borderRadius:"8px", fontSize:"13px", fontFamily:"'Barlow',sans-serif", width:"100%", boxSizing:"border-box" }}/>
+              <div style={{ fontSize:"11px", color:C.muted, marginBottom:"4px" }}>{lbl}</div>
+              <input type="date" value={val} onChange={e=>set(e.target.value)} style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"8px", borderRadius:"10px", fontSize:"13px", fontFamily:FONT, width:"100%", boxSizing:"border-box" }}/>
             </div>
           ))}
         </div>
@@ -556,11 +558,13 @@ function switchoverDate(sw) {
 
 
 const GS = `
-  @import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:ital,wght@0,400;0,600;0,700;0,800;0,900;1,700;1,800;1,900&family=Barlow:wght@400;500;600;700&display=swap');
   * { margin:0; padding:0; box-sizing:border-box; }
-  body { background:#f0f8ff; color:#0d2240; font-family:'Barlow',sans-serif; -webkit-font-smoothing:antialiased; }
-  ::-webkit-scrollbar { width:4px; } ::-webkit-scrollbar-track { background:#e8f4ff; } ::-webkit-scrollbar-thumb { background:#c5dff8; border-radius:2px; }
-  input,select,button { font-family:'Barlow',sans-serif; }
+  body { background:#f5f5f7; color:#1d1d1f; font-family:-apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", "Segoe UI", Roboto, sans-serif; -webkit-font-smoothing:antialiased; -moz-osx-font-smoothing:grayscale; letter-spacing:-0.01em; }
+  ::-webkit-scrollbar { width:6px; height:6px; } ::-webkit-scrollbar-track { background:transparent; } ::-webkit-scrollbar-thumb { background:rgba(0,0,0,0.18); border-radius:3px; }
+  input,select,button,textarea { font-family:inherit; }
+  button { transition:opacity .15s, transform .1s, background-color .15s; }
+  button:active:not(:disabled) { transform:scale(0.98); }
+  input:focus, select:focus, textarea:focus { outline:none; border-color:#0a84ff !important; box-shadow:0 0 0 4px rgba(10,132,255,0.18); }
   input[type=number]::-webkit-inner-spin-button { -webkit-appearance:none; }
   input, select { color-scheme: light; }
 `;
@@ -572,14 +576,14 @@ function Logo({ h=40 }) {
 
 function Header({ right, left, title, subtitle }) {
   return (
-    <div style={{ background:C.white, borderBottom:`3px solid ${C.blue}`, padding:"0 16px", display:"flex", alignItems:"center", justifyContent:"space-between", height:"64px", boxShadow:"0 2px 12px rgba(43,156,240,0.12)", position:"sticky", top:0, zIndex:100 }}>
+    <div style={{ background:"rgba(255,255,255,0.78)", backdropFilter:"saturate(180%) blur(20px)", WebkitBackdropFilter:"saturate(180%) blur(20px)", borderBottom:"1px solid rgba(0,0,0,0.08)", padding:"0 16px", display:"flex", alignItems:"center", justifyContent:"space-between", height:"56px", position:"sticky", top:0, zIndex:100 }}>
       <div style={{ display:"flex", alignItems:"center", gap:"12px" }}>
         {left}
         <Logo h={34}/>
         {title && (
           <div>
-            <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontStyle:"italic", fontSize:"17px", letterSpacing:"1px", textTransform:"uppercase", color:C.black, lineHeight:1 }}>{title}</div>
-            {subtitle && <div style={{ fontSize:"10px", color:C.muted, letterSpacing:"2px", textTransform:"uppercase", marginTop:"2px" }}>{subtitle}</div>}
+            <div style={{ fontFamily:FONT, fontWeight:"700", fontStyle:"normal", fontSize:"17px", letterSpacing:"-0.01em", textTransform:"none", color:C.black, lineHeight:1 }}>{title}</div>
+            {subtitle && <div style={{ fontSize:"11px", color:C.muted, letterSpacing:"-0.01em", textTransform:"none", marginTop:"2px" }}>{subtitle}</div>}
           </div>
         )}
       </div>
@@ -601,25 +605,25 @@ function HamburgerBtn({ onClick }) {
 function SideNav({ sections, active, setActive, open, onClose, name, role }) {
   return (
     <>
-      {open&&<div onClick={onClose} style={{ position:"fixed", inset:0, background:"rgba(13,34,64,0.55)", zIndex:300 }}/>}
-      <div style={{ position:"fixed", top:0, left:0, height:"100%", width:"272px", background:C.white, zIndex:301, transform:open?"translateX(0)":"translateX(-100%)", transition:"transform 0.22s cubic-bezier(.4,0,.2,1)", boxShadow:"6px 0 24px rgba(0,0,0,0.18)", display:"flex", flexDirection:"column", overflowY:"auto" }}>
+      {open&&<div onClick={onClose} style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.28)", backdropFilter:"blur(2px)", WebkitBackdropFilter:"blur(2px)", zIndex:300 }}/>}
+      <div style={{ position:"fixed", top:0, left:0, height:"100%", width:"280px", background:"rgba(246,246,248,0.94)", backdropFilter:"saturate(180%) blur(24px)", WebkitBackdropFilter:"saturate(180%) blur(24px)", borderRight:"1px solid rgba(0,0,0,0.08)", zIndex:301, transform:open?"translateX(0)":"translateX(-100%)", transition:"transform 0.28s cubic-bezier(.32,.72,0,1)", boxShadow:open?"0 0 40px rgba(0,0,0,0.12)":"none", display:"flex", flexDirection:"column", overflowY:"auto" }}>
         {/* Drawer header */}
-        <div style={{ background:`linear-gradient(135deg, ${C.blue} 0%, #0077cc 100%)`, padding:"20px 18px 16px", flexShrink:0 }}>
-          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:"12px" }}>
-            <Logo h={30}/>
-            <button onClick={onClose} style={{ background:"rgba(255,255,255,0.15)", border:"none", color:"#fff", width:"28px", height:"28px", borderRadius:"50%", cursor:"pointer", fontSize:"14px", display:"flex", alignItems:"center", justifyContent:"center" }}>✕</button>
+        <div style={{ padding:"18px 18px 12px", flexShrink:0 }}>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:"14px" }}>
+            <Logo h={26}/>
+            <button onClick={onClose} aria-label="Close menu" style={{ background:"rgba(0,0,0,0.06)", border:"none", color:C.muted, width:"28px", height:"28px", borderRadius:"50%", cursor:"pointer", fontSize:"13px", display:"flex", alignItems:"center", justifyContent:"center" }}>✕</button>
           </div>
-          <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontStyle:"italic", fontSize:"20px", color:"#fff", lineHeight:1 }}>{name}</div>
-          {role&&<div style={{ fontSize:"11px", color:"rgba(255,255,255,0.7)", letterSpacing:"2px", textTransform:"uppercase", marginTop:"3px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"600" }}>{role}</div>}
+          <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"24px", color:C.black, lineHeight:1.1, letterSpacing:"-0.02em" }}>{name}</div>
+          {role&&<div style={{ fontSize:"13px", color:C.muted, marginTop:"2px", fontFamily:FONT }}>{role}</div>}
         </div>
         {/* Nav sections */}
-        <div style={{ flex:1, paddingBottom:"24px" }}>
+        <div style={{ flex:1, padding:"0 10px 24px" }}>
           {sections.map((sec,si)=>(
-            <div key={si} style={{ paddingTop:"8px" }}>
-              {sec.label&&<div style={{ padding:"10px 18px 4px", fontSize:"9px", color:C.muted, letterSpacing:"2px", textTransform:"uppercase", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>{sec.label}</div>}
+            <div key={si} style={{ paddingTop:"10px" }}>
+              {sec.label&&<div style={{ padding:"8px 10px 4px", fontSize:"12px", color:C.muted, fontFamily:FONT, fontWeight:"600" }}>{sec.label}</div>}
               {sec.items.map(([id,icon,label])=>(
-                <button key={id} onClick={()=>{ setActive(id); onClose(); }} style={{ width:"100%", display:"flex", alignItems:"center", gap:"12px", padding:"11px 18px", background:active===id?`${C.blue}12`:"none", border:"none", borderLeft:active===id?`3px solid ${C.blue}`:"3px solid transparent", cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:active===id?"900":"700", fontSize:"14px", color:active===id?C.blue:C.black, textAlign:"left", transition:"background 0.12s" }}>
-                  <span style={{ fontSize:"17px", width:"24px", textAlign:"center" }}>{icon}</span>
+                <button key={id} onClick={()=>{ setActive(id); onClose(); }} style={{ width:"100%", display:"flex", alignItems:"center", gap:"10px", padding:"8px 10px", background:active===id?C.blue:"none", border:"none", borderRadius:"8px", cursor:"pointer", fontFamily:FONT, fontWeight:"500", fontSize:"15px", color:active===id?"#fff":C.black, textAlign:"left", transition:"background 0.12s" }}>
+                  <span style={{ fontSize:"16px", width:"22px", textAlign:"center" }}>{icon}</span>
                   {label}
                 </button>
               ))}
@@ -633,8 +637,8 @@ function SideNav({ sections, active, setActive, open, onClose, name, role }) {
 
 function LogoutBtn({ onLogout }) {
   return (
-    <button onClick={onLogout} style={{ background:"none", border:`2px solid ${C.border}`, color:C.muted, padding:"6px 16px", borderRadius:"20px", cursor:"pointer", fontSize:"11px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", letterSpacing:"2px", textTransform:"uppercase" }}>
-      EXIT
+    <button onClick={onLogout} style={{ background:"rgba(0,0,0,0.05)", border:"none", color:C.black, padding:"7px 14px", borderRadius:"980px", cursor:"pointer", fontSize:"13px", fontFamily:FONT, fontWeight:"500" }}>
+      Sign Out
     </button>
   );
 }
@@ -642,12 +646,12 @@ function LogoutBtn({ onLogout }) {
 function TabBar({ tabs, active, setActive, accent }) {
   const ac = accent || C.blue;
   return (
-    <div style={{ display:"flex", background:C.white, borderBottom:`1px solid ${C.border}`, overflowX:"auto", WebkitOverflowScrolling:"touch", scrollbarWidth:"none", boxShadow:"0 1px 4px rgba(43,156,240,0.08)" }}>
+    <div style={{ display:"flex", background:C.white, borderBottom:`1px solid ${C.border}`, overflowX:"auto", WebkitOverflowScrolling:"touch", scrollbarWidth:"none", boxShadow:"0 1px 4px rgba(0,0,0,0.06)" }}>
       {tabs.map(([id,label]) => (
         <button key={id} onClick={()=>setActive(id)} style={{
           background:"none", border:"none", cursor:"pointer", whiteSpace:"nowrap",
-          padding:"14px 18px", fontSize:"11px", letterSpacing:"2px", textTransform:"uppercase",
-          fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800",
+          padding:"14px 16px", fontSize:"14px", letterSpacing:"-0.01em", textTransform:"none",
+          fontFamily:FONT, fontWeight:"600",
           color:active===id?ac:C.muted, flexShrink:0,
           borderBottom:active===id?`3px solid ${ac}`:"3px solid transparent",
         }}>{label}</button>
@@ -659,16 +663,16 @@ function TabBar({ tabs, active, setActive, accent }) {
 function Num({ val, size=32, color=C.white, unit="" }) {
   return (
     <div style={{ display:"flex", alignItems:"baseline", gap:"3px" }}>
-      <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:`${size}px`, color, lineHeight:1 }}>{val}</span>
-      {unit && <span style={{ fontSize:`${size*0.45}px`, color:C.muted, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>{unit}</span>}
+      <span style={{ fontFamily:FONT, fontWeight:"700", fontSize:`${size}px`, color, lineHeight:1 }}>{val}</span>
+      {unit && <span style={{ fontSize:`${size*0.45}px`, color:C.muted, fontFamily:FONT, fontWeight:"700" }}>{unit}</span>}
     </div>
   );
 }
 
 function StatBlock({ label, value, color, sub, accent }) {
   return (
-    <div style={{ background:C.white, border:`1px solid ${C.border}`, borderTop:`3px solid ${accent||color||C.blue}`, borderRadius:"12px", padding:"16px", boxShadow:"0 2px 8px rgba(43,156,240,0.08)" }}>
-      <div style={{ fontSize:"10px", color:C.muted, letterSpacing:"2px", textTransform:"uppercase", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", marginBottom:"8px" }}>{label}</div>
+    <div style={{ background:C.white, border:`1px solid ${C.border}`, borderTop:`3px solid ${accent||color||C.blue}`, borderRadius:"16px", padding:"16px", boxShadow:"0 2px 8px rgba(0,0,0,0.06)" }}>
+      <div style={{ fontSize:"11px", color:C.muted, letterSpacing:"-0.01em", textTransform:"none", fontFamily:FONT, fontWeight:"700", marginBottom:"8px" }}>{label}</div>
       <Num val={value} color={color||C.black} size={28}/>
       {sub && <div style={{ fontSize:"11px", color:C.muted, marginTop:"5px" }}>{sub}</div>}
     </div>
@@ -677,15 +681,15 @@ function StatBlock({ label, value, color, sub, accent }) {
 
 function Bar({ pct, color=C.blue, h=5 }) {
   return (
-    <div style={{ background:C.border, borderRadius:"4px", height:`${h}px`, overflow:"hidden" }}>
-      <div style={{ width:`${Math.min(pct,100)}%`, height:"100%", background:color, borderRadius:"4px" }}/>
+    <div style={{ background:C.border, borderRadius:"8px", height:`${h}px`, overflow:"hidden" }}>
+      <div style={{ width:`${Math.min(pct,100)}%`, height:"100%", background:color, borderRadius:"8px" }}/>
     </div>
   );
 }
 
 function Label({ children, color=C.blue }) {
   return (
-    <div style={{ fontSize:"11px", color, letterSpacing:"2px", textTransform:"uppercase", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontStyle:"italic", marginBottom:"10px" }}>{children}</div>
+    <div style={{ fontSize:"11px", color, letterSpacing:"-0.01em", textTransform:"none", fontFamily:FONT, fontWeight:"700", fontStyle:"normal", marginBottom:"10px" }}>{children}</div>
   );
 }
 
@@ -693,12 +697,12 @@ function Label({ children, color=C.blue }) {
 // payroll, audit history — where their past data must stay visible, just
 // clearly labeled so it's not mistaken for a current active tech.
 function ArchivedTag() {
-  return <span style={{ fontSize:"10px", color:C.muted, fontWeight:"600", fontStyle:"italic", marginLeft:"5px" }}>(Archived)</span>;
+  return <span style={{ fontSize:"11px", color:C.muted, fontWeight:"600", fontStyle:"normal", marginLeft:"5px" }}>(Archived)</span>;
 }
 
 function Pill({ children, color=C.blue }) {
   return (
-    <span style={{ display:"inline-block", background:`${color}22`, border:`1px solid ${color}55`, color, borderRadius:"3px", padding:"2px 8px", fontSize:"10px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", letterSpacing:"1px", textTransform:"uppercase" }}>
+    <span style={{ display:"inline-block", background:`${color}22`, border:`1px solid ${color}55`, color, borderRadius:"3px", padding:"2px 8px", fontSize:"11px", fontFamily:FONT, fontWeight:"700", letterSpacing:"-0.01em", textTransform:"none" }}>
       {children}
     </span>
   );
@@ -729,12 +733,12 @@ function PinPad({ onSubmit }) {
           <div key={i} style={{ width:"16px", height:"16px", borderRadius:"50%", background:i<pin.length?C.blue:"transparent", border:`2px solid ${i<pin.length?C.blue:C.border}` }}/>
         ))}
       </div>
-      {msg && <div style={{ fontSize:"13px", color:"#ef4444", fontWeight:"700", maxWidth:"240px", textAlign:"center" }}>{msg}</div>}
+      {msg && <div style={{ fontSize:"13px", color:"#ff3b30", fontWeight:"700", maxWidth:"240px", textAlign:"center" }}>{msg}</div>}
       <div style={{ display:"grid", gridTemplateColumns:"repeat(3,72px)", gap:"10px" }}>
         {[1,2,3,4,5,6,7,8,9,"",0,"⌫"].map((d,i)=>(
           <button key={i} onClick={()=>d==="⌫"?setPin(p=>p.slice(0,-1)):d!==""?press(String(d)):null}
             disabled={d===""}
-            style={{ width:"72px", height:"72px", borderRadius:"12px", background:d===""?"transparent":C.white, border:d===""?"none":`2px solid ${C.border}`, color:d==="⌫"?C.muted:C.black, fontSize:d==="⌫"?"20px":"24px", fontWeight:"700", cursor:d===""?"default":"pointer", fontFamily:"'Barlow Condensed',sans-serif", boxShadow:d===""?"none":"0 2px 8px rgba(43,156,240,0.12)" }}>
+            style={{ width:"72px", height:"72px", borderRadius:"16px", background:d===""?"transparent":C.white, border:d===""?"none":`2px solid ${C.border}`, color:d==="⌫"?C.muted:C.black, fontSize:d==="⌫"?"20px":"24px", fontWeight:"700", cursor:d===""?"default":"pointer", fontFamily:FONT, boxShadow:d===""?"none":"0 2px 8px rgba(0,0,0,0.06)" }}>
             {d}
           </button>
         ))}
@@ -751,14 +755,14 @@ function BadgeGrid({ earned }) {
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:"24px" }}>
       {/* Rotating Trophies info */}
-      <div style={{ background:"#ff6ef718", border:"1px solid #ff6ef744", borderRadius:"12px", padding:"12px 16px" }}>
-        <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"13px", color:"#ff6ef7", letterSpacing:"2px", marginBottom:"6px" }}>🏆 ROTATING MONTHLY TROPHIES</div>
+      <div style={{ background:"#ff6ef718", border:"1px solid #ff6ef744", borderRadius:"16px", padding:"12px 16px" }}>
+        <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"13px", color:"#ff6ef7", letterSpacing:"-0.01em", marginBottom:"6px" }}>🏆 ROTATING MONTHLY TROPHIES</div>
         <div style={{ fontSize:"12px", color:C.muted }}>These badges are passed to whoever is in the lead each month — no points, pure bragging rights.</div>
         <div style={{ display:"flex", gap:"8px", flexWrap:"wrap", marginTop:"10px" }}>
           {ROTATING_TROPHIES.map(t=>(
-            <div key={t.id} style={{ background:earned?.includes(t.id)?"#ff6ef722":"rgba(0,0,0,0.2)", border:`1px solid ${earned?.includes(t.id)?"#ff6ef7":"#333"}`, borderRadius:"4px", padding:"6px 12px", opacity:earned?.includes(t.id)?1:0.5 }}>
+            <div key={t.id} style={{ background:earned?.includes(t.id)?"#ff6ef722":"rgba(0,0,0,0.2)", border:`1px solid ${earned?.includes(t.id)?"#ff6ef7":"#333"}`, borderRadius:"8px", padding:"6px 12px", opacity:earned?.includes(t.id)?1:0.5 }}>
               <span style={{ fontSize:"16px" }}>{t.icon}</span>
-              <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", fontSize:"12px", color:earned?.includes(t.id)?"#ff6ef7":C.muted, marginLeft:"6px" }}>{t.name}</span>
+              <span style={{ fontFamily:FONT, fontWeight:"700", fontSize:"12px", color:earned?.includes(t.id)?"#ff6ef7":C.muted, marginLeft:"6px" }}>{t.name}</span>
             </div>
           ))}
         </div>
@@ -769,16 +773,16 @@ function BadgeGrid({ earned }) {
         const col = catColors[cat] || C.blue;
         return (
           <div key={cat}>
-            <div style={{ fontSize:"10px", color:col, letterSpacing:"2px", textTransform:"uppercase", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", marginBottom:"10px" }}>{cat}</div>
+            <div style={{ fontSize:"11px", color:col, letterSpacing:"-0.01em", textTransform:"none", fontFamily:FONT, fontWeight:"600", marginBottom:"10px" }}>{cat}</div>
             <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(160px,1fr))", gap:"8px" }}>
               {badges.map(b=>{
                 const have = earned?.includes(b.id);
                 return (
-                  <div key={b.id} style={{ background:have?`${col}18`:"rgba(0,0,0,0.2)", border:`1px solid ${have?col+"55":C.border}`, borderRadius:"12px", padding:"10px 12px", opacity:have?1:0.45 }}>
+                  <div key={b.id} style={{ background:have?`${col}18`:"rgba(0,0,0,0.2)", border:`1px solid ${have?col+"55":C.border}`, borderRadius:"16px", padding:"10px 12px", opacity:have?1:0.45 }}>
                     <div style={{ fontSize:"22px", marginBottom:"5px" }}>{b.icon}</div>
-                    <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"13px", color:have?C.white:C.muted }}>{b.name}</div>
-                    <div style={{ fontSize:"10px", color:col, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", marginTop:"2px" }}>{b.pts>0?`+${b.pts} pts`:"Trophy"}</div>
-                    <div style={{ fontSize:"10px", color:C.muted, marginTop:"4px", lineHeight:"1.3" }}>{b.desc}</div>
+                    <div style={{ fontFamily:FONT, fontWeight:"600", fontSize:"13px", color:have?C.white:C.muted }}>{b.name}</div>
+                    <div style={{ fontSize:"11px", color:col, fontFamily:FONT, fontWeight:"700", marginTop:"2px" }}>{b.pts>0?`+${b.pts} pts`:"Trophy"}</div>
+                    <div style={{ fontSize:"11px", color:C.muted, marginTop:"4px", lineHeight:"1.3" }}>{b.desc}</div>
                   </div>
                 );
               })}
@@ -831,12 +835,12 @@ function UpsellLeaderboard({ techs, upsells, jobs=[], currentId }) {
     <div style={{ display:"flex", flexDirection:"column", gap:"20px" }}>
 
       {/* Week selector */}
-      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"14px 18px" }}>
+      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"14px 18px" }}>
         <Label color={C.green}>📅 Select Week</Label>
         <select
           value={selectedWeek}
           onChange={e=>setSelectedWeek(e.target.value)}
-          style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"10px 14px", borderRadius:"12px", fontSize:"14px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", width:"100%", cursor:"pointer" }}
+          style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"10px 14px", borderRadius:"16px", fontSize:"14px", fontFamily:FONT, fontWeight:"700", width:"100%", cursor:"pointer" }}
         >
           {allWeeks.length === 0 && <option value={wk}>{formatWeekLabel(wk)} — Current Week</option>}
           {allWeeks.map(w=>(
@@ -846,31 +850,31 @@ function UpsellLeaderboard({ techs, upsells, jobs=[], currentId }) {
       </div>
 
       {/* Selected week breakdown */}
-      <div style={{ background:C.card, border:`1px solid ${selectedWeek===wk?C.blue:C.border}`, borderTop:`3px solid ${C.green}`, borderRadius:"12px", overflow:"hidden" }}>
+      <div style={{ background:C.card, border:`1px solid ${selectedWeek===wk?C.blue:C.border}`, borderRadius:"16px", overflow:"hidden" }}>
         <div style={{ padding:"14px 18px", borderBottom:`1px solid ${C.border}`, background:C.cardLt, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
           <div>
-            <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"16px", color:C.black }}>{formatWeekLabel(selectedWeek)}</div>
-            {selectedWeek===wk&&<div style={{ fontSize:"10px", color:C.blue, letterSpacing:"1px", textTransform:"uppercase", marginTop:"2px" }}>Current Week</div>}
+            <div style={{ fontFamily:FONT, fontWeight:"600", fontSize:"16px", color:C.black }}>{formatWeekLabel(selectedWeek)}</div>
+            {selectedWeek===wk&&<div style={{ fontSize:"11px", color:C.blue, letterSpacing:"-0.01em", textTransform:"none", marginTop:"2px" }}>Current Week</div>}
           </div>
           <div style={{ textAlign:"right" }}>
-            <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"24px", color:C.green }}>${weekTotal.toLocaleString()}</div>
-            <div style={{ fontSize:"10px", color:C.muted, letterSpacing:"1px" }}>TEAM TOTAL</div>
+            <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"24px", color:C.green }}>${weekTotal.toLocaleString()}</div>
+            <div style={{ fontSize:"11px", color:C.muted, letterSpacing:"-0.01em" }}>TEAM TOTAL</div>
           </div>
         </div>
         <div style={{ padding:"14px 18px", display:"flex", flexDirection:"column", gap:"8px" }}>
           {ranked.filter(t=>t.amt>0).map((t,idx)=>{
             const isMe=t.id===currentId; const pct=top>0?Math.round((t.amt/top)*100):0;
             return (
-              <div key={t.id} style={{ background:idx===0?`${C.green}12`:isMe?`${C.blue}12`:"transparent", border:`1px solid ${idx===0?C.green:isMe?`${C.blue}44`:C.border}`, borderRadius:"12px", padding:"10px 12px" }}>
+              <div key={t.id} style={{ background:idx===0?`${C.green}12`:isMe?`${C.blue}12`:"transparent", border:`1px solid ${idx===0?C.green:isMe?`${C.blue}44`:C.border}`, borderRadius:"16px", padding:"10px 12px" }}>
                 <div style={{ display:"flex", alignItems:"center", gap:"12px", marginBottom:"6px" }}>
-                  <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontStyle:"italic", fontSize:idx===0?"28px":idx<3?"22px":"16px", color:idx===0?C.green:idx===1?"#a8c0d6":idx===2?"#cd7f32":C.muted, width:"30px", textAlign:"center", lineHeight:1 }}>{medal(idx)}</div>
-                  <div style={{ width:"36px", height:"36px", borderRadius:"50%", background:`${C.blue}22`, border:`1px solid ${C.blue}44`, display:"flex", alignItems:"center", justifyContent:"center", fontFamily:"'Barlow Condensed',sans-serif", fontSize:"12px", fontWeight:"800", color:C.blue, flexShrink:0 }}>{t.avatar}</div>
+                  <div style={{ fontFamily:FONT, fontWeight:"700", fontStyle:"normal", fontSize:idx===0?"28px":idx<3?"22px":"16px", color:idx===0?C.green:idx===1?"#a8c0d6":idx===2?"#cd7f32":C.muted, width:"30px", textAlign:"center", lineHeight:1 }}>{medal(idx)}</div>
+                  <div style={{ width:"36px", height:"36px", borderRadius:"50%", background:`${C.blue}22`, border:`1px solid ${C.blue}44`, display:"flex", alignItems:"center", justifyContent:"center", fontFamily:FONT, fontSize:"12px", fontWeight:"600", color:C.blue, flexShrink:0 }}>{t.avatar}</div>
                   <div style={{ flex:1 }}>
-                    <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontStyle:"italic", fontSize:"16px", color:C.black }}>{t.name}{isMe&&<span style={{ color:C.blue, fontSize:"11px", marginLeft:"6px", fontStyle:"normal" }}>YOU</span>}</div>
+                    <div style={{ fontFamily:FONT, fontWeight:"700", fontStyle:"normal", fontSize:"16px", color:C.black }}>{t.name}{isMe&&<span style={{ color:C.blue, fontSize:"11px", marginLeft:"6px", fontStyle:"normal" }}>YOU</span>}</div>
                     <div style={{ fontSize:"11px", color:C.muted }}>+{Math.round(t.amt*UPSELL_PTS_PER_DOLLAR)} pts this week</div>
                   </div>
                   <div style={{ textAlign:"right" }}>
-                    <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"24px", color:idx===0?C.green:C.black }}>${t.amt.toLocaleString()}</div>
+                    <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"24px", color:idx===0?C.green:C.black }}>${t.amt.toLocaleString()}</div>
                   </div>
                 </div>
                 <Bar pct={pct} color={idx===0?C.green:C.blue} h={5}/>
@@ -879,14 +883,14 @@ function UpsellLeaderboard({ techs, upsells, jobs=[], currentId }) {
           })}
           {ranked.filter(t=>t.amt===0).length>0&&(
             <div style={{ borderTop:`1px dashed ${C.border}`, paddingTop:"8px", marginTop:"4px" }}>
-              <div style={{ fontSize:"10px", color:C.muted, letterSpacing:"2px", textTransform:"uppercase", fontFamily:"'Barlow Condensed',sans-serif", marginBottom:"6px" }}>No upsells logged yet this week</div>
+              <div style={{ fontSize:"11px", color:C.muted, letterSpacing:"-0.01em", textTransform:"none", fontFamily:FONT, marginBottom:"6px" }}>No upsells logged yet this week</div>
               {ranked.filter(t=>t.amt===0).map(t=>{
                 const isMe=t.id===currentId;
                 return (
                   <div key={t.id} style={{ display:"flex", alignItems:"center", gap:"10px", padding:"6px 8px", opacity:0.5 }}>
-                    <div style={{ width:"36px", height:"36px", borderRadius:"50%", background:C.cardLt, border:`1px solid ${C.border}`, display:"flex", alignItems:"center", justifyContent:"center", fontFamily:"'Barlow Condensed',sans-serif", fontSize:"12px", fontWeight:"800", color:C.muted }}>{t.avatar}</div>
-                    <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", fontSize:"14px", color:C.muted }}>{t.name}{isMe&&" — YOU"}</div>
-                    <div style={{ marginLeft:"auto", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"14px", color:C.muted }}>$0</div>
+                    <div style={{ width:"36px", height:"36px", borderRadius:"50%", background:C.cardLt, border:`1px solid ${C.border}`, display:"flex", alignItems:"center", justifyContent:"center", fontFamily:FONT, fontSize:"12px", fontWeight:"600", color:C.muted }}>{t.avatar}</div>
+                    <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"14px", color:C.muted }}>{t.name}{isMe&&" — YOU"}</div>
+                    <div style={{ marginLeft:"auto", fontFamily:FONT, fontWeight:"600", fontSize:"14px", color:C.muted }}>$0</div>
                   </div>
                 );
               })}
@@ -897,7 +901,7 @@ function UpsellLeaderboard({ techs, upsells, jobs=[], currentId }) {
       </div>
 
       {/* Running totals pinned at bottom */}
-      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.green}`, borderRadius:"12px", overflow:"hidden" }}>
+      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", overflow:"hidden" }}>
         <div style={{ padding:"14px 18px", borderBottom:`1px solid ${C.border}`, background:C.cardLt }}>
           <Label color={C.green}>💰 Running Totals — All Time</Label>
         </div>
@@ -909,7 +913,7 @@ function UpsellLeaderboard({ techs, upsells, jobs=[], currentId }) {
                 <div style={{ display:"flex", justifyContent:"space-between", marginBottom:"5px" }}>
                   <span style={{ fontSize:"13px", fontWeight:"600", color:t.id===currentId?C.blue:C.black }}>{medal(i)} {t.name}{t.id===currentId?" — YOU":""}</span>
                   <div style={{ textAlign:"right" }}>
-                    <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"14px", color:C.black }}>${amt.toLocaleString()}</span>
+                    <span style={{ fontFamily:FONT, fontWeight:"600", fontSize:"14px", color:C.black }}>${amt.toLocaleString()}</span>
                     <span style={{ fontSize:"11px", color:C.green, marginLeft:"8px" }}>{Math.round(amt*UPSELL_PTS_PER_DOLLAR).toLocaleString()} pts</span>
                   </div>
                 </div>
@@ -922,7 +926,7 @@ function UpsellLeaderboard({ techs, upsells, jobs=[], currentId }) {
 
       {/* Date Range */}
       <DateRangePicker label="📅 Date Range" color={C.green} preset={rangePreset} setPreset={setRangePreset} customStart={cStart} setCustomStart={setCStart} customEnd={cEnd} setCustomEnd={setCEnd}>
-        <div style={{ fontSize:"11px", color:C.green, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", marginTop:"8px" }}>
+        <div style={{ fontSize:"11px", color:C.green, fontFamily:FONT, fontWeight:"700", marginTop:"8px" }}>
           {rangeStart} → {rangeEnd} · matched by exact completion date · ${rangeInRange.reduce((s,u)=>s+(u.amount||0),0).toLocaleString()} · {rangeInRange.length} entr{rangeInRange.length!==1?"ies":"y"}
         </div>
         {noDateEntries.length>0&&(
@@ -941,7 +945,7 @@ function UpsellLeaderboard({ techs, upsells, jobs=[], currentId }) {
           .sort((a, b) => b.amt - a.amt);
         const rangeTop = rangeRanked[0]?.amt || 1;
         return (
-          <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.green}`, borderRadius:"12px", overflow:"hidden" }}>
+          <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", overflow:"hidden" }}>
             <div style={{ padding:"14px 18px", borderBottom:`1px solid ${C.border}`, background:C.cardLt }}>
               <Label color={C.green}>💰 Upsells · {rangeStart} → {rangeEnd}</Label>
             </div>
@@ -953,7 +957,7 @@ function UpsellLeaderboard({ techs, upsells, jobs=[], currentId }) {
                   <div key={t.id}>
                     <div style={{ display:"flex", justifyContent:"space-between", marginBottom:"5px" }}>
                       <span style={{ fontSize:"13px", color:t.id===currentId?C.blue:C.black }}>{medal(i)} {t.name}{t.id===currentId?" — YOU":""}</span>
-                      <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"14px", color:C.black }}>${t.amt.toLocaleString()}</span>
+                      <span style={{ fontFamily:FONT, fontWeight:"600", fontSize:"14px", color:C.black }}>${t.amt.toLocaleString()}</span>
                     </div>
                     <Bar pct={pct} color={C.green}/>
                   </div>
@@ -1011,13 +1015,13 @@ function SwitchoverLeaderboard({ techs, switchovers, currentId }) {
 
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:"24px" }}>
-      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", overflow:"hidden" }}>
+      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", overflow:"hidden" }}>
         <div style={{ padding:"14px 18px", borderBottom:`1px solid ${C.border}` }}><Label color={C.purple}>🔄 All-Time Switchovers</Label></div>
         <div style={{ padding:"14px 18px", display:"flex", flexDirection:"column", gap:"8px" }}>
           {[...techs].sort((a,b)=>(allPts[b.id]||0)-(allPts[a.id]||0)).map((t,i)=>(
             <div key={t.id} style={{ display:"flex", justifyContent:"space-between" }}>
               <span style={{ fontSize:"13px", color:t.id===currentId?C.blue:C.black }}>{medal(i)} {t.name}{t.id===currentId?" — YOU":""}</span>
-              <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"13px", color:C.black }}>{allCount[t.id]||0} switchovers · {(allPts[t.id]||0).toLocaleString()} pts</span>
+              <span style={{ fontFamily:FONT, fontWeight:"600", fontSize:"13px", color:C.black }}>{allCount[t.id]||0} switchovers · {(allPts[t.id]||0).toLocaleString()} pts</span>
             </div>
           ))}
         </div>
@@ -1027,7 +1031,7 @@ function SwitchoverLeaderboard({ techs, switchovers, currentId }) {
           <Label>This Week · {formatWeekLabel(wk)}</Label>
           <div style={{ display:"flex", gap:"6px" }}>
             {[["count","COUNT"],["pts","POINTS"]].map(([id,label])=>(
-              <button key={id} onClick={()=>setRankBy(id)} style={{ background:rankBy===id?C.blue:"none", border:`1px solid ${rankBy===id?C.blue:C.border}`, color:rankBy===id?C.white:C.muted, padding:"4px 10px", borderRadius:"4px", cursor:"pointer", fontSize:"10px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", letterSpacing:"1px" }}>{label}</button>
+              <button key={id} onClick={()=>setRankBy(id)} style={{ background:rankBy===id?C.blue:"none", border:`1px solid ${rankBy===id?C.blue:C.border}`, color:rankBy===id?C.white:C.muted, padding:"4px 10px", borderRadius:"8px", cursor:"pointer", fontSize:"11px", fontFamily:FONT, fontWeight:"700", letterSpacing:"-0.01em" }}>{label}</button>
             ))}
           </div>
         </div>
@@ -1035,23 +1039,23 @@ function SwitchoverLeaderboard({ techs, switchovers, currentId }) {
           {ranked.map((t,idx)=>{
             const isMe=t.id===currentId; const val=rankBy==="count"?t.count:t.pts; const pct=top>0?Math.round((val/top)*100):0;
             return (
-              <div key={t.id} style={{ background:isMe?`${C.blue}18`:C.card, border:`1px solid ${isMe?C.blue:C.border}`, borderRadius:"12px", padding:"14px 18px" }}>
+              <div key={t.id} style={{ background:isMe?`${C.blue}18`:C.card, border:`1px solid ${isMe?C.blue:C.border}`, borderRadius:"16px", padding:"14px 18px" }}>
                 <div style={{ display:"flex", alignItems:"center", gap:"12px", marginBottom:"10px" }}>
-                  <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:idx<3?"22px":"14px", color:C.muted, width:"28px", textAlign:"center" }}>{medal(idx)}</div>
-                  <div style={{ width:"38px", height:"38px", borderRadius:"50%", background:`${C.blue}22`, border:`1px solid ${C.blue}44`, display:"flex", alignItems:"center", justifyContent:"center", fontFamily:"'Barlow Condensed',sans-serif", fontSize:"12px", fontWeight:"800", color:C.blue, flexShrink:0 }}>{t.avatar}</div>
+                  <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:idx<3?"22px":"14px", color:C.muted, width:"28px", textAlign:"center" }}>{medal(idx)}</div>
+                  <div style={{ width:"38px", height:"38px", borderRadius:"50%", background:`${C.blue}22`, border:`1px solid ${C.blue}44`, display:"flex", alignItems:"center", justifyContent:"center", fontFamily:FONT, fontSize:"12px", fontWeight:"600", color:C.blue, flexShrink:0 }}>{t.avatar}</div>
                   <div style={{ flex:1 }}>
-                    <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"16px", color:C.black }}>{t.name}{isMe&&<span style={{ color:C.blue, fontSize:"11px", marginLeft:"6px" }}>YOU</span>}</div>
+                    <div style={{ fontFamily:FONT, fontWeight:"600", fontSize:"16px", color:C.black }}>{t.name}{isMe&&<span style={{ color:C.blue, fontSize:"11px", marginLeft:"6px" }}>YOU</span>}</div>
                     <div style={{ fontSize:"11px", color:C.muted }}>All-time: {t.allCount} switchovers · {t.allPts.toLocaleString()} pts</div>
                   </div>
                   <div style={{ textAlign:"right" }}>
-                    <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"24px", color:t.count>0?C.white:C.border }}>{t.count}</div>
+                    <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"24px", color:t.count>0?C.white:C.border }}>{t.count}</div>
                     <div style={{ fontSize:"11px", color:C.purple }}>+{t.pts} pts</div>
                   </div>
                 </div>
                 <Bar pct={pct} color={C.purple}/>
                 {t.entries.length>0&&(
                   <div style={{ display:"flex", flexWrap:"wrap", gap:"5px", marginTop:"10px" }}>
-                    {t.entries.map((e,i)=>{ const plan=PLAN_MAP[e.plan]; const pc=PLAN_COLORS[e.plan]||C.muted; return plan?(<span key={i} style={{ background:`${pc}22`, border:`1px solid ${pc}55`, borderLeft:`3px solid ${pc}`, borderRadius:"3px", padding:"2px 8px", fontSize:"11px", color:C.black, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>{plan.label} +{plan.pts}pts</span>):null; })}
+                    {t.entries.map((e,i)=>{ const plan=PLAN_MAP[e.plan]; const pc=PLAN_COLORS[e.plan]||C.muted; return plan?(<span key={i} style={{ background:`${pc}22`, border:`1px solid ${pc}55`, borderLeft:`3px solid ${pc}`, borderRadius:"3px", padding:"2px 8px", fontSize:"11px", color:C.black, fontFamily:FONT, fontWeight:"700" }}>{plan.label} +{plan.pts}pts</span>):null; })}
                   </div>
                 )}
               </div>
@@ -1062,12 +1066,12 @@ function SwitchoverLeaderboard({ techs, switchovers, currentId }) {
 
       {/* Date Range */}
       <DateRangePicker label="📅 Date Range" color={C.purple} preset={rangePreset} setPreset={setRangePreset} customStart={cStart} setCustomStart={setCStart} customEnd={cEnd} setCustomEnd={setCEnd}>
-        <div style={{ fontSize:"11px", color:C.purple, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", marginTop:"8px" }}>
+        <div style={{ fontSize:"11px", color:C.purple, fontFamily:FONT, fontWeight:"700", marginTop:"8px" }}>
           {rangeStart} → {rangeEnd} · matched by week (switchovers are logged by week, not exact day)
         </div>
       </DateRangePicker>
 
-      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.purple}`, borderRadius:"12px", overflow:"hidden" }}>
+      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", overflow:"hidden" }}>
         <div style={{ padding:"14px 18px", borderBottom:`1px solid ${C.border}`, background:C.cardLt }}>
           <Label color={C.purple}>🔄 Switchovers by Plan Type · {rangeStart} → {rangeEnd}</Label>
         </div>
@@ -1075,8 +1079,8 @@ function SwitchoverLeaderboard({ techs, switchovers, currentId }) {
           <table style={{ width:"100%", borderCollapse:"collapse", fontSize:"13px" }}>
             <thead>
               <tr>
-                <th style={{ padding:"8px 18px", textAlign:"left", color:C.muted, fontWeight:"700", letterSpacing:"1px", fontFamily:"'Barlow Condensed',sans-serif", fontSize:"11px", borderBottom:`1px solid ${C.border}`, whiteSpace:"nowrap" }}>TECH</th>
-                <th style={{ padding:"8px 18px", textAlign:"left", color:C.muted, fontWeight:"700", letterSpacing:"1px", fontFamily:"'Barlow Condensed',sans-serif", fontSize:"11px", borderBottom:`1px solid ${C.border}` }}>BREAKDOWN</th>
+                <th style={{ padding:"8px 18px", textAlign:"left", color:C.muted, fontWeight:"700", letterSpacing:"-0.01em", fontFamily:FONT, fontSize:"11px", borderBottom:`1px solid ${C.border}`, whiteSpace:"nowrap" }}>TECH</th>
+                <th style={{ padding:"8px 18px", textAlign:"left", color:C.muted, fontWeight:"700", letterSpacing:"-0.01em", fontFamily:FONT, fontSize:"11px", borderBottom:`1px solid ${C.border}` }}>BREAKDOWN</th>
               </tr>
             </thead>
             <tbody>
@@ -1087,7 +1091,7 @@ function SwitchoverLeaderboard({ techs, switchovers, currentId }) {
                 const breakdown = Object.entries(t.byPlan).sort((a,b)=>b[1]-a[1]).map(([planId,count])=>`${count} ${PLAN_MAP[planId]?.label||planId}`).join(", ");
                 return (
                   <tr key={t.id} style={{ borderBottom:`1px solid ${C.border}` }}>
-                    <td style={{ padding:"10px 18px", color:t.id===currentId?C.blue:C.black, fontWeight:"700", fontFamily:"'Barlow Condensed',sans-serif", whiteSpace:"nowrap" }}>{medal(i)} {t.name}{t.id===currentId?" — YOU":""}</td>
+                    <td style={{ padding:"10px 18px", color:t.id===currentId?C.blue:C.black, fontWeight:"700", fontFamily:FONT, whiteSpace:"nowrap" }}>{medal(i)} {t.name}{t.id===currentId?" — YOU":""}</td>
                     <td style={{ padding:"10px 18px", color:C.black }}>{breakdown} <span style={{ color:C.muted, fontSize:"11px" }}>({t.total} total)</span></td>
                   </tr>
                 );
@@ -1097,15 +1101,15 @@ function SwitchoverLeaderboard({ techs, switchovers, currentId }) {
         </div>
       </div>
 
-      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"14px 18px" }}>
+      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"14px 18px" }}>
         <Label color={C.purple}>Plan Values</Label>
         <div style={{ display:"flex", flexWrap:"wrap", gap:"6px" }}>
           {SERVICE_PLANS.map(p=>{ const pc=PLAN_COLORS[p.id]; return (
-            <div key={p.id} style={{ background:`${pc}15`, border:`1px solid ${pc}44`, borderLeft:`3px solid ${pc}`, borderRadius:"4px", padding:"4px 10px", fontSize:"12px" }}>
-              <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", color:C.black }}>{p.label} </span>
+            <div key={p.id} style={{ background:`${pc}15`, border:`1px solid ${pc}44`, borderLeft:`3px solid ${pc}`, borderRadius:"8px", padding:"4px 10px", fontSize:"12px" }}>
+              <span style={{ fontFamily:FONT, fontWeight:"600", color:C.black }}>{p.label} </span>
               <span style={{ color:C.muted }}>{p.freq} </span>
-              <span style={{ color:pc, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>+{p.pts}pts </span>
-              <span style={{ color:C.green, fontFamily:"'Barlow Condensed',sans-serif" }}>${p.ltv.toLocaleString()}/yr LTV</span>
+              <span style={{ color:pc, fontFamily:FONT, fontWeight:"700" }}>+{p.pts}pts </span>
+              <span style={{ color:C.green, fontFamily:FONT }}>${p.ltv.toLocaleString()}/yr LTV</span>
             </div>
           ); })}
         </div>
@@ -1132,18 +1136,18 @@ function ReviewLeaderboard({ techs, reviews, currentId }) {
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:"20px" }}>
       {/* Points info */}
-      <div style={{ background:`${C.gold}18`, border:`1px solid ${C.gold}44`, borderRadius:"12px", padding:"12px 18px", display:"flex", gap:"24px", flexWrap:"wrap" }}>
-        <div><span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"20px", color:C.gold }}>+{REVIEW_PTS}</span><span style={{ fontSize:"12px", color:C.muted, marginLeft:"6px" }}>pts per review</span></div>
-        <div><span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"20px", color:C.gold }}>+{REVIEW_BONUS_PTS}</span><span style={{ fontSize:"12px", color:C.muted, marginLeft:"6px" }}>bonus at 10+ in a month</span></div>
+      <div style={{ background:`${C.gold}18`, border:`1px solid ${C.gold}44`, borderRadius:"16px", padding:"12px 18px", display:"flex", gap:"24px", flexWrap:"wrap" }}>
+        <div><span style={{ fontFamily:FONT, fontWeight:"700", fontSize:"20px", color:C.gold }}>+{REVIEW_PTS}</span><span style={{ fontSize:"12px", color:C.muted, marginLeft:"6px" }}>pts per review</span></div>
+        <div><span style={{ fontFamily:FONT, fontWeight:"700", fontSize:"20px", color:C.gold }}>+{REVIEW_BONUS_PTS}</span><span style={{ fontSize:"12px", color:C.muted, marginLeft:"6px" }}>bonus at 10+ in a month</span></div>
       </div>
 
       {/* Month selector */}
-      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"14px 18px" }}>
+      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"14px 18px" }}>
         <Label color={C.gold}>📅 Select Month</Label>
         <select
           value={selectedMonth}
           onChange={e=>setSelectedMonth(e.target.value)}
-          style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"10px 14px", borderRadius:"12px", fontSize:"14px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", width:"100%", cursor:"pointer" }}
+          style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"10px 14px", borderRadius:"16px", fontSize:"14px", fontFamily:FONT, fontWeight:"700", width:"100%", cursor:"pointer" }}
         >
           {allMonths.length === 0 && <option value={mk}>{formatMonthLabel(mk)} — Current Month</option>}
           {allMonths.map(m=>(
@@ -1153,31 +1157,31 @@ function ReviewLeaderboard({ techs, reviews, currentId }) {
       </div>
 
       {/* Selected month breakdown */}
-      <div style={{ background:C.card, border:`1px solid ${selectedMonth===mk?C.gold:C.border}`, borderTop:`3px solid ${C.gold}`, borderRadius:"12px", overflow:"hidden" }}>
+      <div style={{ background:C.card, border:`1px solid ${selectedMonth===mk?C.gold:C.border}`, borderRadius:"16px", overflow:"hidden" }}>
         <div style={{ padding:"14px 18px", borderBottom:`1px solid ${C.border}`, background:C.cardLt, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
           <div>
-            <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"16px", color:C.black }}>{formatMonthLabel(selectedMonth)}</div>
-            {selectedMonth===mk&&<div style={{ fontSize:"10px", color:C.gold, letterSpacing:"1px", textTransform:"uppercase", marginTop:"2px" }}>Current Month</div>}
+            <div style={{ fontFamily:FONT, fontWeight:"600", fontSize:"16px", color:C.black }}>{formatMonthLabel(selectedMonth)}</div>
+            {selectedMonth===mk&&<div style={{ fontSize:"11px", color:C.gold, letterSpacing:"-0.01em", textTransform:"none", marginTop:"2px" }}>Current Month</div>}
           </div>
           <div style={{ textAlign:"right" }}>
-            <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"24px", color:C.gold }}>{monthTotal} ⭐</div>
-            <div style={{ fontSize:"10px", color:C.muted, letterSpacing:"1px" }}>TEAM TOTAL</div>
+            <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"24px", color:C.gold }}>{monthTotal} ⭐</div>
+            <div style={{ fontSize:"11px", color:C.muted, letterSpacing:"-0.01em" }}>TEAM TOTAL</div>
           </div>
         </div>
         <div style={{ padding:"14px 18px", display:"flex", flexDirection:"column", gap:"10px" }}>
           {ranked.map((t,idx)=>{
             const isMe=t.id===currentId; const pct=top>0?Math.round((t.cnt/top)*100):0; const bonus=t.cnt>=10;
             return (
-              <div key={t.id} style={{ background:isMe?`${C.blue}18`:"transparent", border:isMe?`1px solid ${C.blue}44`:"1px solid transparent", borderRadius:"12px", padding:"10px 12px" }}>
+              <div key={t.id} style={{ background:isMe?`${C.blue}18`:"transparent", border:isMe?`1px solid ${C.blue}44`:"1px solid transparent", borderRadius:"16px", padding:"10px 12px" }}>
                 <div style={{ display:"flex", alignItems:"center", gap:"12px", marginBottom:"8px" }}>
-                  <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:idx<3?"20px":"13px", color:C.muted, width:"26px", textAlign:"center" }}>{medal(idx)}</div>
-                  <div style={{ width:"36px", height:"36px", borderRadius:"50%", background:`${C.blue}22`, border:`1px solid ${C.blue}44`, display:"flex", alignItems:"center", justifyContent:"center", fontFamily:"'Barlow Condensed',sans-serif", fontSize:"12px", fontWeight:"800", color:C.blue, flexShrink:0 }}>{t.avatar}</div>
+                  <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:idx<3?"20px":"13px", color:C.muted, width:"26px", textAlign:"center" }}>{medal(idx)}</div>
+                  <div style={{ width:"36px", height:"36px", borderRadius:"50%", background:`${C.blue}22`, border:`1px solid ${C.blue}44`, display:"flex", alignItems:"center", justifyContent:"center", fontFamily:FONT, fontSize:"12px", fontWeight:"600", color:C.blue, flexShrink:0 }}>{t.avatar}</div>
                   <div style={{ flex:1 }}>
-                    <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"15px", color:C.black }}>{t.name}{isMe&&<span style={{ color:C.blue, fontSize:"11px", marginLeft:"6px" }}>YOU</span>}</div>
+                    <div style={{ fontFamily:FONT, fontWeight:"600", fontSize:"15px", color:C.black }}>{t.name}{isMe&&<span style={{ color:C.blue, fontSize:"11px", marginLeft:"6px" }}>YOU</span>}</div>
                     <div style={{ fontSize:"11px", color:C.muted }}>+{(t.cnt*REVIEW_PTS)+(bonus?REVIEW_BONUS_PTS:0)} pts{bonus?" 🔥":""}</div>
                   </div>
                   <div style={{ textAlign:"right" }}>
-                    <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"22px", color:t.cnt>0?C.gold:C.border }}>{t.cnt} ⭐</div>
+                    <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"22px", color:t.cnt>0?C.gold:C.border }}>{t.cnt} ⭐</div>
                   </div>
                 </div>
                 <Bar pct={pct} color={C.gold} h={4}/>
@@ -1190,7 +1194,7 @@ function ReviewLeaderboard({ techs, reviews, currentId }) {
       </div>
 
       {/* Running totals pinned at bottom */}
-      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.gold}`, borderRadius:"12px", overflow:"hidden" }}>
+      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", overflow:"hidden" }}>
         <div style={{ padding:"14px 18px", borderBottom:`1px solid ${C.border}`, background:C.cardLt }}>
           <Label color={C.gold}>⭐ Running Totals — All Time</Label>
         </div>
@@ -1201,7 +1205,7 @@ function ReviewLeaderboard({ techs, reviews, currentId }) {
               <div key={t.id}>
                 <div style={{ display:"flex", justifyContent:"space-between", marginBottom:"5px" }}>
                   <span style={{ fontSize:"13px", color:t.id===currentId?C.blue:C.black }}>{medal(i)} {t.name}{t.id===currentId?" — YOU":""}</span>
-                  <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"14px", color:C.black }}>{cnt} ⭐</span>
+                  <span style={{ fontFamily:FONT, fontWeight:"600", fontSize:"14px", color:C.black }}>{cnt} ⭐</span>
                 </div>
                 <Bar pct={pct} color={C.gold}/>
               </div>
@@ -1222,17 +1226,17 @@ function TotalLeaderboard({ techs, upsells, switchovers, reviews, callbacks, job
       {ranked.map((t,idx)=>{
         const pct=Math.round((t.total/top)*100);
         return (
-          <div key={t.id} style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"16px 18px" }}>
+          <div key={t.id} style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"16px 18px" }}>
             <div style={{ display:"flex", alignItems:"center", gap:"12px", marginBottom:"12px" }}>
-              <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:idx<3?"26px":"16px", color:C.muted, width:"32px", textAlign:"center" }}>{medal(idx)}</div>
-              <div style={{ width:"42px", height:"42px", borderRadius:"50%", background:`${C.blue}22`, border:`1px solid ${C.blue}44`, display:"flex", alignItems:"center", justifyContent:"center", fontFamily:"'Barlow Condensed',sans-serif", fontSize:"13px", fontWeight:"800", color:C.blue, flexShrink:0 }}>{t.avatar}</div>
+              <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:idx<3?"26px":"16px", color:C.muted, width:"32px", textAlign:"center" }}>{medal(idx)}</div>
+              <div style={{ width:"42px", height:"42px", borderRadius:"50%", background:`${C.blue}22`, border:`1px solid ${C.blue}44`, display:"flex", alignItems:"center", justifyContent:"center", fontFamily:FONT, fontSize:"13px", fontWeight:"600", color:C.blue, flexShrink:0 }}>{t.avatar}</div>
               <div style={{ flex:1 }}>
-                <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"18px", color:C.black }}>{t.name}</div>
+                <div style={{ fontFamily:FONT, fontWeight:"600", fontSize:"18px", color:C.black }}>{t.name}</div>
                 <Pill color={t.tier.color}>{t.tier.icon} {t.tier.name}</Pill>
               </div>
               <div style={{ textAlign:"right" }}>
-                <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"28px", color:C.black }}>{t.total.toLocaleString()}</div>
-                <div style={{ fontSize:"10px", color:C.muted, letterSpacing:"1px" }}>TOTAL PTS</div>
+                <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"28px", color:C.black }}>{t.total.toLocaleString()}</div>
+                <div style={{ fontSize:"11px", color:C.muted, letterSpacing:"-0.01em" }}>TOTAL PTS</div>
               </div>
             </div>
             <Bar pct={pct} color={C.blue} h={4}/>
@@ -1243,9 +1247,9 @@ function TotalLeaderboard({ techs, upsells, switchovers, reviews, callbacks, job
                 {l:"Switchovers",  v:t.switchPts,              c:C.blue},
                 {l:"Reviews",   v:t.reviewPts,              c:C.gold},
               ].map(item=>(
-                <div key={item.l} style={{ background:C.cardLt, borderRadius:"4px", padding:"8px", textAlign:"center" }}>
-                  <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"15px", color:item.c }}>{item.v}</div>
-                  <div style={{ fontSize:"9px", color:C.muted, letterSpacing:"1px", textTransform:"uppercase" }}>{item.l}</div>
+                <div key={item.l} style={{ background:C.cardLt, borderRadius:"8px", padding:"8px", textAlign:"center" }}>
+                  <div style={{ fontFamily:FONT, fontWeight:"600", fontSize:"15px", color:item.c }}>{item.v}</div>
+                  <div style={{ fontSize:"11px", color:C.muted, letterSpacing:"-0.01em", textTransform:"none" }}>{item.l}</div>
                 </div>
               ))}
             </div>
@@ -1381,19 +1385,19 @@ function ReportsTab({ techs, jobs, upsells=[], timeEntries=[], tipEntries=[], te
     return { ...t, rev, hrs, ups, tips, revPerHr:hrs>0?rev/hrs:0, upsellPct:rev>0?(ups/rev)*100:0, wkBreakdown };
   }).filter(t=>t.rev>0||t.hrs>0).sort((a,b)=>b.rev-a.rev);
 
-  const metricStyle = { background:C.white, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"16px", boxShadow:"0 2px 8px rgba(43,156,240,0.08)" };
+  const metricStyle = { background:C.white, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"16px", boxShadow:"0 2px 8px rgba(0,0,0,0.06)" };
 
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:"16px" }}>
       {/* Period selector */}
       <DateRangePicker label="📊 Time Period" color={C.blue} preset={preset} setPreset={setPreset} customStart={cStart} setCustomStart={setCStart} customEnd={cEnd} setCustomEnd={setCEnd}>
-        <div style={{ marginTop:"8px", fontSize:"11px", color:C.blue, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>
+        <div style={{ marginTop:"8px", fontSize:"11px", color:C.blue, fontFamily:FONT, fontWeight:"700" }}>
             {start} → {end} · {inRange.length} job{inRange.length!==1?"s":""}
           </div>
       </DateRangePicker>
 
       {inRange.length===0?(
-        <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"32px", textAlign:"center", color:C.muted, fontSize:"13px" }}>
+        <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"32px", textAlign:"center", color:C.muted, fontSize:"13px" }}>
           No jobs found for this period. The HCP sync runs every 5 minutes.
         </div>
       ):(
@@ -1410,8 +1414,8 @@ function ReportsTab({ techs, jobs, upsells=[], timeEntries=[], tipEntries=[], te
               { label:"Labor Cost %", value:totalLabor>0?`${laborPct.toFixed(1)}%`:"—",        color:totalLabor>0?(laborPct<24?C.green:C.orange):C.muted,  sub:"Target: <24%" },
             ].map(s=>(
               <div key={s.label} style={{ ...metricStyle, borderTop:`3px solid ${s.color}` }}>
-                <div style={{ fontSize:"10px", color:C.muted, letterSpacing:"2px", textTransform:"uppercase", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", marginBottom:"8px" }}>{s.label}</div>
-                <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"28px", color:s.color, lineHeight:1 }}>{s.value}</div>
+                <div style={{ fontSize:"11px", color:C.muted, letterSpacing:"-0.01em", textTransform:"none", fontFamily:FONT, fontWeight:"700", marginBottom:"8px" }}>{s.label}</div>
+                <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"28px", color:s.color, lineHeight:1 }}>{s.value}</div>
                 {s.sub&&<div style={{ fontSize:"11px", color:C.muted, marginTop:"5px" }}>{s.sub}</div>}
               </div>
             ))}
@@ -1419,19 +1423,19 @@ function ReportsTab({ techs, jobs, upsells=[], timeEntries=[], tipEntries=[], te
 
           {/* Per-tech breakdown — admin / all-techs view only */}
           {techRows.length>0&&(
-            <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.blue}`, borderRadius:"12px", overflow:"hidden" }}>
+            <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", overflow:"hidden" }}>
               <div style={{ padding:"14px 18px", borderBottom:`1px solid ${C.border}`, background:C.cardLt }}>
                 <Label color={C.blue}>Per-Tech Breakdown</Label>
               </div>
               <div style={{ padding:"14px 18px", display:"flex", flexDirection:"column", gap:"10px" }}>
                 {techRows.map((t,i)=>(
-                  <div key={t.id} style={{ background:C.cardLt, border:`1px solid ${C.border}`, borderRadius:"10px", padding:"12px 14px" }}>
+                  <div key={t.id} style={{ background:C.cardLt, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"12px 14px" }}>
                     <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:"8px" }}>
-                      <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontStyle:"italic", fontSize:"16px", color:C.black }}>{medal(i)} {t.name}{t.is_active===false&&<ArchivedTag/>}</div>
+                      <div style={{ fontFamily:FONT, fontWeight:"700", fontStyle:"normal", fontSize:"16px", color:C.black }}>{medal(i)} {t.name}{t.is_active===false&&<ArchivedTag/>}</div>
                       <div style={{ textAlign:"right" }}>
-                        <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"22px", color:C.green, lineHeight:1 }}>${Math.round(t.rev).toLocaleString()}</div>
-                        <div style={{ fontSize:"9px", color:C.muted, letterSpacing:"1px", textTransform:"uppercase", marginBottom:"2px" }}>serviced</div>
-                        {t.tips>0&&<div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"14px", color:C.gold }}>${t.tips.toFixed(0)} tips</div>}
+                        <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"22px", color:C.green, lineHeight:1 }}>${Math.round(t.rev).toLocaleString()}</div>
+                        <div style={{ fontSize:"11px", color:C.muted, letterSpacing:"-0.01em", textTransform:"none", marginBottom:"2px" }}>serviced</div>
+                        {t.tips>0&&<div style={{ fontFamily:FONT, fontWeight:"600", fontSize:"14px", color:C.gold }}>${t.tips.toFixed(0)} tips</div>}
                       </div>
                     </div>
                     <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:"6px" }}>
@@ -1441,20 +1445,20 @@ function ReportsTab({ techs, jobs, upsells=[], timeEntries=[], tipEntries=[], te
                         { l:"Upsells",  v:`$${Math.round(t.ups)}`,      c:C.gold   },
                         { l:"Upsell %", v:`${t.upsellPct.toFixed(1)}%`, c:t.upsellPct>=10?C.green:C.orange },
                       ].map(s=>(
-                        <div key={s.l} style={{ background:C.white, borderRadius:"4px", padding:"6px", textAlign:"center" }}>
-                          <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"14px", color:s.c }}>{s.v}</div>
-                          <div style={{ fontSize:"9px", color:C.muted, textTransform:"uppercase", letterSpacing:"1px" }}>{s.l}</div>
+                        <div key={s.l} style={{ background:C.white, borderRadius:"8px", padding:"6px", textAlign:"center" }}>
+                          <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"14px", color:s.c }}>{s.v}</div>
+                          <div style={{ fontSize:"11px", color:C.muted, textTransform:"none", letterSpacing:"-0.01em" }}>{s.l}</div>
                         </div>
                       ))}
                     </div>
                     {t.wkBreakdown?.length>0&&(
                       <div style={{ marginTop:"8px", borderTop:`1px solid ${C.border}`, paddingTop:"8px", display:"flex", flexDirection:"column", gap:"3px" }}>
                         {t.wkBreakdown.map(w=>(
-                          <div key={w.wk} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"4px 8px", background:C.white, borderRadius:"4px" }}>
-                            <div style={{ fontSize:"11px", color:C.muted, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>{formatWeekLabel(w.wk)} · {w.count} job{w.count!==1?"s":""}</div>
+                          <div key={w.wk} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"4px 8px", background:C.white, borderRadius:"8px" }}>
+                            <div style={{ fontSize:"11px", color:C.muted, fontFamily:FONT, fontWeight:"700" }}>{formatWeekLabel(w.wk)} · {w.count} job{w.count!==1?"s":""}</div>
                             <div style={{ display:"flex", gap:"8px", alignItems:"center" }}>
-                              <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"13px", color:C.green }}>${Math.round(w.rev).toLocaleString()}</span>
-                              {w.tips>0&&<span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", fontSize:"12px", color:C.gold }}>+${w.tips.toFixed(0)} tips</span>}
+                              <span style={{ fontFamily:FONT, fontWeight:"700", fontSize:"13px", color:C.green }}>${Math.round(w.rev).toLocaleString()}</span>
+                              {w.tips>0&&<span style={{ fontFamily:FONT, fontWeight:"700", fontSize:"12px", color:C.gold }}>+${w.tips.toFixed(0)} tips</span>}
                             </div>
                           </div>
                         ))}
@@ -1470,44 +1474,44 @@ function ReportsTab({ techs, jobs, upsells=[], timeEntries=[], tipEntries=[], te
 
       {/* Repair Revenue — admin only */}
       {techId===null && (
-        <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.orange}`, borderRadius:"12px", padding:"20px", display:"flex", flexDirection:"column", gap:"12px" }}>
+        <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"20px", display:"flex", flexDirection:"column", gap:"12px" }}>
           <Label color={C.orange}>Repair Revenue from HCP</Label>
           <div style={{ fontSize:"12px", color:C.muted }}>Re-scans completed jobs and their invoices across a custom date range and rewrites revenue to the board. Use this to fix missing or wrong revenue.</div>
           <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"8px" }}>
             {[["FROM", repairRevFrom, setRepairRevFrom], ["TO", repairRevTo, setRepairRevTo]].map(([lbl, val, set]) => (
               <div key={lbl}>
-                <div style={{ fontSize:"10px", color:C.muted, letterSpacing:"2px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", marginBottom:"4px" }}>{lbl}</div>
-                <input type="date" value={val} onChange={e => set(e.target.value)} style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"8px 10px", borderRadius:"8px", fontSize:"13px", fontFamily:"'Barlow',sans-serif", width:"100%", boxSizing:"border-box" }}/>
+                <div style={{ fontSize:"11px", color:C.muted, letterSpacing:"-0.01em", fontFamily:FONT, fontWeight:"700", marginBottom:"4px" }}>{lbl}</div>
+                <input type="date" value={val} onChange={e => set(e.target.value)} style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"8px 10px", borderRadius:"10px", fontSize:"13px", fontFamily:FONT, width:"100%", boxSizing:"border-box" }}/>
               </div>
             ))}
           </div>
-          <button onClick={repairRevenueFromHCP} disabled={repairingRev} style={{ background:repairingRev?"#333":C.orange, border:"none", color:C.white, padding:"13px", borderRadius:"12px", cursor:repairingRev?"not-allowed":"pointer", fontSize:"13px", fontWeight:"700", letterSpacing:"2px", fontFamily:"'Barlow Condensed',sans-serif", width:"100%", textTransform:"uppercase" }}>
+          <button onClick={repairRevenueFromHCP} disabled={repairingRev} style={{ background:repairingRev?"#333":C.orange, border:"none", color:C.white, padding:"13px", borderRadius:"16px", cursor:repairingRev?"not-allowed":"pointer", fontSize:"13px", fontWeight:"700", letterSpacing:"-0.01em", fontFamily:FONT, width:"100%", textTransform:"none" }}>
             {repairingRev ? "Scanning HCP — this may take ~20 sec..." : "Repair Revenue"}
           </button>
           {repairRevResult && (
             <div style={{ display:"flex", flexDirection:"column", gap:"8px" }}>
-              <div style={{ background:C.cardLt, borderRadius:"8px", padding:"10px 14px", fontSize:"12px", color:C.muted, display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:"8px" }}>
+              <div style={{ background:C.cardLt, borderRadius:"10px", padding:"10px 14px", fontSize:"12px", color:C.muted, display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:"8px" }}>
                 <span>
                   Scanned <strong style={{color:C.black}}>{repairRevResult.jobsScanned}</strong> jobs · matched <strong style={{color:C.black}}>{repairRevResult.invoicesMatched}</strong> invoices · wrote <strong style={{color:C.orange}}>{repairRevResult.jobsWritten} row{repairRevResult.jobsWritten===1?"":"s"}</strong> to the board
                 </span>
                 {repairRevResult.jobs && repairRevResult.jobs.length > 0 && (
                   <div style={{ display:"flex", gap:"6px" }}>
-                    <button onClick={()=>setRevExpanded(v=>!v)} style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"5px 10px", borderRadius:"4px", cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", fontSize:"11px", letterSpacing:"1px" }}>
+                    <button onClick={()=>setRevExpanded(v=>!v)} style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"5px 10px", borderRadius:"8px", cursor:"pointer", fontFamily:FONT, fontWeight:"700", fontSize:"11px", letterSpacing:"-0.01em" }}>
                       {revExpanded ? "COLLAPSE" : "VIEW FULL REPORT"}
                     </button>
-                    <button onClick={exportRevenueCSV} style={{ background:C.green, border:"none", color:C.black, padding:"5px 10px", borderRadius:"4px", cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", fontSize:"11px", letterSpacing:"1px" }}>
+                    <button onClick={exportRevenueCSV} style={{ background:C.green, border:"none", color:C.black, padding:"5px 10px", borderRadius:"8px", cursor:"pointer", fontFamily:FONT, fontWeight:"700", fontSize:"11px", letterSpacing:"-0.01em" }}>
                       EXPORT CSV
                     </button>
                   </div>
                 )}
               </div>
               {repairRevResult.jobs && repairRevResult.jobs.length > 0 && (
-                <div style={{ overflowX:"auto", maxHeight: revExpanded ? "none" : "320px", overflowY:"auto", borderRadius:"8px", border:`1px solid ${C.border}` }}>
-                  <table style={{ width:"100%", borderCollapse:"collapse", fontSize:"11px", fontFamily:"'Barlow',sans-serif" }}>
+                <div style={{ overflowX:"auto", maxHeight: revExpanded ? "none" : "320px", overflowY:"auto", borderRadius:"10px", border:`1px solid ${C.border}` }}>
+                  <table style={{ width:"100%", borderCollapse:"collapse", fontSize:"11px", fontFamily:FONT }}>
                     <thead>
                       <tr style={{ background:C.card, position:"sticky", top:0 }}>
                         {["Job ID","Tech","Date","Revenue","Invoice"].map(h => (
-                          <th key={h} style={{ padding:"6px 10px", textAlign:"left", color:C.muted, fontWeight:"700", letterSpacing:"1px", fontFamily:"'Barlow Condensed',sans-serif", whiteSpace:"nowrap", borderBottom:`1px solid ${C.border}` }}>{h}</th>
+                          <th key={h} style={{ padding:"6px 10px", textAlign:"left", color:C.muted, fontWeight:"700", letterSpacing:"-0.01em", fontFamily:FONT, whiteSpace:"nowrap", borderBottom:`1px solid ${C.border}` }}>{h}</th>
                         ))}
                       </tr>
                     </thead>
@@ -1662,9 +1666,9 @@ function PayrollTab({ techs, jobs, tipEntries=[], switchovers=[], timeEntries=[]
     <div style={{ display:"flex", flexDirection:"column", gap:"16px" }}>
 
       {/* Period selector */}
-      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.green}`, borderRadius:"12px", padding:"16px 18px" }}>
+      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"16px 18px" }}>
         <Label color={C.green}>💵 Pay Period</Label>
-        <select value={selKey} onChange={e=>setSelKey(e.target.value)} style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"10px 14px", borderRadius:"12px", fontSize:"14px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", width:"100%", cursor:"pointer", marginBottom:"12px" }}>
+        <select value={selKey} onChange={e=>setSelKey(e.target.value)} style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"10px 14px", borderRadius:"16px", fontSize:"14px", fontFamily:FONT, fontWeight:"700", width:"100%", cursor:"pointer", marginBottom:"12px" }}>
           {activePeriods.map(p=>(
             <option key={p.key} value={p.key}>{fmtShortDate(p.start)} – {fmtShortDate(p.end)}{p.key===currentPPKey()?" — Current":""}</option>
           ))}
@@ -1675,9 +1679,9 @@ function PayrollTab({ techs, jobs, tipEntries=[], switchovers=[], timeEntries=[]
             { l:"Submit By",   v:fmtShortDate(period.submit) },
             { l:"Pay Date",    v:fmtShortDate(period.payout) },
           ].map(s=>(
-            <div key={s.l} style={{ background:C.cardLt, borderRadius:"8px", padding:"8px 10px", textAlign:"center" }}>
-              <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"14px", color:C.black }}>{s.v}</div>
-              <div style={{ fontSize:"9px", color:C.muted, letterSpacing:"1px", textTransform:"uppercase", marginTop:"2px" }}>{s.l}</div>
+            <div key={s.l} style={{ background:C.cardLt, borderRadius:"10px", padding:"8px 10px", textAlign:"center" }}>
+              <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"14px", color:C.black }}>{s.v}</div>
+              <div style={{ fontSize:"11px", color:C.muted, letterSpacing:"-0.01em", textTransform:"none", marginTop:"2px" }}>{s.l}</div>
             </div>
           ))}
         </div>
@@ -1685,34 +1689,34 @@ function PayrollTab({ techs, jobs, tipEntries=[], switchovers=[], timeEntries=[]
 
       {/* Sort */}
       <div style={{ display:"flex", alignItems:"center", gap:"8px", flexWrap:"wrap" }}>
-        <span style={{ fontSize:"11px", color:C.muted, letterSpacing:"1px", textTransform:"uppercase", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>Sort by</span>
+        <span style={{ fontSize:"11px", color:C.muted, letterSpacing:"-0.01em", textTransform:"none", fontFamily:FONT, fontWeight:"700" }}>Sort by</span>
         {[["last","Last name"],["first","First name"],["revenue","Serviced revenue"]].map(([id,label])=>(
-          <button key={id} onClick={()=>setSortBy(id)} style={{ background:sortBy===id?C.blue:C.white, border:`1px solid ${sortBy===id?C.blue:C.border}`, color:sortBy===id?C.white:C.black, padding:"6px 12px", borderRadius:"16px", cursor:"pointer", fontSize:"12px", fontWeight:"700", fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:"1px", textTransform:"uppercase" }}>{label}</button>
+          <button key={id} onClick={()=>setSortBy(id)} style={{ background:sortBy===id?C.blue:C.white, border:`1px solid ${sortBy===id?C.blue:C.border}`, color:sortBy===id?C.white:C.black, padding:"6px 12px", borderRadius:"16px", cursor:"pointer", fontSize:"12px", fontWeight:"700", fontFamily:FONT, letterSpacing:"-0.01em", textTransform:"none" }}>{label}</button>
         ))}
       </div>
 
       {/* Team total */}
-      <div style={{ background:`${C.green}15`, border:`2px solid ${C.green}44`, borderRadius:"12px", padding:"16px 20px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-        <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontStyle:"italic", fontSize:"13px", color:C.green, letterSpacing:"2px" }}>TEAM TOTAL</div>
-        <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"34px", color:C.black }}>${teamTotal.toFixed(2)}</div>
+      <div style={{ background:`${C.green}15`, border:`2px solid ${C.green}44`, borderRadius:"16px", padding:"16px 20px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+        <div style={{ fontFamily:FONT, fontWeight:"700", fontStyle:"normal", fontSize:"13px", color:C.green, letterSpacing:"-0.01em" }}>TEAM TOTAL</div>
+        <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"34px", color:C.black }}>${teamTotal.toFixed(2)}</div>
       </div>
 
       {showBonuses&&tote.error&&(
-        <div style={{ background:`${C.red}10`, border:`1px solid ${C.red}`, borderRadius:"10px", padding:"12px", fontSize:"13px", color:C.red }}>Couldn't load tote checks, so tote deductions are NOT included below: {tote.error}</div>
+        <div style={{ background:`${C.red}10`, border:`1px solid ${C.red}`, borderRadius:"12px", padding:"12px", fontSize:"13px", color:C.red }}>Couldn't load tote checks, so tote deductions are NOT included below: {tote.error}</div>
       )}
       {rows.length===0?(
-        <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"32px", textAlign:"center", color:C.muted, fontSize:"13px" }}>
+        <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"32px", textAlign:"center", color:C.muted, fontSize:"13px" }}>
           No jobs synced for this pay period yet. HCP sync runs every 5 min.
         </div>
       ):(
         <div style={{ display:"flex", flexDirection:"column", gap:"10px" }}>
           {rows.map(r=>(
-            <div key={r.id} style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"16px 18px" }}>
+            <div key={r.id} style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"16px 18px" }}>
               <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:"12px" }}>
-                <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontStyle:"italic", fontSize:"20px", color:C.black }}>{r.name}{r.is_active===false&&<ArchivedTag/>}</div>
+                <div style={{ fontFamily:FONT, fontWeight:"700", fontStyle:"normal", fontSize:"20px", color:C.black }}>{r.name}{r.is_active===false&&<ArchivedTag/>}</div>
                 <div style={{ textAlign:"right" }}>
-                  <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"28px", color:C.green, lineHeight:1 }}>${r.total.toFixed(2)}</div>
-                  <div style={{ fontSize:"10px", color:C.muted, letterSpacing:"1px" }}>TOTAL PAY</div>
+                  <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"28px", color:C.green, lineHeight:1 }}>${r.total.toFixed(2)}</div>
+                  <div style={{ fontSize:"11px", color:C.muted, letterSpacing:"-0.01em" }}>TOTAL PAY</div>
                 </div>
               </div>
               <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:"8px", marginBottom:r.weeks.length>1?"10px":0 }}>
@@ -1721,39 +1725,39 @@ function PayrollTab({ techs, jobs, tipEntries=[], switchovers=[], timeEntries=[]
                   { l:`Commission (${r.rate}%)`, v:`$${r.commission.toFixed(2)}`,                c:C.green },
                   { l:"Tips",                   v:`$${r.tips.toFixed(2)}`,                      c:C.gold  },
                 ].map(item=>(
-                  <div key={item.l} style={{ background:C.cardLt, borderRadius:"8px", padding:"10px 12px" }}>
-                    <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"18px", color:item.c }}>{item.v}</div>
-                    <div style={{ fontSize:"10px", color:C.muted, marginTop:"3px" }}>{item.l}</div>
+                  <div key={item.l} style={{ background:C.cardLt, borderRadius:"10px", padding:"10px 12px" }}>
+                    <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"18px", color:item.c }}>{item.v}</div>
+                    <div style={{ fontSize:"11px", color:C.muted, marginTop:"3px" }}>{item.l}</div>
                   </div>
                 ))}
               </div>
               {showBonuses&&(
                 <div style={{ display:"flex", flexDirection:"column", gap:"6px", marginTop:"8px", marginBottom:r.weeks.length>1?"10px":0 }}>
                   {(r.trainingHours>0||r.heldDue>0)&&(
-                    <div style={{ background:`${C.purple}0d`, border:`1px solid ${C.purple}33`, borderRadius:"8px", padding:"10px 12px" }}>
+                    <div style={{ background:`${C.purple}0d`, border:`1px solid ${C.purple}33`, borderRadius:"10px", padding:"10px 12px" }}>
                       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:"10px" }}>
-                        <div style={{ fontSize:"10px", color:C.purple, letterSpacing:"1px", textTransform:"uppercase", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>🎓 Training Pay</div>
-                        <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"18px", color:C.purple }}>${(r.trainingPay+r.heldDue).toFixed(2)}</div>
+                        <div style={{ fontSize:"11px", color:C.purple, letterSpacing:"-0.01em", textTransform:"none", fontFamily:FONT, fontWeight:"700" }}>🎓 Training Pay</div>
+                        <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"18px", color:C.purple }}>${(r.trainingPay+r.heldDue).toFixed(2)}</div>
                       </div>
                       {r.trainingHours>0&&<div style={{ fontSize:"13px", color:C.black, marginTop:"4px" }}>{r.trainingHours.toFixed(2)} training hrs × ${TRAINING_RATE_NOW.toFixed(2)} = <strong>${r.trainingPay.toFixed(2)}</strong> <span style={{ fontSize:"11px", color:C.muted }}>({r.trainingDays.map(fmtShortDate).join(", ")})</span></div>}
                       {r.heldDue>0&&<div style={{ fontSize:"13px", color:C.black, marginTop:"4px" }}>90-day training pay due ({fmtShortDate(r.tr.day90)}): {r.tr.totalHours.toFixed(2)} hrs × ${TRAINING_RATE_HELD.toFixed(2)} = <strong>${r.heldDue.toFixed(2)}</strong></div>}
                       {r.trainingHours>0&&!r.heldDue&&r.tr&&<div style={{ fontSize:"11px", color:C.muted, marginTop:"3px" }}>Plus ${TRAINING_RATE_HELD.toFixed(2)}/hr held: ${(Math.round(r.tr.totalHours*TRAINING_RATE_HELD*100)/100).toFixed(2)} so far ({r.tr.totalHours.toFixed(2)} hrs), paid at 90 days ({fmtShortDate(r.tr.day90)}) if still active.{r.tr.firstJob ? ` Training ended with their first real job ${fmtShortDate(r.tr.firstJob)}.` : ""}</div>}
                     </div>
                   )}
-                  <div style={{ background:C.cardLt, borderRadius:"8px", padding:"10px 12px", display:"flex", justifyContent:"space-between", alignItems:"center", gap:"10px" }}>
+                  <div style={{ background:C.cardLt, borderRadius:"10px", padding:"10px 12px", display:"flex", justifyContent:"space-between", alignItems:"center", gap:"10px" }}>
                     <div>
-                      <div style={{ fontSize:"10px", color:C.muted, letterSpacing:"1px", textTransform:"uppercase", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>📈 Upsell Bonus</div>
+                      <div style={{ fontSize:"11px", color:C.muted, letterSpacing:"-0.01em", textTransform:"none", fontFamily:FONT, fontWeight:"700" }}>📈 Upsell Bonus</div>
                       <div style={{ fontSize:"13px", color:C.black, marginTop:"2px" }}>{r.upsellAmt>0 ? <>${r.upsellAmt.toFixed(2)} of upsells, {Math.round(r.upsellRate*100)}% is <strong>${r.upsellPay.toFixed(2)}</strong></> : "No upsells this pay period"}</div>
                     </div>
-                    <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"18px", color:C.purple }}>${r.upsellPay.toFixed(2)}</div>
+                    <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"18px", color:C.purple }}>${r.upsellPay.toFixed(2)}</div>
                   </div>
-                  <div style={{ background:C.cardLt, borderRadius:"8px", padding:"10px 12px" }}>
+                  <div style={{ background:C.cardLt, borderRadius:"10px", padding:"10px 12px" }}>
                     <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:"10px" }}>
                       <div>
-                        <div style={{ fontSize:"10px", color:C.muted, letterSpacing:"1px", textTransform:"uppercase", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>🔄 Switchover Bonus</div>
+                        <div style={{ fontSize:"11px", color:C.muted, letterSpacing:"-0.01em", textTransform:"none", fontFamily:FONT, fontWeight:"700" }}>🔄 Switchover Bonus</div>
                         <div style={{ fontSize:"13px", color:C.black, marginTop:"2px" }}>{r.sws.length>0 ? `${r.sws.length} switchover${r.sws.length!==1?"s":""}` : "No switchovers this pay period"}</div>
                       </div>
-                      <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"18px", color:C.purple }}>${r.switchPay.toFixed(2)}</div>
+                      <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"18px", color:C.purple }}>${r.switchPay.toFixed(2)}</div>
                     </div>
                     {r.sws.map(sw=>{
                       const pay = switchoverPay(sw), base = SWITCHOVER_PAY[sw.plan_id];
@@ -1767,18 +1771,18 @@ function PayrollTab({ techs, jobs, tipEntries=[], switchovers=[], timeEntries=[]
                     {r.switchUnpriced>0&&<div style={{ fontSize:"11px", color:C.red, marginTop:"6px" }}>⚠ {r.switchUnpriced} switchover{r.switchUnpriced!==1?"s":""} on a plan with no pay amount set — not included in the total.</div>}
                   </div>
                   {r.toteHere.length>0&&(
-                    <div style={{ background:`${C.red}0d`, border:`1px solid ${C.red}33`, borderRadius:"8px", padding:"10px 12px" }}>
+                    <div style={{ background:`${C.red}0d`, border:`1px solid ${C.red}33`, borderRadius:"10px", padding:"10px 12px" }}>
                       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:"10px" }}>
                         <div>
-                          <div style={{ fontSize:"10px", color:C.red, letterSpacing:"1px", textTransform:"uppercase", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>🧰 Tote Losses (failed checks)</div>
+                          <div style={{ fontSize:"11px", color:C.red, letterSpacing:"-0.01em", textTransform:"none", fontFamily:FONT, fontWeight:"700" }}>🧰 Tote Losses (failed checks)</div>
                           <div style={{ fontSize:"12px", color:C.muted, marginTop:"2px" }}>{r.toteHere.length} failed check{r.toteHere.length!==1?"s":""} {fmtShortDate(period.start)} – {fmtShortDate(period.end)}</div>
                         </div>
-                        <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"18px", color:C.red }}>−${r.toteDeduct.toFixed(2)}</div>
+                        <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"18px", color:C.red }}>−${r.toteDeduct.toFixed(2)}</div>
                       </div>
                       {r.toteHere.map(c=>(
                         <div key={c.check.id} style={{ borderTop:`1px solid ${C.red}22`, marginTop:"6px", paddingTop:"6px" }}>
                           <div style={{ fontSize:"12px", color:C.black, fontWeight:"700" }}>{fmtShortDate(c.check.work_date)}{c.check.checkedBy?` · checked by ${c.check.checkedBy}`:""} · −{fmtCents(c.chargedCents)}</div>
-                          {c.check.notes&&<div style={{ fontSize:"11px", color:C.muted, fontStyle:"italic", marginTop:"2px" }}>📝 {c.check.notes}</div>}
+                          {c.check.notes&&<div style={{ fontSize:"11px", color:C.muted, fontStyle:"normal", marginTop:"2px" }}>📝 {c.check.notes}</div>}
                           {c.items.map(it=>{
                             const key = `${c.check.id}|${it.name}`;
                             return (
@@ -1788,7 +1792,7 @@ function PayrollTab({ techs, jobs, tipEntries=[], switchovers=[], timeEntries=[]
                                   {it.status==="already"&&<span style={{ fontSize:"11px", color:C.muted }}>already charged</span>}
                                   {it.status==="waived"&&<span style={{ fontSize:"11px", color:C.muted }}>waived</span>}
                                   {canWaive&&it.status!=="already"&&(
-                                    <button disabled={waiving===key} onClick={()=>setWaived(c.check.id, it.name, it.status!=="waived")} style={{ background:"none", border:`1px solid ${C.border}`, color:it.status==="waived"?C.blue:C.red, padding:"2px 8px", borderRadius:"4px", cursor:"pointer", fontSize:"11px", fontWeight:"700" }}>{waiving===key?"…":it.status==="waived"?"Undo":"Waive"}</button>
+                                    <button disabled={waiving===key} onClick={()=>setWaived(c.check.id, it.name, it.status!=="waived")} style={{ background:"none", border:`1px solid ${C.border}`, color:it.status==="waived"?C.blue:C.red, padding:"2px 8px", borderRadius:"8px", cursor:"pointer", fontSize:"11px", fontWeight:"700" }}>{waiving===key?"…":it.status==="waived"?"Undo":"Waive"}</button>
                                   )}
                                 </span>
                               </div>
@@ -1802,14 +1806,14 @@ function PayrollTab({ techs, jobs, tipEntries=[], switchovers=[], timeEntries=[]
               )}
               {r.weeks.length>1&&(
                 <div style={{ borderTop:`1px solid ${C.border}`, paddingTop:"10px" }}>
-                  <div style={{ fontSize:"10px", color:C.muted, letterSpacing:"1px", textTransform:"uppercase", marginBottom:"6px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>Week Breakdown</div>
+                  <div style={{ fontSize:"11px", color:C.muted, letterSpacing:"-0.01em", textTransform:"none", marginBottom:"6px", fontFamily:FONT, fontWeight:"700" }}>Week Breakdown</div>
                   <div style={{ display:"flex", flexDirection:"column", gap:"4px" }}>
                     {r.weeks.map(w=>(
-                      <div key={w.wk} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", background:C.cardLt, borderRadius:"6px", padding:"6px 10px" }}>
-                        <div style={{ fontSize:"12px", color:C.muted, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>{formatWeekLabel(w.wk)} · {w.count} job{w.count!==1?"s":""}</div>
+                      <div key={w.wk} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", background:C.cardLt, borderRadius:"10px", padding:"6px 10px" }}>
+                        <div style={{ fontSize:"12px", color:C.muted, fontFamily:FONT, fontWeight:"700" }}>{formatWeekLabel(w.wk)} · {w.count} job{w.count!==1?"s":""}</div>
                         <div style={{ display:"flex", gap:"10px", alignItems:"center" }}>
-                          <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"13px", color:C.blue }}>${Math.round(w.rev).toLocaleString()}</span>
-                          {w.tips>0&&<span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", fontSize:"12px", color:C.gold }}>+${w.tips.toFixed(0)} tips</span>}
+                          <span style={{ fontFamily:FONT, fontWeight:"700", fontSize:"13px", color:C.blue }}>${Math.round(w.rev).toLocaleString()}</span>
+                          {w.tips>0&&<span style={{ fontFamily:FONT, fontWeight:"700", fontSize:"12px", color:C.gold }}>+${w.tips.toFixed(0)} tips</span>}
                         </div>
                       </div>
                     ))}
@@ -1821,7 +1825,7 @@ function PayrollTab({ techs, jobs, tipEntries=[], switchovers=[], timeEntries=[]
         </div>
       )}
 
-      <button onClick={exportCSV} style={{ background:C.blue, border:"none", color:C.white, padding:"13px", borderRadius:"12px", cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"13px", letterSpacing:"2px", textTransform:"uppercase" }}>
+      <button onClick={exportCSV} style={{ background:C.blue, border:"none", color:C.white, padding:"13px", borderRadius:"16px", cursor:"pointer", fontFamily:FONT, fontWeight:"700", fontSize:"13px", letterSpacing:"-0.01em", textTransform:"none" }}>
         📥 Export CSV — {fmtShortDate(period.start)} to {fmtShortDate(period.end)}
       </button>
     </div>
@@ -1881,11 +1885,11 @@ function Leaderboard({ techs, jobs, upsells, reviews, callbacks, switchovers, ti
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:"16px" }}>
       {/* Metric toggle */}
-      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.gold}`, borderRadius:"12px", padding:"14px 16px" }}>
+      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"14px 16px" }}>
         <Label color={C.gold}>🏆 Leaderboard</Label>
         <div style={{ display:"flex", gap:"6px", flexWrap:"wrap" }}>
           {METRICS.map(m=>(
-            <button key={m.id} onClick={()=>setMetric(m.id)} style={{ background:metric===m.id?C.gold:C.cardLt, border:`1px solid ${metric===m.id?C.gold:C.border}`, color:metric===m.id?C.white:C.muted, padding:"6px 14px", borderRadius:"20px", cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", fontSize:"12px", letterSpacing:"1px" }}>
+            <button key={m.id} onClick={()=>setMetric(m.id)} style={{ background:metric===m.id?C.gold:C.cardLt, border:`1px solid ${metric===m.id?C.gold:C.border}`, color:metric===m.id?C.white:C.muted, padding:"6px 14px", borderRadius:"20px", cursor:"pointer", fontFamily:FONT, fontWeight:"700", fontSize:"12px", letterSpacing:"-0.01em" }}>
               {m.icon} {m.label}
             </button>
           ))}
@@ -1893,22 +1897,22 @@ function Leaderboard({ techs, jobs, upsells, reviews, callbacks, switchovers, ti
       </div>
 
       {sorted.length===0?(
-        <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"32px", textAlign:"center", color:C.muted, fontSize:"13px" }}>
+        <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"32px", textAlign:"center", color:C.muted, fontSize:"13px" }}>
           No data yet for this period. Check back after jobs sync from HCP.
         </div>
       ):(
         <div style={{ display:"flex", flexDirection:"column", gap:"8px" }}>
           {sorted.map((r,i)=>(
-            <div key={r.id} style={{ background:C.card, border:`1px solid ${i<3?colors[i]+"55":C.border}`, borderLeft:`4px solid ${i<3?colors[i]:C.border}`, borderRadius:"12px", padding:"14px 16px", display:"flex", alignItems:"center", gap:"14px" }}>
-              <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"22px", width:"32px", textAlign:"center", color:i<3?colors[i]:C.muted }}>
+            <div key={r.id} style={{ background:C.card, border:`1px solid ${i<3?colors[i]+"55":C.border}`, borderLeft:`4px solid ${i<3?colors[i]:C.border}`, borderRadius:"16px", padding:"14px 16px", display:"flex", alignItems:"center", gap:"14px" }}>
+              <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"22px", width:"32px", textAlign:"center", color:i<3?colors[i]:C.muted }}>
                 {i<3?medals[i]:i+1}
               </div>
-              <div style={{ width:"40px", height:"40px", borderRadius:"50%", background:i<3?`${colors[i]}22`:`${C.blue}15`, border:`2px solid ${i<3?colors[i]:C.border}`, display:"flex", alignItems:"center", justifyContent:"center", fontFamily:"'Barlow Condensed',sans-serif", fontSize:"13px", fontWeight:"900", color:i<3?colors[i]:C.blue, flexShrink:0 }}>{r.avatar}</div>
+              <div style={{ width:"40px", height:"40px", borderRadius:"50%", background:i<3?`${colors[i]}22`:`${C.blue}15`, border:`2px solid ${i<3?colors[i]:C.border}`, display:"flex", alignItems:"center", justifyContent:"center", fontFamily:FONT, fontSize:"13px", fontWeight:"700", color:i<3?colors[i]:C.blue, flexShrink:0 }}>{r.avatar}</div>
               <div style={{ flex:1 }}>
-                <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontStyle:"italic", fontSize:"17px", color:C.black }}>{r.name}</div>
-                <div style={{ fontSize:"10px", color:C.muted, letterSpacing:"1px" }}>{getLabel(r)}</div>
+                <div style={{ fontFamily:FONT, fontWeight:"700", fontStyle:"normal", fontSize:"17px", color:C.black }}>{r.name}</div>
+                <div style={{ fontSize:"11px", color:C.muted, letterSpacing:"-0.01em" }}>{getLabel(r)}</div>
               </div>
-              <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"22px", color:i<3?colors[i]:C.black }}>{getValue(r)}</div>
+              <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"22px", color:i<3?colors[i]:C.black }}>{getValue(r)}</div>
             </div>
           ))}
         </div>
@@ -1949,16 +1953,16 @@ function JourneyBoard({ techs, upsells, switchovers, reviews, quota, callbacks, 
             onClick={()=>setSelected(selected===t.id?null:t.id)} expanded={selected===t.id}/>
         ))}
       </div>
-      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"16px 18px" }}>
+      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"16px 18px" }}>
         <Label>Arena Tiers</Label>
         <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(180px,1fr))", gap:"8px" }}>
           {JOURNEY_TIERS.map(tier=>(
-            <div key={tier.id} style={{ background:tier.bg, border:`1px solid ${tier.color}33`, borderLeft:`3px solid ${tier.color}`, borderRadius:"12px", padding:"12px" }}>
-              <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"20px", color:tier.color, letterSpacing:"2px" }}>{tier.icon} {tier.name}</div>
-              <div style={{ fontSize:"10px", color:C.muted, fontFamily:"'Barlow Condensed',sans-serif", marginBottom:"4px" }}>
+            <div key={tier.id} style={{ background:tier.bg, border:`1px solid ${tier.color}33`, borderLeft:`3px solid ${tier.color}`, borderRadius:"16px", padding:"12px" }}>
+              <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"20px", color:tier.color, letterSpacing:"-0.01em" }}>{tier.icon} {tier.name}</div>
+              <div style={{ fontSize:"11px", color:C.muted, fontFamily:FONT, marginBottom:"4px" }}>
                 {tier.maxPts===Infinity?`${tier.minPts.toLocaleString()}+ pts`:`${tier.minPts.toLocaleString()} – ${tier.maxPts.toLocaleString()} pts`}
               </div>
-              <div style={{ fontSize:"11px", color:tier.color, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>🎁 {tier.reward}</div>
+              <div style={{ fontSize:"11px", color:tier.color, fontFamily:FONT, fontWeight:"700" }}>🎁 {tier.reward}</div>
             </div>
           ))}
         </div>
@@ -1990,28 +1994,28 @@ function JourneyCard({ tech, rank, total, onClick, expanded, upsells, quota, job
   const hitsCount = [upHit, revHit, swHit].filter(Boolean).length;
 
   return (
-    <div onClick={onClick} style={{ background:C.white, border:`2px solid ${allHit ? "#00c853" : tier.color}44`, borderTop:`3px solid ${allHit ? "#00c853" : tier.color}`, borderRadius:"12px", cursor:"pointer", overflow:"hidden", boxShadow:"0 2px 10px rgba(43,156,240,0.08)" }}>
+    <div onClick={onClick} style={{ background:C.white, border:`2px solid ${allHit ? "#34c759" : tier.color}44`, borderTop:`3px solid ${allHit ? "#34c759" : tier.color}`, borderRadius:"16px", cursor:"pointer", overflow:"hidden", boxShadow:"0 2px 10px rgba(0,0,0,0.06)" }}>
       <div style={{ padding:"16px 18px" }}>
         <div style={{ display:"flex", alignItems:"flex-start", justifyContent:"space-between", marginBottom:"14px" }}>
           <div>
-            <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontStyle:"italic", fontSize:"22px", color:C.black, lineHeight:1 }}>{tech.name}</div>
-            <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"13px", color:tier.color, letterSpacing:"2px", marginTop:"3px" }}>{tier.icon} {tier.name} ARENA</div>
-            {tenure&&<div style={{ fontSize:"10px", color:C.muted, marginTop:"3px" }}>⏱ {tenure} with Skylo</div>}
+            <div style={{ fontFamily:FONT, fontWeight:"700", fontStyle:"normal", fontSize:"22px", color:C.black, lineHeight:1 }}>{tech.name}</div>
+            <div style={{ fontFamily:FONT, fontWeight:"600", fontSize:"13px", color:tier.color, letterSpacing:"-0.01em", marginTop:"3px" }}>{tier.icon} {tier.name} ARENA</div>
+            {tenure&&<div style={{ fontSize:"11px", color:C.muted, marginTop:"3px" }}>⏱ {tenure} with Skylo</div>}
           </div>
           <div style={{ textAlign:"right" }}>
-            <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontStyle:"italic", fontSize:"30px", color:C.blue, lineHeight:1 }}>{tech.total.toLocaleString()}</div>
-            <div style={{ fontSize:"10px", color:C.muted, letterSpacing:"1px" }}>PTS</div>
-            <div style={{ fontSize:"10px", color:tier.color, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", marginTop:"2px" }}>#{rank} of {total}</div>
+            <div style={{ fontFamily:FONT, fontWeight:"700", fontStyle:"normal", fontSize:"30px", color:C.blue, lineHeight:1 }}>{tech.total.toLocaleString()}</div>
+            <div style={{ fontSize:"11px", color:C.muted, letterSpacing:"-0.01em" }}>PTS</div>
+            <div style={{ fontSize:"11px", color:tier.color, fontFamily:FONT, fontWeight:"700", marginTop:"2px" }}>#{rank} of {total}</div>
           </div>
         </div>
 
         {/* ── MONTHLY QUOTA TRACKER ── */}
-        <div style={{ background:allHit?`${C.green}12`:`${C.blue}08`, border:`1px solid ${allHit?C.green:C.border}`, borderRadius:"10px", padding:"12px 14px", marginBottom:"14px" }}>
+        <div style={{ background:allHit?`${C.green}12`:`${C.blue}08`, border:`1px solid ${allHit?C.green:C.border}`, borderRadius:"12px", padding:"12px 14px", marginBottom:"14px" }}>
           <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:"10px" }}>
-            <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontStyle:"italic", fontSize:"12px", color:allHit?C.green:C.black, letterSpacing:"2px", textTransform:"uppercase" }}>
+            <div style={{ fontFamily:FONT, fontWeight:"700", fontStyle:"normal", fontSize:"12px", color:allHit?C.green:C.black, letterSpacing:"-0.01em", textTransform:"none" }}>
               {allHit ? "✅ QUOTA HIT THIS MONTH" : `📊 MONTHLY QUOTA — ${hitsCount}/3`}
             </div>
-            <div style={{ fontSize:"10px", color:C.muted }}>{formatMonthLabel(getMonthKey())}</div>
+            <div style={{ fontSize:"11px", color:C.muted }}>{formatMonthLabel(getMonthKey())}</div>
           </div>
           {[
             { label:"Upsells",     actual:`$${tech.monthUpsellAmt}`,       target:`$${q.upsells}`,  pct:upPct,  hit:upHit,  color:C.green  },
@@ -2020,37 +2024,37 @@ function JourneyCard({ tech, rank, total, onClick, expanded, upsells, quota, job
           ].map(row=>(
             <div key={row.label} style={{ marginBottom:"8px" }}>
               <div style={{ display:"flex", justifyContent:"space-between", marginBottom:"3px" }}>
-                <span style={{ fontSize:"11px", color:C.muted, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>{row.label}</span>
-                <span style={{ fontSize:"11px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", color:row.hit?C.green:C.black }}>
+                <span style={{ fontSize:"11px", color:C.muted, fontFamily:FONT, fontWeight:"700" }}>{row.label}</span>
+                <span style={{ fontSize:"11px", fontFamily:FONT, fontWeight:"700", color:row.hit?C.green:C.black }}>
                   {row.actual} <span style={{ color:C.muted, fontWeight:"600" }}>/ {row.target}</span>
                   {row.hit && <span style={{ color:C.green, marginLeft:"4px" }}>✓</span>}
                 </span>
               </div>
-              <div style={{ background:C.border, borderRadius:"4px", height:"5px", overflow:"hidden" }}>
-                <div style={{ width:`${row.pct}%`, height:"100%", background:row.hit?C.green:row.color, borderRadius:"4px", transition:"width 0.3s" }}/>
+              <div style={{ background:C.border, borderRadius:"8px", height:"5px", overflow:"hidden" }}>
+                <div style={{ width:`${row.pct}%`, height:"100%", background:row.hit?C.green:row.color, borderRadius:"8px", transition:"width 0.3s" }}/>
               </div>
             </div>
           ))}
         </div>
 
         {tech.nextTier?(
-          <div style={{ background:`${tier.color}12`, border:`1px solid ${tier.color}44`, borderRadius:"10px", padding:"12px 14px", marginBottom:"14px" }}>
+          <div style={{ background:`${tier.color}12`, border:`1px solid ${tier.color}44`, borderRadius:"12px", padding:"12px 14px", marginBottom:"14px" }}>
             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:"8px" }}>
               <div>
-                <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontStyle:"italic", fontSize:"13px", color:tier.color, letterSpacing:"1px" }}>🎯 WORKING TOWARD</div>
-                <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"22px", color:C.black, lineHeight:1, marginTop:"2px" }}>{tech.nextTier.reward}</div>
+                <div style={{ fontFamily:FONT, fontWeight:"700", fontStyle:"normal", fontSize:"13px", color:tier.color, letterSpacing:"-0.01em" }}>🎯 WORKING TOWARD</div>
+                <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"22px", color:C.black, lineHeight:1, marginTop:"2px" }}>{tech.nextTier.reward}</div>
               </div>
               <div style={{ textAlign:"right", flexShrink:0 }}>
-                <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"22px", color:tier.color, lineHeight:1 }}>{tech.ptsToNext.toLocaleString()}</div>
-                <div style={{ fontSize:"10px", color:C.muted, letterSpacing:"1px" }}>PTS TO GO</div>
+                <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"22px", color:tier.color, lineHeight:1 }}>{tech.ptsToNext.toLocaleString()}</div>
+                <div style={{ fontSize:"11px", color:C.muted, letterSpacing:"-0.01em" }}>PTS TO GO</div>
               </div>
             </div>
             <Bar pct={tech.tierPct} color={tier.color} h={7}/>
-            <div style={{ fontSize:"10px", color:C.muted, marginTop:"5px" }}>{tech.tierPct}% of the way there · {tech.total.toLocaleString()} / {tech.nextTier.minPts.toLocaleString()} pts</div>
+            <div style={{ fontSize:"11px", color:C.muted, marginTop:"5px" }}>{tech.tierPct}% of the way there · {tech.total.toLocaleString()} / {tech.nextTier.minPts.toLocaleString()} pts</div>
           </div>
         ):(
-          <div style={{ marginBottom:"14px", background:`${tier.color}18`, border:`1px solid ${tier.color}44`, borderRadius:"8px", padding:"8px 12px", textAlign:"center" }}>
-            <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"13px", color:tier.color, letterSpacing:"2px" }}>💎 PLATINUM STATUS ACHIEVED</span>
+          <div style={{ marginBottom:"14px", background:`${tier.color}18`, border:`1px solid ${tier.color}44`, borderRadius:"10px", padding:"8px 12px", textAlign:"center" }}>
+            <span style={{ fontFamily:FONT, fontWeight:"700", fontSize:"13px", color:tier.color, letterSpacing:"-0.01em" }}>💎 PLATINUM STATUS ACHIEVED</span>
           </div>
         )}
         <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:"6px" }}>
@@ -2060,9 +2064,9 @@ function JourneyCard({ tech, rank, total, onClick, expanded, upsells, quota, job
             {l:"Switchovers", v:tech.totalSwitches,        c:C.blue},
             {l:"Reviews",  v:tech.totalReviews,         c:C.gold},
           ].map(s=>(
-            <div key={s.l} style={{ background:C.cardLt, borderRadius:"8px", padding:"8px 4px", textAlign:"center" }}>
-              <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"16px", color:s.c }}>{s.v}</div>
-              <div style={{ fontSize:"9px", color:C.muted, letterSpacing:"1px", textTransform:"uppercase" }}>{s.l}</div>
+            <div key={s.l} style={{ background:C.cardLt, borderRadius:"10px", padding:"8px 4px", textAlign:"center" }}>
+              <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"16px", color:s.c }}>{s.v}</div>
+              <div style={{ fontSize:"11px", color:C.muted, letterSpacing:"-0.01em", textTransform:"none" }}>{s.l}</div>
             </div>
           ))}
         </div>
@@ -2070,11 +2074,11 @@ function JourneyCard({ tech, rank, total, onClick, expanded, upsells, quota, job
           <div style={{ borderTop:`1px solid ${C.border}`, paddingTop:"14px", marginTop:"14px", display:"flex", flexDirection:"column", gap:"12px" }}>
             
             {/* 💵 Weekly Pay Scale */}
-            <div style={{ background:C.cardLt, borderRadius:"12px", padding:"12px 14px", border:`1px solid ${C.green}44` }}>
-              <div style={{ fontSize:"10px", color:C.green, letterSpacing:"2px", textTransform:"uppercase", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontStyle:"italic", marginBottom:"10px" }}>💵 Upsell Pay Scale{pp ? ` · ${fmtShortDate(pp.start)}–${fmtShortDate(pp.end)}` : ""}</div>
+            <div style={{ background:C.cardLt, borderRadius:"16px", padding:"12px 14px", border:`1px solid ${C.green}44` }}>
+              <div style={{ fontSize:"11px", color:C.green, letterSpacing:"-0.01em", textTransform:"none", fontFamily:FONT, fontWeight:"700", fontStyle:"normal", marginBottom:"10px" }}>💵 Upsell Pay Scale{pp ? ` · ${fmtShortDate(pp.start)}–${fmtShortDate(pp.end)}` : ""}</div>
               <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", marginBottom:"10px" }}>
                 <span style={{ fontSize:"12px", color:C.muted }}>Pay period upsells</span>
-                <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"20px", color:C.black }}>${weekUpsellAmt.toLocaleString()}</span>
+                <span style={{ fontFamily:FONT, fontWeight:"700", fontSize:"20px", color:C.black }}>${weekUpsellAmt.toLocaleString()}</span>
               </div>
               {/* Pay scale — backfill display */}
               <div style={{ display:"flex", flexDirection:"column", gap:"4px", marginBottom:"8px" }}>
@@ -2089,15 +2093,15 @@ function JourneyCard({ tech, rank, total, onClick, expanded, upsells, quota, job
                     const backfilled   = isPast && currentPct > b.baseRate;
                     const displayRate  = isLocked ? b.baseRate : currentPct;
                     return (
-                      <div key={b.label} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", background:isCurrent?`${C.green}22`:isPast?`${C.green}08`:"transparent", border:isCurrent?`1px solid ${C.green}55`:"1px solid transparent", borderRadius:"6px", padding:"6px 10px" }}>
+                      <div key={b.label} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", background:isCurrent?`${C.green}22`:isPast?`${C.green}08`:"transparent", border:isCurrent?`1px solid ${C.green}55`:"1px solid transparent", borderRadius:"10px", padding:"6px 10px" }}>
                         <div style={{ display:"flex", alignItems:"center", gap:"6px" }}>
-                          <span style={{ fontSize:"11px", color:isCurrent?C.green:isPast?C.black:C.muted, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:isCurrent?"900":"600" }}>{b.label}</span>
-                          {isCurrent && <span style={{ fontSize:"9px", background:C.green, color:C.white, borderRadius:"8px", padding:"1px 7px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900" }}>YOUR TIER</span>}
-                          {backfilled && <span style={{ fontSize:"9px", background:`${C.green}22`, color:C.green, borderRadius:"8px", padding:"1px 7px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800" }}>↑ BACKFILLED</span>}
+                          <span style={{ fontSize:"11px", color:isCurrent?C.green:isPast?C.black:C.muted, fontFamily:FONT, fontWeight:isCurrent?"900":"600" }}>{b.label}</span>
+                          {isCurrent && <span style={{ fontSize:"11px", background:C.green, color:C.white, borderRadius:"10px", padding:"1px 7px", fontFamily:FONT, fontWeight:"700" }}>YOUR TIER</span>}
+                          {backfilled && <span style={{ fontSize:"11px", background:`${C.green}22`, color:C.green, borderRadius:"10px", padding:"1px 7px", fontFamily:FONT, fontWeight:"600" }}>↑ BACKFILLED</span>}
                         </div>
                         <div style={{ display:"flex", alignItems:"center", gap:"5px" }}>
-                          {backfilled && <span style={{ fontSize:"10px", color:C.muted, textDecoration:"line-through", fontFamily:"'Barlow Condensed',sans-serif" }}>{b.baseRate}%</span>}
-                          <span style={{ fontSize:"13px", color:isLocked?C.muted:C.green, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900" }}>{displayRate}%</span>
+                          {backfilled && <span style={{ fontSize:"11px", color:C.muted, textDecoration:"line-through", fontFamily:FONT }}>{b.baseRate}%</span>}
+                          <span style={{ fontSize:"13px", color:isLocked?C.muted:C.green, fontFamily:FONT, fontWeight:"700" }}>{displayRate}%</span>
                         </div>
                       </div>
                     );
@@ -2105,11 +2109,11 @@ function JourneyCard({ tech, rank, total, onClick, expanded, upsells, quota, job
                 })()}
               </div>
               <div style={{ borderTop:`1px solid ${C.green}33`, paddingTop:"8px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-                <span style={{ fontSize:"12px", color:C.muted }}>Est. upsell bonus <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", color:C.black }}>({Math.round(calcUpsellPay(weekUpsellAmt).rate*100)}% × ${weekUpsellAmt})</span></span>
-                <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"22px", color:C.green }}>${totalPay.toFixed(2)}</span>
+                <span style={{ fontSize:"12px", color:C.muted }}>Est. upsell bonus <span style={{ fontFamily:FONT, fontWeight:"600", color:C.black }}>({Math.round(calcUpsellPay(weekUpsellAmt).rate*100)}% × ${weekUpsellAmt})</span></span>
+                <span style={{ fontFamily:FONT, fontWeight:"700", fontSize:"22px", color:C.green }}>${totalPay.toFixed(2)}</span>
               </div>
               {nextPayTier&&(
-                <div style={{ marginTop:"8px", background:nextPayTier.amt===null?`${C.green}18`:`${C.gold}18`, border:`1px solid ${nextPayTier.amt===null?C.green:C.gold}44`, borderRadius:"8px", padding:"6px 10px", fontSize:"11px", color:nextPayTier.amt===null?C.green:C.gold, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>
+                <div style={{ marginTop:"8px", background:nextPayTier.amt===null?`${C.green}18`:`${C.gold}18`, border:`1px solid ${nextPayTier.amt===null?C.green:C.gold}44`, borderRadius:"10px", padding:"6px 10px", fontSize:"11px", color:nextPayTier.amt===null?C.green:C.gold, fontFamily:FONT, fontWeight:"700" }}>
                   {nextPayTier.amt===null
                     ? `🔥 ${nextPayTier.label}`
                     : `💡 Upsell $${nextPayTier.amt.toFixed(0)} more to unlock ${nextPayTier.label}`}
@@ -2127,14 +2131,14 @@ function JourneyCard({ tech, rank, total, onClick, expanded, upsells, quota, job
               ].map(item=>(
                 <div key={item.l} style={{ display:"flex", justifyContent:"space-between", marginBottom:"6px" }}>
                   <span style={{ fontSize:"12px", color:C.muted }}>{item.l}</span>
-                  <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"14px", color:item.c }}>{item.v.toLocaleString()}</span>
+                  <span style={{ fontFamily:FONT, fontWeight:"600", fontSize:"14px", color:item.c }}>{item.v.toLocaleString()}</span>
                 </div>
               ))}
             </div>
             {tech.start_date&&(
-              <div style={{ background:C.cardLt, borderRadius:"8px", padding:"10px 12px", display:"flex", justifyContent:"space-between" }}>
+              <div style={{ background:C.cardLt, borderRadius:"10px", padding:"10px 12px", display:"flex", justifyContent:"space-between" }}>
                 <span style={{ fontSize:"12px", color:C.muted }}>Started</span>
-                <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", fontSize:"13px", color:C.black }}>{new Date(tech.start_date+"T00:00:00").toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"})} · {tenure}</span>
+                <span style={{ fontFamily:FONT, fontWeight:"700", fontSize:"13px", color:C.black }}>{new Date(tech.start_date+"T00:00:00").toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"})} · {tenure}</span>
               </div>
             )}
             {earnedBadges.length>0&&(
@@ -2142,7 +2146,7 @@ function JourneyCard({ tech, rank, total, onClick, expanded, upsells, quota, job
                 <Label color={tier.color}>Badges</Label>
                 <div style={{ display:"flex", flexWrap:"wrap", gap:"5px" }}>
                   {earnedBadges.map(b=>(
-                    <span key={b.id} style={{ background:`${tier.color}18`, border:`1px solid ${tier.color}44`, borderRadius:"6px", padding:"3px 10px", fontSize:"11px", color:C.black, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>{b.icon} {b.name}</span>
+                    <span key={b.id} style={{ background:`${tier.color}18`, border:`1px solid ${tier.color}44`, borderRadius:"10px", padding:"3px 10px", fontSize:"11px", color:C.black, fontFamily:FONT, fontWeight:"700" }}>{b.icon} {b.name}</span>
                   ))}
                 </div>
               </div>
@@ -2151,13 +2155,13 @@ function JourneyCard({ tech, rank, total, onClick, expanded, upsells, quota, job
               <Label color={tier.color}>Current Perks</Label>
               {tier.perks.map((p,i)=>(
                 <div key={i} style={{ fontSize:"12px", color:C.black, display:"flex", alignItems:"center", gap:"6px", marginBottom:"4px" }}>
-                  <span style={{ color:tier.color, fontWeight:"900" }}>✓</span>{p}
+                  <span style={{ color:tier.color, fontWeight:"700" }}>✓</span>{p}
                 </div>
               ))}
             </div>
           </div>
         )}
-        <div style={{ textAlign:"center", marginTop:"12px", fontSize:"10px", color:C.muted, letterSpacing:"1px" }}>
+        <div style={{ textAlign:"center", marginTop:"12px", fontSize:"11px", color:C.muted, letterSpacing:"-0.01em" }}>
           {expanded?"▲ COLLAPSE":"▼ EXPAND"}
         </div>
       </div>
@@ -2210,15 +2214,15 @@ function StaffingSettings({ showToast=()=>{}, readOnly=false }) {
     setSaving(false);
   }
   const sorted = [...holidays].sort();
-  const btn = { border:"none", borderRadius:"8px", padding:"6px 14px", cursor:saving?"not-allowed":"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"13px" };
+  const btn = { border:"none", borderRadius:"10px", padding:"6px 14px", cursor:saving?"not-allowed":"pointer", fontFamily:FONT, fontWeight:"600", fontSize:"13px" };
   return (
-    <div style={{ background:C.white, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.blue}`, borderRadius:"12px", padding:"20px", boxShadow:"0 2px 8px rgba(43,156,240,0.08)" }}>
+    <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"20px", boxShadow:"0 2px 8px rgba(0,0,0,0.06)" }}>
       <Label color={C.blue}>🚚 Trucks & Staffing</Label>
       {!loaded ? <div style={{ fontSize:"12px", color:C.muted }}>Loading…</div> : (<>
         <div style={{ display:"flex", alignItems:"center", gap:"10px", marginBottom:"8px" }}>
           <span style={{ fontSize:"13px", color:C.black }}>Working trucks:</span>
           {!readOnly&&<button disabled={saving||truckCount<=1} onClick={()=>save(truckCount-1, holidays)} style={{ ...btn, background:C.cardLt, color:C.black }}>−</button>}
-          <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"22px", color:C.black, minWidth:"28px", textAlign:"center" }}>{truckCount}</span>
+          <span style={{ fontFamily:FONT, fontWeight:"700", fontSize:"22px", color:C.black, minWidth:"28px", textAlign:"center" }}>{truckCount}</span>
           {!readOnly&&<button disabled={saving} onClick={()=>save(truckCount+1, holidays)} style={{ ...btn, background:C.cardLt, color:C.black }}>+</button>}
         </div>
         <div style={{ fontSize:"12px", color:C.muted, marginBottom:"16px" }}>
@@ -2227,16 +2231,16 @@ function StaffingSettings({ showToast=()=>{}, readOnly=false }) {
         <div style={{ fontSize:"13px", color:C.black, marginBottom:"6px" }}>Company holidays (not counted as workdays):</div>
         <div style={{ display:"flex", flexWrap:"wrap", gap:"6px", marginBottom:"10px" }}>
           {sorted.map(d=>(
-            <span key={d} style={{ background:C.cardLt, border:`1px solid ${C.border}`, borderRadius:"6px", padding:"3px 8px", fontSize:"12px", display:"inline-flex", alignItems:"center", gap:"6px" }}>
+            <span key={d} style={{ background:C.cardLt, border:`1px solid ${C.border}`, borderRadius:"10px", padding:"3px 8px", fontSize:"12px", display:"inline-flex", alignItems:"center", gap:"6px" }}>
               {new Date(d+"T12:00:00").toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric",year:"numeric"})}
-              {!readOnly&&<button disabled={saving} onClick={()=>save(truckCount, holidays.filter(h=>h!==d))} style={{ background:"none", border:"none", color:"#ef4444", cursor:"pointer", fontSize:"13px", padding:0 }}>×</button>}
+              {!readOnly&&<button disabled={saving} onClick={()=>save(truckCount, holidays.filter(h=>h!==d))} style={{ background:"none", border:"none", color:"#ff3b30", cursor:"pointer", fontSize:"13px", padding:0 }}>×</button>}
             </span>
           ))}
           {sorted.length===0&&<span style={{ fontSize:"12px", color:C.muted }}>None</span>}
         </div>
-        {readOnly ? <div style={{ fontSize:"12px", color:C.muted, fontStyle:"italic" }}>Only an owner can change trucks or holidays.</div> :
+        {readOnly ? <div style={{ fontSize:"12px", color:C.muted, fontStyle:"normal" }}>Only an owner can change trucks or holidays.</div> :
         <div style={{ display:"flex", gap:"8px", alignItems:"center" }}>
-          <input type="date" value={newHoliday} onChange={e=>setNewHoliday(e.target.value)} style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"4px 8px", borderRadius:"4px", fontSize:"12px" }}/>
+          <input type="date" value={newHoliday} onChange={e=>setNewHoliday(e.target.value)} style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"4px 8px", borderRadius:"8px", fontSize:"12px" }}/>
           <button disabled={saving||!newHoliday||holidays.includes(newHoliday)} onClick={()=>{ save(truckCount, [...holidays,newHoliday]); setNewHoliday(""); }} style={{ ...btn, background:C.blue, color:C.white }}>Add holiday</button>
         </div>}
       </>)}
@@ -2247,10 +2251,10 @@ function StaffingSettings({ showToast=()=>{}, readOnly=false }) {
 // ─── KYLE BONUS + QUOTA SETTINGS ─────────────────────────────────────────────
 function QuotaSettings({ quota, onSave, saving, readOnly=false }) {
   const [form, setForm] = useState({ ...quota });
-  const inp = { background:C.white, border:`1px solid ${C.border}`, color:C.black, padding:"10px 14px", borderRadius:"8px", fontSize:"16px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", width:"100%", boxSizing:"border-box" };
+  const inp = { background:C.white, border:`1px solid ${C.border}`, color:C.black, padding:"10px 14px", borderRadius:"10px", fontSize:"16px", fontFamily:FONT, fontWeight:"700", width:"100%", boxSizing:"border-box" };
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:"16px" }}>
-      <div style={{ background:C.white, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.blue}`, borderRadius:"12px", padding:"20px", display:"flex", flexDirection:"column", gap:"14px", boxShadow:"0 2px 8px rgba(43,156,240,0.08)" }}>
+      <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"20px", display:"flex", flexDirection:"column", gap:"14px", boxShadow:"0 2px 8px rgba(0,0,0,0.06)" }}>
         <Label color={C.blue}>📋 Monthly Quota Targets</Label>
         <div style={{ fontSize:"13px", color:C.muted }}>Set the baseline expectation for each tech per month. These show up on every Journey card so techs always know what they're working toward.</div>
         {[
@@ -2260,27 +2264,27 @@ function QuotaSettings({ quota, onSave, saving, readOnly=false }) {
         ].map(f=>(
           <div key={f.key}>
             <div style={{ display:"flex", justifyContent:"space-between", marginBottom:"6px" }}>
-              <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"14px", color:C.black }}>{f.icon} {f.label}</div>
+              <div style={{ fontFamily:FONT, fontWeight:"600", fontSize:"14px", color:C.black }}>{f.icon} {f.label}</div>
               <div style={{ fontSize:"11px", color:C.muted }}>{f.desc}</div>
             </div>
             <div style={{ display:"flex", alignItems:"center", gap:"10px" }}>
               <input type="number" value={form[f.key]} min={0} disabled={readOnly}
                 onChange={e=>setForm(v=>({...v,[f.key]:Number(e.target.value)}))}
                 style={inp}/>
-              <span style={{ fontSize:"12px", color:C.muted, whiteSpace:"nowrap", fontFamily:"'Barlow Condensed',sans-serif" }}>{f.suffix}</span>
+              <span style={{ fontSize:"12px", color:C.muted, whiteSpace:"nowrap", fontFamily:FONT }}>{f.suffix}</span>
             </div>
           </div>
         ))}
         {readOnly ? (
-          <div style={{ fontSize:"12px", color:C.muted, fontStyle:"italic" }}>Only an owner can change quota targets.</div>
+          <div style={{ fontSize:"12px", color:C.muted, fontStyle:"normal" }}>Only an owner can change quota targets.</div>
         ) : (
         <button disabled={saving} onClick={()=>onSave(form)}
-          style={{ background:saving?C.border:C.blue, border:"none", color:C.white, padding:"13px", borderRadius:"24px", cursor:saving?"not-allowed":"pointer", fontSize:"14px", fontWeight:"900", fontStyle:"italic", letterSpacing:"2px", fontFamily:"'Barlow Condensed',sans-serif", textTransform:"uppercase" }}>
+          style={{ background:saving?C.border:C.blue, border:"none", color:C.white, padding:"13px", borderRadius:"24px", cursor:saving?"not-allowed":"pointer", fontSize:"14px", fontWeight:"700", fontStyle:"normal", letterSpacing:"-0.01em", fontFamily:FONT, textTransform:"none" }}>
           {saving?"Saving...":"Save Quota Targets"}
         </button>
         )}
       </div>
-      <div style={{ background:`${C.blue}10`, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"16px 18px" }}>
+      <div style={{ background:`${C.blue}10`, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"16px 18px" }}>
         <Label color={C.blue}>💡 How these feed Will's bonus</Label>
         <div style={{ fontSize:"13px", color:C.black }}>These are the per-tech monthly targets for the quota bonus. Will is paid a flat amount by the share of counted techs who hit all three (60% → $200, 70% → $300, 85% → $400, 100% → $500). See Operations Progress for all four of his bonuses.</div>
       </div>
@@ -2307,12 +2311,12 @@ const money = n => `$${Number(n||0).toLocaleString(undefined,{maximumFractionDig
 
 function OpsCard({ title, color, pay, status, statusColor, children }) {
   return (
-    <div style={{ background:C.white, border:`1px solid ${C.border}`, borderTop:`3px solid ${color}`, borderRadius:"12px", padding:"18px", boxShadow:"0 2px 8px rgba(43,156,240,0.08)" }}>
+    <div style={{ background:C.white, border:`1px solid ${C.border}`, borderTop:`3px solid ${color}`, borderRadius:"16px", padding:"18px", boxShadow:"0 2px 8px rgba(0,0,0,0.06)" }}>
       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:"10px", marginBottom:"10px" }}>
         <Label color={color}>{title}</Label>
         <div style={{ textAlign:"right" }}>
-          <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"24px", color:pay>0?C.green:C.muted, lineHeight:1 }}>{money(pay)}</div>
-          {status && <div style={{ fontSize:"10px", fontWeight:"800", letterSpacing:"1px", color:statusColor||C.muted, marginTop:"3px" }}>{status}</div>}
+          <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"24px", color:pay>0?C.green:C.muted, lineHeight:1 }}>{money(pay)}</div>
+          {status && <div style={{ fontSize:"11px", fontWeight:"600", letterSpacing:"-0.01em", color:statusColor||C.muted, marginTop:"3px" }}>{status}</div>}
         </div>
       </div>
       {children}
@@ -2325,7 +2329,7 @@ function TierTable({ tiers, activeLabel, suffix="" }) {
       {tiers.map(t=>{
         const on = t.label===activeLabel;
         return (
-          <div key={t.label} style={{ display:"flex", justifyContent:"space-between", fontSize:"12px", padding:"4px 8px", borderRadius:"6px", background:on?`${C.green}18`:C.cardLt, border:`1px solid ${on?C.green:"transparent"}`, color:C.black, fontWeight:on?"800":"400" }}>
+          <div key={t.label} style={{ display:"flex", justifyContent:"space-between", fontSize:"12px", padding:"4px 8px", borderRadius:"10px", background:on?`${C.green}18`:C.cardLt, border:`1px solid ${on?C.green:"transparent"}`, color:C.black, fontWeight:on?"800":"400" }}>
             <span>{on?"▶ ":""}{t.label}</span><span>{money(t.pay)}{suffix}</span>
           </div>
         );
@@ -2334,7 +2338,7 @@ function TierTable({ tiers, activeLabel, suffix="" }) {
   );
 }
 const statLine = { fontSize:"12px", color:C.muted, marginTop:"4px" };
-const bigNum = { fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"32px", color:C.black, lineHeight:1 };
+const bigNum = { fontFamily:FONT, fontWeight:"700", fontSize:"32px", color:C.black, lineHeight:1 };
 
 function OperationsProgressTab({ techs, switchovers, reviews, quota, callbacks=[], jobs=[], isManager=false }) {
   const today = mountainDate(new Date().toISOString());
@@ -2386,7 +2390,7 @@ function OperationsProgressTab({ techs, switchovers, reviews, quota, callbacks=[
   const gateNote = !r.gateOpen ? "Voided — staffing was missed this month" : null;
   const statusMap = {
     earned:{ text:"✅ EARNED", color:C.green }, on_track:{ text:"ON TRACK", color:C.green },
-    at_risk:{ text:"⚠️ SHORT DAYS AHEAD", color:C.gold }, missed:{ text:"❌ MISSED", color:"#ef4444" },
+    at_risk:{ text:"⚠️ SHORT DAYS AHEAD", color:C.gold }, missed:{ text:"❌ MISSED", color:"#ff3b30" },
   };
   const stStatus = statusMap[st.status] || statusMap.on_track;
   const inProgress = !monthOver;
@@ -2394,26 +2398,26 @@ function OperationsProgressTab({ techs, switchovers, reviews, quota, callbacks=[
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:"16px" }}>
       {/* Month picker + total */}
-      <div style={{ background:r.gateOpen?C.white:"#fff5f5", border:`2px solid ${r.gateOpen?C.border:"#ef4444"}`, borderTop:`3px solid ${r.gateOpen?C.blue:"#ef4444"}`, borderRadius:"12px", padding:"18px" }}>
+      <div style={{ background:r.gateOpen?C.white:"#fff5f5", border:`2px solid ${r.gateOpen?C.border:"#ff3b30"}`, borderTop:`3px solid ${r.gateOpen?C.blue:"#ff3b30"}`, borderRadius:"16px", padding:"18px" }}>
         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:"10px" }}>
           <div>
-            <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontStyle:"italic", fontSize:"13px", color:C.muted, letterSpacing:"2px" }}>WILL'S OPERATIONS BONUS</div>
+            <div style={{ fontFamily:FONT, fontWeight:"700", fontStyle:"normal", fontSize:"13px", color:C.muted, letterSpacing:"-0.01em" }}>WILL'S OPERATIONS BONUS</div>
             <select value={monthKey} onChange={e=>{ setMonthKey(e.target.value); setShowLive(false); setMsg(null); }}
-              style={{ marginTop:"6px", background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"6px 10px", borderRadius:"8px", fontSize:"15px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800" }}>
+              style={{ marginTop:"6px", background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"6px 10px", borderRadius:"10px", fontSize:"15px", fontFamily:FONT, fontWeight:"600" }}>
               {months.map(m=><option key={m} value={m}>{formatMonthLabel(m)}{m==="2026-09"?" (preview — plan starts Oct)":""}</option>)}
             </select>
           </div>
           <div style={{ textAlign:"right" }}>
-            <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"36px", color:r.totalPay>0?C.green:C.black, lineHeight:1 }}>{money(r.totalPay)}</div>
+            <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"36px", color:r.totalPay>0?C.green:C.black, lineHeight:1 }}>{money(r.totalPay)}</div>
             <div style={{ fontSize:"11px", color:C.muted }}>{inProgress?"projected so far":"for the month"}{r.isQuarterEnd?` · includes ${rt.quarter.label} retention`:""}</div>
           </div>
         </div>
-        {!r.gateOpen && <div style={{ marginTop:"10px", fontSize:"13px", color:"#ef4444", fontWeight:"700" }}>Staffing was short on {st.missedDays.length} day{st.missedDays.length!==1?"s":""}, so this month's callback and quota bonuses are voided.</div>}
+        {!r.gateOpen && <div style={{ marginTop:"10px", fontSize:"13px", color:"#ff3b30", fontWeight:"700" }}>Staffing was short on {st.missedDays.length} day{st.missedDays.length!==1?"s":""}, so this month's callback and quota bonuses are voided.</div>}
         <div style={{ display:"flex", gap:"10px", alignItems:"center", marginTop:"10px", flexWrap:"wrap", fontSize:"12px", color:C.muted }}>
           {monthOver && snap && <span>Saved {new Date(snap.saved_at).toLocaleString("en-US",{month:"short",day:"numeric",hour:"numeric",minute:"2-digit"})}{showLive?" · showing live numbers":""}</span>}
           {monthOver && !snap && <span>Not saved yet — showing live numbers</span>}
-          {monthOver && snap && <button onClick={()=>setShowLive(v=>!v)} style={{ background:"none", border:`1px solid ${C.border}`, color:C.blue, padding:"3px 10px", borderRadius:"6px", cursor:"pointer", fontSize:"11px", fontWeight:"700" }}>{showLive?"Show saved":"Show live"}</button>}
-          {monthOver && !isManager && <button onClick={saveSnapshot} disabled={saving} style={{ background:C.blue, border:"none", color:C.white, padding:"4px 12px", borderRadius:"6px", cursor:saving?"not-allowed":"pointer", fontSize:"11px", fontWeight:"800" }}>{saving?"Saving…":snap?"Recalculate & save":"Save results"}</button>}
+          {monthOver && snap && <button onClick={()=>setShowLive(v=>!v)} style={{ background:"none", border:`1px solid ${C.border}`, color:C.blue, padding:"3px 10px", borderRadius:"10px", cursor:"pointer", fontSize:"11px", fontWeight:"700" }}>{showLive?"Show saved":"Show live"}</button>}
+          {monthOver && !isManager && <button onClick={saveSnapshot} disabled={saving} style={{ background:C.blue, border:"none", color:C.white, padding:"4px 12px", borderRadius:"10px", cursor:saving?"not-allowed":"pointer", fontSize:"11px", fontWeight:"600" }}>{saving?"Saving…":snap?"Recalculate & save":"Save results"}</button>}
           {msg && <span style={{ color:C.black }}>{msg}</span>}
         </div>
       </div>
@@ -2424,22 +2428,22 @@ function OperationsProgressTab({ techs, switchovers, reviews, quota, callbacks=[
         <div style={statLine}>Full roster target: {st.rosterTarget} techs (trucks ÷ 2 × 3) · Holidays skipped</div>
         <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(64px,1fr))", gap:"4px", marginTop:"12px" }}>
           {st.days.map(d=>{
-            const bg = d.short ? (d.past ? "#ef4444" : C.gold) : (d.past ? C.green : `${C.green}55`);
+            const bg = d.short ? (d.past ? "#ff3b30" : C.gold) : (d.past ? C.green : `${C.green}55`);
             return (
-              <div key={d.date} title={`${d.scheduled} of ${d.needed} scheduled`} style={{ background:bg, color:C.white, borderRadius:"6px", padding:"4px", textAlign:"center", fontSize:"10px", fontWeight:"800" }}>
+              <div key={d.date} title={`${d.scheduled} of ${d.needed} scheduled`} style={{ background:bg, color:C.white, borderRadius:"10px", padding:"4px", textAlign:"center", fontSize:"11px", fontWeight:"600" }}>
                 <div>{new Date(d.date+"T12:00:00").toLocaleDateString("en-US",{weekday:"short",day:"numeric"})}</div>
                 <div style={{ fontSize:"12px" }}>{d.scheduled}/{d.needed}</div>
               </div>
             );
           })}
         </div>
-        {st.missedDays.length>0 && <div style={{ ...statLine, color:"#ef4444", fontWeight:"700" }}>Short: {st.missedDays.map(d=>`${fmtShortDate(d.date)} (${d.scheduled}/${d.needed})`).join(", ")}</div>}
+        {st.missedDays.length>0 && <div style={{ ...statLine, color:"#ff3b30", fontWeight:"700" }}>Short: {st.missedDays.map(d=>`${fmtShortDate(d.date)} (${d.scheduled}/${d.needed})`).join(", ")}</div>}
         {st.upcomingShort.length>0 && <div style={{ ...statLine, color:C.gold, fontWeight:"700" }}>Coming up short: {st.upcomingShort.map(d=>`${fmtShortDate(d.date)} (${d.scheduled}/${d.needed})`).join(", ")}</div>}
         <div style={statLine}>Based on the Work Schedule tab plus any time off or extra days entered there.</div>
       </OpsCard>
 
       {/* 2. Callback rate */}
-      <OpsCard title="📞 Callback Rate" color="#ef4444" pay={r.gateOpen?cb.pay:0} status={gateNote || (cb.tier?cb.tier.label:"2.00%+ — no bonus")} statusColor={gateNote?"#ef4444":cb.tier?C.green:C.muted}>
+      <OpsCard title="📞 Callback Rate" color="#ff3b30" pay={r.gateOpen?cb.pay:0} status={gateNote || (cb.tier?cb.tier.label:"2.00%+ — no bonus")} statusColor={gateNote?"#ff3b30":cb.tier?C.green:C.muted}>
         <div style={{ display:"flex", alignItems:"baseline", gap:"10px" }}>
           <div style={bigNum}>{cb.rate.toFixed(2)}%</div>
           <div style={{ fontSize:"13px", color:C.muted }}>{cb.count} callback{cb.count!==1?"s":""} ÷ {cb.jobCount} jobs</div>
@@ -2454,7 +2458,7 @@ function OperationsProgressTab({ techs, switchovers, reviews, quota, callbacks=[
       </OpsCard>
 
       {/* 3. Quota */}
-      <OpsCard title="📋 Team Quota" color={C.green} pay={r.gateOpen?qt.pay:0} status={gateNote || (qt.tier?`${qt.tier.label} tier`:"Under 60% — no bonus")} statusColor={gateNote?"#ef4444":qt.tier?C.green:C.muted}>
+      <OpsCard title="📋 Team Quota" color={C.green} pay={r.gateOpen?qt.pay:0} status={gateNote || (qt.tier?`${qt.tier.label} tier`:"Under 60% — no bonus")} statusColor={gateNote?"#ff3b30":qt.tier?C.green:C.muted}>
         <div style={{ display:"flex", alignItems:"baseline", gap:"10px" }}>
           <div style={bigNum}>{qt.pct.toFixed(2)}%</div>
           <div style={{ fontSize:"13px", color:C.muted }}>{qt.hitting} of {qt.counted} counted techs hit all 3</div>
@@ -2464,14 +2468,14 @@ function OperationsProgressTab({ techs, switchovers, reviews, quota, callbacks=[
         <TierTable tiers={QUOTA_TIERS} activeLabel={qt.tier?.label}/>
         <div style={{ display:"flex", flexDirection:"column", gap:"6px", marginTop:"14px" }}>
           {qt.rows.map(t=>(
-            <div key={t.id} style={{ background:t.allHit?`${C.green}10`:C.cardLt, border:`1px solid ${t.allHit?C.green:C.border}`, borderRadius:"8px", padding:"8px 10px" }}>
+            <div key={t.id} style={{ background:t.allHit?`${C.green}10`:C.cardLt, border:`1px solid ${t.allHit?C.green:C.border}`, borderRadius:"10px", padding:"8px 10px" }}>
               <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:"6px" }}>
-                <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"15px", color:C.black }}>
+                <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"15px", color:C.black }}>
                   {t.name}
-                  {t.prorated && <span style={{ fontSize:"10px", color:C.gold, marginLeft:"6px" }}>LEFT {fmtShortDate(t.left_date).toUpperCase()} · {t.prorated}-WEEK TARGETS</span>}
-                  {!t.prorated && t.left_date && <span style={{ fontSize:"10px", color:C.gold, marginLeft:"6px" }}>LEFT {fmtShortDate(t.left_date).toUpperCase()}</span>}
+                  {t.prorated && <span style={{ fontSize:"11px", color:C.gold, marginLeft:"6px" }}>LEFT {fmtShortDate(t.left_date).toUpperCase()} · {t.prorated}-WEEK TARGETS</span>}
+                  {!t.prorated && t.left_date && <span style={{ fontSize:"11px", color:C.gold, marginLeft:"6px" }}>LEFT {fmtShortDate(t.left_date).toUpperCase()}</span>}
                 </div>
-                <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"13px", color:t.allHit?C.green:C.muted }}>{t.allHit?"✅ ALL HIT":`${t.hitsCount}/3`}</div>
+                <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"13px", color:t.allHit?C.green:C.muted }}>{t.allHit?"✅ ALL HIT":`${t.hitsCount}/3`}</div>
               </div>
               <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:"4px" }}>
                 {[
@@ -2479,9 +2483,9 @@ function OperationsProgressTab({ techs, switchovers, reviews, quota, callbacks=[
                   { label:"Reviews", val:t.reviews, target:t.targets.reviews, hit:t.revHit },
                   { label:"Switchovers", val:t.switchovers, target:t.targets.switchovers, hit:t.swHit },
                 ].map(col=>(
-                  <div key={col.label} style={{ background:col.hit?`${C.green}15`:C.white, border:`1px solid ${col.hit?C.green:C.border}`, borderRadius:"6px", padding:"4px 6px", textAlign:"center" }}>
-                    <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"14px", color:col.hit?C.green:C.black }}>{col.val}{col.hit?" ✓":""}</div>
-                    <div style={{ fontSize:"9px", color:C.muted, textTransform:"uppercase", letterSpacing:"1px" }}>{col.label} / {col.target}</div>
+                  <div key={col.label} style={{ background:col.hit?`${C.green}15`:C.white, border:`1px solid ${col.hit?C.green:C.border}`, borderRadius:"10px", padding:"4px 6px", textAlign:"center" }}>
+                    <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"14px", color:col.hit?C.green:C.black }}>{col.val}{col.hit?" ✓":""}</div>
+                    <div style={{ fontSize:"11px", color:C.muted, textTransform:"none", letterSpacing:"-0.01em" }}>{col.label} / {col.target}</div>
                   </div>
                 ))}
               </div>
@@ -2517,14 +2521,14 @@ function OperationsProgressTab({ techs, switchovers, reviews, quota, callbacks=[
           {rt.pendingFires.length>0 && <div style={{ color:C.gold, fontWeight:"700" }}>Waiting for owner approval: {rt.pendingFires.map(t=>t.name).join(", ")} — counted as losses until approved</div>}
         </div>
         <div style={{ marginTop:"14px", paddingTop:"12px", borderTop:`1px solid ${C.border}` }}>
-          <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"14px", color:C.black }}>
+          <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"14px", color:C.black }}>
             New hires reaching 90 days: {rt.newHires.pct==null?"—":`${rt.newHires.pct.toFixed(0)}%`}{rt.newHires.rating?` · ${rt.newHires.rating}`:""}
             <span style={{ fontSize:"11px", color:C.muted, fontWeight:"600", marginLeft:"6px" }}>tracked, not paid</span>
           </div>
           <div style={statLine}>90%+ excellent · 80–89.99% great · 70–79.99% average · under 70% underperforming</div>
           <div style={{ display:"flex", flexWrap:"wrap", gap:"4px", marginTop:"8px" }}>
             {rt.newHires.cohort.map(c=>(
-              <span key={c.id} style={{ fontSize:"11px", padding:"3px 8px", borderRadius:"10px", background:c.status==="made_it"?`${C.green}20`:c.status==="left"?"#ef444420":C.cardLt, color:C.black }}>
+              <span key={c.id} style={{ fontSize:"11px", padding:"3px 8px", borderRadius:"12px", background:c.status==="made_it"?`${C.green}20`:c.status==="left"?"#ef444420":C.cardLt, color:C.black }}>
                 {c.name} · {c.status==="made_it"?"made 90 days":c.status==="left"?`left ${fmtShortDate(c.left_date)}`:`day 90 on ${fmtShortDate(c.day90)}`}
               </span>
             ))}
@@ -2549,7 +2553,7 @@ const CREWS = [
   { id:"blue",   label:"Blue crew",  days:"3456", color:"#1e40af" },
   { id:"green",  label:"Green crew", days:"1246", color:"#16a34a" },
   { id:"other",  label:"Other days", days:null,   color:"#8b5cf6" },
-  { id:"bb",     label:"BB (commercial)", days:null, color:"#f59e0b" },
+  { id:"bb",     label:"BB (commercial)", days:null, color:"#ff9f0a" },
   { id:"aux",    label:"AUX (backup)",    days:null, color:"#64748b" },
 ];
 const CREW_BY_ID = Object.fromEntries(CREWS.map(c=>[c.id,c]));
@@ -2657,18 +2661,18 @@ function WorkScheduleTab({ techs, showToast=()=>{} }) {
   const today = mountainDate(new Date().toISOString());
   const upcoming = exceptions.filter(e => e.date >= today);
   const techName = id => techs.find(t=>t.id===id)?.name || "Unknown";
-  const inp = { background:C.white, border:`1px solid ${C.border}`, color:C.black, padding:"6px 8px", borderRadius:"6px", fontSize:"12px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", boxSizing:"border-box" };
+  const inp = { background:C.white, border:`1px solid ${C.border}`, color:C.black, padding:"6px 8px", borderRadius:"10px", fontSize:"12px", fontFamily:FONT, fontWeight:"700", boxSizing:"border-box" };
   if (!loaded) return <div style={{ fontSize:"13px", color:C.muted, padding:"20px" }}>Loading…</div>;
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:"16px" }}>
-      <div style={{ background:C.white, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.blue}`, borderRadius:"12px", padding:"18px", boxShadow:"0 2px 8px rgba(43,156,240,0.08)" }}>
+      <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"18px", boxShadow:"0 2px 8px rgba(0,0,0,0.06)" }}>
         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:"10px", flexWrap:"wrap" }}>
           <div>
             <Label color={C.blue}>🗓 Weekly Truck Schedule</Label>
             <div style={{ fontSize:"12px", color:C.muted }}>{swapMode ? "Swap mode: tap one box, then another, and they trade." : "Tap a box to pick the vehicle (or Off)."} Needs {truckCount} on trucks every workday.</div>
           </div>
           <button onClick={()=>{ setSwapMode(v=>!v); setSwapFirst(null); setEditing(null); }}
-            style={{ background:swapMode?C.blue:C.cardLt, border:`1px solid ${swapMode?C.blue:C.border}`, color:swapMode?C.white:C.black, padding:"8px 14px", borderRadius:"20px", cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"13px", letterSpacing:"1px" }}>
+            style={{ background:swapMode?C.blue:C.cardLt, border:`1px solid ${swapMode?C.blue:C.border}`, color:swapMode?C.white:C.black, padding:"8px 14px", borderRadius:"20px", cursor:"pointer", fontFamily:FONT, fontWeight:"700", fontSize:"13px", letterSpacing:"-0.01em" }}>
             🔁 {swapMode ? "SWAP MODE ON" : "SWAP"}
           </button>
         </div>
@@ -2688,20 +2692,20 @@ function WorkScheduleTab({ techs, showToast=()=>{} }) {
               <tr>
                 <th style={{ textAlign:"left", fontSize:"11px", color:C.muted, padding:"4px" }}>Tech</th>
                 {SCHEDULE_DAYS.map((d,i)=>(
-                  <th key={d} style={{ fontSize:"11px", color:counts[i]<truckCount?"#ef4444":C.green, padding:"4px", fontFamily:"'Barlow Condensed',sans-serif" }}>{d.toUpperCase()}<div style={{ fontSize:"10px" }}>{counts[i]}/{truckCount}</div></th>
+                  <th key={d} style={{ fontSize:"11px", color:counts[i]<truckCount?"#ff3b30":C.green, padding:"4px", fontFamily:FONT }}>{d.toUpperCase()}<div style={{ fontSize:"11px" }}>{counts[i]}/{truckCount}</div></th>
                 ))}
               </tr>
             </thead>
             {pods.map((pod,pi)=>(
               <tbody key={pi}>
                 {pi>0&&<tr><td colSpan={7} style={{ height:"8px" }}/></tr>}
-                {!pod.scheduled&&<tr><td colSpan={7} style={{ fontSize:"11px", color:C.muted, fontWeight:"800", letterSpacing:"1px", padding:"4px 8px" }}>NOT ON THE SCHEDULE — tap a box to add them</td></tr>}
+                {!pod.scheduled&&<tr><td colSpan={7} style={{ fontSize:"11px", color:C.muted, fontWeight:"600", letterSpacing:"-0.01em", padding:"4px 8px" }}>NOT ON THE SCHEDULE — tap a box to add them</td></tr>}
                 {pod.members.map(({t, crew})=>{
                   const color = crew?.color || C.muted;
                   return (
                     <tr key={t.id}>
-                      <td style={{ fontSize:"13px", fontWeight:"800", color:C.black, padding:"6px 8px", whiteSpace:"nowrap", borderRadius:"6px", fontFamily:"'Barlow Condensed',sans-serif", background:t.is_lead?C.blueLt:"transparent", border:t.is_lead?`1px solid ${C.blue}`:"1px solid transparent" }}>
-                        {t.is_lead&&"⭐ "}{t.name}{t.on_leave&&<span style={{ fontSize:"10px", color:C.gold, marginLeft:"4px" }}>ON LEAVE</span>}
+                      <td style={{ fontSize:"13px", fontWeight:"600", color:C.black, padding:"6px 8px", whiteSpace:"nowrap", borderRadius:"10px", fontFamily:FONT, background:t.is_lead?C.blueLt:"transparent", border:t.is_lead?`1px solid ${C.blue}`:"1px solid transparent" }}>
+                        {t.is_lead&&"⭐ "}{t.name}{t.on_leave&&<span style={{ fontSize:"11px", color:C.gold, marginLeft:"4px" }}>ON LEAVE</span>}
                       </td>
                       {SCHEDULE_DAYS.map((d,i)=>{
                         const wd=i+1, v=cell(t.id,wd)?.vehicle||"";
@@ -2718,7 +2722,7 @@ function WorkScheduleTab({ techs, showToast=()=>{} }) {
                         );
                         return (
                           <td key={d} onClick={()=>tapCell(t.id,wd)}
-                            style={{ cursor:busy?"wait":"pointer", borderRadius:"6px", padding:"7px 6px", textAlign:"center", fontSize:"12px", fontWeight:"800", fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:"0.5px",
+                            style={{ cursor:busy?"wait":"pointer", borderRadius:"10px", padding:"7px 6px", textAlign:"center", fontSize:"12px", fontWeight:"600", fontFamily:FONT, letterSpacing:"-0.01em",
                               background: v ? color : C.cardLt, color: v ? C.white : C.border,
                               outline: isPicked ? `3px solid ${C.black}` : "none", outlineOffset:"-3px",
                               boxShadow: v ? "0 1px 3px rgba(13,34,64,0.15)" : "none" }}>
@@ -2735,7 +2739,7 @@ function WorkScheduleTab({ techs, showToast=()=>{} }) {
         </div>
         <div style={{ fontSize:"11px", color:C.muted, marginTop:"8px" }}>Crews and groups update on their own from the days each tech works. Team leads are set in the Teams tab. BB and AUX don't count toward staffing.</div>
       </div>
-      <div style={{ background:C.white, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.gold}`, borderRadius:"12px", padding:"18px", boxShadow:"0 2px 8px rgba(43,156,240,0.08)" }}>
+      <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"18px", boxShadow:"0 2px 8px rgba(0,0,0,0.06)" }}>
         <Label color={C.gold}>🏖 Time Off & Extra Days</Label>
         <div style={{ fontSize:"12px", color:C.muted, marginBottom:"10px" }}>One-off changes to the weekly schedule. "Off" takes a tech off a day they'd normally work; "Extra" adds them on a day they normally don't.</div>
         <div style={{ display:"flex", gap:"8px", flexWrap:"wrap", alignItems:"center" }}>
@@ -2749,13 +2753,13 @@ function WorkScheduleTab({ techs, showToast=()=>{} }) {
             <option value="extra">Extra day</option>
           </select>
           <input value={exForm.note} onChange={e=>setExForm(f=>({...f,note:e.target.value}))} placeholder="Note (optional)" style={{ ...inp, width:"180px" }}/>
-          <button onClick={addException} disabled={busy} style={{ background:C.gold, border:"none", color:C.white, padding:"7px 14px", borderRadius:"8px", cursor:busy?"not-allowed":"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"13px" }}>Add</button>
+          <button onClick={addException} disabled={busy} style={{ background:C.gold, border:"none", color:C.white, padding:"7px 14px", borderRadius:"10px", cursor:busy?"not-allowed":"pointer", fontFamily:FONT, fontWeight:"600", fontSize:"13px" }}>Add</button>
         </div>
         <div style={{ display:"flex", flexDirection:"column", gap:"4px", marginTop:"12px" }}>
           {upcoming.map(e=>(
-            <div key={e.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", fontSize:"13px", background:C.cardLt, borderRadius:"6px", padding:"6px 10px" }}>
+            <div key={e.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", fontSize:"13px", background:C.cardLt, borderRadius:"10px", padding:"6px 10px" }}>
               <span><strong>{techName(e.tech_id)}</strong> · {new Date(e.date+"T12:00:00").toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric"})} · {e.kind==="off"?"Off":"Extra day"}{holidays.includes(e.date)?" (holiday)":""}{e.note?` — ${e.note}`:""}</span>
-              <button onClick={()=>removeException(e.id)} disabled={busy} style={{ background:"none", border:"none", color:"#ef4444", cursor:"pointer", fontSize:"14px" }}>×</button>
+              <button onClick={()=>removeException(e.id)} disabled={busy} style={{ background:"none", border:"none", color:"#ff3b30", cursor:"pointer", fontSize:"14px" }}>×</button>
             </div>
           ))}
           {upcoming.length===0 && <div style={{ fontSize:"12px", color:C.muted }}>Nothing upcoming.</div>}
@@ -2804,22 +2808,22 @@ function TeamLeadPanel({ tech, techs, upsells, switchovers, reviews, callbacks, 
 
       {/* No members yet */}
       {totalMembers===0&&(
-        <div style={{ background:C.white, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.gold}`, borderRadius:"12px", padding:"24px 20px", textAlign:"center", boxShadow:"0 2px 8px rgba(43,156,240,0.08)" }}>
+        <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"24px 20px", textAlign:"center", boxShadow:"0 2px 8px rgba(0,0,0,0.06)" }}>
           <div style={{ fontSize:"32px", marginBottom:"10px" }}>👥</div>
-          <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontStyle:"italic", fontSize:"20px", color:C.black, marginBottom:"6px" }}>No Team Members Yet</div>
+          <div style={{ fontFamily:FONT, fontWeight:"700", fontStyle:"normal", fontSize:"20px", color:C.black, marginBottom:"6px" }}>No Team Members Yet</div>
           <div style={{ fontSize:"13px", color:C.muted }}>Ask your admin to assign members to your team.</div>
         </div>
       )}
 
       {/* Override status card */}
       {totalMembers>0&&(
-        <div style={{ background:(allTeamHit||partialHit)?`${statusColor}12`:C.white, border:`2px solid ${allTeamHit||partialHit?statusColor:C.border}`, borderTop:`4px solid ${statusColor}`, borderRadius:"16px", padding:"18px 20px", boxShadow:"0 4px 16px rgba(43,156,240,0.10)" }}>
-          <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontStyle:"italic", fontSize:"13px", color:statusColor, letterSpacing:"2px", marginBottom:"6px" }}>
+        <div style={{ background:(allTeamHit||partialHit)?`${statusColor}12`:C.white, border:`2px solid ${allTeamHit||partialHit?statusColor:C.border}`, borderTop:`4px solid ${statusColor}`, borderRadius:"16px", padding:"18px 20px", boxShadow:"0 4px 16px rgba(0,0,0,0.06)" }}>
+          <div style={{ fontFamily:FONT, fontWeight:"700", fontStyle:"normal", fontSize:"13px", color:statusColor, letterSpacing:"-0.01em", marginBottom:"6px" }}>
             {allTeamHit?"🏆 10% OVERRIDE UNLOCKED":partialHit?"⚡ 5% OVERRIDE UNLOCKED":"⏳ TEAM LEAD OVERRIDE"}
           </div>
           <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:"14px" }}>
             <div>
-              <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontStyle:"italic", fontSize:"36px", color:overridePts>0?statusColor:C.black, lineHeight:1 }}>
+              <div style={{ fontFamily:FONT, fontWeight:"700", fontStyle:"normal", fontSize:"36px", color:overridePts>0?statusColor:C.black, lineHeight:1 }}>
                 {overridePts>0?`+${overridePts.toLocaleString()} PTS`:"LOCKED"}
               </div>
               <div style={{ fontSize:"12px", color:C.muted, marginTop:"4px" }}>
@@ -2827,8 +2831,8 @@ function TeamLeadPanel({ tech, techs, upsells, switchovers, reviews, callbacks, 
               </div>
             </div>
             <div style={{ textAlign:"right" }}>
-              <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"22px", color:C.black }}>{hittingCount}/{totalMembers}</div>
-              <div style={{ fontSize:"10px", color:C.muted, letterSpacing:"1px" }}>ON QUOTA</div>
+              <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"22px", color:C.black }}>{hittingCount}/{totalMembers}</div>
+              <div style={{ fontSize:"11px", color:C.muted, letterSpacing:"-0.01em" }}>ON QUOTA</div>
             </div>
           </div>
 
@@ -2839,35 +2843,35 @@ function TeamLeadPanel({ tech, techs, upsells, switchovers, reviews, callbacks, 
               { label:`${neededForPartial}/${totalMembers} teammates hit quota → 5% override`, hit:hittingCount>=neededForPartial, pts:Math.round(teamTotalPts*0.05) },
               { label:`All ${totalMembers}/${totalMembers} teammates hit quota → 10% override`, hit:allTeamHit, pts:Math.round(teamTotalPts*0.10) },
             ].map((row,i)=>(
-              <div key={i} style={{ display:"flex", alignItems:"center", gap:"8px", background:row.hit?`${C.green}10`:`${C.border}30`, border:`1px solid ${row.hit?C.green:C.border}`, borderRadius:"8px", padding:"8px 12px" }}>
-                <span style={{ color:row.hit?C.green:"#ef4444", fontSize:"16px", flexShrink:0 }}>{row.hit?"✓":"✗"}</span>
-                <span style={{ fontSize:"12px", color:row.hit?C.black:C.muted, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", flex:1 }}>{row.label}</span>
-                {i>0&&<span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"12px", color:row.hit?C.green:C.muted }}>+{row.pts} pts</span>}
+              <div key={i} style={{ display:"flex", alignItems:"center", gap:"8px", background:row.hit?`${C.green}10`:`${C.border}30`, border:`1px solid ${row.hit?C.green:C.border}`, borderRadius:"10px", padding:"8px 12px" }}>
+                <span style={{ color:row.hit?C.green:"#ff3b30", fontSize:"16px", flexShrink:0 }}>{row.hit?"✓":"✗"}</span>
+                <span style={{ fontSize:"12px", color:row.hit?C.black:C.muted, fontFamily:FONT, fontWeight:"700", flex:1 }}>{row.label}</span>
+                {i>0&&<span style={{ fontFamily:FONT, fontWeight:"700", fontSize:"12px", color:row.hit?C.green:C.muted }}>+{row.pts} pts</span>}
               </div>
             ))}
           </div>
 
-          {!leadHitsQuota&&<div style={{ fontSize:"12px", color:C.muted, fontStyle:"italic" }}>Hit your own quota first to unlock any override.</div>}
-          {leadHitsQuota&&!partialHit&&totalMembers>0&&<div style={{ fontSize:"12px", color:C.muted, fontStyle:"italic" }}>Get {neededForPartial-hittingCount} more teammate{neededForPartial-hittingCount!==1?"s":""} to quota to unlock 5%.</div>}
-          {partialHit&&!allTeamHit&&<div style={{ fontSize:"12px", color:C.gold, fontStyle:"italic", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>5% unlocked! Get {totalMembers-hittingCount} more to quota for the full 10%.</div>}
+          {!leadHitsQuota&&<div style={{ fontSize:"12px", color:C.muted, fontStyle:"normal" }}>Hit your own quota first to unlock any override.</div>}
+          {leadHitsQuota&&!partialHit&&totalMembers>0&&<div style={{ fontSize:"12px", color:C.muted, fontStyle:"normal" }}>Get {neededForPartial-hittingCount} more teammate{neededForPartial-hittingCount!==1?"s":""} to quota to unlock 5%.</div>}
+          {partialHit&&!allTeamHit&&<div style={{ fontSize:"12px", color:C.gold, fontStyle:"normal", fontFamily:FONT, fontWeight:"700" }}>5% unlocked! Get {totalMembers-hittingCount} more to quota for the full 10%.</div>}
         </div>
       )}
 
       {/* Team member cards */}
       {totalMembers>0&&(
-        <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:"12px", overflow:"hidden", boxShadow:"0 2px 8px rgba(43,156,240,0.08)" }}>
+        <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:"16px", overflow:"hidden", boxShadow:"0 2px 8px rgba(0,0,0,0.06)" }}>
           <div style={{ padding:"14px 18px", borderBottom:`1px solid ${C.border}`, background:C.cardLt }}>
-            <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontStyle:"italic", fontSize:"16px", color:C.black }}>👥 {tech.team_name||"Your Team"} — {formatMonthLabel(mk)}</div>
+            <div style={{ fontFamily:FONT, fontWeight:"700", fontStyle:"normal", fontSize:"16px", color:C.black }}>👥 {tech.team_name||"Your Team"} — {formatMonthLabel(mk)}</div>
             <div style={{ fontSize:"11px", color:C.muted, marginTop:"2px" }}>Push your guys to hit all 3 before month end</div>
           </div>
           <div style={{ padding:"14px 18px", display:"flex", flexDirection:"column", gap:"10px" }}>
             {teamMemberStats.map(m=>(
-              <div key={m.id} style={{ background:m.allHit?`${C.green}10`:C.cardLt, border:`1px solid ${m.allHit?C.green:C.border}`, borderRadius:"10px", padding:"12px 14px" }}>
+              <div key={m.id} style={{ background:m.allHit?`${C.green}10`:C.cardLt, border:`1px solid ${m.allHit?C.green:C.border}`, borderRadius:"12px", padding:"12px 14px" }}>
                 <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:"8px" }}>
-                  <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontStyle:"italic", fontSize:"16px", color:C.black }}>{m.name}</div>
+                  <div style={{ fontFamily:FONT, fontWeight:"700", fontStyle:"normal", fontSize:"16px", color:C.black }}>{m.name}</div>
                   <div style={{ display:"flex", alignItems:"center", gap:"8px" }}>
-                    <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"12px", color:m.allHit?C.green:C.muted }}>{m.allHit?"✅ ALL HIT":`${[m.upHit,m.revHit,m.swHit].filter(Boolean).length}/3`}</span>
-                    <span style={{ fontSize:"11px", color:C.gold, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>+{Math.round(m.total*overridePct)} pts override</span>
+                    <span style={{ fontFamily:FONT, fontWeight:"700", fontSize:"12px", color:m.allHit?C.green:C.muted }}>{m.allHit?"✅ ALL HIT":`${[m.upHit,m.revHit,m.swHit].filter(Boolean).length}/3`}</span>
+                    <span style={{ fontSize:"11px", color:C.gold, fontFamily:FONT, fontWeight:"700" }}>+{Math.round(m.total*overridePct)} pts override</span>
                   </div>
                 </div>
                 <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:"6px" }}>
@@ -2876,9 +2880,9 @@ function TeamLeadPanel({ tech, techs, upsells, switchovers, reviews, callbacks, 
                     { label:"Reviews",  val:m.monthReviewCount,      target:q.reviews,         hit:m.revHit, color:C.gold  },
                     { label:"Switchovers", val:m.monthSwitchCount,      target:q.switchovers,     hit:m.swHit,  color:C.blue  },
                   ].map(col=>(
-                    <div key={col.label} style={{ background:col.hit?`${col.color}15`:C.white, border:`1px solid ${col.hit?col.color:C.border}`, borderRadius:"6px", padding:"6px 8px", textAlign:"center" }}>
-                      <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"14px", color:col.hit?col.color:C.black }}>{col.val}{col.hit?" ✓":""}</div>
-                      <div style={{ fontSize:"9px", color:C.muted, textTransform:"uppercase", letterSpacing:"1px" }}>{col.label} / {col.target}</div>
+                    <div key={col.label} style={{ background:col.hit?`${col.color}15`:C.white, border:`1px solid ${col.hit?col.color:C.border}`, borderRadius:"10px", padding:"6px 8px", textAlign:"center" }}>
+                      <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"14px", color:col.hit?col.color:C.black }}>{col.val}{col.hit?" ✓":""}</div>
+                      <div style={{ fontSize:"11px", color:C.muted, textTransform:"none", letterSpacing:"-0.01em" }}>{col.label} / {col.target}</div>
                     </div>
                   ))}
                 </div>
@@ -2959,10 +2963,10 @@ const INCENTIVE_TIERS = [
 function IncentiveBoard({ techs, upsells, switchovers, reviews, callbacks, currentId, jobs=[] }) {
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:"16px" }}>
-      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.blue}`, borderRadius:"12px", padding:"16px 18px" }}>
-        <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontStyle:"italic", fontSize:"28px", color:C.black, letterSpacing:"2px", marginBottom:"4px" }}>SKYLO REWARDS PROGRAM</div>
+      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"16px 18px" }}>
+        <div style={{ fontFamily:FONT, fontWeight:"700", fontStyle:"normal", fontSize:"28px", color:C.black, letterSpacing:"-0.01em", marginBottom:"4px" }}>SKYLO REWARDS PROGRAM</div>
         <div style={{ fontSize:"13px", color:C.muted, marginBottom:"8px" }}>Stack your points from upsells, switchovers, reviews, and badges. Hit a tier, claim your Skylo Cash — then your points reset and the grind starts again.</div>
-        <div style={{ background:`${C.blue}12`, border:`1px solid ${C.border}`, borderRadius:"8px", padding:"10px 14px", fontSize:"12px", color:C.muted, display:"flex", gap:"6px", alignItems:"flex-start" }}>
+        <div style={{ background:`${C.blue}12`, border:`1px solid ${C.border}`, borderRadius:"10px", padding:"10px 14px", fontSize:"12px", color:C.muted, display:"flex", gap:"6px", alignItems:"flex-start" }}>
           <span style={{ color:C.blue, fontSize:"14px" }}>ℹ️</span>
           <span><strong style={{ color:C.black }}>How it works:</strong> Every $2 upselled = 1 pt. Reviews are 5 pts each (+20 bonus at 10/mo). Switchovers are 15–120 pts by plan. Hit 2,500 pts ($150) · 4,500 pts ($300) · 6,000 pts ($600) · 8,000 pts ($1,200) — then points reset and you climb again.</span>
         </div>
@@ -2973,9 +2977,9 @@ function IncentiveBoard({ techs, upsells, switchovers, reviews, callbacks, curre
             {l:"Switchovers",v:"15–120 pts",        c:C.purple},
             {l:"Badges",     v:"40–1,000 pts",      c:C.blue},
           ].map(item=>(
-            <div key={item.l} style={{ background:C.cardLt, borderRadius:"4px", padding:"8px 12px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+            <div key={item.l} style={{ background:C.cardLt, borderRadius:"8px", padding:"8px 12px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
               <span style={{ fontSize:"12px", color:C.muted }}>{item.l}</span>
-              <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"14px", color:item.c }}>{item.v}</span>
+              <span style={{ fontFamily:FONT, fontWeight:"600", fontSize:"14px", color:item.c }}>{item.v}</span>
             </div>
           ))}
         </div>
@@ -2993,15 +2997,15 @@ function IncentiveBoard({ techs, upsells, switchovers, reviews, callbacks, curre
         const tierProgress = myTotal !== null ? Math.min(Math.round(((myTotal - prevPts) / (tier.pts - prevPts)) * 100), 100) : null;
 
         return (
-          <div key={tier.name} style={{ background:C.card, border:`1px solid ${unlocked ? tier.color+"66" : C.border}`, borderTop:`4px solid ${tier.color}`, borderRadius:"12px", overflow:"hidden", opacity: unlocked || myTotal === null ? 1 : 0.85 }}>
+          <div key={tier.name} style={{ background:C.card, border:`1px solid ${unlocked ? tier.color+"66" : C.border}`, borderTop:`4px solid ${tier.color}`, borderRadius:"16px", overflow:"hidden", opacity: unlocked || myTotal === null ? 1 : 0.85 }}>
             <div style={{ padding:"16px 18px", borderBottom:`1px solid ${C.border}`, display:"flex", alignItems:"center", justifyContent:"space-between" }}>
               <div>
-                <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"28px", color:tier.color, letterSpacing:"3px", lineHeight:1 }}>{tier.icon} {tier.name}</div>
+                <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"28px", color:tier.color, letterSpacing:"-0.01em", lineHeight:1 }}>{tier.icon} {tier.name}</div>
                 <div style={{ fontSize:"12px", color:C.muted, marginTop:"3px" }}>{tier.tagline}</div>
               </div>
               <div style={{ textAlign:"right" }}>
-                <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"38px", color:C.black, lineHeight:1 }}>{tier.prize}</div>
-                <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontSize:"12px", color:tier.color, fontWeight:"700", letterSpacing:"1px" }}>{tier.pts.toLocaleString()} PTS REQUIRED</div>
+                <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"38px", color:C.black, lineHeight:1 }}>{tier.prize}</div>
+                <div style={{ fontFamily:FONT, fontSize:"12px", color:tier.color, fontWeight:"700", letterSpacing:"-0.01em" }}>{tier.pts.toLocaleString()} PTS REQUIRED</div>
               </div>
             </div>
 
@@ -3009,32 +3013,32 @@ function IncentiveBoard({ techs, upsells, switchovers, reviews, callbacks, curre
               <div style={{ padding:"12px 18px", borderBottom:`1px solid ${C.border}`, background:C.cardLt }}>
                 {unlocked ? (
                   <div style={{ display:"flex", alignItems:"center", gap:"10px" }}>
-                    <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"14px", color:tier.color, letterSpacing:"2px" }}>✅ UNLOCKED — SEE ADMIN TO CLAIM</div>
+                    <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"14px", color:tier.color, letterSpacing:"-0.01em" }}>✅ UNLOCKED — SEE ADMIN TO CLAIM</div>
                   </div>
                 ) : (
                   <div>
                     <div style={{ display:"flex", justifyContent:"space-between", marginBottom:"6px" }}>
-                      <span style={{ fontSize:"11px", color:C.muted, letterSpacing:"1px", textTransform:"uppercase" }}>Progress</span>
-                      <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"12px", color:tier.color }}>{(tier.pts - myTotal).toLocaleString()} pts away</span>
+                      <span style={{ fontSize:"11px", color:C.muted, letterSpacing:"-0.01em", textTransform:"none" }}>Progress</span>
+                      <span style={{ fontFamily:FONT, fontWeight:"600", fontSize:"12px", color:tier.color }}>{(tier.pts - myTotal).toLocaleString()} pts away</span>
                     </div>
                     <div style={{ background:C.border, borderRadius:"2px", height:"6px", overflow:"hidden" }}>
                       <div style={{ width:`${Math.max(tierProgress||0,0)}%`, height:"100%", background:tier.color, borderRadius:"2px" }}/>
                     </div>
-                    <div style={{ fontSize:"10px", color:C.muted, marginTop:"4px" }}>{Math.max(tierProgress||0,0)}% of the way there</div>
+                    <div style={{ fontSize:"11px", color:C.muted, marginTop:"4px" }}>{Math.max(tierProgress||0,0)}% of the way there</div>
                   </div>
                 )}
               </div>
             )}
 
             <div style={{ padding:"14px 18px" }}>
-              <div style={{ fontSize:"10px", color:C.muted, letterSpacing:"2px", textTransform:"uppercase", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", marginBottom:"12px" }}>Choose Your Reward</div>
+              <div style={{ fontSize:"11px", color:C.muted, letterSpacing:"-0.01em", textTransform:"none", fontFamily:FONT, fontWeight:"700", marginBottom:"12px" }}>Choose Your Reward</div>
               <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(150px,1fr))", gap:"10px" }}>
                 {tier.items.map(item=>(
-                  <div key={item.name} style={{ background:C.cardLt, borderRadius:"12px", overflow:"hidden", border:`1px solid ${C.border}` }}>
+                  <div key={item.name} style={{ background:C.cardLt, borderRadius:"16px", overflow:"hidden", border:`1px solid ${C.border}` }}>
                     <img src={item.img} alt={item.name} style={{ width:"100%", height:"110px", objectFit:"cover", display:"block" }} loading="lazy"/>
                     <div style={{ padding:"10px" }}>
-                      <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"13px", color:C.black, lineHeight:"1.2", marginBottom:"3px" }}>{item.name}</div>
-                      <div style={{ fontSize:"10px", color:C.muted, lineHeight:"1.3" }}>{item.desc}</div>
+                      <div style={{ fontFamily:FONT, fontWeight:"600", fontSize:"13px", color:C.black, lineHeight:"1.2", marginBottom:"3px" }}>{item.name}</div>
+                      <div style={{ fontSize:"11px", color:C.muted, lineHeight:"1.3" }}>{item.desc}</div>
                     </div>
                   </div>
                 ))}
@@ -3228,28 +3232,28 @@ function TimeSheetTab({ tech, techs=[], timeEntries, vehicles=[], truckAssignmen
 
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:"16px" }}>
-      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.blue}`, borderRadius:"12px", padding:"16px 18px" }}>
+      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"16px 18px" }}>
         <Label color={C.blue}>🕒 Time Sheet</Label>
         <div style={{ fontSize:"12px", color:C.muted, marginTop:"6px" }}>Clock in when you walk in the door for the day, and clock out when you arrive back for the day! This entry does not effect your pay in any way shape or form so please enter the correct time</div>
       </div>
 
       {autoClosedDays.length>0&&(
-        <div style={{ background:`${C.gold}18`, border:`1px solid ${C.gold}`, borderRadius:"10px", padding:"12px 16px", fontSize:"12px", color:C.black }}>
+        <div style={{ background:`${C.gold}18`, border:`1px solid ${C.gold}`, borderRadius:"12px", padding:"12px 16px", fontSize:"12px", color:C.black }}>
           ⚠ {autoClosedDays.length} day{autoClosedDays.length!==1?"s":""} auto-closed at midnight because a clock-out was missed ({autoClosedDays.slice(0,3).map(fmtShortDate).join(", ")}{autoClosedDays.length>3?"...":""}) — fix it below with Edit Time if it's wrong.
         </div>
       )}
 
-      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"20px", display:"flex", flexDirection:"column", gap:"14px" }}>
+      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"20px", display:"flex", flexDirection:"column", gap:"14px" }}>
         {truckOffered && (
           <div>
-            <div style={{ fontSize:"11px", color:C.muted, letterSpacing:"1px", fontWeight:"700", marginBottom:"6px" }}>🚚 TRUCK TODAY{!myPick && truckRequired && <span style={{ color:C.red }}> *</span>}</div>
+            <div style={{ fontSize:"11px", color:C.muted, letterSpacing:"-0.01em", fontWeight:"700", marginBottom:"6px" }}>🚚 TRUCK TODAY{!myPick && truckRequired && <span style={{ color:C.red }}> *</span>}</div>
             {myPick && !changingTruck ? (
               <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:"10px" }}>
-                <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"18px", color:C.black }}>{vehicles.find(v=>v.id===myPick.vehicle_id)?.name || "—"}</span>
-                <button onClick={()=>setChangingTruck(true)} style={{ background:"none", border:`1px solid ${C.border}`, color:C.blue, padding:"4px 10px", borderRadius:"4px", cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", fontSize:"11px" }}>CHANGE</button>
+                <span style={{ fontFamily:FONT, fontWeight:"700", fontSize:"18px", color:C.black }}>{vehicles.find(v=>v.id===myPick.vehicle_id)?.name || "—"}</span>
+                <button onClick={()=>setChangingTruck(true)} style={{ background:"none", border:`1px solid ${C.border}`, color:C.blue, padding:"4px 10px", borderRadius:"8px", cursor:"pointer", fontFamily:FONT, fontWeight:"700", fontSize:"11px" }}>CHANGE</button>
               </div>
             ) : (
-              <select value={pickId} disabled={saving} onChange={e => myPick ? changeTruck(e.target.value) : setPickId(e.target.value)} style={{ background:C.white, border:`1px solid ${pickId?C.border:C.red}`, color:pickId?C.black:C.muted, padding:"10px 14px", borderRadius:"8px", fontSize:"14px", width:"100%", boxSizing:"border-box" }}>
+              <select value={pickId} disabled={saving} onChange={e => myPick ? changeTruck(e.target.value) : setPickId(e.target.value)} style={{ background:C.white, border:`1px solid ${pickId?C.border:C.red}`, color:pickId?C.black:C.muted, padding:"10px 14px", borderRadius:"10px", fontSize:"14px", width:"100%", boxSizing:"border-box" }}>
                 <option value="">Pick your truck…</option>
                 {activeVehicles.map(v => {
                   const other = takenBy(v.id);
@@ -3260,16 +3264,16 @@ function TimeSheetTab({ tech, techs=[], timeEntries, vehicles=[], truckAssignmen
           </div>
         )}
         <div style={{ display:"flex", gap:"12px" }}>
-          <button onClick={clockIn} disabled={saving||isClockedInToday} style={{ flex:1, background:isClockedInToday?C.border:C.green, border:"none", color:C.white, padding:"16px", borderRadius:"12px", cursor:(saving||isClockedInToday)?"not-allowed":"pointer", fontSize:"14px", fontWeight:"900", letterSpacing:"1px", fontFamily:"'Barlow Condensed',sans-serif", textTransform:"uppercase" }}>Clock In</button>
-          <button onClick={clockOut} disabled={saving||!isClockedInToday} style={{ flex:1, background:!isClockedInToday?C.border:"#ef4444", border:"none", color:C.white, padding:"16px", borderRadius:"12px", cursor:(saving||!isClockedInToday)?"not-allowed":"pointer", fontSize:"14px", fontWeight:"900", letterSpacing:"1px", fontFamily:"'Barlow Condensed',sans-serif", textTransform:"uppercase" }}>Clock Out</button>
+          <button onClick={clockIn} disabled={saving||isClockedInToday} style={{ flex:1, background:isClockedInToday?C.border:C.green, border:"none", color:C.white, padding:"16px", borderRadius:"16px", cursor:(saving||isClockedInToday)?"not-allowed":"pointer", fontSize:"14px", fontWeight:"700", letterSpacing:"-0.01em", fontFamily:FONT, textTransform:"none" }}>Clock In</button>
+          <button onClick={clockOut} disabled={saving||!isClockedInToday} style={{ flex:1, background:!isClockedInToday?C.border:"#ff3b30", border:"none", color:C.white, padding:"16px", borderRadius:"16px", cursor:(saving||!isClockedInToday)?"not-allowed":"pointer", fontSize:"14px", fontWeight:"700", letterSpacing:"-0.01em", fontFamily:FONT, textTransform:"none" }}>Clock Out</button>
         </div>
         <div style={{ textAlign:"center" }}>
-          <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"32px", color:C.blue }}>{todayTotal.toFixed(2)}h</div>
-          <div style={{ fontSize:"11px", color:C.muted, letterSpacing:"1px" }}>{isClockedInToday ? "CLOCKED IN — LIVE TOTAL FOR TODAY" : "TOTAL FOR TODAY"}</div>
+          <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"32px", color:C.blue }}>{todayTotal.toFixed(2)}h</div>
+          <div style={{ fontSize:"11px", color:C.muted, letterSpacing:"-0.01em" }}>{isClockedInToday ? "CLOCKED IN — LIVE TOTAL FOR TODAY" : "TOTAL FOR TODAY"}</div>
         </div>
       </div>
 
-      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", overflow:"hidden" }}>
+      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", overflow:"hidden" }}>
         <div style={{ padding:"14px 18px", borderBottom:`1px solid ${C.border}` }}><Label color={C.blue}>Recent Days</Label></div>
         <div style={{ padding:"14px 18px", display:"flex", flexDirection:"column", gap:"6px" }}>
           {recentDays.map(d => {
@@ -3279,8 +3283,8 @@ function TimeSheetTab({ tech, techs=[], timeEntries, vehicles=[], truckAssignmen
               <div key={d} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"6px 0", borderBottom:`1px solid ${C.border}` }}>
                 <span style={{ fontSize:"13px", color:C.black }}>{fmtShortDate(d)}{d===today?" (Today)":""}{isAutoClosed?" ⚠":""}</span>
                 <div style={{ display:"flex", alignItems:"center", gap:"10px" }}>
-                  <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"13px", color:total>0?C.black:C.muted }}>{total.toFixed(2)}h</span>
-                  <button onClick={()=>{setEditDate(d);setEditingId(null);}} style={{ background:"none", border:`1px solid ${C.border}`, color:C.blue, padding:"3px 8px", borderRadius:"4px", cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", fontSize:"10px" }}>EDIT</button>
+                  <span style={{ fontFamily:FONT, fontWeight:"600", fontSize:"13px", color:total>0?C.black:C.muted }}>{total.toFixed(2)}h</span>
+                  <button onClick={()=>{setEditDate(d);setEditingId(null);}} style={{ background:"none", border:`1px solid ${C.border}`, color:C.blue, padding:"3px 8px", borderRadius:"8px", cursor:"pointer", fontFamily:FONT, fontWeight:"700", fontSize:"11px" }}>EDIT</button>
                 </div>
               </div>
             );
@@ -3288,29 +3292,29 @@ function TimeSheetTab({ tech, techs=[], timeEntries, vehicles=[], truckAssignmen
         </div>
       </div>
 
-      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.blue}`, borderRadius:"12px", padding:"16px 18px", display:"flex", flexDirection:"column", gap:"12px" }}>
+      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"16px 18px", display:"flex", flexDirection:"column", gap:"12px" }}>
         <Label color={C.blue}>Edit a Day</Label>
         <div style={{ fontSize:"11px", color:C.muted }}>Forgot to clock in or out? Pick the date and fix it here — no admin needed.</div>
-        <input type="date" value={editDate} onChange={e=>{setEditDate(e.target.value);setEditingId(null);}} style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"8px 10px", borderRadius:"8px", fontSize:"13px", fontFamily:"'Barlow',sans-serif", width:"100%", boxSizing:"border-box" }}/>
+        <input type="date" value={editDate} onChange={e=>{setEditDate(e.target.value);setEditingId(null);}} style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"8px 10px", borderRadius:"10px", fontSize:"13px", fontFamily:FONT, width:"100%", boxSizing:"border-box" }}/>
         {editEntries.length===0 && <div style={{ fontSize:"12px", color:C.muted }}>No sessions logged for this day yet.</div>}
         {editEntries.map(e => (
-          <div key={e.id} style={{ background:C.cardLt, borderRadius:"8px", padding:"10px 12px" }}>
+          <div key={e.id} style={{ background:C.cardLt, borderRadius:"10px", padding:"10px 12px" }}>
             {editingId===e.id ? (
               <div style={{ display:"flex", flexDirection:"column", gap:"8px" }}>
                 <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"8px" }}>
                   <div>
-                    <div style={{ fontSize:"10px", color:C.muted, marginBottom:"4px" }}>Clock In</div>
-                    <input type="time" value={editForm.in} onChange={ev=>setEditForm(f=>({...f,in:ev.target.value}))} style={{ background:C.card, border:`1px solid ${C.border}`, color:C.black, padding:"8px", borderRadius:"8px", fontSize:"13px", width:"100%", boxSizing:"border-box" }}/>
+                    <div style={{ fontSize:"11px", color:C.muted, marginBottom:"4px" }}>Clock In</div>
+                    <input type="time" value={editForm.in} onChange={ev=>setEditForm(f=>({...f,in:ev.target.value}))} style={{ background:C.card, border:`1px solid ${C.border}`, color:C.black, padding:"8px", borderRadius:"10px", fontSize:"13px", width:"100%", boxSizing:"border-box" }}/>
                   </div>
                   <div>
-                    <div style={{ fontSize:"10px", color:C.muted, marginBottom:"4px" }}>Clock Out</div>
-                    <input type="time" value={editForm.out} onChange={ev=>setEditForm(f=>({...f,out:ev.target.value}))} style={{ background:C.card, border:`1px solid ${C.border}`, color:C.black, padding:"8px", borderRadius:"8px", fontSize:"13px", width:"100%", boxSizing:"border-box" }}/>
+                    <div style={{ fontSize:"11px", color:C.muted, marginBottom:"4px" }}>Clock Out</div>
+                    <input type="time" value={editForm.out} onChange={ev=>setEditForm(f=>({...f,out:ev.target.value}))} style={{ background:C.card, border:`1px solid ${C.border}`, color:C.black, padding:"8px", borderRadius:"10px", fontSize:"13px", width:"100%", boxSizing:"border-box" }}/>
                   </div>
                 </div>
                 <div style={{ display:"flex", gap:"8px" }}>
-                  <button onClick={saveEdit} disabled={saving} style={{ flex:1, background:C.blue, border:"none", color:C.white, padding:"8px", borderRadius:"8px", cursor:"pointer", fontWeight:"700", fontSize:"12px" }}>Save</button>
-                  <button onClick={()=>setEditingId(null)} style={{ background:"none", border:`1px solid ${C.border}`, color:C.muted, padding:"8px 14px", borderRadius:"8px", cursor:"pointer", fontSize:"12px" }}>Cancel</button>
-                  <button onClick={()=>deleteSession(e.id)} style={{ background:"none", border:"1px solid #ef4444", color:"#ef4444", padding:"8px 14px", borderRadius:"8px", cursor:"pointer", fontSize:"12px" }}>Delete</button>
+                  <button onClick={saveEdit} disabled={saving} style={{ flex:1, background:C.blue, border:"none", color:C.white, padding:"8px", borderRadius:"10px", cursor:"pointer", fontWeight:"700", fontSize:"12px" }}>Save</button>
+                  <button onClick={()=>setEditingId(null)} style={{ background:"none", border:`1px solid ${C.border}`, color:C.muted, padding:"8px 14px", borderRadius:"10px", cursor:"pointer", fontSize:"12px" }}>Cancel</button>
+                  <button onClick={()=>deleteSession(e.id)} style={{ background:"none", border:"1px solid #ef4444", color:"#ff3b30", padding:"8px 14px", borderRadius:"10px", cursor:"pointer", fontSize:"12px" }}>Delete</button>
                 </div>
               </div>
             ) : (
@@ -3319,12 +3323,12 @@ function TimeSheetTab({ tech, techs=[], timeEntries, vehicles=[], truckAssignmen
                   {formatMTTime(e.clock_in)} → {e.clock_out ? formatMTTime(e.clock_out) : (e.work_date===today ? "still clocked in" : "—")}
                   {e.auto_closed && <span style={{ color:C.gold }}> ⚠ auto-closed</span>}
                 </span>
-                <button onClick={()=>startEdit(e)} style={{ background:"none", border:`1px solid ${C.border}`, color:C.blue, padding:"4px 10px", borderRadius:"4px", cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", fontSize:"11px" }}>Edit Time</button>
+                <button onClick={()=>startEdit(e)} style={{ background:"none", border:`1px solid ${C.border}`, color:C.blue, padding:"4px 10px", borderRadius:"8px", cursor:"pointer", fontFamily:FONT, fontWeight:"700", fontSize:"11px" }}>Edit Time</button>
               </div>
             )}
           </div>
         ))}
-        <button onClick={addSession} disabled={saving} style={{ background:C.cardLt, border:`1px solid ${C.blue}`, color:C.blue, padding:"10px", borderRadius:"8px", cursor:saving?"not-allowed":"pointer", fontWeight:"700", fontSize:"12px" }}>+ Add Session for This Day</button>
+        <button onClick={addSession} disabled={saving} style={{ background:C.cardLt, border:`1px solid ${C.blue}`, color:C.blue, padding:"10px", borderRadius:"10px", cursor:saving?"not-allowed":"pointer", fontWeight:"700", fontSize:"12px" }}>+ Add Session for This Day</button>
       </div>
     </div>
   );
@@ -3398,15 +3402,15 @@ function TechDashboard({ tech, techs, upsells, switchovers, reviews, callbacks, 
   ];
 
   return (
-    <div style={{ minHeight:"100vh", background:"#f0f8ff" }}>
+    <div style={{ minHeight:"100vh", background:"#f5f5f7" }}>
       <style>{GS}</style>
       <SideNav sections={techNavSections} active={tab} setActive={setTab} open={menuOpen} onClose={()=>setMenuOpen(false)} name={tech.name} role={`${tier.icon} ${tier.name}`}/>
       <Header left={<HamburgerBtn onClick={()=>setMenuOpen(true)}/>} right={<LogoutBtn onLogout={onLogout}/>}/>
-      <div style={{ background:C.white, borderBottom:`1px solid ${C.border}`, padding:"14px 20px 0", boxShadow:"0 2px 12px rgba(43,156,240,0.08)" }}>
+      <div style={{ background:C.white, borderBottom:`1px solid ${C.border}`, padding:"14px 20px 0", boxShadow:"0 2px 12px rgba(0,0,0,0.06)" }}>
         <div style={{ display:"flex", alignItems:"center", gap:"14px", marginBottom:"14px" }}>
-          <div style={{ width:"50px", height:"50px", borderRadius:"50%", background:`${C.blue}18`, border:`2px solid ${C.blue}`, display:"flex", alignItems:"center", justifyContent:"center", fontFamily:"'Barlow Condensed',sans-serif", fontSize:"16px", fontWeight:"900", color:C.blue, flexShrink:0 }}>{tech.avatar}</div>
+          <div style={{ width:"50px", height:"50px", borderRadius:"50%", background:`${C.blue}18`, border:`2px solid ${C.blue}`, display:"flex", alignItems:"center", justifyContent:"center", fontFamily:FONT, fontSize:"16px", fontWeight:"700", color:C.blue, flexShrink:0 }}>{tech.avatar}</div>
           <div style={{ flex:1 }}>
-            <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontStyle:"italic", fontSize:"24px", color:C.black, lineHeight:1 }}>{tech.name}</div>
+            <div style={{ fontFamily:FONT, fontWeight:"700", fontStyle:"normal", fontSize:"24px", color:C.black, lineHeight:1 }}>{tech.name}</div>
             <div style={{ display:"flex", gap:"8px", alignItems:"center", marginTop:"4px", flexWrap:"wrap" }}>
               <Pill color={tier.color}>{tier.icon} {tier.name}</Pill>
               {tenure&&<span style={{ fontSize:"11px", color:C.muted }}>⏱ {tenure}</span>}
@@ -3416,15 +3420,15 @@ function TechDashboard({ tech, techs, upsells, switchovers, reviews, callbacks, 
             </div>
           </div>
           <div style={{ textAlign:"right" }}>
-            <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontStyle:"italic", fontSize:"34px", color:C.blue, lineHeight:1 }}>{tt.total.toLocaleString()}</div>
-            <div style={{ fontSize:"10px", color:C.muted, letterSpacing:"2px" }}>TOTAL PTS</div>
+            <div style={{ fontFamily:FONT, fontWeight:"700", fontStyle:"normal", fontSize:"34px", color:C.blue, lineHeight:1 }}>{tt.total.toLocaleString()}</div>
+            <div style={{ fontSize:"11px", color:C.muted, letterSpacing:"-0.01em" }}>TOTAL PTS</div>
           </div>
         </div>
         {nextTier&&(
           <div style={{ marginBottom:"12px" }}>
             <div style={{ display:"flex", justifyContent:"space-between", marginBottom:"5px" }}>
-              <span style={{ fontSize:"10px", color:C.muted, letterSpacing:"1px" }}>🎯 TOWARD: {nextTier.reward}</span>
-              <span style={{ fontSize:"10px", color:tier.color, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>{(nextTier.minPts-tt.total).toLocaleString()} PTS TO GO</span>
+              <span style={{ fontSize:"11px", color:C.muted, letterSpacing:"-0.01em" }}>🎯 TOWARD: {nextTier.reward}</span>
+              <span style={{ fontSize:"11px", color:tier.color, fontFamily:FONT, fontWeight:"700" }}>{(nextTier.minPts-tt.total).toLocaleString()} PTS TO GO</span>
             </div>
             <Bar pct={Math.round(((tt.total-tier.minPts)/(nextTier.minPts-tier.minPts))*100)} color={tier.color} h={4}/>
           </div>
@@ -3435,15 +3439,15 @@ function TechDashboard({ tech, techs, upsells, switchovers, reviews, callbacks, 
           <div style={{ display:"flex", flexDirection:"column", gap:"16px" }}>
 
             {/* ── MONTHLY QUOTA CARD ── */}
-            <div style={{ background:allQuotaHit?`${C.green}12`:C.white, border:`2px solid ${allQuotaHit?C.green:C.border}`, borderTop:`4px solid ${allQuotaHit?C.green:C.blue}`, borderRadius:"16px", padding:"18px 20px", boxShadow:"0 4px 16px rgba(43,156,240,0.10)" }}>
+            <div style={{ background:allQuotaHit?`${C.green}12`:C.white, border:`2px solid ${allQuotaHit?C.green:C.border}`, borderTop:`4px solid ${allQuotaHit?C.green:C.blue}`, borderRadius:"16px", padding:"18px 20px", boxShadow:"0 4px 16px rgba(0,0,0,0.06)" }}>
               <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:"14px" }}>
                 <div>
-                  <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontStyle:"italic", fontSize:"18px", color:allQuotaHit?C.green:C.black, letterSpacing:"1px" }}>
+                  <div style={{ fontFamily:FONT, fontWeight:"700", fontStyle:"normal", fontSize:"18px", color:allQuotaHit?C.green:C.black, letterSpacing:"-0.01em" }}>
                     {allQuotaHit ? "✅ QUOTA CRUSHED" : `📊 MONTHLY QUOTA`}
                   </div>
                   <div style={{ fontSize:"11px", color:C.muted, marginTop:"2px" }}>{formatMonthLabel(mk)} · {quotaHitCount}/3 targets hit</div>
                 </div>
-                <div style={{ background:allQuotaHit?C.green:quotaHitCount>=2?C.gold:quotaHitCount===1?C.orange:"#ef4444", borderRadius:"20px", padding:"4px 12px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"13px", color:C.white }}>
+                <div style={{ background:allQuotaHit?C.green:quotaHitCount>=2?C.gold:quotaHitCount===1?C.orange:"#ff3b30", borderRadius:"20px", padding:"4px 12px", fontFamily:FONT, fontWeight:"700", fontSize:"13px", color:C.white }}>
                   {allQuotaHit?"ON FIRE 🔥":quotaHitCount>=2?"CLOSE":"NEEDS WORK"}
                 </div>
               </div>
@@ -3455,25 +3459,25 @@ function TechDashboard({ tech, techs, upsells, switchovers, reviews, callbacks, 
                 ].map(row=>(
                   <div key={row.label}>
                     <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:"5px" }}>
-                      <span style={{ fontSize:"12px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", color:C.black }}>{row.label}</span>
+                      <span style={{ fontSize:"12px", fontFamily:FONT, fontWeight:"600", color:C.black }}>{row.label}</span>
                       <div style={{ display:"flex", alignItems:"center", gap:"8px" }}>
-                        <span style={{ fontSize:"12px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", color:row.hit?row.color:C.black }}>
+                        <span style={{ fontSize:"12px", fontFamily:FONT, fontWeight:"700", color:row.hit?row.color:C.black }}>
                           {row.actual} <span style={{ color:C.muted, fontWeight:"600" }}>/ {row.target}</span>
                         </span>
                         {row.hit
-                          ? <span style={{ background:row.color, color:C.white, borderRadius:"10px", padding:"1px 8px", fontSize:"10px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900" }}>✓ HIT</span>
-                          : <span style={{ background:C.cardLt, color:C.muted, borderRadius:"10px", padding:"1px 8px", fontSize:"10px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>{row.pct}%</span>
+                          ? <span style={{ background:row.color, color:C.white, borderRadius:"12px", padding:"1px 8px", fontSize:"11px", fontFamily:FONT, fontWeight:"700" }}>✓ HIT</span>
+                          : <span style={{ background:C.cardLt, color:C.muted, borderRadius:"12px", padding:"1px 8px", fontSize:"11px", fontFamily:FONT, fontWeight:"700" }}>{row.pct}%</span>
                         }
                       </div>
                     </div>
-                    <div style={{ background:C.border, borderRadius:"6px", height:"7px", overflow:"hidden" }}>
-                      <div style={{ width:`${row.pct}%`, height:"100%", background:row.hit?row.color:row.color+"99", borderRadius:"6px", transition:"width 0.4s ease" }}/>
+                    <div style={{ background:C.border, borderRadius:"10px", height:"7px", overflow:"hidden" }}>
+                      <div style={{ width:`${row.pct}%`, height:"100%", background:row.hit?row.color:row.color+"99", borderRadius:"10px", transition:"width 0.4s ease" }}/>
                     </div>
                   </div>
                 ))}
               </div>
               {!allQuotaHit&&(
-                <div style={{ fontSize:"11px", color:C.muted, fontStyle:"italic", marginTop:"12px" }}>
+                <div style={{ fontSize:"11px", color:C.muted, fontStyle:"normal", marginTop:"12px" }}>
                   Keep pushing — hit all 3 targets this month 💪
                 </div>
               )}
@@ -3503,8 +3507,8 @@ function TechDashboard({ tech, techs, upsells, switchovers, reviews, callbacks, 
               const curPP = currentPayPeriod();
               const { totalPay:projBonus } = calcUpsellPay(curPP ? upsellAmountInRange(jobs, tech.id, curPP.start, curPP.end) : 0);
               return (
-                <div style={{ background:C.white, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.purple}`, borderRadius:"12px", padding:"16px 18px", boxShadow:"0 2px 8px rgba(43,156,240,0.08)" }}>
-                  <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontStyle:"italic", fontSize:"12px", color:C.purple, letterSpacing:"2px", marginBottom:"12px" }}>
+                <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"16px 18px", boxShadow:"0 2px 8px rgba(0,0,0,0.06)" }}>
+                  <div style={{ fontFamily:FONT, fontWeight:"700", fontStyle:"normal", fontSize:"12px", color:C.purple, letterSpacing:"-0.01em", marginBottom:"12px" }}>
                     📈 WEEK PROJECTION — {daysElapsed}/{daysInWeek} DAYS IN
                   </div>
                   <div style={{ display:"grid", gridTemplateColumns:"repeat(2,1fr)", gap:"8px" }}>
@@ -3514,13 +3518,13 @@ function TechDashboard({ tech, techs, upsells, switchovers, reviews, callbacks, 
                       { l:"Proj. Monthly Rev",   v:`$${projMonthly.toLocaleString()}`,   c:C.purple },
                       { l:"Upsell Bonus (pay period so far)",  v:`$${projBonus.toFixed(2)}`,           c:C.gold   },
                     ].map(s=>(
-                      <div key={s.l} style={{ background:C.cardLt, borderRadius:"8px", padding:"10px", textAlign:"center" }}>
-                        <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"20px", color:s.c }}>{s.v}</div>
-                        <div style={{ fontSize:"9px", color:C.muted, letterSpacing:"1px", textTransform:"uppercase" }}>{s.l}</div>
+                      <div key={s.l} style={{ background:C.cardLt, borderRadius:"10px", padding:"10px", textAlign:"center" }}>
+                        <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"20px", color:s.c }}>{s.v}</div>
+                        <div style={{ fontSize:"11px", color:C.muted, letterSpacing:"-0.01em", textTransform:"none" }}>{s.l}</div>
                       </div>
                     ))}
                   </div>
-                  <div style={{ fontSize:"10px", color:C.muted, marginTop:"8px" }}>Based on {daysElapsed} day{daysElapsed!==1?"s":""} of pace · refreshes every 5 min</div>
+                  <div style={{ fontSize:"11px", color:C.muted, marginTop:"8px" }}>Based on {daysElapsed} day{daysElapsed!==1?"s":""} of pace · refreshes every 5 min</div>
                 </div>
               );
             })()}
@@ -3536,23 +3540,23 @@ function TechDashboard({ tech, techs, upsells, switchovers, reviews, callbacks, 
               const commission = wkRevenue*(rate/100);
               const total      = commission+wkTips;
               return (
-                <div style={{ background:C.white, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.green}`, borderRadius:"12px", padding:"16px 18px", boxShadow:"0 2px 8px rgba(43,156,240,0.08)" }}>
-                  <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontStyle:"italic", fontSize:"12px", color:C.green, letterSpacing:"2px", marginBottom:"12px" }}>💵 YOUR EARNINGS — THIS WEEK</div>
+                <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"16px 18px", boxShadow:"0 2px 8px rgba(0,0,0,0.06)" }}>
+                  <div style={{ fontFamily:FONT, fontWeight:"700", fontStyle:"normal", fontSize:"12px", color:C.green, letterSpacing:"-0.01em", marginBottom:"12px" }}>💵 YOUR EARNINGS — THIS WEEK</div>
                   <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:"8px", marginBottom:"10px" }}>
                     {[
                       { l:"Revenue",             v:`$${wkRevenue.toLocaleString()}`,   c:C.blue  },
                       { l:`Commission (${rate}%)`,v:`$${commission.toFixed(2)}`,        c:C.green },
                       { l:"Tips",                v:`$${wkTips.toFixed(2)}`,            c:C.gold  },
                     ].map(s=>(
-                      <div key={s.l} style={{ background:C.cardLt, borderRadius:"8px", padding:"10px", textAlign:"center" }}>
-                        <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"18px", color:s.c }}>{s.v}</div>
-                        <div style={{ fontSize:"9px", color:C.muted, letterSpacing:"1px", textTransform:"uppercase", marginTop:"3px" }}>{s.l}</div>
+                      <div key={s.l} style={{ background:C.cardLt, borderRadius:"10px", padding:"10px", textAlign:"center" }}>
+                        <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"18px", color:s.c }}>{s.v}</div>
+                        <div style={{ fontSize:"11px", color:C.muted, letterSpacing:"-0.01em", textTransform:"none", marginTop:"3px" }}>{s.l}</div>
                       </div>
                     ))}
                   </div>
-                  <div style={{ background:`${C.green}15`, border:`1px solid ${C.green}44`, borderRadius:"8px", padding:"10px 14px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-                    <div style={{ fontSize:"11px", color:C.green, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", letterSpacing:"1px" }}>TOTAL THIS WEEK</div>
-                    <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"26px", color:C.black }}>${total.toFixed(2)}</div>
+                  <div style={{ background:`${C.green}15`, border:`1px solid ${C.green}44`, borderRadius:"10px", padding:"10px 14px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                    <div style={{ fontSize:"11px", color:C.green, fontFamily:FONT, fontWeight:"700", letterSpacing:"-0.01em" }}>TOTAL THIS WEEK</div>
+                    <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"26px", color:C.black }}>${total.toFixed(2)}</div>
                   </div>
                 </div>
               );
@@ -3568,10 +3572,10 @@ function TechDashboard({ tech, techs, upsells, switchovers, reviews, callbacks, 
               const isOnTeam = tech.team_lead_id || tech.is_lead;
 
               return (
-                <div style={{ background:C.white, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.gold}`, borderRadius:"12px", padding:"14px 16px", boxShadow:"0 2px 8px rgba(43,156,240,0.08)" }}>
+                <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"14px 16px", boxShadow:"0 2px 8px rgba(0,0,0,0.06)" }}>
                   <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:"10px" }}>
-                    <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontStyle:"italic", fontSize:"13px", color:C.gold, letterSpacing:"1px" }}>👥 YOUR TEAM</div>
-                    {teamName&&<div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontStyle:"italic", fontSize:"16px", color:C.black }}>{teamName}</div>}
+                    <div style={{ fontFamily:FONT, fontWeight:"700", fontStyle:"normal", fontSize:"13px", color:C.gold, letterSpacing:"-0.01em" }}>👥 YOUR TEAM</div>
+                    {teamName&&<div style={{ fontFamily:FONT, fontWeight:"700", fontStyle:"normal", fontSize:"16px", color:C.black }}>{teamName}</div>}
                   </div>
 
                   {!isOnTeam&&(
@@ -3582,20 +3586,20 @@ function TechDashboard({ tech, techs, upsells, switchovers, reviews, callbacks, 
                     <>
                       {myLead&&(
                         <div style={{ display:"flex", alignItems:"center", gap:"8px", marginBottom:"8px", paddingBottom:"8px", borderBottom:`1px solid ${C.border}` }}>
-                          <div style={{ width:"32px", height:"32px", borderRadius:"50%", background:`${C.gold}22`, border:`1px solid ${C.gold}`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:"11px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", color:C.gold }}>{myLead.avatar}</div>
+                          <div style={{ width:"32px", height:"32px", borderRadius:"50%", background:`${C.gold}22`, border:`1px solid ${C.gold}`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:"11px", fontFamily:FONT, fontWeight:"600", color:C.gold }}>{myLead.avatar}</div>
                           <div>
-                            <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"14px", color:C.black }}>{myLead.name}</div>
-                            <div style={{ fontSize:"10px", color:C.gold, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", letterSpacing:"1px" }}>TEAM LEAD</div>
+                            <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"14px", color:C.black }}>{myLead.name}</div>
+                            <div style={{ fontSize:"11px", color:C.gold, fontFamily:FONT, fontWeight:"700", letterSpacing:"-0.01em" }}>TEAM LEAD</div>
                           </div>
                         </div>
                       )}
                       {tech.is_lead&&(
-                        <div style={{ fontSize:"11px", color:C.gold, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", marginBottom:"8px", letterSpacing:"1px" }}>👑 YOU ARE THE TEAM LEAD</div>
+                        <div style={{ fontSize:"11px", color:C.gold, fontFamily:FONT, fontWeight:"600", marginBottom:"8px", letterSpacing:"-0.01em" }}>👑 YOU ARE THE TEAM LEAD</div>
                       )}
                       <div style={{ display:"flex", flexWrap:"wrap", gap:"6px" }}>
                         {myTeam.map(m=>(
                           <div key={m.id} style={{ background:C.cardLt, border:`1px solid ${C.border}`, borderRadius:"20px", padding:"4px 12px" }}>
-                            <span style={{ fontSize:"11px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", color:C.black }}>{m.name}</span>
+                            <span style={{ fontSize:"11px", fontFamily:FONT, fontWeight:"700", color:C.black }}>{m.name}</span>
                           </div>
                         ))}
                         {myTeam.length===0&&<div style={{ fontSize:"12px", color:C.muted }}>No teammates assigned yet</div>}
@@ -3605,7 +3609,7 @@ function TechDashboard({ tech, techs, upsells, switchovers, reviews, callbacks, 
                 </div>
               );
             })()}
-            <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${tier.color}`, borderRadius:"12px", padding:"16px 18px" }}>
+            <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${tier.color}`, borderRadius:"16px", padding:"16px 18px" }}>
               <Label color={tier.color}>Points Breakdown</Label>
               <div style={{ display:"grid", gridTemplateColumns:"repeat(2,1fr)", gap:"8px" }}>
                 {[
@@ -3613,26 +3617,26 @@ function TechDashboard({ tech, techs, upsells, switchovers, reviews, callbacks, 
                   {l:"💰 Upsells",   v:tt.upsellPts,  c:C.green},
                   {l:"🔄 Switchovers",  v:tt.switchPts,  c:C.blue},
                   {l:"⭐ Reviews",   v:tt.reviewPts,  c:C.gold},
-                  ...(tt.callbackCount>0?[{l:`📞 Callbacks (${tt.callbackCount})`, v:tt.callbackPts, c:"#ef4444"}]:[]),
+                  ...(tt.callbackCount>0?[{l:`📞 Callbacks (${tt.callbackCount})`, v:tt.callbackPts, c:"#ff3b30"}]:[]),
                   ...(tech.is_lead?(()=>{ const {overridePts,overridePct,allTeamHit,partialHit}=calcTeamOverride(tech,techs,upsells,switchovers,reviews,callbacks||[],q,jobs); const active=allTeamHit||partialHit; return [{l:`👥 Team Override (${active?Math.round(overridePct*100)+"% unlocked":"locked"})`,v:active?`+${overridePts}`:"—",c:active?C.gold:C.muted}]; })():[]),
                 ].map(item=>(
-                  <div key={item.l} style={{ background:C.cardLt, borderRadius:"4px", padding:"10px 12px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                  <div key={item.l} style={{ background:C.cardLt, borderRadius:"8px", padding:"10px 12px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
                     <span style={{ fontSize:"12px", color:C.muted }}>{item.l}</span>
-                    <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"18px", color:item.c }}>{item.v.toLocaleString()}</span>
+                    <span style={{ fontFamily:FONT, fontWeight:"700", fontSize:"18px", color:item.c }}>{item.v.toLocaleString()}</span>
                   </div>
                 ))}
               </div>
             </div>
             {tech.badges.length>0&&(
-              <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"16px 18px" }}>
+              <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"16px 18px" }}>
                 <Label>My Badges</Label>
                 <div style={{ display:"flex", flexWrap:"wrap", gap:"6px" }}>
                   {ALL_BADGE_DEFS.filter(b=>tech.badges?.includes(b.id)).map(b=>(
-                    <div key={b.id} style={{ background:`${C.blue}18`, border:`1px solid ${C.blue}44`, borderRadius:"4px", padding:"6px 10px", display:"flex", alignItems:"center", gap:"6px" }}>
+                    <div key={b.id} style={{ background:`${C.blue}18`, border:`1px solid ${C.blue}44`, borderRadius:"8px", padding:"6px 10px", display:"flex", alignItems:"center", gap:"6px" }}>
                       <span style={{ fontSize:"16px" }}>{b.icon}</span>
                       <div>
-                        <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", fontSize:"12px", color:C.black }}>{b.name}</div>
-                        <div style={{ fontSize:"10px", color:C.blue, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>+{b.pts} PTS</div>
+                        <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"12px", color:C.black }}>{b.name}</div>
+                        <div style={{ fontSize:"11px", color:C.blue, fontFamily:FONT, fontWeight:"700" }}>+{b.pts} PTS</div>
                       </div>
                     </div>
                   ))}
@@ -3671,7 +3675,7 @@ function TechDashboard({ tech, techs, upsells, switchovers, reviews, callbacks, 
         {tab==="callbacks"&&CALLBACK_ENTRY_TECHS.has(tech.id)&&<CallbacksPanel techs={techs} jobs={jobs||[]} callbacks={callbacks||[]} refreshAll={refreshAll} showToast={showToast}/>}
       </div>
       {toast&&(
-        <div style={{ position:"fixed", bottom:"24px", left:"50%", transform:"translateX(-50%)", background:toast.ok?C.green:"#ef4444", color:C.white, padding:"12px 28px", borderRadius:"24px", fontSize:"14px", fontWeight:"900", zIndex:999, whiteSpace:"nowrap", fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:"1px", fontStyle:"italic", boxShadow:"0 4px 20px rgba(0,0,0,0.15)" }}>
+        <div style={{ position:"fixed", bottom:"24px", left:"50%", transform:"translateX(-50%)", background:toast.ok?C.green:"#ff3b30", color:C.white, padding:"12px 28px", borderRadius:"24px", fontSize:"14px", fontWeight:"700", zIndex:999, whiteSpace:"nowrap", fontFamily:FONT, letterSpacing:"-0.01em", fontStyle:"normal", boxShadow:"0 4px 20px rgba(0,0,0,0.15)" }}>
           {toast.msg}
         </div>
       )}
@@ -3687,7 +3691,7 @@ function DeleteTab({ techs, upsells, switchovers, reviews, saving, setSaving, re
   const [section, setSection] = useState("upsells");
   const [filterTech, setFilterTech] = useState("");
 
-  const selStyle = { background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"8px 12px", borderRadius:"12px", fontSize:"13px", fontFamily:"'Barlow',sans-serif", width:"100%", cursor:"pointer" };
+  const selStyle = { background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"8px 12px", borderRadius:"16px", fontSize:"13px", fontFamily:FONT, width:"100%", cursor:"pointer" };
 
   async function deleteUpsell(id) {
     if (!window.confirm("Delete this upsell entry?")) return;
@@ -3717,14 +3721,14 @@ function DeleteTab({ techs, upsells, switchovers, reviews, saving, setSaving, re
 
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:"14px" }}>
-      <div style={{ background:`#ff444418`, border:`1px solid #ff444444`, borderRadius:"12px", padding:"12px 16px", fontSize:"12px", color:C.muted }}>
-        <span style={{ color:C.red, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800" }}>⚠️ DELETE ZONE</span> — Deletions are permanent. Use this to remove test data or mistakes.
+      <div style={{ background:`#ff444418`, border:`1px solid #ff444444`, borderRadius:"16px", padding:"12px 16px", fontSize:"12px", color:C.muted }}>
+        <span style={{ color:C.red, fontFamily:FONT, fontWeight:"600" }}>⚠️ DELETE ZONE</span> — Deletions are permanent. Use this to remove test data or mistakes.
       </div>
 
       {/* Section picker */}
       <div style={{ display:"flex", gap:"8px" }}>
         {[["upsells","💰 Upsells"],["switchovers","🔄 Switchovers"],["reviews","⭐ Reviews"]].map(([id,label])=>(
-          <button key={id} onClick={()=>setSection(id)} style={{ background:section===id?C.red:C.card, border:`1px solid ${section===id?C.red:C.border}`, color:section===id?C.white:C.muted, padding:"8px 14px", borderRadius:"4px", cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", fontSize:"11px", letterSpacing:"1px" }}>{label}</button>
+          <button key={id} onClick={()=>setSection(id)} style={{ background:section===id?C.red:C.card, border:`1px solid ${section===id?C.red:C.border}`, color:section===id?C.white:C.muted, padding:"8px 14px", borderRadius:"8px", cursor:"pointer", fontFamily:FONT, fontWeight:"700", fontSize:"11px", letterSpacing:"-0.01em" }}>{label}</button>
         ))}
       </div>
 
@@ -3741,12 +3745,12 @@ function DeleteTab({ techs, upsells, switchovers, reviews, saving, setSaving, re
           {filteredUpsells.map(u=>{
             const tech=techs.find(t=>t.id===u.tech_id);
             return (
-              <div key={u.id} style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"12px 16px", display:"flex", alignItems:"center", justifyContent:"space-between", gap:"12px" }}>
+              <div key={u.id} style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"12px 16px", display:"flex", alignItems:"center", justifyContent:"space-between", gap:"12px" }}>
                 <div>
-                  <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"15px", color:C.black }}>{tech?.name}</div>
+                  <div style={{ fontFamily:FONT, fontWeight:"600", fontSize:"15px", color:C.black }}>{tech?.name}</div>
                   <div style={{ fontSize:"12px", color:C.muted }}>{formatWeekLabel(u.week_key)} · <span style={{ color:C.green, fontWeight:"700" }}>${u.amount?.toLocaleString()}</span></div>
                 </div>
-                <button onClick={()=>deleteUpsell(u.id)} disabled={saving} style={{ background:"none", border:`1px solid ${C.red}`, color:C.red, padding:"6px 12px", borderRadius:"4px", cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", fontSize:"12px", letterSpacing:"1px", flexShrink:0 }}>DELETE</button>
+                <button onClick={()=>deleteUpsell(u.id)} disabled={saving} style={{ background:"none", border:`1px solid ${C.red}`, color:C.red, padding:"6px 12px", borderRadius:"8px", cursor:"pointer", fontFamily:FONT, fontWeight:"700", fontSize:"12px", letterSpacing:"-0.01em", flexShrink:0 }}>DELETE</button>
               </div>
             );
           })}
@@ -3762,12 +3766,12 @@ function DeleteTab({ techs, upsells, switchovers, reviews, saving, setSaving, re
             const plan=PLAN_MAP[s.plan_id];
             const pc=PLAN_COLORS[s.plan_id]||C.muted;
             return (
-              <div key={s.id} style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"12px 16px", display:"flex", alignItems:"center", justifyContent:"space-between", gap:"12px" }}>
+              <div key={s.id} style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"12px 16px", display:"flex", alignItems:"center", justifyContent:"space-between", gap:"12px" }}>
                 <div>
-                  <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"15px", color:C.black }}>{tech?.name}</div>
+                  <div style={{ fontFamily:FONT, fontWeight:"600", fontSize:"15px", color:C.black }}>{tech?.name}</div>
                   <div style={{ fontSize:"12px", color:C.muted }}>{formatWeekLabel(s.week_key)} · <span style={{ color:pc, fontWeight:"700" }}>{plan?.label||s.plan_id} · +{plan?.pts||0}pts</span></div>
                 </div>
-                <button onClick={()=>deleteSwitchover(s.id)} disabled={saving} style={{ background:"none", border:`1px solid ${C.red}`, color:C.red, padding:"6px 12px", borderRadius:"4px", cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", fontSize:"12px", letterSpacing:"1px", flexShrink:0 }}>DELETE</button>
+                <button onClick={()=>deleteSwitchover(s.id)} disabled={saving} style={{ background:"none", border:`1px solid ${C.red}`, color:C.red, padding:"6px 12px", borderRadius:"8px", cursor:"pointer", fontFamily:FONT, fontWeight:"700", fontSize:"12px", letterSpacing:"-0.01em", flexShrink:0 }}>DELETE</button>
               </div>
             );
           })}
@@ -3781,12 +3785,12 @@ function DeleteTab({ techs, upsells, switchovers, reviews, saving, setSaving, re
           {filteredReviews.map(r=>{
             const tech=techs.find(t=>t.id===r.tech_id);
             return (
-              <div key={r.id} style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"12px 16px", display:"flex", alignItems:"center", justifyContent:"space-between", gap:"12px" }}>
+              <div key={r.id} style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"12px 16px", display:"flex", alignItems:"center", justifyContent:"space-between", gap:"12px" }}>
                 <div>
-                  <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"15px", color:C.black }}>{tech?.name}</div>
+                  <div style={{ fontFamily:FONT, fontWeight:"600", fontSize:"15px", color:C.black }}>{tech?.name}</div>
                   <div style={{ fontSize:"12px", color:C.muted }}>{formatMonthLabel(r.month_key)} · <span style={{ color:C.gold, fontWeight:"700" }}>{r.count} ⭐</span></div>
                 </div>
-                <button onClick={()=>deleteReview(r.id)} disabled={saving} style={{ background:"none", border:`1px solid ${C.red}`, color:C.red, padding:"6px 12px", borderRadius:"4px", cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", fontSize:"12px", letterSpacing:"1px", flexShrink:0 }}>DELETE</button>
+                <button onClick={()=>deleteReview(r.id)} disabled={saving} style={{ background:"none", border:`1px solid ${C.red}`, color:C.red, padding:"6px 12px", borderRadius:"8px", cursor:"pointer", fontFamily:FONT, fontWeight:"700", fontSize:"12px", letterSpacing:"-0.01em", flexShrink:0 }}>DELETE</button>
               </div>
             );
           })}
@@ -3812,8 +3816,8 @@ function AdminTimeEditor({ techs, timeEntries, start, end, refreshAll, showToast
   const entries = timeEntries.filter(e => e.tech_id===techId && e.work_date>=start && e.work_date<=end)
     .sort((a,b) => b.work_date.localeCompare(a.work_date) || a.clock_in.localeCompare(b.clock_in));
   const days = [...new Set(entries.map(e => e.work_date))];
-  const inp = { background:C.white, border:`1px solid ${C.border}`, color:C.black, padding:"8px", borderRadius:"8px", fontSize:"13px" };
-  const small = (bg, fg=C.white) => ({ background:bg, border:"none", color:fg, padding:"6px 12px", borderRadius:"8px", cursor:"pointer", fontSize:"12px", fontWeight:"700" });
+  const inp = { background:C.white, border:`1px solid ${C.border}`, color:C.black, padding:"8px", borderRadius:"10px", fontSize:"13px" };
+  const small = (bg, fg=C.white) => ({ background:bg, border:"none", color:fg, padding:"6px 12px", borderRadius:"10px", cursor:"pointer", fontSize:"12px", fontWeight:"700" });
 
   function toIsoPair(date, tin, tout) {
     if (!tin) throw new Error("Clock-in time is required");
@@ -3850,7 +3854,7 @@ function AdminTimeEditor({ techs, timeEntries, start, end, refreshAll, showToast
   }
 
   return (
-    <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.purple}`, borderRadius:"12px", padding:"16px 18px", display:"flex", flexDirection:"column", gap:"10px" }}>
+    <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"16px 18px", display:"flex", flexDirection:"column", gap:"10px" }}>
       <Label color={C.purple}>✏️ Edit a Tech's Time · {start} → {end}</Label>
       <select value={techId} onChange={e=>{ setTechId(e.target.value); setEditing(null); }} style={{ ...inp, width:"100%" }}>
         <option value="">— Select Tech —</option>
@@ -3863,7 +3867,7 @@ function AdminTimeEditor({ techs, timeEntries, start, end, refreshAll, showToast
           const dayEntries = entries.filter(e => e.work_date===d);
           const total = dayEntries.reduce((s,e)=>s+sessionHours(e),0);
           return (
-            <div key={d} style={{ background:C.cardLt, borderRadius:"8px", padding:"10px 12px" }}>
+            <div key={d} style={{ background:C.cardLt, borderRadius:"10px", padding:"10px 12px" }}>
               <div style={{ display:"flex", justifyContent:"space-between", fontSize:"13px", fontWeight:"700", color:C.black }}>
                 <span>{new Date(d+"T12:00:00Z").toLocaleDateString("en-US",{ weekday:"short", month:"short", day:"numeric", timeZone:"UTC" })}</span>
                 <span>{total.toFixed(2)}h</span>
@@ -3989,12 +3993,12 @@ function AdminTimeSheetTab({ techs, timeEntries, refreshAll, showToast, lockedTe
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:"16px" }}>
       <DateRangePicker label="🕒 Time Sheet" color={C.blue} preset={rangePreset} setPreset={setRangePreset} customStart={cStart} setCustomStart={setCStart} customEnd={cEnd} setCustomEnd={setCEnd}>
-        <div style={{ fontSize:"11px", color:C.blue, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", marginTop:"8px" }}>
+        <div style={{ fontSize:"11px", color:C.blue, fontFamily:FONT, fontWeight:"700", marginTop:"8px" }}>
           {start} → {end} · {rankedTechs.length} tech{rankedTechs.length!==1?"s":""} with hours
         </div>
       </DateRangePicker>
 
-      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.blue}`, borderRadius:"12px", overflow:"hidden" }}>
+      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", overflow:"hidden" }}>
         <div style={{ padding:"14px 18px", borderBottom:`1px solid ${C.border}`, background:C.cardLt }}>
           <Label color={C.blue}>🕒 Hours by Tech · {start} → {end}</Label>
         </div>
@@ -4003,7 +4007,7 @@ function AdminTimeSheetTab({ techs, timeEntries, refreshAll, showToast, lockedTe
           {rankedTechs.map((t,i)=>(
             <div key={t.id} style={{ display:"flex", justifyContent:"space-between" }}>
               <span style={{ fontSize:"13px", color:C.black }}>{medal(i)} {t.name}</span>
-              <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"13px", color:C.black }}>{t.hours.toFixed(2)}h</span>
+              <span style={{ fontFamily:FONT, fontWeight:"600", fontSize:"13px", color:C.black }}>{t.hours.toFixed(2)}h</span>
             </div>
           ))}
         </div>
@@ -4011,21 +4015,21 @@ function AdminTimeSheetTab({ techs, timeEntries, refreshAll, showToast, lockedTe
 
       <AdminTimeEditor techs={techs} timeEntries={timeEntries} start={start} end={end} refreshAll={refreshAll} showToast={showToast} lockedTechId={lockedTechId}/>
 
-      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.orange}`, borderRadius:"12px", padding:"20px", display:"flex", flexDirection:"column", gap:"12px" }}>
+      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"20px", display:"flex", flexDirection:"column", gap:"12px" }}>
         <Label color={C.orange}>Bulk Import — One-Time Backfill</Label>
         <div style={{ fontSize:"12px", color:C.muted, display:"flex", flexDirection:"column", gap:"4px" }}>
           <div>Two line formats, mix freely — one entry per line:</div>
           <div>• Per-session: <code>Tech Name, YYYY-MM-DD, HH:MM, HH:MM</code> (24-hour, Mountain Time). Same tech + date twice = two sessions that day (e.g. a lunch break).</div>
           <div>• Weekly total (historical, no daily breakdown available): <code>Tech Name: Month Day TotalHours</code> — day must be a <strong>Sunday</strong> (weeks run Sun–Sat). Spread evenly across 4 synthetic Mon–Thu sessions so daily numbers stay plausible while the weekly total still rolls up correctly.</div>
         </div>
-        <textarea value={bulkText} onChange={e=>setBulkText(e.target.value)} rows={8} placeholder={"Riley Lyon, 2026-06-02, 08:15, 16:30\nTom Lorenc, 2026-06-02, 07:30, 15:00\nJaMuar Hill: July 4 37.18"} style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"10px", borderRadius:"8px", fontSize:"12px", fontFamily:"monospace", width:"100%", boxSizing:"border-box", resize:"vertical" }}/>
-        <button onClick={runImport} disabled={importing||!bulkText.trim()} style={{ background:importing?"#333":C.orange, border:"none", color:C.white, padding:"13px", borderRadius:"12px", cursor:(importing||!bulkText.trim())?"not-allowed":"pointer", fontSize:"13px", fontWeight:"700", letterSpacing:"2px", fontFamily:"'Barlow Condensed',sans-serif", width:"100%", textTransform:"uppercase" }}>
+        <textarea value={bulkText} onChange={e=>setBulkText(e.target.value)} rows={8} placeholder={"Riley Lyon, 2026-06-02, 08:15, 16:30\nTom Lorenc, 2026-06-02, 07:30, 15:00\nJaMuar Hill: July 4 37.18"} style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"10px", borderRadius:"10px", fontSize:"12px", fontFamily:"monospace", width:"100%", boxSizing:"border-box", resize:"vertical" }}/>
+        <button onClick={runImport} disabled={importing||!bulkText.trim()} style={{ background:importing?"#333":C.orange, border:"none", color:C.white, padding:"13px", borderRadius:"16px", cursor:(importing||!bulkText.trim())?"not-allowed":"pointer", fontSize:"13px", fontWeight:"700", letterSpacing:"-0.01em", fontFamily:FONT, width:"100%", textTransform:"none" }}>
           {importing ? "Importing..." : "Import Sessions"}
         </button>
         {importResult && (
           importResult.ok
             ? <div style={{ fontSize:"12px", color:C.green }}>✅ Imported {importResult.count} session{importResult.count===1?"":"s"}.</div>
-            : <div style={{ background:"#ef444418", border:"1px solid #ef4444", borderRadius:"8px", padding:"10px", fontSize:"11px", color:"#ef4444", maxHeight:"200px", overflowY:"auto", display:"flex", flexDirection:"column", gap:"4px" }}>
+            : <div style={{ background:"#ef444418", border:"1px solid #ef4444", borderRadius:"10px", padding:"10px", fontSize:"11px", color:"#ff3b30", maxHeight:"200px", overflowY:"auto", display:"flex", flexDirection:"column", gap:"4px" }}>
                 {importResult.errors.map((e,i)=><div key={i}>{e}</div>)}
               </div>
         )}
@@ -4107,41 +4111,41 @@ function AdminUpsellEntry({ techs, refreshAll, showToast, upsells, jobs=[] }) {
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:"16px" }}>
       {/* ── Repair / Backfill ── */}
-      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.orange}`, borderRadius:"12px", padding:"20px", display:"flex", flexDirection:"column", gap:"12px" }}>
+      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"20px", display:"flex", flexDirection:"column", gap:"12px" }}>
         <Label color={C.orange}>Repair Upsells from HCP</Label>
         <div style={{ fontSize:"12px", color:C.muted }}>Scans every "Additional Upgrades" line item across a custom date range and writes the real amounts to the board. Use this to fix missing or wrong upsells.</div>
         <DateRangePicker label="📅 Date Range" color={C.orange} preset={repairPreset} setPreset={setRepairPreset} customStart={repairCStart} setCustomStart={setRepairCStart} customEnd={repairCEnd} setCustomEnd={setRepairCEnd}>
-          <div style={{ fontSize:"11px", color:C.orange, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", marginTop:"8px" }}>
+          <div style={{ fontSize:"11px", color:C.orange, fontFamily:FONT, fontWeight:"700", marginTop:"8px" }}>
             {repairFrom} → {repairTo}
           </div>
         </DateRangePicker>
-        <button onClick={repairFromHCP} disabled={repairing} style={{ background:repairing?"#333":C.orange, border:"none", color:C.white, padding:"13px", borderRadius:"12px", cursor:repairing?"not-allowed":"pointer", fontSize:"13px", fontWeight:"700", letterSpacing:"2px", fontFamily:"'Barlow Condensed',sans-serif", width:"100%", textTransform:"uppercase" }}>
+        <button onClick={repairFromHCP} disabled={repairing} style={{ background:repairing?"#333":C.orange, border:"none", color:C.white, padding:"13px", borderRadius:"16px", cursor:repairing?"not-allowed":"pointer", fontSize:"13px", fontWeight:"700", letterSpacing:"-0.01em", fontFamily:FONT, width:"100%", textTransform:"none" }}>
           {repairing ? "Scanning HCP — this may take ~20 sec..." : "Repair Upsells"}
         </button>
         {repairResult && (
           <div style={{ display:"flex", flexDirection:"column", gap:"8px" }}>
-            <div style={{ background:C.cardLt, borderRadius:"8px", padding:"10px 14px", fontSize:"12px", color:C.muted, display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:"8px" }}>
+            <div style={{ background:C.cardLt, borderRadius:"10px", padding:"10px 14px", fontSize:"12px", color:C.muted, display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:"8px" }}>
               <span>
                 Scanned <strong style={{color:C.black}}>{repairResult.jobsScanned}</strong> jobs · matched <strong style={{color:C.black}}>{repairResult.invoicesMatched}</strong> invoices · wrote <strong style={{color:C.orange}}>{repairResult.upsellsFound} upsell{repairResult.upsellsFound===1?"":"s"}</strong> to the board
               </span>
               {repairResult.jobs && repairResult.jobs.length > 0 && (
                 <div style={{ display:"flex", gap:"6px" }}>
-                  <button onClick={()=>setUpsExpanded(v=>!v)} style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"5px 10px", borderRadius:"4px", cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", fontSize:"11px", letterSpacing:"1px" }}>
+                  <button onClick={()=>setUpsExpanded(v=>!v)} style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"5px 10px", borderRadius:"8px", cursor:"pointer", fontFamily:FONT, fontWeight:"700", fontSize:"11px", letterSpacing:"-0.01em" }}>
                     {upsExpanded ? "COLLAPSE" : "VIEW FULL REPORT"}
                   </button>
-                  <button onClick={exportUpsellsCSV} style={{ background:C.green, border:"none", color:C.black, padding:"5px 10px", borderRadius:"4px", cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", fontSize:"11px", letterSpacing:"1px" }}>
+                  <button onClick={exportUpsellsCSV} style={{ background:C.green, border:"none", color:C.black, padding:"5px 10px", borderRadius:"8px", cursor:"pointer", fontFamily:FONT, fontWeight:"700", fontSize:"11px", letterSpacing:"-0.01em" }}>
                     EXPORT CSV
                   </button>
                 </div>
               )}
             </div>
             {repairResult.jobs && repairResult.jobs.length > 0 && (
-              <div style={{ overflowX:"auto", maxHeight: upsExpanded ? "none" : "320px", overflowY:"auto", borderRadius:"8px", border:`1px solid ${C.border}` }}>
-                <table style={{ width:"100%", borderCollapse:"collapse", fontSize:"11px", fontFamily:"'Barlow',sans-serif" }}>
+              <div style={{ overflowX:"auto", maxHeight: upsExpanded ? "none" : "320px", overflowY:"auto", borderRadius:"10px", border:`1px solid ${C.border}` }}>
+                <table style={{ width:"100%", borderCollapse:"collapse", fontSize:"11px", fontFamily:FONT }}>
                   <thead>
                     <tr style={{ background:C.card, position:"sticky", top:0 }}>
                       {["Job ID","Tech","Date","Revenue","Discount","Upsells","Invoice"].map(h => (
-                        <th key={h} style={{ padding:"6px 10px", textAlign:"left", color:C.muted, fontWeight:"700", letterSpacing:"1px", fontFamily:"'Barlow Condensed',sans-serif", whiteSpace:"nowrap", borderBottom:`1px solid ${C.border}` }}>{h}</th>
+                        <th key={h} style={{ padding:"6px 10px", textAlign:"left", color:C.muted, fontWeight:"700", letterSpacing:"-0.01em", fontFamily:FONT, whiteSpace:"nowrap", borderBottom:`1px solid ${C.border}` }}>{h}</th>
                       ))}
                     </tr>
                   </thead>
@@ -4183,17 +4187,17 @@ function AdminUpsellEntry({ techs, refreshAll, showToast, upsells, jobs=[] }) {
         rangeInRange.forEach(u => { rangeByTech[u.tech_id] = (rangeByTech[u.tech_id]||0) + (u.amount||0); });
         const rangeRanked = [...techs].map(t=>({...t, amt: rangeByTech[t.id]||0})).sort((a,b)=>b.amt-a.amt);
         return (
-          <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"16px 18px" }}>
+          <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"16px 18px" }}>
             <Label color={C.green}>Upsell Totals · {repairFrom} → {repairTo}</Label>
             {noDateEntries.length>0&&(
-              <div style={{ background:C.cardLt, borderRadius:"8px", padding:"8px 12px", fontSize:"11px", color:C.muted, marginBottom:"10px" }}>
+              <div style={{ background:C.cardLt, borderRadius:"10px", padding:"8px 12px", fontSize:"11px", color:C.muted, marginBottom:"10px" }}>
                 ⚠ {noDateEntries.length} entr{noDateEntries.length!==1?"ies":"y"} totaling ${noDateTotal.toLocaleString()} {noDateEntries.length!==1?"have":"has"} no matched completion date (manually entered, not tied to an HCP job) — excluded from this range.
               </div>
             )}
             {rangeRanked.map((t,i)=>(
               <div key={t.id} style={{ display:"flex", justifyContent:"space-between", marginBottom:"8px" }}>
                 <span style={{ fontSize:"13px", color:C.black }}>{medal(i)} {t.name}</span>
-                <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", color:C.green }}>${t.amt.toLocaleString()} · {Math.round(t.amt*UPSELL_PTS_PER_DOLLAR)} pts</span>
+                <span style={{ fontFamily:FONT, fontWeight:"600", color:C.green }}>${t.amt.toLocaleString()} · {Math.round(t.amt*UPSELL_PTS_PER_DOLLAR)} pts</span>
               </div>
             ))}
           </div>
@@ -4252,11 +4256,11 @@ function AdminReviewEntry({ techs, reviews, saving, setSaving, refreshAll, showT
 
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:"16px" }}>
-    <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.gold}`, borderRadius:"12px", padding:"20px", display:"flex", flexDirection:"column", gap:"14px" }}>
+    <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"20px", display:"flex", flexDirection:"column", gap:"14px" }}>
       <Label color={C.gold}>Log 5-Star Reviews</Label>
       <div style={{ fontSize:"12px", color:C.muted }}>+{REVIEW_PTS} pts each · +{REVIEW_BONUS_PTS} bonus at 10+ · Log current or any past month</div>
 
-      <div style={{ background:C.cardLt, borderRadius:"8px", padding:"8px 12px", fontSize:"12px", color:C.muted }}>
+      <div style={{ background:C.cardLt, borderRadius:"10px", padding:"8px 12px", fontSize:"12px", color:C.muted }}>
         {formatLastEntered(mostRecentTimestamp(reviews)) ? (
           <>Last entered: <strong style={{ color:C.black }}>{formatLastEntered(mostRecentTimestamp(reviews))}</strong> — everything before that is already logged.</>
         ) : "No reviews logged yet."}
@@ -4264,7 +4268,7 @@ function AdminReviewEntry({ techs, reviews, saving, setSaving, refreshAll, showT
 
       <div>
         <div style={{ fontSize:"11px", color:C.muted, marginBottom:"6px" }}>Select month</div>
-        <select value={targetMonth} onChange={e=>{ setTargetMonth(e.target.value); setForm({}); }} style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"8px 12px", borderRadius:"12px", fontSize:"14px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", width:"100%", cursor:"pointer" }}>
+        <select value={targetMonth} onChange={e=>{ setTargetMonth(e.target.value); setForm({}); }} style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"8px 12px", borderRadius:"16px", fontSize:"14px", fontFamily:FONT, fontWeight:"700", width:"100%", cursor:"pointer" }}>
           <option value={mk}>{formatMonthLabel(mk)} — Current</option>
           {existingMonths.filter(m=>m!==mk).map(m=><option key={m} value={m}>{formatMonthLabel(m)}</option>)}
           {/* generate last 12 months as options */}
@@ -4276,32 +4280,32 @@ function AdminReviewEntry({ techs, reviews, saving, setSaving, refreshAll, showT
         </select>
       </div>
 
-      <div style={{ background:C.cardLt, borderRadius:"4px", padding:"8px 12px", fontSize:"12px", color:C.gold, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>
+      <div style={{ background:C.cardLt, borderRadius:"8px", padding:"8px 12px", fontSize:"12px", color:C.gold, fontFamily:FONT, fontWeight:"700" }}>
         Logging for: {formatMonthLabel(targetMonth)}{targetMonth===mk?" (Current Month)":""}
       </div>
 
       {techs.map(t=>(
         <div key={t.id} style={{ display:"flex", alignItems:"center", gap:"12px" }}>
           <div style={{ width:"150px" }}>
-            <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", fontSize:"15px", color:C.black }}>{t.name}</div>
+            <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"15px", color:C.black }}>{t.name}</div>
             <div style={{ fontSize:"11px", color:C.muted }}>logged: {monthData[t.id]||0} ⭐</div>
           </div>
           <div style={{ display:"flex", alignItems:"center", gap:"6px", flex:1 }}>
             <span style={{ color:C.gold, fontSize:"16px" }}>⭐</span>
-            <input type="number" placeholder={monthData[t.id]||"0"} value={form[t.id]||""} onChange={e=>setForm(f=>({...f,[t.id]:e.target.value}))} style={{ background:C.card, border:`1px solid ${C.border}`, color:C.black, padding:"8px 10px", borderRadius:"12px", fontSize:"14px", fontFamily:"'Barlow Condensed',sans-serif", width:"100%", fontWeight:"700" }}/>
+            <input type="number" placeholder={monthData[t.id]||"0"} value={form[t.id]||""} onChange={e=>setForm(f=>({...f,[t.id]:e.target.value}))} style={{ background:C.card, border:`1px solid ${C.border}`, color:C.black, padding:"8px 10px", borderRadius:"16px", fontSize:"14px", fontFamily:FONT, width:"100%", fontWeight:"700" }}/>
           </div>
         </div>
       ))}
-      <button onClick={handleSave} disabled={saving} style={{ background:saving?"#333":C.gold, border:"none", color:saving?"#666":C.black, padding:"13px", borderRadius:"12px", cursor:saving?"not-allowed":"pointer", fontSize:"13px", fontWeight:"700", letterSpacing:"2px", fontFamily:"'Barlow Condensed',sans-serif", width:"100%", textTransform:"uppercase" }}>{saving?"Saving...":"Save Reviews"}</button>
+      <button onClick={handleSave} disabled={saving} style={{ background:saving?"#333":C.gold, border:"none", color:saving?"#666":C.black, padding:"13px", borderRadius:"16px", cursor:saving?"not-allowed":"pointer", fontSize:"13px", fontWeight:"700", letterSpacing:"-0.01em", fontFamily:FONT, width:"100%", textTransform:"none" }}>{saving?"Saving...":"Save Reviews"}</button>
     </div>
 
     <DateRangePicker label="📅 Date Range" color={C.gold} preset={rangePreset} setPreset={setRangePreset} customStart={cStart} setCustomStart={setCStart} customEnd={cEnd} setCustomEnd={setCEnd}>
-      <div style={{ fontSize:"11px", color:C.gold, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", marginTop:"8px" }}>
+      <div style={{ fontSize:"11px", color:C.gold, fontFamily:FONT, fontWeight:"700", marginTop:"8px" }}>
         {rangeStart} → {rangeEnd} · matched by month (reviews are logged by month, not exact day)
       </div>
     </DateRangePicker>
 
-    <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.gold}`, borderRadius:"12px", overflow:"hidden" }}>
+    <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", overflow:"hidden" }}>
       <div style={{ padding:"14px 18px", borderBottom:`1px solid ${C.border}`, background:C.cardLt }}>
         <Label color={C.gold}>⭐ Review Totals · {rangeStart} → {rangeEnd}</Label>
       </div>
@@ -4310,7 +4314,7 @@ function AdminReviewEntry({ techs, reviews, saving, setSaving, refreshAll, showT
         {rangeRanked.map((t,i)=>(
           <div key={t.id} style={{ display:"flex", justifyContent:"space-between" }}>
             <span style={{ fontSize:"13px", color:C.black }}>{medal(i)} {t.name}</span>
-            <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"13px", color:C.black }}>{t.count} ⭐</span>
+            <span style={{ fontFamily:FONT, fontWeight:"600", fontSize:"13px", color:C.black }}>{t.count} ⭐</span>
           </div>
         ))}
       </div>
@@ -4359,11 +4363,11 @@ function AdminTipEntry({ techs, tipEntries, refreshAll, showToast }) {
 
   const recent = [...tipEntries].sort((a,b)=>(b.created_at||"").localeCompare(a.created_at||"")).slice(0,25);
   const techById = Object.fromEntries(techs.map(t=>[t.id,t]));
-  const selStyle = (val) => ({ background:C.cardLt, border:`1px solid ${C.border}`, color:val?C.black:C.muted, padding:"10px 14px", borderRadius:"12px", fontSize:"14px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", width:"100%", boxSizing:"border-box", cursor:"pointer" });
+  const selStyle = (val) => ({ background:C.cardLt, border:`1px solid ${C.border}`, color:val?C.black:C.muted, padding:"10px 14px", borderRadius:"16px", fontSize:"14px", fontFamily:FONT, fontWeight:"700", width:"100%", boxSizing:"border-box", cursor:"pointer" });
 
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:"16px" }}>
-      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.gold}`, borderRadius:"12px", padding:"20px", display:"flex", flexDirection:"column", gap:"12px" }}>
+      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"20px", display:"flex", flexDirection:"column", gap:"12px" }}>
         <Label color={C.gold}>Log a Tip</Label>
         <div style={{ fontSize:"12px", color:C.muted }}>Manual entry only — this is the source of truth for tip totals everywhere in the app (Reports, Payroll, etc.).</div>
         <select value={form.techId} onChange={e=>setForm(f=>({...f,techId:e.target.value}))} style={selStyle(form.techId)}>
@@ -4371,20 +4375,20 @@ function AdminTipEntry({ techs, tipEntries, refreshAll, showToast }) {
           {techs.filter(t=>t.is_active!==false).map(t=><option key={t.id} value={t.id}>{t.name}</option>)}
         </select>
         <div>
-          <div style={{ fontSize:"10px", color:C.muted, letterSpacing:"2px", textTransform:"uppercase", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", marginBottom:"6px" }}>Date</div>
-          <input type="date" value={form.date} onChange={e=>setForm(f=>({...f,date:e.target.value}))} style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"10px 14px", borderRadius:"12px", fontSize:"14px", fontFamily:"'Barlow',sans-serif", width:"100%", boxSizing:"border-box" }}/>
+          <div style={{ fontSize:"11px", color:C.muted, letterSpacing:"-0.01em", textTransform:"none", fontFamily:FONT, fontWeight:"700", marginBottom:"6px" }}>Date</div>
+          <input type="date" value={form.date} onChange={e=>setForm(f=>({...f,date:e.target.value}))} style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"10px 14px", borderRadius:"16px", fontSize:"14px", fontFamily:FONT, width:"100%", boxSizing:"border-box" }}/>
         </div>
         <div>
-          <div style={{ fontSize:"10px", color:C.muted, letterSpacing:"2px", textTransform:"uppercase", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", marginBottom:"6px" }}>Amount</div>
+          <div style={{ fontSize:"11px", color:C.muted, letterSpacing:"-0.01em", textTransform:"none", fontFamily:FONT, fontWeight:"700", marginBottom:"6px" }}>Amount</div>
           <div style={{ display:"flex", alignItems:"center", gap:"10px" }}>
             <span style={{ color:C.gold, fontSize:"16px" }}>$</span>
-            <input type="number" min="0" step="0.01" placeholder="e.g. 20.00" value={form.amount} onChange={e=>setForm(f=>({...f,amount:e.target.value}))} style={{ flex:1, background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"10px 14px", borderRadius:"12px", fontSize:"16px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", boxSizing:"border-box" }}/>
+            <input type="number" min="0" step="0.01" placeholder="e.g. 20.00" value={form.amount} onChange={e=>setForm(f=>({...f,amount:e.target.value}))} style={{ flex:1, background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"10px 14px", borderRadius:"16px", fontSize:"16px", fontFamily:FONT, fontWeight:"600", boxSizing:"border-box" }}/>
           </div>
         </div>
-        <button onClick={logTip} disabled={saving} style={{ background:saving?"#333":C.gold, border:"none", color:C.black, padding:"13px", borderRadius:"12px", cursor:saving?"not-allowed":"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"13px", letterSpacing:"2px", textTransform:"uppercase" }}>{saving?"Saving...":"Log Tip"}</button>
+        <button onClick={logTip} disabled={saving} style={{ background:saving?"#333":C.gold, border:"none", color:C.black, padding:"13px", borderRadius:"16px", cursor:saving?"not-allowed":"pointer", fontFamily:FONT, fontWeight:"700", fontSize:"13px", letterSpacing:"-0.01em", textTransform:"none" }}>{saving?"Saving...":"Log Tip"}</button>
       </div>
 
-      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", overflow:"hidden" }}>
+      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", overflow:"hidden" }}>
         <div style={{ padding:"14px 18px", borderBottom:`1px solid ${C.border}` }}><Label color={C.gold}>Recent Tips</Label></div>
         <div style={{ padding:"14px 18px", display:"flex", flexDirection:"column", gap:"8px" }}>
           {recent.length===0 && <div style={{ fontSize:"13px", color:C.muted, textAlign:"center", padding:"12px" }}>No tips logged yet.</div>}
@@ -4392,8 +4396,8 @@ function AdminTipEntry({ techs, tipEntries, refreshAll, showToast }) {
             <div key={t.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"6px 0", borderBottom:`1px solid ${C.border}` }}>
               <span style={{ fontSize:"13px", color:C.black }}>{techById[t.tech_id]?.name||"Unknown"} · {fmtShortDate(t.work_date)}</span>
               <div style={{ display:"flex", alignItems:"center", gap:"10px" }}>
-                <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"13px", color:C.gold }}>${t.amount.toFixed(2)}</span>
-                <button onClick={()=>deleteTip(t.id)} style={{ background:"none", border:"1px solid #ef4444", color:"#ef4444", padding:"3px 8px", borderRadius:"4px", cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", fontSize:"10px" }}>DELETE</button>
+                <span style={{ fontFamily:FONT, fontWeight:"600", fontSize:"13px", color:C.gold }}>${t.amount.toFixed(2)}</span>
+                <button onClick={()=>deleteTip(t.id)} style={{ background:"none", border:"1px solid #ef4444", color:"#ff3b30", padding:"3px 8px", borderRadius:"8px", cursor:"pointer", fontFamily:FONT, fontWeight:"700", fontSize:"11px" }}>DELETE</button>
               </div>
             </div>
           ))}
@@ -4538,22 +4542,22 @@ function RideAlongTab({ techs, rideAlongs, schedules, onSave, onSaveSchedule, sa
     await onSaveSchedule(date, techId);
   }
 
-  const inp = { background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"10px 14px", borderRadius:"12px", fontSize:"14px", fontFamily:"'Barlow',sans-serif", width:"100%", boxSizing:"border-box", resize:"vertical", minHeight:"80px" };
-  const selStyle = (val) => ({ background:C.cardLt, border:`1px solid ${C.border}`, color:val?C.white:C.muted, padding:"10px 14px", borderRadius:"12px", fontSize:"14px", fontFamily:"'Barlow',sans-serif", width:"100%", boxSizing:"border-box", cursor:"pointer" });
+  const inp = { background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"10px 14px", borderRadius:"16px", fontSize:"14px", fontFamily:FONT, width:"100%", boxSizing:"border-box", resize:"vertical", minHeight:"80px" };
+  const selStyle = (val) => ({ background:C.cardLt, border:`1px solid ${C.border}`, color:val?C.white:C.muted, padding:"10px 14px", borderRadius:"16px", fontSize:"14px", fontFamily:FONT, width:"100%", boxSizing:"border-box", cursor:"pointer" });
 
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:"16px" }}>
       {/* View switcher */}
       <div style={{ display:"flex", gap:"8px", flexWrap:"wrap" }}>
         {[["schedule","📅 Schedule"],["new","✏️ New Ride-Along"],["history","📋 History"]].map(([id,label])=>(
-          <button key={id} onClick={()=>{ setView(id); setViewDetail(null); }} style={{ background:view===id?C.blue:C.card, border:`1px solid ${view===id?C.blue:C.border}`, color:view===id?C.white:C.muted, padding:"8px 16px", borderRadius:"4px", cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", fontSize:"12px", letterSpacing:"1px", textTransform:"uppercase" }}>{label}</button>
+          <button key={id} onClick={()=>{ setView(id); setViewDetail(null); }} style={{ background:view===id?C.blue:C.card, border:`1px solid ${view===id?C.blue:C.border}`, color:view===id?C.white:C.muted, padding:"8px 16px", borderRadius:"8px", cursor:"pointer", fontFamily:FONT, fontWeight:"700", fontSize:"12px", letterSpacing:"-0.01em", textTransform:"none" }}>{label}</button>
         ))}
       </div>
 
       {/* SCHEDULE VIEW */}
       {view==="schedule"&&(
         <div style={{ display:"flex", flexDirection:"column", gap:"10px" }}>
-          <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.blue}`, borderRadius:"12px", padding:"16px 18px" }}>
+          <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"16px 18px" }}>
             <Label color={C.blue}>📅 Thursday Ride-Along Schedule</Label>
             <div style={{ fontSize:"12px", color:C.muted, marginBottom:"14px" }}>Assign a tech to each Thursday. This is your weekly coaching schedule.</div>
             <div style={{ display:"flex", flexDirection:"column", gap:"8px" }}>
@@ -4562,15 +4566,15 @@ function RideAlongTab({ techs, rideAlongs, schedules, onSave, onSaveSchedule, sa
                 const assignedTech = techs.find(t=>t.id===assignedId);
                 const isPast = new Date(date) < new Date(new Date().toISOString().split("T")[0]);
                 return (
-                  <div key={date} style={{ background:C.cardLt, border:`1px solid ${assignedId?C.blue:C.border}`, borderRadius:"12px", padding:"12px 16px", display:"flex", alignItems:"center", gap:"12px", opacity:isPast?0.6:1 }}>
+                  <div key={date} style={{ background:C.cardLt, border:`1px solid ${assignedId?C.blue:C.border}`, borderRadius:"16px", padding:"12px 16px", display:"flex", alignItems:"center", gap:"12px", opacity:isPast?0.6:1 }}>
                     <div style={{ flex:1 }}>
-                      <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"15px", color:C.black }}>{formatDate(date)}</div>
-                      {isPast&&<div style={{ fontSize:"10px", color:C.muted, letterSpacing:"1px", textTransform:"uppercase" }}>Past</div>}
+                      <div style={{ fontFamily:FONT, fontWeight:"600", fontSize:"15px", color:C.black }}>{formatDate(date)}</div>
+                      {isPast&&<div style={{ fontSize:"11px", color:C.muted, letterSpacing:"-0.01em", textTransform:"none" }}>Past</div>}
                     </div>
                     <select
                       value={scheduleMap[date]||""}
                       onChange={e=>handleScheduleChange(date,e.target.value)}
-                      style={{ background:C.card, border:`1px solid ${assignedId?C.blue:C.border}`, color:assignedId?C.blue:C.muted, padding:"6px 10px", borderRadius:"4px", fontSize:"13px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", cursor:"pointer", minWidth:"140px" }}
+                      style={{ background:C.card, border:`1px solid ${assignedId?C.blue:C.border}`, color:assignedId?C.blue:C.muted, padding:"6px 10px", borderRadius:"8px", fontSize:"13px", fontFamily:FONT, fontWeight:"700", cursor:"pointer", minWidth:"140px" }}
                     >
                       <option value="">— Assign Tech —</option>
                       {techs.map(t=><option key={t.id} value={t.id}>{t.name}</option>)}
@@ -4588,13 +4592,13 @@ function RideAlongTab({ techs, rideAlongs, schedules, onSave, onSaveSchedule, sa
             if (!next) return null;
             const tech = techs.find(t=>t.id===scheduleMap[next]);
             return (
-              <div style={{ background:`${C.blue}18`, border:`1px solid ${C.blue}44`, borderRadius:"12px", padding:"16px 18px", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+              <div style={{ background:`${C.blue}18`, border:`1px solid ${C.blue}44`, borderRadius:"16px", padding:"16px 18px", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
                 <div>
-                  <div style={{ fontSize:"10px", color:C.blue, letterSpacing:"2px", textTransform:"uppercase", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", marginBottom:"4px" }}>Next Ride-Along</div>
-                  <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"22px", color:C.black }}>{tech?.name}</div>
+                  <div style={{ fontSize:"11px", color:C.blue, letterSpacing:"-0.01em", textTransform:"none", fontFamily:FONT, fontWeight:"700", marginBottom:"4px" }}>Next Ride-Along</div>
+                  <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"22px", color:C.black }}>{tech?.name}</div>
                   <div style={{ fontSize:"13px", color:C.muted }}>{formatDate(next)}</div>
                 </div>
-                <button onClick={()=>{ setSelectedTech(scheduleMap[next]); setSelectedDate(next); setView("new"); }} style={{ background:C.blue, border:"none", color:C.black, padding:"10px 18px", borderRadius:"4px", cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"13px", letterSpacing:"1px" }}>START SESSION →</button>
+                <button onClick={()=>{ setSelectedTech(scheduleMap[next]); setSelectedDate(next); setView("new"); }} style={{ background:C.blue, border:"none", color:C.black, padding:"10px 18px", borderRadius:"8px", cursor:"pointer", fontFamily:FONT, fontWeight:"700", fontSize:"13px", letterSpacing:"-0.01em" }}>START SESSION →</button>
               </div>
             );
           })()}
@@ -4604,24 +4608,24 @@ function RideAlongTab({ techs, rideAlongs, schedules, onSave, onSaveSchedule, sa
       {/* NEW RIDE-ALONG FORM */}
       {view==="new"&&(
         <div style={{ display:"flex", flexDirection:"column", gap:"14px" }}>
-          <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.green}`, borderRadius:"12px", padding:"16px 18px", display:"flex", flexDirection:"column", gap:"12px" }}>
+          <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"16px 18px", display:"flex", flexDirection:"column", gap:"12px" }}>
             <Label color={C.green}>✏️ New Ride-Along Session</Label>
             <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"10px" }}>
               <select value={selectedTech} onChange={e=>setSelectedTech(e.target.value)} style={selStyle(selectedTech)}>
                 <option value="">— Select Tech —</option>
                 {techs.map(t=><option key={t.id} value={t.id}>{t.name}</option>)}
               </select>
-              <input type="date" value={selectedDate} onChange={e=>setSelectedDate(e.target.value)} style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:selectedDate?C.white:C.muted, padding:"10px 14px", borderRadius:"12px", fontSize:"14px", fontFamily:"'Barlow',sans-serif", width:"100%", boxSizing:"border-box" }}/>
+              <input type="date" value={selectedDate} onChange={e=>setSelectedDate(e.target.value)} style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:selectedDate?C.white:C.muted, padding:"10px 14px", borderRadius:"16px", fontSize:"14px", fontFamily:FONT, width:"100%", boxSizing:"border-box" }}/>
             </div>
           </div>
 
           {loadingRubric&&(
-            <div style={{ background:C.cardLt, border:`1px solid ${C.border}`, borderRadius:"10px", padding:"14px", fontSize:"13px", color:C.muted }}>Loading checklist items...</div>
+            <div style={{ background:C.cardLt, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"14px", fontSize:"13px", color:C.muted }}>Loading checklist items...</div>
           )}
 
           {!loadingRubric&&CHECKLIST_SECTIONS.map(section=>(
-            <div key={section.id} style={{ background:C.card, border:`1px solid ${C.border}`, borderLeft:`3px solid ${C.blue}`, borderRadius:"12px", padding:"16px 18px" }}>
-              <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"18px", color:C.black, letterSpacing:"2px", marginBottom:"14px" }}>{section.icon} {section.title.toUpperCase()}</div>
+            <div key={section.id} style={{ background:C.card, border:`1px solid ${C.border}`, borderLeft:`3px solid ${C.blue}`, borderRadius:"16px", padding:"16px 18px" }}>
+              <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"18px", color:C.black, letterSpacing:"-0.01em", marginBottom:"14px" }}>{section.icon} {section.title.toUpperCase()}</div>
               <div style={{ display:"flex", flexDirection:"column", gap:"10px" }}>
                 {section.itemIds.map(itemId=>{
                   const item = rubricMap[itemId];
@@ -4633,7 +4637,7 @@ function RideAlongTab({ techs, rideAlongs, schedules, onSave, onSaveSchedule, sa
                         <div style={{ display:"flex", gap:"6px", flexShrink:0, marginTop:"2px" }}>
                           {["✅","❌","N/A"].map(val=>(
                             <button key={val} onClick={()=>setChecklist(c=>({...c,[key]:val}))}
-                              style={{ background:checklist[key]===val?( val==="✅"?`${C.green}33`:val==="❌"?"#ff444433":"#ffffff22"):C.cardLt, border:`1px solid ${checklist[key]===val?(val==="✅"?C.green:val==="❌"?C.red:C.muted):C.border}`, color:checklist[key]===val?(val==="✅"?C.green:val==="❌"?C.red:C.white):C.muted, padding:"3px 8px", borderRadius:"4px", cursor:"pointer", fontSize:"11px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", whiteSpace:"nowrap" }}>
+                              style={{ background:checklist[key]===val?( val==="✅"?`${C.green}33`:val==="❌"?"#ff444433":"#ffffff22"):C.cardLt, border:`1px solid ${checklist[key]===val?(val==="✅"?C.green:val==="❌"?C.red:C.muted):C.border}`, color:checklist[key]===val?(val==="✅"?C.green:val==="❌"?C.red:C.white):C.muted, padding:"3px 8px", borderRadius:"8px", cursor:"pointer", fontSize:"11px", fontFamily:FONT, fontWeight:"700", whiteSpace:"nowrap" }}>
                               {val}
                             </button>
                           ))}
@@ -4642,11 +4646,11 @@ function RideAlongTab({ techs, rideAlongs, schedules, onSave, onSaveSchedule, sa
                       </div>
                       {item.has_script&&(
                         <div style={{ marginLeft:"78px" }}>
-                          <button onClick={()=>setExpandedScript(s=>({...s,[item.id]:!s[item.id]}))} style={{ background:"none", border:"none", color:C.blue, fontSize:"11px", cursor:"pointer", padding:"2px 0", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>
+                          <button onClick={()=>setExpandedScript(s=>({...s,[item.id]:!s[item.id]}))} style={{ background:"none", border:"none", color:C.blue, fontSize:"11px", cursor:"pointer", padding:"2px 0", fontFamily:FONT, fontWeight:"700" }}>
                             {expandedScript[item.id]?"▲ Hide Perfect Day script":"▼ View Perfect Day script"}
                           </button>
                           {expandedScript[item.id]&&(
-                            <div style={{ background:C.blueXlt, border:`1px solid ${C.border}`, borderRadius:"6px", padding:"8px 10px", fontSize:"12px", color:C.black, marginTop:"4px", lineHeight:1.5 }}>
+                            <div style={{ background:C.blueXlt, border:`1px solid ${C.border}`, borderRadius:"10px", padding:"8px 10px", fontSize:"12px", color:C.black, marginTop:"4px", lineHeight:1.5 }}>
                               {item.script_text}
                             </div>
                           )}
@@ -4669,20 +4673,20 @@ function RideAlongTab({ techs, rideAlongs, schedules, onSave, onSaveSchedule, sa
           {!loadingRubric&&(() => {
             const livePct = scorePctFromChecklist(checklist);
             return (
-              <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${scoreColor(livePct)}`, borderRadius:"12px", padding:"16px 18px", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+              <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${scoreColor(livePct)}`, borderRadius:"16px", padding:"16px 18px", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
                 <Label color={scoreColor(livePct)}>📊 Live Score</Label>
-                <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"28px", color:scoreColor(livePct) }}>{livePct==null?"—":`${livePct}%`}</div>
+                <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"28px", color:scoreColor(livePct) }}>{livePct==null?"—":`${livePct}%`}</div>
               </div>
             );
           })()}
 
           {/* General notes */}
-          <div style={{ background:C.card, border:`1px solid ${C.border}`, borderLeft:`3px solid ${C.gold}`, borderRadius:"12px", padding:"16px 18px" }}>
-            <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"18px", color:C.black, letterSpacing:"2px", marginBottom:"10px" }}>📝 GENERAL NOTES & COACHING POINTS</div>
+          <div style={{ background:C.card, border:`1px solid ${C.border}`, borderLeft:`3px solid ${C.gold}`, borderRadius:"16px", padding:"16px 18px" }}>
+            <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"18px", color:C.black, letterSpacing:"-0.01em", marginBottom:"10px" }}>📝 GENERAL NOTES & COACHING POINTS</div>
             <textarea value={generalNotes} onChange={e=>setGeneralNotes(e.target.value)} placeholder="Overall session notes, things to work on, wins, action items for next ride-along..." style={{...inp, minHeight:"100px"}}/>
           </div>
 
-          <button onClick={handleSaveRideAlong} disabled={saving||!selectedTech||!selectedDate} style={{ background:saving||!selectedTech||!selectedDate?"#333":C.green, border:"none", color:saving||!selectedTech||!selectedDate?"#666":C.black, padding:"14px", borderRadius:"12px", cursor:saving||!selectedTech||!selectedDate?"not-allowed":"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"14px", letterSpacing:"2px", textTransform:"uppercase" }}>
+          <button onClick={handleSaveRideAlong} disabled={saving||!selectedTech||!selectedDate} style={{ background:saving||!selectedTech||!selectedDate?"#333":C.green, border:"none", color:saving||!selectedTech||!selectedDate?"#666":C.black, padding:"14px", borderRadius:"16px", cursor:saving||!selectedTech||!selectedDate?"not-allowed":"pointer", fontFamily:FONT, fontWeight:"700", fontSize:"14px", letterSpacing:"-0.01em", textTransform:"none" }}>
             {saving?"SAVING...":"SAVE RIDE-ALONG SESSION"}
           </button>
         </div>
@@ -4691,7 +4695,7 @@ function RideAlongTab({ techs, rideAlongs, schedules, onSave, onSaveSchedule, sa
       {/* HISTORY VIEW */}
       {view==="history"&&!viewDetail&&(
         <div style={{ display:"flex", flexDirection:"column", gap:"10px" }}>
-          <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.purple}`, borderRadius:"12px", padding:"16px 18px" }}>
+          <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"16px 18px" }}>
             <Label color={C.purple}>📋 Ride-Along History</Label>
             {rideAlongs.length===0&&<div style={{ fontSize:"13px", color:C.muted }}>No ride-alongs logged yet.</div>}
             {[...rideAlongs].sort((a,b)=>b.date.localeCompare(a.date)).map(ra=>{
@@ -4702,15 +4706,15 @@ function RideAlongTab({ techs, rideAlongs, schedules, onSave, onSaveSchedule, sa
               const total = Object.values(cl).length;
               const pct = typeof cl._meta_score_pct==="number" ? cl._meta_score_pct : scorePctFromChecklist(cl);
               return (
-                <div key={ra.id} onClick={()=>setViewDetail(ra)} style={{ background:C.cardLt, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"14px 16px", marginBottom:"8px", cursor:"pointer", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                <div key={ra.id} onClick={()=>setViewDetail(ra)} style={{ background:C.cardLt, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"14px 16px", marginBottom:"8px", cursor:"pointer", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
                   <div>
-                    <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"16px", color:C.black }}>{tech?.name}</div>
+                    <div style={{ fontFamily:FONT, fontWeight:"600", fontSize:"16px", color:C.black }}>{tech?.name}</div>
                     <div style={{ fontSize:"12px", color:C.muted }}>{formatDate(ra.date)}</div>
                     {total>0&&<div style={{ fontSize:"11px", color:C.muted, marginTop:"3px" }}><span style={{ color:C.green }}>✅ {passed}</span> passed · <span style={{ color:C.red }}>❌ {failed}</span> failed</div>}
                   </div>
                   <div style={{ display:"flex", alignItems:"center", gap:"10px" }}>
                     {pct!=null&&<Pill color={scoreColor(pct)}>{pct}%</Pill>}
-                    <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", fontSize:"12px", color:C.blue, letterSpacing:"1px" }}>VIEW →</div>
+                    <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"12px", color:C.blue, letterSpacing:"-0.01em" }}>VIEW →</div>
                   </div>
                 </div>
               );
@@ -4722,7 +4726,7 @@ function RideAlongTab({ techs, rideAlongs, schedules, onSave, onSaveSchedule, sa
       {/* DETAIL VIEW */}
       {view==="history"&&viewDetail&&(
         <div style={{ display:"flex", flexDirection:"column", gap:"14px" }}>
-          <button onClick={()=>setViewDetail(null)} style={{ background:"none", border:`1px solid ${C.border}`, color:C.muted, padding:"8px 16px", borderRadius:"4px", cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", fontSize:"12px", letterSpacing:"1px", alignSelf:"flex-start" }}>← BACK TO HISTORY</button>
+          <button onClick={()=>setViewDetail(null)} style={{ background:"none", border:`1px solid ${C.border}`, color:C.muted, padding:"8px 16px", borderRadius:"8px", cursor:"pointer", fontFamily:FONT, fontWeight:"700", fontSize:"12px", letterSpacing:"-0.01em", alignSelf:"flex-start" }}>← BACK TO HISTORY</button>
           {(() => {
             const tech = techs.find(t=>t.id===viewDetail.tech_id);
             const cl = viewDetail.checklist ? JSON.parse(viewDetail.checklist) : {};
@@ -4730,16 +4734,16 @@ function RideAlongTab({ techs, rideAlongs, schedules, onSave, onSaveSchedule, sa
             const pct = typeof cl._meta_score_pct==="number" ? cl._meta_score_pct : scorePctFromChecklist(cl);
             return (
               <>
-                <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.purple}`, borderRadius:"12px", padding:"16px 18px", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+                <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"16px 18px", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
                   <div>
-                    <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"22px", color:C.black }}>{tech?.name}</div>
+                    <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"22px", color:C.black }}>{tech?.name}</div>
                     <div style={{ fontSize:"13px", color:C.muted }}>{formatDate(viewDetail.date)}</div>
                   </div>
                   {pct!=null&&<Pill color={scoreColor(pct)}>{pct}% Score</Pill>}
                 </div>
                 {CHECKLIST_SECTIONS.map(section=>(
-                  <div key={section.id} style={{ background:C.card, border:`1px solid ${C.border}`, borderLeft:`3px solid ${C.blue}`, borderRadius:"12px", padding:"16px 18px" }}>
-                    <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"16px", color:C.black, letterSpacing:"2px", marginBottom:"12px" }}>{section.icon} {section.title.toUpperCase()}</div>
+                  <div key={section.id} style={{ background:C.card, border:`1px solid ${C.border}`, borderLeft:`3px solid ${C.blue}`, borderRadius:"16px", padding:"16px 18px" }}>
+                    <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"16px", color:C.black, letterSpacing:"-0.01em", marginBottom:"12px" }}>{section.icon} {section.title.toUpperCase()}</div>
                     {section.itemIds.map(itemId=>{
                       const item = rubricMap[itemId];
                       if (!item) return null;
@@ -4752,11 +4756,11 @@ function RideAlongTab({ techs, rideAlongs, schedules, onSave, onSaveSchedule, sa
                           </div>
                           {item.has_script&&(
                             <div style={{ marginLeft:"24px" }}>
-                              <button onClick={()=>setExpandedScript(s=>({...s,[item.id]:!s[item.id]}))} style={{ background:"none", border:"none", color:C.blue, fontSize:"11px", cursor:"pointer", padding:"2px 0", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>
+                              <button onClick={()=>setExpandedScript(s=>({...s,[item.id]:!s[item.id]}))} style={{ background:"none", border:"none", color:C.blue, fontSize:"11px", cursor:"pointer", padding:"2px 0", fontFamily:FONT, fontWeight:"700" }}>
                                 {expandedScript[item.id]?"▲ Hide Perfect Day script":"▼ View Perfect Day script"}
                               </button>
                               {expandedScript[item.id]&&(
-                                <div style={{ background:C.blueXlt, border:`1px solid ${C.border}`, borderRadius:"6px", padding:"8px 10px", fontSize:"12px", color:C.black, marginTop:"4px", lineHeight:1.5 }}>
+                                <div style={{ background:C.blueXlt, border:`1px solid ${C.border}`, borderRadius:"10px", padding:"8px 10px", fontSize:"12px", color:C.black, marginTop:"4px", lineHeight:1.5 }}>
                                   {item.script_text}
                                 </div>
                               )}
@@ -4769,7 +4773,7 @@ function RideAlongTab({ techs, rideAlongs, schedules, onSave, onSaveSchedule, sa
                       const val = notes[section.id+"_"+note.id];
                       if (!val) return null;
                       return (
-                        <div key={note.id} style={{ marginTop:"8px", background:C.cardLt, borderRadius:"4px", padding:"10px 12px" }}>
+                        <div key={note.id} style={{ marginTop:"8px", background:C.cardLt, borderRadius:"8px", padding:"10px 12px" }}>
                           <div style={{ fontSize:"11px", color:C.muted, marginBottom:"4px" }}>{note.label}</div>
                           <div style={{ fontSize:"13px", color:C.black, lineHeight:"1.5", whiteSpace:"pre-wrap" }}>{val}</div>
                         </div>
@@ -4778,8 +4782,8 @@ function RideAlongTab({ techs, rideAlongs, schedules, onSave, onSaveSchedule, sa
                   </div>
                 ))}
                 {viewDetail.general_notes&&(
-                  <div style={{ background:C.card, border:`1px solid ${C.border}`, borderLeft:`3px solid ${C.gold}`, borderRadius:"12px", padding:"16px 18px" }}>
-                    <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"16px", color:C.black, letterSpacing:"2px", marginBottom:"10px" }}>📝 GENERAL NOTES</div>
+                  <div style={{ background:C.card, border:`1px solid ${C.border}`, borderLeft:`3px solid ${C.gold}`, borderRadius:"16px", padding:"16px 18px" }}>
+                    <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"16px", color:C.black, letterSpacing:"-0.01em", marginBottom:"10px" }}>📝 GENERAL NOTES</div>
                     <div style={{ fontSize:"13px", color:C.black, lineHeight:"1.6", whiteSpace:"pre-wrap" }}>{viewDetail.general_notes}</div>
                   </div>
                 )}
@@ -4894,10 +4898,10 @@ const PHASE_LABELS = {
 const STAGE_CONFIG = {
   classroom:      { label:"Classroom",      color:"#2b9cf0", icon:"📚" },
   field_training: { label:"Field Training", color:"#7c3aed", icon:"🔧" },
-  cert_pending:   { label:"Cert Pending",   color:"#f59e0b", icon:"⏳" },
-  cert_passed:    { label:"Certified",      color:"#00c853", icon:"✅" },
-  active:         { label:"Active",         color:"#00c853", icon:"⭐" },
-  hard_fail:      { label:"Hard Fail",      color:"#ef4444", icon:"🚫" },
+  cert_pending:   { label:"Cert Pending",   color:"#ff9f0a", icon:"⏳" },
+  cert_passed:    { label:"Certified",      color:"#34c759", icon:"✅" },
+  active:         { label:"Active",         color:"#34c759", icon:"⭐" },
+  hard_fail:      { label:"Hard Fail",      color:"#ff3b30", icon:"🚫" },
 };
 
 const TITLE_LABELS = {
@@ -5079,9 +5083,9 @@ function PerfectDayTrainingPanel({ tech=null, techs=[], admin=false, fixedSubjec
   }
 
   const setNote = (k, v) => { setNoteForm(f => ({ ...f, [k]:v })); setNoteDirty(true); };
-  const heading = { fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", letterSpacing:"1px" };
-  const small = { fontSize:"11px", color:C.muted, letterSpacing:"1px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800" };
-  const inp = { background:C.white, border:`1px solid ${C.border}`, color:C.black, padding:"9px 12px", borderRadius:"8px", fontSize:"14px", fontFamily:"'Barlow',sans-serif", width:"100%", boxSizing:"border-box" };
+  const heading = { fontFamily:FONT, fontWeight:"700", letterSpacing:"-0.01em" };
+  const small = { fontSize:"11px", color:C.muted, letterSpacing:"-0.01em", fontFamily:FONT, fontWeight:"600" };
+  const inp = { background:C.white, border:`1px solid ${C.border}`, color:C.black, padding:"9px 12px", borderRadius:"10px", fontSize:"14px", fontFamily:FONT, width:"100%", boxSizing:"border-box" };
   const accent = training ? C.purple : C.blue;
 
   const byPhase = {}, phases = [];
@@ -5097,10 +5101,10 @@ function PerfectDayTrainingPanel({ tech=null, techs=[], admin=false, fixedSubjec
   }
 
   const scriptToggle = item => item.has_script && (<>
-    <button onClick={e => { e.stopPropagation(); setExpandedScript(s => ({...s, [item.id]: !s[item.id]})); }} style={{ background:"none", border:"none", color:C.blue, fontSize:"11px", cursor:"pointer", padding:"2px 0", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>
+    <button onClick={e => { e.stopPropagation(); setExpandedScript(s => ({...s, [item.id]: !s[item.id]})); }} style={{ background:"none", border:"none", color:C.blue, fontSize:"11px", cursor:"pointer", padding:"2px 0", fontFamily:FONT, fontWeight:"700" }}>
       {expandedScript[item.id] ? "▲ Hide" : item.section==="misc" ? "▼ How to" : "▼ View script"}
     </button>
-    {expandedScript[item.id] && <div style={{ background:C.blueXlt, border:`1px solid ${C.border}`, borderRadius:"6px", padding:"8px 10px", fontSize:"12px", color:C.black, marginTop:"4px", lineHeight:1.5, whiteSpace:"pre-wrap" }}>{item.script_text}</div>}
+    {expandedScript[item.id] && <div style={{ background:C.blueXlt, border:`1px solid ${C.border}`, borderRadius:"10px", padding:"8px 10px", fontSize:"12px", color:C.black, marginTop:"4px", lineHeight:1.5, whiteSpace:"pre-wrap" }}>{item.script_text}</div>}
   </>);
 
   const Stars = ({ k }) => (
@@ -5118,10 +5122,10 @@ function PerfectDayTrainingPanel({ tech=null, techs=[], admin=false, fixedSubjec
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:"12px" }}>
       {isTrainer && !admin && (
-        <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.purple}`, borderRadius:"12px", padding:"14px 16px" }}>
+        <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"14px 16px" }}>
           <div style={{ ...small, marginBottom:"6px" }}>WHO ARE YOU TRAINING?</div>
           <select value={subjectId} onChange={e=>{ setSubjectId(e.target.value); setDay(today); setView("daily"); }}
-            style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"10px 12px", borderRadius:"10px", fontSize:"15px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", width:"100%" }}>
+            style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"10px 12px", borderRadius:"12px", fontSize:"15px", fontFamily:FONT, fontWeight:"600", width:"100%" }}>
             <option value={tech.id}>My own rubric</option>
             {myTrainees.length>0 && <optgroup label="Apprentices I'm training">{myTrainees.map(t=><option key={t.id} value={t.id}>{t.name}</option>)}</optgroup>}
             {otherApprentices.length>0 && <optgroup label="Other apprentices">{otherApprentices.map(t=><option key={t.id} value={t.id}>{t.name}</option>)}</optgroup>}
@@ -5131,8 +5135,8 @@ function PerfectDayTrainingPanel({ tech=null, techs=[], admin=false, fixedSubjec
       )}
 
       {/* Progress */}
-      <div style={{ background:training?`${C.purple}10`:C.card, border:`1px solid ${training?C.purple:C.border}`, borderRadius:"12px", padding:"16px" }}>
-        {training && <div style={{ fontSize:"11px", color:C.purple, letterSpacing:"2px", ...heading, marginBottom:"4px" }}>TRAINING</div>}
+      <div style={{ background:training?`${C.purple}10`:C.card, border:`1px solid ${training?C.purple:C.border}`, borderRadius:"16px", padding:"16px" }}>
+        {training && <div style={{ fontSize:"11px", color:C.purple, letterSpacing:"-0.01em", ...heading, marginBottom:"4px" }}>TRAINING</div>}
         <div style={{ display:"flex", alignItems:"baseline", justifyContent:"space-between", gap:"10px", marginBottom:"8px" }}>
           <div style={{ ...heading, fontSize:"22px", color:C.black, letterSpacing:0 }}>{training ? subject.name : "Perfect Day Training"}</div>
           <div style={{ ...heading, fontSize:"28px", color:prog.complete ? C.green : accent, letterSpacing:0 }}>{prog.pct}%</div>
@@ -5151,7 +5155,7 @@ function PerfectDayTrainingPanel({ tech=null, techs=[], admin=false, fixedSubjec
           <div>
             <div style={small}>MISCELLANEOUS · {prog.miscDone}/{prog.miscMax} REPS</div>
             <div style={{ marginTop:"6px" }}><Bar pct={prog.miscMax ? (prog.miscDone/prog.miscMax)*100 : 0} color={prog.miscMax && prog.miscDone>=prog.miscMax ? C.green : C.gold} h={8}/></div>
-            {prog.misc.length===0 && <div style={{ fontSize:"10px", color:C.muted, marginTop:"3px" }}>No misc items yet</div>}
+            {prog.misc.length===0 && <div style={{ fontSize:"11px", color:C.muted, marginTop:"3px" }}>No misc items yet</div>}
           </div>
         </div>
       </div>
@@ -5159,7 +5163,7 @@ function PerfectDayTrainingPanel({ tech=null, techs=[], admin=false, fixedSubjec
       {showRoad && !loading && <ApprenticeFinalDay tech={subject} prog={prog} onStartTest={key => setSelfTest(key)}/>}
       {loading && <div style={{ color:C.muted, padding:"16px" }}>Loading training progress...</div>}
       {!loading && rubricItems.length === 0 && (
-        <div style={{ background:C.cardLt, border:`1px solid ${C.border}`, borderRadius:"10px", padding:"14px", fontSize:"13px", color:C.muted }}>
+        <div style={{ background:C.cardLt, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"14px", fontSize:"13px", color:C.muted }}>
           Rubric items not seeded yet. Ask an admin to seed them in the Development tab.
         </div>
       )}
@@ -5167,21 +5171,21 @@ function PerfectDayTrainingPanel({ tech=null, techs=[], admin=false, fixedSubjec
       {!loading && rubricItems.length > 0 && (<>
         {/* Day picker */}
         {(training || dayList.length > 0) && (
-          <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"12px 14px" }}>
+          <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"12px 14px" }}>
             <div style={{ ...small, marginBottom:"8px" }}>TRAINING DAY</div>
             <div style={{ display:"flex", gap:"6px", overflowX:"auto", paddingBottom:"4px" }}>
               {dayList.map(d => {
                 const n = prog.perDay[d] || 0, full = prog.daily.length && n >= prog.daily.length, on = d === day;
                 return (
-                  <button key={d} onClick={() => setDay(d)} style={{ flexShrink:0, background:on ? accent : C.cardLt, color:on ? C.white : C.black, border:`1px solid ${on ? accent : full ? C.green : C.border}`, borderRadius:"10px", padding:"6px 10px", cursor:"pointer", textAlign:"left", fontFamily:"'Barlow Condensed',sans-serif" }}>
-                    <div style={{ fontWeight:"900", fontSize:"13px" }}>Day {dayNumber(d)}{full ? " ✓" : ""}</div>
+                  <button key={d} onClick={() => setDay(d)} style={{ flexShrink:0, background:on ? accent : C.cardLt, color:on ? C.white : C.black, border:`1px solid ${on ? accent : full ? C.green : C.border}`, borderRadius:"12px", padding:"6px 10px", cursor:"pointer", textAlign:"left", fontFamily:FONT }}>
+                    <div style={{ fontWeight:"700", fontSize:"13px" }}>Day {dayNumber(d)}{full ? " ✓" : ""}</div>
                     <div style={{ fontSize:"11px", opacity:0.85 }}>{d === today ? "Today" : fmtDay(d)} · {n}/{prog.daily.length}</div>
                   </button>
                 );
               })}
               {training && (addingDay
                 ? <input type="date" max={today} autoFocus onChange={e => { if (e.target.value) { setDay(e.target.value); setAddingDay(false); } }} onBlur={() => setAddingDay(false)} style={{ ...inp, width:"auto", flexShrink:0 }}/>
-                : <button onClick={() => setAddingDay(true)} style={{ flexShrink:0, background:"none", border:`1px dashed ${C.border}`, borderRadius:"10px", padding:"6px 10px", cursor:"pointer", color:C.muted, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"12px" }}>+ Other date</button>)}
+                : <button onClick={() => setAddingDay(true)} style={{ flexShrink:0, background:"none", border:`1px dashed ${C.border}`, borderRadius:"12px", padding:"6px 10px", cursor:"pointer", color:C.muted, fontFamily:FONT, fontWeight:"600", fontSize:"12px" }}>+ Other date</button>)}
             </div>
           </div>
         )}
@@ -5189,7 +5193,7 @@ function PerfectDayTrainingPanel({ tech=null, techs=[], admin=false, fixedSubjec
         {/* Section switcher */}
         <div style={{ display:"flex", gap:"6px" }}>
           {[["daily",`Perfect Day ${dailyToday}/${prog.daily.length}`],["misc","Miscellaneous"],...(training?[["notes", notes.some(n=>n.day_date===day) ? "Notes ✓" : "Notes"]]:[])].map(([id,label]) => (
-            <button key={id} onClick={() => setView(id)} style={{ flex:1, background:view===id ? accent : C.card, color:view===id ? C.white : C.black, border:`1px solid ${view===id ? accent : C.border}`, borderRadius:"20px", padding:"9px 6px", cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"13px", letterSpacing:"1px", textTransform:"uppercase" }}>{label}</button>
+            <button key={id} onClick={() => setView(id)} style={{ flex:1, background:view===id ? accent : C.card, color:view===id ? C.white : C.black, border:`1px solid ${view===id ? accent : C.border}`, borderRadius:"20px", padding:"9px 6px", cursor:"pointer", fontFamily:FONT, fontWeight:"700", fontSize:"13px", letterSpacing:"-0.01em", textTransform:"none" }}>{label}</button>
           ))}
         </div>
 
@@ -5200,7 +5204,7 @@ function PerfectDayTrainingPanel({ tech=null, techs=[], admin=false, fixedSubjec
               : dayList.length ? <>Showing {day===today ? "today" : fmtDay(day)}. Your trainer checks these off as you go.</> : "Your trainer checks these off with you each training day."}
           </div>
           {phases.map(phase => (
-            <div key={phase} style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", overflow:"hidden" }}>
+            <div key={phase} style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", overflow:"hidden" }}>
               <div style={{ background:C.cardLt, padding:"10px 16px", ...heading, fontSize:"13px", color:accent, display:"flex", justifyContent:"space-between" }}>
                 <span>{PHASE_LABELS[phase] || phase}</span>
                 <span style={{ color:C.muted }}>{byPhase[phase].filter(i=>dayChecks[i.id]).length}/{byPhase[phase].length}</span>
@@ -5210,20 +5214,20 @@ function PerfectDayTrainingPanel({ tech=null, techs=[], admin=false, fixedSubjec
                 return (
                   <div key={item.id} onClick={() => setCheck(item, "done")} style={{ padding:"10px 16px", borderBottom:`1px solid ${C.border}40`, cursor:training?"pointer":"default", opacity:saving===item.id?0.5:1 }}>
                     <div style={{ display:"flex", alignItems:"flex-start", gap:"10px" }}>
-                      <div style={{ width:"22px", height:"22px", borderRadius:"4px", border:`2px solid ${done ? C.green : na ? C.muted : C.border}`, background:done ? C.green : na ? C.border : "transparent", flexShrink:0, display:"flex", alignItems:"center", justifyContent:"center", marginTop:"1px" }}>
+                      <div style={{ width:"22px", height:"22px", borderRadius:"8px", border:`2px solid ${done ? C.green : na ? C.muted : C.border}`, background:done ? C.green : na ? C.border : "transparent", flexShrink:0, display:"flex", alignItems:"center", justifyContent:"center", marginTop:"1px" }}>
                         {done && <span style={{ color:C.white, fontSize:"12px", lineHeight:1 }}>✓</span>}
-                        {na && <span style={{ color:C.muted, fontSize:"9px", fontWeight:"900", lineHeight:1 }}>N/A</span>}
+                        {na && <span style={{ color:C.muted, fontSize:"11px", fontWeight:"700", lineHeight:1 }}>N/A</span>}
                       </div>
                       <div style={{ flex:1 }}>
                         <div style={{ fontSize:"13px", color:ck ? C.muted : C.black, textDecoration:done ? "line-through" : "none", fontStyle:na ? "italic" : "normal" }}>
-                          <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", color:C.muted, marginRight:"4px" }}>#{item.sort_order}</span>
+                          <span style={{ fontFamily:FONT, fontWeight:"700", color:C.muted, marginRight:"4px" }}>#{item.sort_order}</span>
                           {item.description}
                         </div>
-                        {ck && ck.trainer_id && training && <div style={{ fontSize:"10px", color:done ? C.green : C.muted, marginTop:"2px" }}>{na ? "N/A" : "Checked"} by {techName(ck.trainer_id)}</div>}
+                        {ck && ck.trainer_id && training && <div style={{ fontSize:"11px", color:done ? C.green : C.muted, marginTop:"2px" }}>{na ? "N/A" : "Checked"} by {techName(ck.trainer_id)}</div>}
                         {scriptToggle(item)}
                       </div>
                       {training && (
-                        <button onClick={e => { e.stopPropagation(); setCheck(item, "na"); }} style={{ flexShrink:0, background:na ? C.muted : "none", color:na ? C.white : C.muted, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"3px 8px", fontSize:"10px", fontWeight:"900", cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif" }}>N/A</button>
+                        <button onClick={e => { e.stopPropagation(); setCheck(item, "na"); }} style={{ flexShrink:0, background:na ? C.muted : "none", color:na ? C.white : C.muted, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"3px 8px", fontSize:"11px", fontWeight:"700", cursor:"pointer", fontFamily:FONT }}>N/A</button>
                       )}
                     </div>
                   </div>
@@ -5238,10 +5242,10 @@ function PerfectDayTrainingPanel({ tech=null, techs=[], admin=false, fixedSubjec
             Each of these gets trained {MISC_REPS} times over the course of training — they don't come up on every job.{training ? ` Tap an item to log a rep on ${day===today ? "today" : fmtDay(day)} (tap again to undo).` : ""}
           </div>
           {prog.misc.length === 0 && (
-            <div style={{ background:C.cardLt, border:`1px solid ${C.border}`, borderRadius:"10px", padding:"14px", fontSize:"13px", color:C.muted }}>No miscellaneous items have been added yet.</div>
+            <div style={{ background:C.cardLt, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"14px", fontSize:"13px", color:C.muted }}>No miscellaneous items have been added yet.</div>
           )}
           {miscPhases.map(phase => (
-            <div key={phase} style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", overflow:"hidden" }}>
+            <div key={phase} style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", overflow:"hidden" }}>
               <div style={{ background:C.cardLt, padding:"10px 16px", ...heading, fontSize:"13px", color:C.gold }}>{PHASE_LABELS[phase] || (phase==="misc" ? "Miscellaneous" : phase)}</div>
               {miscByPhase[phase].map(item => {
                 const reps = checks.filter(c => c.rubric_item_id===item.id).sort((a,b)=>a.day_date.localeCompare(b.day_date));
@@ -5254,10 +5258,10 @@ function PerfectDayTrainingPanel({ tech=null, techs=[], admin=false, fixedSubjec
                       </div>
                       <div style={{ flex:1 }}>
                         <div style={{ fontSize:"13px", color:complete ? C.muted : C.black }}>
-                          <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", color:C.muted, marginRight:"4px" }}>#{prog.misc.indexOf(item)+1}</span>
+                          <span style={{ fontFamily:FONT, fontWeight:"700", color:C.muted, marginRight:"4px" }}>#{prog.misc.indexOf(item)+1}</span>
                           {item.description}
                         </div>
-                        {reps.length > 0 && <div style={{ fontSize:"10px", color:C.muted, marginTop:"2px" }}>Done {reps.map(r => fmtDay(r.day_date)).join(" · ")}{doneToday && training ? " — logged for this day" : ""}</div>}
+                        {reps.length > 0 && <div style={{ fontSize:"11px", color:C.muted, marginTop:"2px" }}>Done {reps.map(r => fmtDay(r.day_date)).join(" · ")}{doneToday && training ? " — logged for this day" : ""}</div>}
                         {scriptToggle(item)}
                       </div>
                     </div>
@@ -5270,7 +5274,7 @@ function PerfectDayTrainingPanel({ tech=null, techs=[], admin=false, fixedSubjec
 
         {view==="notes" && training && (
           <div style={{ display:"flex", flexDirection:"column", gap:"12px" }}>
-            <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.purple}`, borderRadius:"12px", padding:"16px", display:"flex", flexDirection:"column", gap:"14px" }}>
+            <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"16px", display:"flex", flexDirection:"column", gap:"14px" }}>
               <div style={{ ...heading, fontSize:"16px", color:C.black }}>Day {dayNumber(day)} notes · {day===today ? "Today" : fmtDay(day)}</div>
               <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"12px" }}>
                 <div><div style={{ ...small, marginBottom:"4px" }}>OVERALL DAY</div><Stars k="overall_rating"/></div>
@@ -5300,13 +5304,13 @@ function PerfectDayTrainingPanel({ tech=null, techs=[], admin=false, fixedSubjec
                 Damage, safety issue, or customer complaint today
               </label>
               {noteForm.incident && <textarea value={noteForm.incident_notes || ""} onChange={e => setNote("incident_notes", e.target.value)} placeholder="What happened?" rows={2} style={{ ...inp, resize:"vertical", borderColor:C.red }}/>}
-              <button onClick={saveNotes} disabled={saving==="notes" || !noteDirty} style={{ background:noteDirty ? C.purple : C.border, border:"none", color:C.white, padding:"11px 18px", borderRadius:"20px", cursor:noteDirty ? "pointer" : "default", fontSize:"13px", fontWeight:"900", fontStyle:"italic", letterSpacing:"2px", fontFamily:"'Barlow Condensed',sans-serif", textTransform:"uppercase" }}>
+              <button onClick={saveNotes} disabled={saving==="notes" || !noteDirty} style={{ background:noteDirty ? C.purple : C.border, border:"none", color:C.white, padding:"11px 18px", borderRadius:"20px", cursor:noteDirty ? "pointer" : "default", fontSize:"13px", fontWeight:"700", fontStyle:"normal", letterSpacing:"-0.01em", fontFamily:FONT, textTransform:"none" }}>
                 {saving==="notes" ? "Saving..." : noteDirty ? "Save notes" : notes.some(n=>n.day_date===day) ? "✓ Saved" : "Save notes"}
               </button>
             </div>
 
             {notes.filter(n => n.day_date !== day).length > 0 && (
-              <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"14px 16px" }}>
+              <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"14px 16px" }}>
                 <div style={{ ...small, marginBottom:"8px" }}>EARLIER DAYS</div>
                 {notes.filter(n => n.day_date !== day).map(n => (
                   <div key={n.day_date} onClick={() => setDay(n.day_date)} style={{ padding:"10px 0", borderTop:`1px solid ${C.border}40`, cursor:"pointer" }}>
@@ -5318,7 +5322,7 @@ function PerfectDayTrainingPanel({ tech=null, techs=[], admin=false, fixedSubjec
                     {n.needs_work && <div style={{ fontSize:"12px", color:C.black, marginTop:"3px" }}>🔧 {n.needs_work}</div>}
                     {n.focus_tomorrow && <div style={{ fontSize:"12px", color:C.black, marginTop:"3px" }}>🎯 {n.focus_tomorrow}</div>}
                     {n.incident && <div style={{ fontSize:"12px", color:C.red, marginTop:"3px" }}>⚠️ {n.incident_notes || "Incident noted"}</div>}
-                    {n.trainer_id && <div style={{ fontSize:"10px", color:C.muted, marginTop:"3px" }}>— {techName(n.trainer_id)}</div>}
+                    {n.trainer_id && <div style={{ fontSize:"11px", color:C.muted, marginTop:"3px" }}>— {techName(n.trainer_id)}</div>}
                   </div>
                 ))}
               </div>
@@ -5393,9 +5397,9 @@ function WrittenTestRunner({ trainee, adminUser, onExit, self=false, testKey="pe
     onExit();
   }
 
-  const wrap = { background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.purple}`, borderRadius:"12px", padding:"18px", display:"flex", flexDirection:"column", gap:"14px" };
-  const big = (bg, on=true) => ({ background:on ? bg : C.border, border:"none", color:C.white, padding:"13px 18px", borderRadius:"22px", cursor:on ? "pointer" : "default", fontSize:"14px", fontWeight:"900", fontStyle:"italic", letterSpacing:"2px", fontFamily:"'Barlow Condensed',sans-serif", textTransform:"uppercase" });
-  const h = { fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", color:C.black };
+  const wrap = { background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"18px", display:"flex", flexDirection:"column", gap:"14px" };
+  const big = (bg, on=true) => ({ background:on ? bg : C.border, border:"none", color:C.white, padding:"13px 18px", borderRadius:"22px", cursor:on ? "pointer" : "default", fontSize:"14px", fontWeight:"700", fontStyle:"normal", letterSpacing:"-0.01em", fontFamily:FONT, textTransform:"none" });
+  const h = { fontFamily:FONT, fontWeight:"700", color:C.black };
 
   if (!test) return (
     <div style={wrap}>
@@ -5414,7 +5418,7 @@ function WrittenTestRunner({ trainee, adminUser, onExit, self=false, testKey="pe
     const passed = result.wrong.length === 0;
     return (
       <div style={wrap}>
-        <div style={{ ...h, fontSize:"13px", color:C.purple, letterSpacing:"2px" }}>{roundNo === 1 ? "FIRST TRY" : `RETAKE ${roundNo - 1}`}</div>
+        <div style={{ ...h, fontSize:"13px", color:C.purple, letterSpacing:"-0.01em" }}>{roundNo === 1 ? "FIRST TRY" : `RETAKE ${roundNo - 1}`}</div>
         <div style={{ ...h, fontSize:"40px", color:passed ? C.green : C.black }}>{result.asked - result.wrong.length}/{result.asked}</div>
         {passed ? (<>
           <div style={{ fontSize:"15px", color:C.green, fontWeight:"700" }}>✅ {T.name} passed{roundNo > 1 ? ` after ${roundNo - 1} retake${roundNo > 2 ? "s" : ""}` : " — 100% on the first try!"}</div>
@@ -5438,18 +5442,18 @@ function WrittenTestRunner({ trainee, adminUser, onExit, self=false, testKey="pe
   return (
     <div style={wrap}>
       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline" }}>
-        <div style={{ ...h, fontSize:"13px", color:C.purple, letterSpacing:"2px" }}>{roundNo === 1 ? T.name.toUpperCase() : `RETAKE ${roundNo - 1}`} · {trainee.name.split(" ")[0].toUpperCase()}</div>
+        <div style={{ ...h, fontSize:"13px", color:C.purple, letterSpacing:"-0.01em" }}>{roundNo === 1 ? T.name.toUpperCase() : `RETAKE ${roundNo - 1}`} · {trainee.name.split(" ")[0].toUpperCase()}</div>
         <div style={{ fontSize:"12px", color:C.muted }}>{idx + 1} of {order.length}</div>
       </div>
       <Bar pct={(answered / order.length) * 100} color={C.purple} h={6}/>
-      <div style={{ fontSize:"11px", color:C.muted, letterSpacing:"1px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800" }}>{q.topic.toUpperCase()}</div>
+      <div style={{ fontSize:"11px", color:C.muted, letterSpacing:"-0.01em", fontFamily:FONT, fontWeight:"600" }}>{q.topic.toUpperCase()}</div>
       <div style={{ fontSize:"17px", color:C.black, fontWeight:"600", lineHeight:1.4 }}>{q.q}</div>
       <div style={{ display:"flex", flexDirection:"column", gap:"8px" }}>
         {cur.choices.map((c, i) => {
           const on = picks[cur.id] === c;
           return (
-            <button key={c} onClick={() => setPicks(p => ({ ...p, [cur.id]:c }))} style={{ textAlign:"left", background:on ? `${C.purple}15` : C.white, border:`2px solid ${on ? C.purple : C.border}`, borderRadius:"10px", padding:"12px 14px", cursor:"pointer", fontSize:"14px", color:C.black, display:"flex", gap:"10px", alignItems:"flex-start", lineHeight:1.4 }}>
-              <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", color:on ? C.purple : C.muted }}>{"ABCD"[i]}</span><span>{c}</span>
+            <button key={c} onClick={() => setPicks(p => ({ ...p, [cur.id]:c }))} style={{ textAlign:"left", background:on ? `${C.purple}15` : C.white, border:`2px solid ${on ? C.purple : C.border}`, borderRadius:"12px", padding:"12px 14px", cursor:"pointer", fontSize:"14px", color:C.black, display:"flex", gap:"10px", alignItems:"flex-start", lineHeight:1.4 }}>
+              <span style={{ fontFamily:FONT, fontWeight:"700", color:on ? C.purple : C.muted }}>{"ABCD"[i]}</span><span>{c}</span>
             </button>
           );
         })}
@@ -5504,11 +5508,11 @@ function FinalEvalRunner({ trainee, adminUser, rubricItems, priorAttempts, onExi
     setSaving(false);
   }
 
-  const btn = (bg, on=true) => ({ background:on ? bg : C.border, border:"none", color:C.white, padding:"12px 18px", borderRadius:"22px", cursor:on ? "pointer" : "default", fontSize:"13px", fontWeight:"900", fontStyle:"italic", letterSpacing:"2px", fontFamily:"'Barlow Condensed',sans-serif", textTransform:"uppercase" });
+  const btn = (bg, on=true) => ({ background:on ? bg : C.border, border:"none", color:C.white, padding:"12px 18px", borderRadius:"22px", cursor:on ? "pointer" : "default", fontSize:"13px", fontWeight:"700", fontStyle:"normal", letterSpacing:"-0.01em", fontFamily:FONT, textTransform:"none" });
 
   if (done) return (
-    <div style={{ background:C.card, border:`1px solid ${done.overall==="pass" ? C.green : C.red}`, borderRadius:"12px", padding:"18px", display:"flex", flexDirection:"column", gap:"10px" }}>
-      <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"24px", color:done.overall==="pass" ? C.green : C.red }}>{done.overall==="pass" ? "✅ Passed the practical test" : `❌ Did not pass (attempt ${done.attempt})`}</div>
+    <div style={{ background:C.card, border:`1px solid ${done.overall==="pass" ? C.green : C.red}`, borderRadius:"16px", padding:"18px", display:"flex", flexDirection:"column", gap:"10px" }}>
+      <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"24px", color:done.overall==="pass" ? C.green : C.red }}>{done.overall==="pass" ? "✅ Passed the practical test" : `❌ Did not pass (attempt ${done.attempt})`}</div>
       {done.overall==="pass" && <div style={{ fontSize:"14px", color:C.black }}>Next: sign {trainee.name.split(" ")[0]}'s <b>Final Onboarding Cert</b> in the Development tab to promote them to Detail Pro.</div>}
       {done.overall!=="pass" && <div style={{ fontSize:"13px", color:C.black }}>Missed {fails.length} item{fails.length===1?"":"s"}: {fails.map(i => `#${i.sort_order}`).join(", ")}. {done.attempt >= 3 ? "That was the third attempt — marked Hard Fail." : "They can retest after more training."}</div>}
       <button onClick={onExit} style={btn(C.blue)}>Done</button>
@@ -5517,20 +5521,20 @@ function FinalEvalRunner({ trainee, adminUser, rubricItems, priorAttempts, onExi
 
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:"12px" }}>
-      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.gold}`, borderRadius:"12px", padding:"16px", display:"flex", flexDirection:"column", gap:"8px" }}>
-        <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"20px", color:C.black }}>🏁 Practical Test — {trainee.name}</div>
+      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"16px", display:"flex", flexDirection:"column", gap:"8px" }}>
+        <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"20px", color:C.black }}>🏁 Practical Test — {trainee.name}</div>
         <div style={{ fontSize:"12px", color:C.muted }}>Attempt {priorAttempts + 1}{priorAttempts >= 2 ? " (last chance — a third fail is a Hard Fail)" : ""}. Watch them run the full Perfect Day and mark every item. Every item must pass.</div>
         <div style={{ display:"flex", alignItems:"center", gap:"8px" }}>
-          <span style={{ fontSize:"11px", color:C.muted, fontWeight:"800" }}>DATE</span>
-          <input type="date" value={date} onChange={e => setDate(e.target.value)} style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:"8px", padding:"6px 10px", fontSize:"14px" }}/>
+          <span style={{ fontSize:"11px", color:C.muted, fontWeight:"600" }}>DATE</span>
+          <input type="date" value={date} onChange={e => setDate(e.target.value)} style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:"10px", padding:"6px 10px", fontSize:"14px" }}/>
         </div>
         <Bar pct={(scored / items.length) * 100} color={fails.length ? C.red : C.green} h={6}/>
         <div style={{ fontSize:"12px", color:C.muted }}>{scored}/{items.length} scored · {fails.length} fail{fails.length===1?"":"s"}</div>
         <button onClick={() => setScores(Object.fromEntries(items.map(i => [i.id, scores[i.id] || "pass"])))} style={{ alignSelf:"flex-start", background:"none", border:`1px solid ${C.border}`, color:C.muted, borderRadius:"14px", padding:"4px 12px", fontSize:"11px", cursor:"pointer" }}>Mark all unscored as pass</button>
       </div>
       {phases.map(phase => (
-        <div key={phase} style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", overflow:"hidden" }}>
-          <div style={{ background:C.cardLt, padding:"10px 16px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"13px", color:C.gold, letterSpacing:"1px" }}>{PHASE_LABELS[phase] || phase}</div>
+        <div key={phase} style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", overflow:"hidden" }}>
+          <div style={{ background:C.cardLt, padding:"10px 16px", fontFamily:FONT, fontWeight:"700", fontSize:"13px", color:C.gold, letterSpacing:"-0.01em" }}>{PHASE_LABELS[phase] || phase}</div>
           {byPhase[phase].map(item => {
             const s = scores[item.id];
             return (
@@ -5538,10 +5542,10 @@ function FinalEvalRunner({ trainee, adminUser, rubricItems, priorAttempts, onExi
                 <div style={{ display:"flex", gap:"10px", alignItems:"flex-start" }}>
                   <div style={{ flex:1, fontSize:"13px", color:C.black }}><span style={{ color:C.muted, fontWeight:"700", marginRight:"4px" }}>#{item.sort_order}</span>{item.description}</div>
                   {["pass","fail"].map(v => (
-                    <button key={v} onClick={() => setScores(sc => ({ ...sc, [item.id]: sc[item.id]===v ? undefined : v }))} style={{ flexShrink:0, background:s===v ? (v==="pass" ? C.green : C.red) : "none", color:s===v ? C.white : C.muted, border:`1px solid ${s===v ? (v==="pass" ? C.green : C.red) : C.border}`, borderRadius:"12px", padding:"4px 10px", fontSize:"11px", fontWeight:"900", cursor:"pointer", textTransform:"uppercase", fontFamily:"'Barlow Condensed',sans-serif" }}>{v}</button>
+                    <button key={v} onClick={() => setScores(sc => ({ ...sc, [item.id]: sc[item.id]===v ? undefined : v }))} style={{ flexShrink:0, background:s===v ? (v==="pass" ? C.green : C.red) : "none", color:s===v ? C.white : C.muted, border:`1px solid ${s===v ? (v==="pass" ? C.green : C.red) : C.border}`, borderRadius:"16px", padding:"4px 10px", fontSize:"11px", fontWeight:"700", cursor:"pointer", textTransform:"none", fontFamily:FONT }}>{v}</button>
                   ))}
                 </div>
-                {s === "fail" && <input value={itemNotes[item.id] || ""} onChange={e => setItemNotes(n => ({ ...n, [item.id]:e.target.value }))} placeholder="What went wrong?" style={{ marginTop:"6px", width:"100%", boxSizing:"border-box", background:C.white, border:`1px solid ${C.red}`, borderRadius:"8px", padding:"7px 10px", fontSize:"13px" }}/>}
+                {s === "fail" && <input value={itemNotes[item.id] || ""} onChange={e => setItemNotes(n => ({ ...n, [item.id]:e.target.value }))} placeholder="What went wrong?" style={{ marginTop:"6px", width:"100%", boxSizing:"border-box", background:C.white, border:`1px solid ${C.red}`, borderRadius:"10px", padding:"7px 10px", fontSize:"13px" }}/>}
               </div>
             );
           })}
@@ -5586,7 +5590,7 @@ function FinalDayStepList({ steps, extra = {} }) {
     <div style={{ display:"flex", flexDirection:"column", gap:"6px" }}>
       {steps.list.map((s, i) => (
         <div key={s.key} style={{ display:"flex", alignItems:"center", gap:"10px", fontSize:"13px", color:s.done ? C.black : s.locked ? C.muted : C.black }}>
-          <div style={{ width:"22px", height:"22px", borderRadius:"50%", flexShrink:0, display:"flex", alignItems:"center", justifyContent:"center", fontSize:"11px", fontWeight:"900", background:s.done ? C.green : "transparent", border:`2px solid ${s.done ? C.green : s.locked ? C.border : C.purple}`, color:s.done ? C.white : s.locked ? C.muted : C.purple }}>{s.done ? "✓" : s.locked ? "🔒" : i + 1}</div>
+          <div style={{ width:"22px", height:"22px", borderRadius:"50%", flexShrink:0, display:"flex", alignItems:"center", justifyContent:"center", fontSize:"11px", fontWeight:"700", background:s.done ? C.green : "transparent", border:`2px solid ${s.done ? C.green : s.locked ? C.border : C.purple}`, color:s.done ? C.white : s.locked ? C.muted : C.purple }}>{s.done ? "✓" : s.locked ? "🔒" : i + 1}</div>
           <div style={{ flex:1 }}>{s.label}{s.detail ? <span style={{ color:C.muted }}> · {s.detail}</span> : null}</div>
           {extra[s.key]}
         </div>
@@ -5608,10 +5612,10 @@ function ApprenticeFinalDay({ tech, prog, onStartTest }) {
     ]).then(([t, e]) => { setTests(t || []); setEvals(e || []); }).catch(() => {});
   }, [tech.id]);
   const steps = finalDaySteps({ trainee:tech, prog, tests, evals });
-  const btn = { background:C.purple, border:"none", color:C.white, padding:"12px 18px", borderRadius:"22px", cursor:"pointer", fontSize:"14px", fontWeight:"900", fontStyle:"italic", letterSpacing:"2px", fontFamily:"'Barlow Condensed',sans-serif", textTransform:"uppercase" };
+  const btn = { background:C.purple, border:"none", color:C.white, padding:"12px 18px", borderRadius:"22px", cursor:"pointer", fontSize:"14px", fontWeight:"700", fontStyle:"normal", letterSpacing:"-0.01em", fontFamily:FONT, textTransform:"none" };
   return (
-    <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.gold}`, borderRadius:"12px", padding:"16px", display:"flex", flexDirection:"column", gap:"12px" }}>
-      <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"18px", color:C.black }}>🎓 Road to Detail Pro</div>
+    <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"16px", display:"flex", flexDirection:"column", gap:"12px" }}>
+      <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"18px", color:C.black }}>🎓 Road to Detail Pro</div>
       <FinalDayStepList steps={steps}/>
       {steps.testUnlocked && !steps.writtenPD && <button onClick={() => onStartTest("perfect_day")} style={btn}>Take the Perfect Day test</button>}
       {steps.testUnlocked && !steps.writtenMisc && <button onClick={() => onStartTest("misc")} style={btn}>Take the Miscellaneous test</button>}
@@ -5634,15 +5638,15 @@ function FinalDayResults({ trainee, prog, tests, evals, evalResults, rubricItems
   const passedMisc = passedTestFor(tests, "misc");
   const passedTest = passedPD && passedMisc;
   const passedEval = evals.find(e => e.overall_result === "pass");
-  const small = { fontSize:"11px", color:C.muted, letterSpacing:"1px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800" };
-  const startBtn = color => ({ background:color, border:"none", color:C.white, padding:"8px 14px", borderRadius:"16px", cursor:"pointer", fontSize:"12px", fontWeight:"900", fontStyle:"italic", letterSpacing:"1px", fontFamily:"'Barlow Condensed',sans-serif", textTransform:"uppercase" });
+  const small = { fontSize:"11px", color:C.muted, letterSpacing:"-0.01em", fontFamily:FONT, fontWeight:"600" };
+  const startBtn = color => ({ background:color, border:"none", color:C.white, padding:"8px 14px", borderRadius:"16px", cursor:"pointer", fontSize:"12px", fontWeight:"700", fontStyle:"normal", letterSpacing:"-0.01em", fontFamily:FONT, textTransform:"none" });
   const row = { padding:"10px 0", borderTop:`1px solid ${C.border}40`, cursor:"pointer" };
 
   return (
-    <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.gold}`, borderRadius:"12px", padding:"16px", display:"flex", flexDirection:"column", gap:"14px" }}>
-      <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"18px", color:C.black }}>🎓 Road to Detail Pro</div>
+    <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"16px", display:"flex", flexDirection:"column", gap:"14px" }}>
+      <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"18px", color:C.black }}>🎓 Road to Detail Pro</div>
       {(() => { const st = finalDaySteps({ trainee, prog, tests, evals }); return (
-        <FinalDayStepList steps={st} extra={{ classroom: <button onClick={onToggleClassroom} style={{ background:"none", border:`1px solid ${C.border}`, color:C.muted, borderRadius:"12px", padding:"3px 10px", fontSize:"11px", cursor:"pointer" }}>{st.classroom ? "Undo" : "Mark done"}</button> }}/>
+        <FinalDayStepList steps={st} extra={{ classroom: <button onClick={onToggleClassroom} style={{ background:"none", border:`1px solid ${C.border}`, color:C.muted, borderRadius:"16px", padding:"3px 10px", fontSize:"11px", cursor:"pointer" }}>{st.classroom ? "Undo" : "Mark done"}</button> }}/>
       ); })()}
 
       <div>
@@ -5672,7 +5676,7 @@ function FinalDayResults({ trainee, prog, tests, evals, evalResults, rubricItems
                 <span style={{ color:C.black, fontWeight:"700" }}>{testName(t)} · {fmtWhen(t.started_at)} · {t.status==="passed" ? "Passed" : t.status==="abandoned" ? "Stopped early" : "In progress"}</span>
                 <span style={{ color:C.muted }}>{t.first_try_correct != null ? `${t.first_try_correct}/${t.total_questions} first try` : "—"}{retakes ? ` · ${retakes} retake${retakes===1?"":"s"}` : ""} {open ? "▲" : "▼"}</span>
               </div>
-              <div style={{ fontSize:"10px", color:C.muted }}>Given by {t.administered_by_name || name(t.administered_by) || "—"}</div>
+              <div style={{ fontSize:"11px", color:C.muted }}>Given by {t.administered_by_name || name(t.administered_by) || "—"}</div>
               {open && (
                 <div style={{ marginTop:"8px", display:"flex", flexDirection:"column", gap:"8px" }}>
                   {(t.rounds || []).length > 0 && <div style={{ fontSize:"12px", color:C.black }}>{t.rounds.map(r => `${r.round === 1 ? "First try" : `Retake ${r.round - 1}`}: ${r.asked.length - r.wrong.length}/${r.asked.length}`).join("  →  ")}</div>}
@@ -5681,7 +5685,7 @@ function FinalDayResults({ trainee, prog, tests, evals, evalResults, rubricItems
                     const q = QUESTION_BY_ID[w.id];
                     const tries = (t.rounds || []).filter(r => r.wrong.some(x => x.id === w.id)).length;
                     return q && (
-                      <div key={w.id} style={{ background:`${C.red}08`, border:`1px solid ${C.red}30`, borderRadius:"8px", padding:"8px 10px", fontSize:"12px" }}>
+                      <div key={w.id} style={{ background:`${C.red}08`, border:`1px solid ${C.red}30`, borderRadius:"10px", padding:"8px 10px", fontSize:"12px" }}>
                         <div style={{ color:C.black, fontWeight:"600" }}>{q.q}</div>
                         <div style={{ color:C.red, marginTop:"3px" }}>✗ Picked: {w.picked}</div>
                         <div style={{ color:C.green }}>✓ Right: {q.correct}</div>
@@ -5717,12 +5721,12 @@ function FinalDayResults({ trainee, prog, tests, evals, evalResults, rubricItems
                 <span style={{ color:e.overall_result==="pass" ? C.green : C.red, fontWeight:"700" }}>{fmtWhen(e.test_date + "T12:00:00Z")} · Attempt {e.attempt_number} · {e.overall_result==="pass" ? "Passed" : "Failed"}</span>
                 <span style={{ color:C.muted }}>{res.length - fails.length}/{res.length} items {open ? "▲" : "▼"}</span>
               </div>
-              <div style={{ fontSize:"10px", color:C.muted }}>Given by {name(e.administered_by) || "—"}</div>
+              <div style={{ fontSize:"11px", color:C.muted }}>Given by {name(e.administered_by) || "—"}</div>
               {open && (
                 <div style={{ marginTop:"8px", display:"flex", flexDirection:"column", gap:"6px" }}>
                   {fails.length === 0 && <div style={{ fontSize:"12px", color:C.green }}>Every item passed.</div>}
                   {fails.map(r => (
-                    <div key={r.id} style={{ background:`${C.red}08`, border:`1px solid ${C.red}30`, borderRadius:"8px", padding:"8px 10px", fontSize:"12px" }}>
+                    <div key={r.id} style={{ background:`${C.red}08`, border:`1px solid ${C.red}30`, borderRadius:"10px", padding:"8px 10px", fontSize:"12px" }}>
                       <div style={{ color:C.black }}>✗ #{item(r.rubric_item_id)?.sort_order} {item(r.rubric_item_id)?.description || r.rubric_item_id}</div>
                       {r.notes && <div style={{ color:C.muted, marginTop:"2px" }}>{r.notes}</div>}
                     </div>
@@ -5765,11 +5769,11 @@ function rangeFor(preset) {
 function GrowthRange({ range, setRange }) {
   const [preset, setPreset] = useState("month");
   const presets = [["today","Today"],["7","7 days"],["month","This month"],["last_month","Last month"],["30","30 days"],["custom","Custom"]];
-  const date = { background:C.white, border:`1px solid ${C.border}`, borderRadius:"8px", padding:"6px 8px", fontSize:"13px", color:C.black };
+  const date = { background:C.white, border:`1px solid ${C.border}`, borderRadius:"10px", padding:"6px 8px", fontSize:"13px", color:C.black };
   return (
     <div style={{ display:"flex", flexWrap:"wrap", gap:"6px", alignItems:"center" }}>
       {presets.map(([k, label]) => (
-        <button key={k} onClick={() => { setPreset(k); if (k !== "custom") setRange(rangeFor(k)); }} style={{ background:preset===k ? C.blue : C.white, color:preset===k ? C.white : C.black, border:`1px solid ${preset===k ? C.blue : C.border}`, borderRadius:"16px", padding:"5px 12px", fontSize:"12px", fontWeight:"700", cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif" }}>{label}</button>
+        <button key={k} onClick={() => { setPreset(k); if (k !== "custom") setRange(rangeFor(k)); }} style={{ background:preset===k ? C.blue : C.white, color:preset===k ? C.white : C.black, border:`1px solid ${preset===k ? C.blue : C.border}`, borderRadius:"16px", padding:"5px 12px", fontSize:"12px", fontWeight:"700", cursor:"pointer", fontFamily:FONT }}>{label}</button>
       ))}
       {preset === "custom" && (<>
         <input type="date" value={range.from} max={range.to} onChange={e => setRange(r => ({ ...r, from:e.target.value }))} style={date}/>
@@ -5797,9 +5801,9 @@ function useGrowthReport(params, token) {
 
 function StatTile({ label, value, sub, pending }) {
   return (
-    <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"12px 14px", minWidth:0 }}>
-      <div style={{ fontSize:"10px", color:C.muted, letterSpacing:"1px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", textTransform:"uppercase" }}>{label}</div>
-      <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:pending ? "16px" : "26px", color:pending ? C.muted : C.black, marginTop:"2px", lineHeight:1.1 }}>{value}</div>
+    <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"12px 14px", minWidth:0 }}>
+      <div style={{ fontSize:"11px", color:C.muted, letterSpacing:"-0.01em", fontFamily:FONT, fontWeight:"600", textTransform:"none" }}>{label}</div>
+      <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:pending ? "16px" : "26px", color:pending ? C.muted : C.black, marginTop:"2px", lineHeight:1.1 }}>{value}</div>
       {sub && <div style={{ fontSize:"11px", color:C.muted, marginTop:"2px" }}>{sub}</div>}
     </div>
   );
@@ -5815,9 +5819,9 @@ function DailyBars({ title, days, value, color = C.blue, fmt = v => v }) {
   const W = 600, H = 120, gap = 2, bw = Math.max(1, (W - gap * (days.length - 1)) / Math.max(1, days.length));
   const h = hover != null ? days[hover] : null;
   return (
-    <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"12px 14px" }}>
+    <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"12px 14px" }}>
       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", marginBottom:"6px" }}>
-        <div style={{ fontSize:"11px", color:C.muted, letterSpacing:"1px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800" }}>{title.toUpperCase()}</div>
+        <div style={{ fontSize:"11px", color:C.muted, letterSpacing:"-0.01em", fontFamily:FONT, fontWeight:"600" }}>{title.toUpperCase()}</div>
         <div style={{ fontSize:"12px", color:C.black }}>{h ? <>{fmtDay(h.d)}: <b>{fmt(value(h))}</b></> : <>Total <b>{fmt(total)}</b></>}</div>
       </div>
       <svg viewBox={`0 0 ${W} ${H}`} style={{ width:"100%", height:"110px", display:"block" }} onMouseLeave={() => setHover(null)}>
@@ -5832,7 +5836,7 @@ function DailyBars({ title, days, value, color = C.blue, fmt = v => v }) {
           );
         })}
       </svg>
-      {days.length > 1 && <div style={{ display:"flex", justifyContent:"space-between", fontSize:"10px", color:C.muted, marginTop:"4px" }}><span>{fmtDay(days[0].d)}</span><span>{fmtDay(days[days.length - 1].d)}</span></div>}
+      {days.length > 1 && <div style={{ display:"flex", justifyContent:"space-between", fontSize:"11px", color:C.muted, marginTop:"4px" }}><span>{fmtDay(days[0].d)}</span><span>{fmtDay(days[days.length - 1].d)}</span></div>}
     </div>
   );
 }
@@ -5852,16 +5856,16 @@ function ConnectionCard({ title, connected, lastSync, steps, note, connectUrl, c
     setSyncing(false);
   }
   return (
-    <div style={{ background:connected ? `${C.green}10` : `${C.gold}12`, border:`1px solid ${connected ? C.green : C.gold}`, borderRadius:"12px", padding:"12px 14px" }}>
+    <div style={{ background:connected ? `${C.green}10` : `${C.gold}12`, border:`1px solid ${connected ? C.green : C.gold}`, borderRadius:"16px", padding:"12px 14px" }}>
       <div onClick={() => setOpen(o => !o)} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", cursor:"pointer", gap:"8px" }}>
         <div style={{ fontSize:"13px", color:C.black, fontWeight:"700" }}>{connected ? "✅" : "🔌"} {title}: {connected ? `connected${lastSync ? ` · last sync ${new Date(lastSync).toLocaleString("en-US", { month:"short", day:"numeric", hour:"numeric", minute:"2-digit", timeZone:"America/Denver" })}` : ""}` : "not connected yet"}</div>
         {steps && <span style={{ fontSize:"12px", color:C.muted }}>{open ? "▲" : "How to connect ▼"}</span>}
       </div>
       {note && <div style={{ fontSize:"12px", color:C.muted, marginTop:"4px" }}>{note}</div>}
       {open && steps && <ol style={{ margin:"8px 0 0", paddingLeft:"20px", fontSize:"12px", color:C.black, lineHeight:1.6 }}>{steps.map((s, i) => <li key={i}>{s}</li>)}</ol>}
-      {connected && syncFn && <button onClick={syncNow} disabled={syncing} style={{ marginTop:"10px", marginRight:"8px", background:C.green, color:C.white, border:"none", padding:"8px 16px", borderRadius:"18px", fontSize:"12px", fontWeight:"900", cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:"1px", textTransform:"uppercase" }}>{syncing ? "Syncing..." : "Sync now"}</button>}
+      {connected && syncFn && <button onClick={syncNow} disabled={syncing} style={{ marginTop:"10px", marginRight:"8px", background:C.green, color:C.white, border:"none", padding:"8px 16px", borderRadius:"18px", fontSize:"12px", fontWeight:"700", cursor:"pointer", fontFamily:FONT, letterSpacing:"-0.01em", textTransform:"none" }}>{syncing ? "Syncing..." : "Sync now"}</button>}
       {syncMsg && <div style={{ fontSize:"12px", color:C.black, marginTop:"6px" }}>{syncMsg}</div>}
-      {connectUrl && <a href={connectUrl} style={{ display:"inline-block", marginTop:"10px", background:C.blue, color:C.white, padding:"8px 16px", borderRadius:"18px", fontSize:"12px", fontWeight:"900", textDecoration:"none", fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:"1px", textTransform:"uppercase" }}>{connectLabel || "Connect"}</a>}
+      {connectUrl && <a href={connectUrl} style={{ display:"inline-block", marginTop:"10px", background:C.blue, color:C.white, padding:"8px 16px", borderRadius:"18px", fontSize:"12px", fontWeight:"700", textDecoration:"none", fontFamily:FONT, letterSpacing:"-0.01em", textTransform:"none" }}>{connectLabel || "Connect"}</a>}
     </div>
   );
 }
@@ -5869,7 +5873,7 @@ function ConnectionCard({ title, connected, lastSync, steps, note, connectUrl, c
 const SubTabs = ({ tabs, active, setActive }) => (
   <div style={{ display:"flex", gap:"6px", overflowX:"auto" }}>
     {tabs.map(([k, label]) => (
-      <button key={k} onClick={() => setActive(k)} style={{ flexShrink:0, background:active===k ? C.black : C.card, color:active===k ? C.white : C.black, border:`1px solid ${active===k ? C.black : C.border}`, borderRadius:"20px", padding:"8px 14px", cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"13px", letterSpacing:"1px", textTransform:"uppercase" }}>{label}</button>
+      <button key={k} onClick={() => setActive(k)} style={{ flexShrink:0, background:active===k ? C.black : C.card, color:active===k ? C.white : C.black, border:`1px solid ${active===k ? C.black : C.border}`, borderRadius:"20px", padding:"8px 14px", cursor:"pointer", fontFamily:FONT, fontWeight:"700", fontSize:"13px", letterSpacing:"-0.01em", textTransform:"none" }}>{label}</button>
     ))}
   </div>
 );
@@ -5903,7 +5907,7 @@ function FormsTab({ me, role }) {
     <a key={k} href={href} target="_blank" rel="noopener noreferrer" style={card}>
       <div style={{ fontSize:"28px" }}>{GHL_FORMS[k].icon}</div>
       <div style={{ flex:1 }}>
-        <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"18px" }}>{GHL_FORMS[k].label}</div>
+        <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"18px" }}>{GHL_FORMS[k].label}</div>
         <div style={{ fontSize:"12px", color:C.muted }}>{sub || GHL_FORMS[k].desc}</div>
       </div>
       <div style={{ fontSize:"18px", color:C.muted }}>›</div>
@@ -5920,8 +5924,8 @@ function FormsTab({ me, role }) {
   );
 }
 
-const SectionTitle = ({ children }) => <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"16px", color:C.black, marginTop:"6px" }}>{children}</div>;
-const ReportState = ({ s }) => s.error ? <div style={{ background:`${C.red}10`, border:`1px solid ${C.red}`, borderRadius:"10px", padding:"12px", fontSize:"13px", color:C.red }}>Couldn't load: {s.error}</div> : s.loading && !s.data ? <div style={{ color:C.muted, padding:"16px" }}>Loading...</div> : null;
+const SectionTitle = ({ children }) => <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"16px", color:C.black, marginTop:"6px" }}>{children}</div>;
+const ReportState = ({ s }) => s.error ? <div style={{ background:`${C.red}10`, border:`1px solid ${C.red}`, borderRadius:"12px", padding:"12px", fontSize:"13px", color:C.red }}>Couldn't load: {s.error}</div> : s.loading && !s.data ? <div style={{ color:C.muted, padding:"16px" }}>Loading...</div> : null;
 const REVENUE_NOTE = "Revenue = HCP jobs these leads booked after coming in (matched by phone, email, or exact full name). Upfront = the first visit only — one-time jobs count once. Committed = first visit + the rest of the plan's minimum visits, when the plan was sold with that booking (weekly 8, bi-weekly 7, monthly 6, bi-monthly 5, quarterly 4). Completed so far = the part of that revenue whose HCP jobs the tech has marked complete. Anything after that — repeat jobs, plan visits past the minimum, plans a tech sells later — is kept by operations and not credited to ads or sales.";
 
 function ChannelTiles({ ch, paid, att }) {
@@ -5969,17 +5973,17 @@ function AttributionSettings({ att, token, onSaved }) {
     if (!r.ok) { setMsg(j.error || "Couldn't save"); return; }
     setOpen(false); onSaved && onSaved();
   };
-  const inp = { width:"64px", padding:"6px 8px", border:`1px solid ${C.border}`, borderRadius:"8px", fontSize:"13px" };
+  const inp = { width:"64px", padding:"6px 8px", border:`1px solid ${C.border}`, borderRadius:"10px", fontSize:"13px" };
   return (
-    <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"10px 14px", fontSize:"12px", color:C.muted }}>
+    <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"10px 14px", fontSize:"12px", color:C.muted }}>
       {!open ? (
         <div style={{ display:"flex", justifyContent:"space-between", gap:"8px", flexWrap:"wrap", alignItems:"center" }}>
           <span>Credit rules: plan minimums {PLANS.map(([k, l]) => `${l.toLowerCase()} ${att.plan_minimums?.[k]}`).join(" · ")} · margin {Math.round(att.gross_margin * 1000) / 10}% (target {Math.round(att.target_margin * 1000) / 10}%)</span>
-          <button onClick={start} style={{ background:"none", border:`1px solid ${C.border}`, borderRadius:"14px", padding:"4px 12px", fontSize:"11px", fontWeight:"800", cursor:"pointer", color:C.black }}>Edit</button>
+          <button onClick={start} style={{ background:"none", border:`1px solid ${C.border}`, borderRadius:"14px", padding:"4px 12px", fontSize:"11px", fontWeight:"600", cursor:"pointer", color:C.black }}>Edit</button>
         </div>
       ) : (
         <div style={{ display:"flex", flexDirection:"column", gap:"8px", color:C.black }}>
-          <div style={{ fontWeight:"800" }}>Plan minimum visits (credited to the ad / sale)</div>
+          <div style={{ fontWeight:"600" }}>Plan minimum visits (credited to the ad / sale)</div>
           <div style={{ display:"flex", gap:"10px", flexWrap:"wrap" }}>
             {PLANS.map(([k, l]) => <label key={k} style={{ display:"flex", flexDirection:"column", gap:"2px" }}>{l}<input type="number" min="1" max="52" value={f.mins[k]} onChange={e => setF({ ...f, mins:{ ...f.mins, [k]:e.target.value } })} style={inp}/></label>)}
           </div>
@@ -5988,7 +5992,7 @@ function AttributionSettings({ att, token, onSaved }) {
             <label style={{ display:"flex", flexDirection:"column", gap:"2px" }}>Target margin %<input type="number" step="0.1" value={f.tm} onChange={e => setF({ ...f, tm:e.target.value })} style={inp}/></label>
           </div>
           <div style={{ display:"flex", gap:"8px", alignItems:"center" }}>
-            <button onClick={save} style={{ background:C.green, color:C.white, border:"none", borderRadius:"14px", padding:"6px 14px", fontWeight:"900", cursor:"pointer" }}>Save</button>
+            <button onClick={save} style={{ background:C.green, color:C.white, border:"none", borderRadius:"14px", padding:"6px 14px", fontWeight:"700", cursor:"pointer" }}>Save</button>
             <button onClick={() => setOpen(false)} style={{ background:"none", border:`1px solid ${C.border}`, borderRadius:"14px", padding:"6px 14px", cursor:"pointer" }}>Cancel</button>
             <span style={{ color:C.muted }}>{msg}</span>
           </div>
@@ -6003,7 +6007,7 @@ function MetaCampaigns({ campaigns }) {
   if (!campaigns.length) return <div style={{ fontSize:"13px", color:C.muted }}>No Meta campaigns in this range.</div>;
   // Compact: headers wrap, cost columns rounded to whole dollars, so all
   // columns fit on a laptop screen without sideways scrolling.
-  const th = { textAlign:"right", padding:"6px 5px", fontSize:"10px", color:C.muted, letterSpacing:"0.5px", fontWeight:"800", lineHeight:1.2, verticalAlign:"bottom" };
+  const th = { textAlign:"right", padding:"6px 5px", fontSize:"11px", color:C.muted, letterSpacing:"-0.01em", fontWeight:"600", lineHeight:1.2, verticalAlign:"bottom" };
   const td = { textAlign:"right", padding:"8px 5px", fontSize:"12px", color:C.black, whiteSpace:"nowrap", fontVariantNumeric:"tabular-nums" };
   const row = x => [
     usd(x.spend), x.leads, x.spend && x.leads ? usd(x.spend / x.leads) : "—", x.booked, x.spend && x.booked ? usd(x.spend / x.booked) : "—",
@@ -6011,7 +6015,7 @@ function MetaCampaigns({ campaigns }) {
     Number(x.spend) > 0 ? `${(Number(x.revenue_upfront || 0) / Number(x.spend)).toFixed(2)}x / ${(Number(x.revenue_sold || 0) / Number(x.spend)).toFixed(2)}x` : "—",
   ];
   return (
-    <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", overflowX:"auto" }}>
+    <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", overflowX:"auto" }}>
       <table style={{ width:"100%", borderCollapse:"collapse", minWidth:"700px" }}>
         <thead><tr style={{ background:C.cardLt }}>
           <th style={{ ...th, textAlign:"left" }}>CAMPAIGN / AD</th><th style={th}>SPEND</th><th style={th}>LEADS</th><th style={th}>CPL</th><th style={th}>BOOKED</th><th style={th}>$/BOOKING</th><th style={th}>UPFRONT</th><th style={th}>COMMITTED</th><th style={th}>COMPLETED</th><th style={th}>ROAS UP / COMM.</th>
@@ -6024,7 +6028,7 @@ function MetaCampaigns({ campaigns }) {
             </tr>
             {open === c.id && (c.ads || []).map(a => (
               <tr key={a.id} style={{ background:C.blueXlt }}>
-                <td style={{ ...td, textAlign:"left", whiteSpace:"normal", paddingLeft:"24px" }}>{a.name || a.id}<div style={{ fontSize:"10px", color:C.muted }}>{a.adset}</div></td>
+                <td style={{ ...td, textAlign:"left", whiteSpace:"normal", paddingLeft:"24px" }}>{a.name || a.id}<div style={{ fontSize:"11px", color:C.muted }}>{a.adset}</div></td>
                 {row(a).map((v, i) => <td key={i} style={td}>{v}</td>)}
               </tr>
             ))}
@@ -6037,10 +6041,10 @@ function MetaCampaigns({ campaigns }) {
 
 function SpendCampaigns({ rows }) {
   if (!rows?.length) return <div style={{ fontSize:"13px", color:C.muted }}>No spend in this range.</div>;
-  const th = { textAlign:"right", padding:"6px 8px", fontSize:"10px", color:C.muted, letterSpacing:"1px", fontWeight:"800", whiteSpace:"nowrap" };
+  const th = { textAlign:"right", padding:"6px 8px", fontSize:"11px", color:C.muted, letterSpacing:"-0.01em", fontWeight:"600", whiteSpace:"nowrap" };
   const td = { textAlign:"right", padding:"8px", fontSize:"12px", color:C.black, whiteSpace:"nowrap", fontVariantNumeric:"tabular-nums" };
   return (
-    <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", overflowX:"auto" }}>
+    <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", overflowX:"auto" }}>
       <table style={{ width:"100%", borderCollapse:"collapse", minWidth:"520px" }}>
         <thead><tr style={{ background:C.cardLt }}><th style={{ ...th, textAlign:"left" }}>CAMPAIGN</th><th style={th}>SPEND</th><th style={th}>CLICKS</th><th style={th}>CPC</th><th style={th}>CONV.</th><th style={th}>$/CONV.</th></tr></thead>
         <tbody>{rows.map(r => (
@@ -6104,9 +6108,9 @@ function MarketingTab({ token }) {
       <GrowthRange range={range} setRange={setRange}/>
       <ReportState s={s}/>
       {d && (<>
-        <div style={{ background:C.black, borderRadius:"12px", padding:"14px 16px", display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(110px, 1fr))", gap:"10px", color:C.white }}>
+        <div style={{ background:C.black, borderRadius:"16px", padding:"14px 16px", display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(110px, 1fr))", gap:"10px", color:C.white }}>
           {[["All leads", all.leads], ["Booked", `${all.booked} · ${pctOf(all.booked, all.leads)}`], ["Ad spend", usd(all.spend)], ["Paid cost / lead", paidSpend && paidLeads ? money2(paidSpend / paidLeads) : "—"], ["Upfront revenue", usd(all.up)], ["Committed revenue", usd(all.sold)], ["Completed so far", usd(all.done)], ["Paid ROAS up / comm.", paidSpend ? `${(paidUp / paidSpend).toFixed(1)}x / ${(paidSold / paidSpend).toFixed(1)}x` : "—"]].map(([l, v]) => (
-            <div key={l}><div style={{ fontSize:"10px", opacity:0.7, letterSpacing:"1px", fontWeight:"800", fontFamily:"'Barlow Condensed',sans-serif" }}>{l.toUpperCase()}</div><div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"22px" }}>{v}</div></div>
+            <div key={l}><div style={{ fontSize:"11px", opacity:0.7, letterSpacing:"-0.01em", fontWeight:"600", fontFamily:FONT }}>{l.toUpperCase()}</div><div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"22px" }}>{v}</div></div>
           ))}
         </div>
         <AttributionSettings att={att} token={token} onSaved={() => setBump(b => b + 1)}/>
@@ -6130,7 +6134,7 @@ function MarketingTab({ token }) {
             syncFn="google-ads-sync" token={token} onSynced={() => setBump(b => b + 1)}
             note={conn.google?.last_result?.ok === false ? `Last sync failed: ${conn.google.last_result.error}` : conn.google?.connected ? null : "Google Ads leads show up here automatically once they arrive in GHL with Google's tracking."}/>
           <ChannelTiles ch={ch.google} paid att={att}/>
-          {Number(ch.google.spend) > 0 && ch.google.leads === 0 && <div style={{ background:`${C.gold}12`, border:`1px solid ${C.gold}`, borderRadius:"10px", padding:"10px 12px", fontSize:"12px", color:C.black }}>Google is reporting conversions, but none of your GHL leads are tagged as coming from Google yet — so leads, bookings and revenue for Google show 0 here. Those leads are landing in GHL as website / direct leads. Fix: turn on GHL tracking for Google (see setup notes) so each lead keeps its Google click ID.</div>}
+          {Number(ch.google.spend) > 0 && ch.google.leads === 0 && <div style={{ background:`${C.gold}12`, border:`1px solid ${C.gold}`, borderRadius:"12px", padding:"10px 12px", fontSize:"12px", color:C.black }}>Google is reporting conversions, but none of your GHL leads are tagged as coming from Google yet — so leads, bookings and revenue for Google show 0 here. Those leads are landing in GHL as website / direct leads. Fix: turn on GHL tracking for Google (see setup notes) so each lead keeps its Google click ID.</div>}
           <DailyBars title="Google Ads spend per day" days={days} value={x => Number(x.spend?.google || 0)} fmt={usd}/>
           <SectionTitle>Campaigns</SectionTitle>
           <SpendCampaigns rows={d.ad_campaigns?.google}/>
@@ -6175,7 +6179,7 @@ function MarketingTab({ token }) {
                 <StatTile label="Key events (GA4)" value={Math.round(g.key_events)} sub="as counted by Google Analytics"/>
               </TileGrid>
               <SectionTitle>Visits by channel</SectionTitle>
-              <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"6px 14px" }}>
+              <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"6px 14px" }}>
                 {g.by_channel.map(c => (
                   <div key={c.channel} style={{ display:"flex", justifyContent:"space-between", padding:"8px 0", borderBottom:`1px solid ${C.border}40`, fontSize:"13px" }}>
                     <span style={{ color:C.black }}>{c.channel}</span>
@@ -6184,7 +6188,7 @@ function MarketingTab({ token }) {
                 ))}
               </div>
               <SectionTitle>Top landing pages</SectionTitle>
-              <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"6px 14px" }}>
+              <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"6px 14px" }}>
                 {g.pages.map(pg => (
                   <div key={pg.page} style={{ display:"flex", justifyContent:"space-between", gap:"8px", padding:"8px 0", borderBottom:`1px solid ${C.border}40`, fontSize:"12px" }}>
                     <span style={{ color:C.black, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{pg.page}</span>
@@ -6201,7 +6205,7 @@ function MarketingTab({ token }) {
             revenue_serviced:Number(ch.website.revenue_serviced || 0) + Number(ch.social.revenue_serviced || 0) }}/>
           <DailyBars title="Website form leads per day" days={days} value={x => (x.leads?.website || 0) + (x.leads?.social || 0)}/>
           <SectionTitle>Where website leads came from</SectionTitle>
-          <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"6px 14px" }}>
+          <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"6px 14px" }}>
             {(d.website_sources || []).length === 0 && <div style={{ fontSize:"13px", color:C.muted, padding:"8px 0" }}>No website leads in this range.</div>}
             {(d.website_sources || []).map(w => (
               <div key={w.source} style={{ display:"flex", justifyContent:"space-between", padding:"8px 0", borderBottom:`1px solid ${C.border}40`, fontSize:"13px" }}>
@@ -6212,7 +6216,7 @@ function MarketingTab({ token }) {
           </div>
           {(d.website_pages || []).length > 0 && (<>
             <SectionTitle>Top lead pages</SectionTitle>
-            <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"6px 14px" }}>
+            <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"6px 14px" }}>
               {d.website_pages.map(p => (
                 <div key={p.page} style={{ display:"flex", justifyContent:"space-between", gap:"8px", padding:"8px 0", borderBottom:`1px solid ${C.border}40`, fontSize:"12px" }}>
                   <span style={{ color:C.black, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{p.page.replace(/^https?:\/\//, "")}</span><b>{p.leads}</b>
@@ -6350,7 +6354,7 @@ function TrainingOverviewTab({ techs, currentUser, refreshAll }) {
     })
     .sort((a, b) => (a.prog.complete - b.prog.complete) || (b.prog.pct - a.prog.pct) || a.t.name.localeCompare(b.t.name));
 
-  const small = { fontSize:"10px", color:C.muted, letterSpacing:"1px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800" };
+  const small = { fontSize:"11px", color:C.muted, letterSpacing:"-0.01em", fontFamily:FONT, fontWeight:"600" };
   const open = trainees.find(x => x.t.id === openId);
 
   if (loading) return <div style={{ color:C.muted, padding:"20px" }}>Loading training...</div>;
@@ -6362,10 +6366,10 @@ function TrainingOverviewTab({ techs, currentUser, refreshAll }) {
     const trainers = techs.filter(t => t.is_active !== false && (t.is_lead || TRAINER_TITLES.includes(t.title)));
     return (
       <div style={{ display:"flex", flexDirection:"column", gap:"12px" }}>
-        <button onClick={() => { setOpenId(null); setTrainerSel(""); load(); }} style={{ alignSelf:"flex-start", background:"none", border:`1px solid ${C.border}`, color:C.blue, padding:"6px 14px", borderRadius:"16px", cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"13px" }}>← All apprentices</button>
-        <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"10px 14px", display:"flex", alignItems:"center", gap:"10px" }}>
+        <button onClick={() => { setOpenId(null); setTrainerSel(""); load(); }} style={{ alignSelf:"flex-start", background:"none", border:`1px solid ${C.border}`, color:C.blue, padding:"6px 14px", borderRadius:"16px", cursor:"pointer", fontFamily:FONT, fontWeight:"600", fontSize:"13px" }}>← All apprentices</button>
+        <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"10px 14px", display:"flex", alignItems:"center", gap:"10px" }}>
           <span style={{ ...small, whiteSpace:"nowrap" }}>CHECKING OFF AS</span>
-          <select value={trainerSel || trainerOf(open.t) || ""} onChange={e => setTrainerSel(e.target.value)} style={{ flex:1, background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"8px 10px", borderRadius:"8px", fontSize:"14px" }}>
+          <select value={trainerSel || trainerOf(open.t) || ""} onChange={e => setTrainerSel(e.target.value)} style={{ flex:1, background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"8px 10px", borderRadius:"10px", fontSize:"14px" }}>
             <option value="">— No trainer —</option>
             {trainers.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
           </select>
@@ -6384,15 +6388,15 @@ function TrainingOverviewTab({ techs, currentUser, refreshAll }) {
       <div style={{ fontSize:"12px", color:C.muted, padding:"0 4px" }}>
         Every Detail Apprentice's training. Done = {TRAINING_MIN_DAYS} full Perfect Days + every Miscellaneous item {MISC_REPS}×. Tap a name to open their rubric and notes.
       </div>
-      {trainees.length === 0 && <div style={{ background:C.cardLt, border:`1px solid ${C.border}`, borderRadius:"10px", padding:"14px", fontSize:"13px", color:C.muted }}>No Detail Apprentices right now.</div>}
+      {trainees.length === 0 && <div style={{ background:C.cardLt, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"14px", fontSize:"13px", color:C.muted }}>No Detail Apprentices right now.</div>}
       {trainees.map(({ t, prog, days, lastNote }) => (
-        <div key={t.id} onClick={() => setOpenId(t.id)} style={{ background:C.card, border:`1px solid ${prog.complete ? C.green : C.border}`, borderRadius:"12px", padding:"14px 16px", cursor:"pointer" }}>
+        <div key={t.id} onClick={() => setOpenId(t.id)} style={{ background:C.card, border:`1px solid ${prog.complete ? C.green : C.border}`, borderRadius:"16px", padding:"14px 16px", cursor:"pointer" }}>
           <div style={{ display:"flex", alignItems:"baseline", justifyContent:"space-between", gap:"10px" }}>
             <div>
-              <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"18px", color:C.black }}>{t.name}</div>
+              <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"18px", color:C.black }}>{t.name}</div>
               <div style={{ fontSize:"11px", color:C.muted }}>Trainer: {name(trainerOf(t)) || "not assigned"}{days.length ? ` · last trained ${fmtDay(days[days.length-1])}` : " · not started"}</div>
             </div>
-            <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"26px", color:prog.complete ? C.green : C.purple }}>{prog.pct}%</div>
+            <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"26px", color:prog.complete ? C.green : C.purple }}>{prog.pct}%</div>
           </div>
           <div style={{ marginTop:"8px" }}><Bar pct={prog.pct} color={prog.complete ? C.green : C.purple} h={8}/></div>
           <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"12px", marginTop:"10px" }}>
@@ -6475,10 +6479,10 @@ function OnboardingSignOff({ tech, refreshAll, showToast, onComplete }) {
   }
 
   return (
-    <div style={{ background:C.card, border:`1px solid ${signed ? C.green : C.border}`, borderRadius:"12px", padding:"16px", display:"flex", flexDirection:"column", gap:"10px" }}>
+    <div style={{ background:C.card, border:`1px solid ${signed ? C.green : C.border}`, borderRadius:"16px", padding:"16px", display:"flex", flexDirection:"column", gap:"10px" }}>
       <Label color={signed ? C.green : C.blue}>Onboarding Sign-Off — {tech.name}</Label>
       {ONBOARDING_BOXES.map(([key, label]) => (
-        <div key={key} style={{ display:"flex", alignItems:"center", gap:"10px", padding:"8px", background:`${C.blue}08`, borderRadius:"8px" }}>
+        <div key={key} style={{ display:"flex", alignItems:"center", gap:"10px", padding:"8px", background:`${C.blue}08`, borderRadius:"10px" }}>
           <input type="checkbox" id={`ob_${key}_${tech.id}`} checked={signed || !!boxes[key]} disabled={signed} onChange={e => toggle(key, e.target.checked)} style={{ width:"16px", height:"16px", cursor:signed ? "default" : "pointer" }}/>
           <label htmlFor={`ob_${key}_${tech.id}`} style={{ fontSize:"13px", color:C.black, cursor:signed ? "default" : "pointer" }}>{label}</label>
         </div>
@@ -6491,7 +6495,7 @@ function OnboardingSignOff({ tech, refreshAll, showToast, onComplete }) {
         <>
           <div>
             <div style={{ fontSize:"11px", color:C.muted, marginBottom:"4px" }}>Signature (type your full name)</div>
-            <input type="text" value={sig} onChange={e => setSig(e.target.value)} placeholder="Your name" style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"10px", borderRadius:"8px", fontSize:"15px", fontStyle:"italic", width:"100%", boxSizing:"border-box" }}/>
+            <input type="text" value={sig} onChange={e => setSig(e.target.value)} placeholder="Your name" style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"10px", borderRadius:"10px", fontSize:"15px", fontStyle:"normal", width:"100%", boxSizing:"border-box" }}/>
           </div>
           <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:"8px", flexWrap:"wrap" }}>
             <div style={{ fontSize:"12px", color:C.muted }}>Signing promotes them to Detail Pro and starts their check-in clock today.</div>
@@ -6525,7 +6529,7 @@ function TestQuestionBank() {
   const shown = term ? all.filter(x => [x.q, x.topic, x.correct, ...x.wrong].join(" ").toLowerCase().includes(term)) : all;
   const topics = [...new Set(shown.map(x => x.topic))];
   const numOf = Object.fromEntries(all.map((x, i) => [x.id, i + 1]));
-  const pill = on => ({ flex:1, background:on ? C.purple : C.cardLt, border:`1px solid ${on ? C.purple : C.border}`, color:on ? C.white : C.black, padding:"8px 12px", borderRadius:"16px", cursor:"pointer", fontSize:"12px", fontWeight:"900", fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:"1px", textTransform:"uppercase" });
+  const pill = on => ({ flex:1, background:on ? C.purple : C.cardLt, border:`1px solid ${on ? C.purple : C.border}`, color:on ? C.white : C.black, padding:"8px 12px", borderRadius:"16px", cursor:"pointer", fontSize:"12px", fontWeight:"700", fontFamily:FONT, letterSpacing:"-0.01em", textTransform:"none" });
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:"12px" }}>
       <div style={{ display:"flex", gap:"6px" }}>
@@ -6534,11 +6538,11 @@ function TestQuestionBank() {
       <div style={{ fontSize:"12px", color:C.muted }}>
         Every question on the {TESTS[key].name}, grouped by topic. ✓ marks the right answer. On the real test the A–D order is reshuffled every time, and apprentices never see which answer is right.
       </div>
-      <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search questions or answers" style={{ background:C.white, border:`1px solid ${C.border}`, color:C.black, padding:"10px 14px", borderRadius:"8px", fontSize:"14px", width:"100%", boxSizing:"border-box" }}/>
+      <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search questions or answers" style={{ background:C.white, border:`1px solid ${C.border}`, color:C.black, padding:"10px 14px", borderRadius:"10px", fontSize:"14px", width:"100%", boxSizing:"border-box" }}/>
       {shown.length === 0 && <div style={{ fontSize:"13px", color:C.muted }}>No questions match.</div>}
       {topics.map(topic => (
-        <div key={topic} style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"14px 16px", display:"flex", flexDirection:"column", gap:"12px" }}>
-          <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"13px", color:C.purple, letterSpacing:"2px" }}>{topic.toUpperCase()} · {shown.filter(x => x.topic === topic).length}</div>
+        <div key={topic} style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"14px 16px", display:"flex", flexDirection:"column", gap:"12px" }}>
+          <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"13px", color:C.purple, letterSpacing:"-0.01em" }}>{topic.toUpperCase()} · {shown.filter(x => x.topic === topic).length}</div>
           {shown.filter(x => x.topic === topic).map(x => (
             <div key={x.id} style={{ borderTop:`1px solid ${C.border}40`, paddingTop:"10px" }}>
               <div style={{ fontSize:"14px", color:C.black, fontWeight:"700", lineHeight:1.4 }}><span style={{ color:C.muted, fontWeight:"600" }}>#{numOf[x.id]}</span> {x.q}</div>
@@ -6547,7 +6551,7 @@ function TestQuestionBank() {
                   const right = a === x.correct;
                   return (
                     <div key={a} style={{ fontSize:"13px", color:right ? C.green : C.muted, fontWeight:right ? "700" : "400", display:"flex", gap:"8px" }}>
-                      <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", minWidth:"14px" }}>{"ABCD"[i]}</span>
+                      <span style={{ fontFamily:FONT, fontWeight:"700", minWidth:"14px" }}>{"ABCD"[i]}</span>
                       <span>{a}{right ? " ✓" : ""}</span>
                     </div>
                   );
@@ -6562,9 +6566,9 @@ function TestQuestionBank() {
 }
 
 function DevelopmentTab({ techs, rideAlongs, refreshAll, showToast }) {
-  const inp = { background:C.white, border:`1px solid ${C.border}`, color:C.black, padding:"10px 14px", borderRadius:"8px", fontSize:"14px", fontFamily:"'Barlow',sans-serif", width:"100%", boxSizing:"border-box" };
+  const inp = { background:C.white, border:`1px solid ${C.border}`, color:C.black, padding:"10px 14px", borderRadius:"10px", fontSize:"14px", fontFamily:FONT, width:"100%", boxSizing:"border-box" };
   const sel = (val) => ({...inp, color:val ? C.black : C.muted });
-  const btn = (color) => ({ background:color||C.blue, border:"none", color:C.white, padding:"11px 18px", borderRadius:"20px", cursor:"pointer", fontSize:"12px", fontWeight:"900", fontStyle:"italic", letterSpacing:"2px", fontFamily:"'Barlow Condensed',sans-serif", textTransform:"uppercase" });
+  const btn = (color) => ({ background:color||C.blue, border:"none", color:C.white, padding:"11px 18px", borderRadius:"20px", cursor:"pointer", fontSize:"12px", fontWeight:"700", fontStyle:"normal", letterSpacing:"-0.01em", fontFamily:FONT, textTransform:"none" });
   const btnSm = (color) => ({...btn(color), padding:"6px 14px", fontSize:"11px" });
 
   const [devView, setDevView] = useState("signoff");
@@ -6709,7 +6713,7 @@ function DevelopmentTab({ techs, rideAlongs, refreshAll, showToast }) {
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:"16px" }}>
       {rubricItems && rubricItems.length === 0 && (
-        <div style={{ background:`${C.gold}18`, border:`1px solid ${C.gold}`, borderRadius:"10px", padding:"14px 16px", display:"flex", alignItems:"center", justifyContent:"space-between", gap:"12px" }}>
+        <div style={{ background:`${C.gold}18`, border:`1px solid ${C.gold}`, borderRadius:"12px", padding:"14px 16px", display:"flex", alignItems:"center", justifyContent:"space-between", gap:"12px" }}>
           <div style={{ fontSize:"13px", color:C.black }}>Rubric items not seeded yet.</div>
           <button onClick={seedRubricItems} disabled={seeding} style={btnSm(C.gold)}>{seeding ? "Seeding..." : `Seed ${RUBRIC_ITEMS_SEED.length} Items`}</button>
         </div>
@@ -6725,8 +6729,8 @@ function DevelopmentTab({ techs, rideAlongs, refreshAll, showToast }) {
       {/* ── A. TRAINING SIGN-OFF ── */}
       {devView==="signoff" && (
         <div style={{ display:"flex", flexDirection:"column", gap:"12px" }}>
-          <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"12px 16px", display:"flex", alignItems:"center", gap:"12px" }}>
-            <span style={{ fontSize:"12px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", color:C.muted, whiteSpace:"nowrap" }}>SIGNING OFF AS:</span>
+          <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"12px 16px", display:"flex", alignItems:"center", gap:"12px" }}>
+            <span style={{ fontSize:"12px", fontFamily:FONT, fontWeight:"700", color:C.muted, whiteSpace:"nowrap" }}>SIGNING OFF AS:</span>
             <select value={trainerSel} onChange={e=>setTrainerSel(e.target.value)} style={{...sel(trainerSel), flex:1}}>
               <option value="">— Select Trainer —</option>
               {activeTechs.filter(t=>TRAINER_TITLES.includes(t.title)).map(t => <option key={t.id} value={t.id}>{t.name} — {TITLE_LABELS[t.title]}</option>)}
@@ -6740,16 +6744,16 @@ function DevelopmentTab({ techs, rideAlongs, refreshAll, showToast }) {
             const stageIdx = stageOrder.indexOf(tech.onboarding_stage || "classroom");
             const canAdv = stageIdx >= 0 && stageIdx < stageOrder.indexOf("active");
             return (
-              <div key={tech.id} style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", overflow:"hidden" }}>
+              <div key={tech.id} style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", overflow:"hidden" }}>
                 <div onClick={() => setExpandedTech(isExp ? null : tech.id)} style={{ padding:"12px 16px", display:"flex", alignItems:"center", gap:"12px", cursor:"pointer", background:C.cardLt }}>
-                  <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"16px", color:C.black, flex:1 }}>{tech.name}</div>
+                  <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"16px", color:C.black, flex:1 }}>{tech.name}</div>
                   <Pill color={sc.color}>{sc.icon} {sc.label}</Pill>
                   <div style={{ fontSize:"12px", color:tProg.complete ? C.green : C.muted }}>{tProg.pct}% · {tProg.fullDays}/{TRAINING_MIN_DAYS} days</div>
                   <div style={{ fontSize:"13px", color:C.muted }}>{isExp ? "▲" : "▼"}</div>
                 </div>
                 {isExp && (
                   <div style={{ padding:"12px 16px", display:"flex", flexDirection:"column", gap:"10px" }}>
-                    <div style={{ display:"flex", alignItems:"center", gap:"10px", padding:"8px", background:`${C.blue}08`, borderRadius:"8px" }}>
+                    <div style={{ display:"flex", alignItems:"center", gap:"10px", padding:"8px", background:`${C.blue}08`, borderRadius:"10px" }}>
                       <input type="checkbox" id={`cc_${tech.id}`} checked={!!tech.classroom_complete} onChange={e => sb(`techs?id=eq.${tech.id}`,{method:"PATCH",body:JSON.stringify({classroom_complete:e.target.checked}),prefer:"return=minimal"}).then(()=>refreshAll()).catch(e=>showToast("Error: "+e.message,false))} style={{ width:"16px", height:"16px", cursor:"pointer" }}/>
                       <label htmlFor={`cc_${tech.id}`} style={{ fontSize:"13px", color:C.black, cursor:"pointer" }}>Classroom training complete</label>
                     </div>
@@ -6770,8 +6774,8 @@ function DevelopmentTab({ techs, rideAlongs, refreshAll, showToast }) {
       {devView==="cert" && (
         <div style={{ display:"flex", flexDirection:"column", gap:"12px" }}>
           {lastCertResult && lastCertResult.overall==="fail" && (
-            <div style={{ background:"#ef444410", border:"2px solid #ef4444", borderRadius:"12px", padding:"16px" }}>
-              <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"16px", color:C.red, marginBottom:"8px" }}>
+            <div style={{ background:"#ef444410", border:"2px solid #ef4444", borderRadius:"16px", padding:"16px" }}>
+              <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"16px", color:C.red, marginBottom:"8px" }}>
                 Study Sheet — {lastCertResult.techName} (Attempt {lastCertResult.attemptNumber})
               </div>
               <div style={{ fontSize:"12px", color:C.muted, marginBottom:"10px" }}>Review these before retesting:</div>
@@ -6779,14 +6783,14 @@ function DevelopmentTab({ techs, rideAlongs, refreshAll, showToast }) {
                 <div key={item.id} style={{ padding:"8px 0", borderBottom:`1px solid ${C.border}40` }}>
                   <div style={{ fontSize:"13px", color:C.black, fontWeight:"600" }}>#{item.sort_order} {item.description}</div>
                   {item.has_script && item.script_text && (
-                    <div style={{ background:C.blueXlt, border:`1px solid ${C.border}`, borderRadius:"6px", padding:"8px 10px", fontSize:"11px", color:C.black, marginTop:"4px", lineHeight:1.5 }}>{item.script_text}</div>
+                    <div style={{ background:C.blueXlt, border:`1px solid ${C.border}`, borderRadius:"10px", padding:"8px 10px", fontSize:"11px", color:C.black, marginTop:"4px", lineHeight:1.5 }}>{item.script_text}</div>
                   )}
                 </div>
               ))}
               <button onClick={() => setLastCertResult(null)} style={{ ...btnSm(C.border), color:C.black, marginTop:"10px" }}>Dismiss</button>
             </div>
           )}
-          <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"16px", display:"flex", flexDirection:"column", gap:"12px" }}>
+          <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"16px", display:"flex", flexDirection:"column", gap:"12px" }}>
             <Label color={C.blue}>Final Onboarding Cert</Label>
             <div style={{ display:"flex", gap:"10px", flexWrap:"wrap" }}>
               <div style={{ flex:1, minWidth:"150px" }}>
@@ -6808,11 +6812,11 @@ function DevelopmentTab({ techs, rideAlongs, refreshAll, showToast }) {
               </div>
               <div style={{ flex:1, minWidth:"130px" }}>
                 <div style={{ fontSize:"11px", color:C.muted, marginBottom:"4px" }}>Test Date</div>
-                <input type="date" value={certDate} onChange={e => setCertDate(e.target.value)} style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"10px", borderRadius:"8px", fontSize:"13px", fontFamily:"'Barlow Condensed',sans-serif", width:"100%", boxSizing:"border-box" }}/>
+                <input type="date" value={certDate} onChange={e => setCertDate(e.target.value)} style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"10px", borderRadius:"10px", fontSize:"13px", fontFamily:FONT, width:"100%", boxSizing:"border-box" }}/>
               </div>
             </div>
             {certTechSel && certs.filter(c=>c.tech_id===certTechSel).length>=3 ? (
-              <div style={{ background:"#ef444410", border:"1px solid #ef4444", borderRadius:"8px", padding:"12px", fontSize:"13px", color:C.red }}>
+              <div style={{ background:"#ef444410", border:"1px solid #ef4444", borderRadius:"10px", padding:"12px", fontSize:"13px", color:C.red }}>
                 ⚠ 3 attempts used. Recommend a fit conversation instead of another retest.
               </div>
             ) : certTechSel && rubricItems && rubricItems.length > 0 && (
@@ -6820,12 +6824,12 @@ function DevelopmentTab({ techs, rideAlongs, refreshAll, showToast }) {
                 <div style={{ fontSize:"11px", color:C.muted }}>Score each item — any ❌ = overall fail.</div>
                 {phases.map(phase => (
                   <div key={phase}>
-                    <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"12px", color:C.blue, letterSpacing:"1px", marginBottom:"4px", marginTop:"8px" }}>{PHASE_LABELS[phase]||phase}</div>
+                    <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"12px", color:C.blue, letterSpacing:"-0.01em", marginBottom:"4px", marginTop:"8px" }}>{PHASE_LABELS[phase]||phase}</div>
                     {byPhase[phase].map(item => (
                       <div key={item.id} style={{ display:"flex", alignItems:"center", gap:"8px", padding:"5px 0", borderBottom:`1px solid ${C.border}20` }}>
                         <div style={{ flex:1, fontSize:"12px", color:C.black }}><span style={{ color:C.muted, marginRight:"4px" }}>#{item.sort_order}</span>{item.description}</div>
-                        <button onClick={() => setCertScores(s => ({...s, [item.id]: s[item.id]==="pass" ? null : "pass"}))} style={{ padding:"4px 10px", borderRadius:"6px", border:"none", cursor:"pointer", background:certScores[item.id]==="pass" ? C.green : C.cardLt, color:certScores[item.id]==="pass" ? C.white : C.black, fontSize:"13px" }}>✅</button>
-                        <button onClick={() => setCertScores(s => ({...s, [item.id]: s[item.id]==="fail" ? null : "fail"}))} style={{ padding:"4px 10px", borderRadius:"6px", border:"none", cursor:"pointer", background:certScores[item.id]==="fail" ? C.red : C.cardLt, color:certScores[item.id]==="fail" ? C.white : C.black, fontSize:"13px" }}>❌</button>
+                        <button onClick={() => setCertScores(s => ({...s, [item.id]: s[item.id]==="pass" ? null : "pass"}))} style={{ padding:"4px 10px", borderRadius:"10px", border:"none", cursor:"pointer", background:certScores[item.id]==="pass" ? C.green : C.cardLt, color:certScores[item.id]==="pass" ? C.white : C.black, fontSize:"13px" }}>✅</button>
+                        <button onClick={() => setCertScores(s => ({...s, [item.id]: s[item.id]==="fail" ? null : "fail"}))} style={{ padding:"4px 10px", borderRadius:"10px", border:"none", cursor:"pointer", background:certScores[item.id]==="fail" ? C.red : C.cardLt, color:certScores[item.id]==="fail" ? C.white : C.black, fontSize:"13px" }}>❌</button>
                       </div>
                     ))}
                   </div>
@@ -6842,11 +6846,11 @@ function DevelopmentTab({ techs, rideAlongs, refreshAll, showToast }) {
           )}
           {certTechSel && certs.filter(c=>c.tech_id===certTechSel).length > 0 && (
             <div style={{ display:"flex", flexDirection:"column", gap:"8px" }}>
-              <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", fontSize:"13px", color:C.muted, letterSpacing:"1px" }}>PAST ATTEMPTS</div>
+              <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"13px", color:C.muted, letterSpacing:"-0.01em" }}>PAST ATTEMPTS</div>
               {certs.filter(c=>c.tech_id===certTechSel).map(cert => (
-                <div key={cert.id} style={{ background:C.card, border:`1px solid ${cert.overall_result==="pass" ? C.green : C.red}60`, borderRadius:"10px", padding:"10px 14px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                <div key={cert.id} style={{ background:C.card, border:`1px solid ${cert.overall_result==="pass" ? C.green : C.red}60`, borderRadius:"12px", padding:"10px 14px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
                   <div>
-                    <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"14px", color:C.black }}>Attempt #{cert.attempt_number} — {cert.test_date}</div>
+                    <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"14px", color:C.black }}>Attempt #{cert.attempt_number} — {cert.test_date}</div>
                     <div style={{ fontSize:"12px", color:cert.overall_result==="pass" ? C.green : C.red }}>{cert.overall_result==="pass" ? "✅ PASS" : "❌ FAIL"}</div>
                   </div>
                   <div style={{ fontSize:"11px", color:C.muted }}>{certResults.filter(r=>r.cert_id===cert.id&&r.result==="fail").length} fails</div>
@@ -6863,8 +6867,8 @@ function DevelopmentTab({ techs, rideAlongs, refreshAll, showToast }) {
       {devView==="checkins" && (
         <div style={{ display:"flex", flexDirection:"column", gap:"12px" }}>
           {selectedCheckin && (
-            <div style={{ background:C.card, border:`2px solid ${C.blue}`, borderRadius:"12px", padding:"16px", display:"flex", flexDirection:"column", gap:"10px" }}>
-              <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"16px", color:C.black }}>
+            <div style={{ background:C.card, border:`2px solid ${C.blue}`, borderRadius:"16px", padding:"16px", display:"flex", flexDirection:"column", gap:"10px" }}>
+              <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"16px", color:C.black }}>
                 {techs.find(t=>t.id===selectedCheckin.tech_id)?.name} — {selectedCheckin.milestone.replace("_"," ")} ({selectedCheckin.scheduled_date})
               </div>
               {(() => {
@@ -6874,7 +6878,7 @@ function DevelopmentTab({ techs, rideAlongs, refreshAll, showToast }) {
                 const myRA = (rideAlongs||[]).filter(r=>r.tech_id===t.id).sort((a,b)=>b.date?.localeCompare(a.date)).slice(0,3);
                 const raAvg = myRA.length ? Math.round(myRA.reduce((s,r)=>{ const cl=r.checklist?JSON.parse(r.checklist):{}; const v=Object.values(cl); return s+(v.length?v.filter(x=>x==="✅").length/v.length*100:0); },0)/myRA.length) : null;
                 return (
-                  <div style={{ background:C.cardLt, borderRadius:"8px", padding:"10px 12px", fontSize:"12px", color:C.muted, display:"flex", gap:"16px", flexWrap:"wrap" }}>
+                  <div style={{ background:C.cardLt, borderRadius:"10px", padding:"10px 12px", fontSize:"12px", color:C.muted, display:"flex", gap:"16px", flexWrap:"wrap" }}>
                     {td!==null && <span>Tenure: <strong style={{color:C.black}}>{td} days</strong></span>}
                     {raAvg!==null && <span>Last 3 ride-along avg: <strong style={{color:C.black}}>{raAvg}%</strong></span>}
                   </div>
@@ -6900,8 +6904,8 @@ function DevelopmentTab({ techs, rideAlongs, refreshAll, showToast }) {
             const tci = training ? [] : checkins.filter(c=>c.tech_id===tech.id).sort((a,b)=>a.scheduled_date.localeCompare(b.scheduled_date));
             const today = new Date().toISOString().split("T")[0];
             return (
-              <div key={tech.id} style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", overflow:"hidden" }}>
-                <div style={{ background:C.cardLt, padding:"10px 16px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"15px", color:C.black }}>
+              <div key={tech.id} style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", overflow:"hidden" }}>
+                <div style={{ background:C.cardLt, padding:"10px 16px", fontFamily:FONT, fontWeight:"700", fontSize:"15px", color:C.black }}>
                   {tech.name}
                   {training
                     ? <span style={{ fontSize:"11px", color:C.purple, fontWeight:"700", marginLeft:"8px" }}>🎓 Detail Apprentice — in training</span>
@@ -6916,9 +6920,9 @@ function DevelopmentTab({ techs, rideAlongs, refreshAll, showToast }) {
                       const over = !done && ci.scheduled_date < today;
                       const clr = done ? C.green : over ? C.red : C.blue;
                       return (
-                        <button key={ci.id} onClick={() => { setSelectedCheckin(ci); setCheckinForm({ audit_notes:ci.audit_notes||"", goal_set:ci.goal_set||"", happy_with_pay:ci.happy_with_pay, pay_notes:ci.pay_notes||"", team_feedback:ci.team_feedback||"", qa_notes:ci.qa_notes||"" }); }} style={{ background:`${clr}15`, border:`2px solid ${clr}`, borderRadius:"8px", padding:"8px 12px", cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", gap:"2px", minWidth:"90px" }}>
-                          <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"13px", color:clr }}>{ci.milestone.replace("_"," ")}</div>
-                          <div style={{ fontSize:"10px", color:C.muted }}>{ci.scheduled_date}</div>
+                        <button key={ci.id} onClick={() => { setSelectedCheckin(ci); setCheckinForm({ audit_notes:ci.audit_notes||"", goal_set:ci.goal_set||"", happy_with_pay:ci.happy_with_pay, pay_notes:ci.pay_notes||"", team_feedback:ci.team_feedback||"", qa_notes:ci.qa_notes||"" }); }} style={{ background:`${clr}15`, border:`2px solid ${clr}`, borderRadius:"10px", padding:"8px 12px", cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", gap:"2px", minWidth:"90px" }}>
+                          <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"13px", color:clr }}>{ci.milestone.replace("_"," ")}</div>
+                          <div style={{ fontSize:"11px", color:C.muted }}>{ci.scheduled_date}</div>
                           <div style={{ fontSize:"11px", color:clr, fontWeight:"bold" }}>{done ? "✓ Done" : over ? "⚠ Overdue" : "Upcoming"}</div>
                         </button>
                       );
@@ -7034,13 +7038,13 @@ function SplitJobsAdmin({ techs, pendingSplits, refreshAll, showToast }) {
 
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:"16px" }}>
-      <div style={{ background:C.cardLt, borderRadius:"8px", padding:"12px 16px", fontSize:"12px", color:C.muted, lineHeight:"1.6" }}>
+      <div style={{ background:C.cardLt, borderRadius:"10px", padding:"12px 16px", fontSize:"12px", color:C.muted, lineHeight:"1.6" }}>
         These jobs have <strong style={{color:C.black}}>multiple techs</strong> with no confirmed revenue split on record — they are currently
-        using <strong style={{color:"#f59e0b"}}>equal split</strong> as a placeholder. Enter the correct percentages below,
+        using <strong style={{color:"#ff9f0a"}}>equal split</strong> as a placeholder. Enter the correct percentages below,
         hit <strong style={{color:C.black}}>Save Split</strong>, then re-run <strong style={{color:C.black}}>Repair Upsells</strong> for that date to apply.
       </div>
       {splitJobs.filter(sj => !dismissedJobIds.has(sj.jobId)).length === 0 ? (
-        <div style={{ background:C.card, borderRadius:"12px", padding:"30px", textAlign:"center", color:C.muted, fontSize:"13px" }}>
+        <div style={{ background:C.card, borderRadius:"16px", padding:"30px", textAlign:"center", color:C.muted, fontSize:"13px" }}>
           ✅ No unconfirmed split jobs — all good!
         </div>
       ) : splitJobs.filter(sj => !dismissedJobIds.has(sj.jobId)).map(sj => {
@@ -7050,21 +7054,21 @@ function SplitJobsAdmin({ techs, pendingSplits, refreshAll, showToast }) {
         const total = vals.reduce((a, b) => a + b, 0);
         const ok = Math.abs(total - 100) <= 0.5;
         return (
-          <div key={sj.jobId} style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid #f59e0b`, borderRadius:"12px", padding:"18px", display:"flex", flexDirection:"column", gap:"12px" }}>
+          <div key={sj.jobId} style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid #f59e0b`, borderRadius:"16px", padding:"18px", display:"flex", flexDirection:"column", gap:"12px" }}>
             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
               <div>
-                <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"13px", color:C.muted, letterSpacing:"1px" }}>...{sj.jobId.slice(-12)}</div>
+                <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"13px", color:C.muted, letterSpacing:"-0.01em" }}>...{sj.jobId.slice(-12)}</div>
                 {sj.customerName && (
                   <div style={{ fontWeight:"700", fontSize:"15px", color:C.black, marginTop:"1px" }}>{sj.customerName}</div>
                 )}
                 <div style={{ fontSize:"13px", color:C.muted, marginTop:"1px" }}>{sj.date}</div>
               </div>
               <div style={{ textAlign:"right" }}>
-                <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"16px", color:C.green }}>${(sj.totalRevenue + sj.totalTips).toFixed(2)}</div>
+                <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"16px", color:C.green }}>${(sj.totalRevenue + sj.totalTips).toFixed(2)}</div>
                 <div style={{ fontSize:"11px", color:C.muted }}>${sj.totalRevenue.toFixed(2)} rev{sj.totalTips > 0 ? ` + $${sj.totalTips.toFixed(2)} tip` : ""}</div>
               </div>
             </div>
-            <div style={{ fontSize:"11px", color:C.muted, fontWeight:"700", letterSpacing:"1px", fontFamily:"'Barlow Condensed',sans-serif", textTransform:"uppercase" }}>Revenue Split</div>
+            <div style={{ fontSize:"11px", color:C.muted, fontWeight:"700", letterSpacing:"-0.01em", fontFamily:FONT, textTransform:"none" }}>Revenue Split</div>
             {sj.rows.map((r, i) => {
               const tech = techById[r.tech_id];
               return (
@@ -7074,7 +7078,7 @@ function SplitJobsAdmin({ techs, pendingSplits, refreshAll, showToast }) {
                     type="number" min="0" max="100" step="0.5"
                     value={getInput(sj.jobId, r.tech_id, defPct)}
                     onChange={e => setInput(sj.jobId, r.tech_id, e.target.value)}
-                    style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"6px 8px", borderRadius:"8px", fontSize:"13px", textAlign:"center", width:"100%", boxSizing:"border-box" }}
+                    style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"6px 8px", borderRadius:"10px", fontSize:"13px", textAlign:"center", width:"100%", boxSizing:"border-box" }}
                   />
                   <div style={{ fontSize:"12px", color:C.muted }}>%</div>
                 </div>
@@ -7082,13 +7086,13 @@ function SplitJobsAdmin({ techs, pendingSplits, refreshAll, showToast }) {
             })}
             {sj.totalUpsells > 0 && (
               <div style={{ borderTop:`1px solid ${C.border}`, paddingTop:"12px", display:"flex", flexDirection:"column", gap:"8px" }}>
-                <div style={{ fontSize:"11px", color:"#f59e0b", fontWeight:"700", letterSpacing:"1px", fontFamily:"'Barlow Condensed',sans-serif", textTransform:"uppercase" }}>
+                <div style={{ fontSize:"11px", color:"#ff9f0a", fontWeight:"700", letterSpacing:"-0.01em", fontFamily:FONT, textTransform:"none" }}>
                   Upsell Credit — ${(+sj.totalUpsells).toFixed(2)} total
                 </div>
                 <select
                   value={upsellAttrib[sj.jobId] || ""}
                   onChange={e => setUpsellAttrib(prev => ({...prev, [sj.jobId]: e.target.value}))}
-                  style={{ background:C.cardLt, border:`1px solid #f59e0b`, color:C.black, padding:"8px 10px", borderRadius:"8px", fontSize:"13px", width:"100%", fontFamily:"'Barlow',sans-serif" }}
+                  style={{ background:C.cardLt, border:`1px solid #f59e0b`, color:C.black, padding:"8px 10px", borderRadius:"10px", fontSize:"13px", width:"100%", fontFamily:FONT }}
                 >
                   <option value="">— Who sold this upsell? —</option>
                   {sj.rows.map(r => {
@@ -7097,12 +7101,12 @@ function SplitJobsAdmin({ techs, pendingSplits, refreshAll, showToast }) {
                   })}
                 </select>
                 {!upsellAttrib[sj.jobId] && (
-                  <div style={{ fontSize:"11px", color:"#f59e0b" }}>⚠ Not set — will split by revenue % until confirmed</div>
+                  <div style={{ fontSize:"11px", color:"#ff9f0a" }}>⚠ Not set — will split by revenue % until confirmed</div>
                 )}
               </div>
             )}
             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-              <div style={{ fontSize:"12px", color: ok ? C.green : "#ef4444", fontWeight:"700" }}>
+              <div style={{ fontSize:"12px", color: ok ? C.green : "#ff3b30", fontWeight:"700" }}>
                 Total: {total.toFixed(1)}% {ok ? "✓" : "— must equal 100%"}
               </div>
               {(() => {
@@ -7112,7 +7116,7 @@ function SplitJobsAdmin({ techs, pendingSplits, refreshAll, showToast }) {
                   <button
                     onClick={() => saveSplit(sj)}
                     disabled={rowDisabled}
-                    style={{ background: rowDisabled ? "#333" : "#f59e0b", border:"none", color: rowDisabled ? "#666" : C.black, padding:"8px 20px", borderRadius:"10px", cursor: rowDisabled ? "not-allowed" : "pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"12px", letterSpacing:"1.5px", textTransform:"uppercase" }}
+                    style={{ background: rowDisabled ? "#333" : "#ff9f0a", border:"none", color: rowDisabled ? "#666" : C.black, padding:"8px 20px", borderRadius:"12px", cursor: rowDisabled ? "not-allowed" : "pointer", fontFamily:FONT, fontWeight:"700", fontSize:"12px", letterSpacing:"-0.01em", textTransform:"none" }}
                   >{rowSaving ? "Applying..." : "Save & Apply"}</button>
                 );
               })()}
@@ -7184,10 +7188,10 @@ function UpsellAuditTab({ techs, upsells, jobs }) {
     else { setSortKey(key); setSortDir("desc"); }
   }
 
-  const sel = (val) => ({ background:C.cardLt, border:`1px solid ${C.border}`, color:val?C.black:C.muted, padding:"8px 12px", borderRadius:"8px", fontSize:"13px", fontFamily:"'Barlow',sans-serif", cursor:"pointer" });
-  const dateInp = { background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"8px 12px", borderRadius:"8px", fontSize:"13px", fontFamily:"'Barlow',sans-serif" };
+  const sel = (val) => ({ background:C.cardLt, border:`1px solid ${C.border}`, color:val?C.black:C.muted, padding:"8px 12px", borderRadius:"10px", fontSize:"13px", fontFamily:FONT, cursor:"pointer" });
+  const dateInp = { background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"8px 12px", borderRadius:"10px", fontSize:"13px", fontFamily:FONT };
   const SORT_COLS = [ { key:"date", label:"Date" }, { key:"tech", label:"Tech" }, { key:"customer", label:"Customer" }, { key:"amount", label:"Amount" } ];
-  const thStyle = { padding:"8px 12px", textAlign:"left", color:C.muted, fontWeight:"700", letterSpacing:"1px", fontFamily:"'Barlow Condensed',sans-serif", whiteSpace:"nowrap", borderBottom:`1px solid ${C.border}` };
+  const thStyle = { padding:"8px 12px", textAlign:"left", color:C.muted, fontWeight:"700", letterSpacing:"-0.01em", fontFamily:FONT, whiteSpace:"nowrap", borderBottom:`1px solid ${C.border}` };
   const sortableTh = (c) => (
     <th key={c.key} onClick={()=>toggleSort(c.key)} style={{ ...thStyle, cursor:"pointer", userSelect:"none" }}>
       {c.label}{sortKey===c.key?(sortDir==="asc"?" ▲":" ▼"):""}
@@ -7196,7 +7200,7 @@ function UpsellAuditTab({ techs, upsells, jobs }) {
 
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:"16px" }}>
-      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.orange}`, borderRadius:"12px", padding:"16px 18px", display:"flex", flexDirection:"column", gap:"12px" }}>
+      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"16px 18px", display:"flex", flexDirection:"column", gap:"12px" }}>
         <Label color={C.orange}>🔍 Upsell Audit</Label>
         <div style={{ fontSize:"12px", color:C.muted }}>Cross-check upsell line items against HCP's "Additional Upgrades" report. Rows with a red border have no matching job or no line-item text — check those first for discrepancies.</div>
         <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:"10px" }}>
@@ -7209,23 +7213,23 @@ function UpsellAuditTab({ techs, upsells, jobs }) {
         </div>
       </div>
 
-      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.green}`, borderRadius:"12px", padding:"16px 18px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"16px 18px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
         <div>
-          <div style={{ fontSize:"10px", color:C.muted, letterSpacing:"2px", textTransform:"uppercase", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>Total Upsells — Active Filters</div>
+          <div style={{ fontSize:"11px", color:C.muted, letterSpacing:"-0.01em", textTransform:"none", fontFamily:FONT, fontWeight:"700" }}>Total Upsells — Active Filters</div>
           <div style={{ fontSize:"11px", color:C.muted, marginTop:"2px" }}>{filtered.length} row{filtered.length===1?"":"s"}{flaggedCount>0?` · ${flaggedCount} flagged`:""}</div>
         </div>
-        <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"28px", color:C.green }}>${total.toFixed(2)}</div>
+        <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"28px", color:C.green }}>${total.toFixed(2)}</div>
       </div>
 
-      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", overflow:"hidden" }}>
+      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", overflow:"hidden" }}>
         <div style={{ overflowX:"auto" }}>
-          <table style={{ width:"100%", borderCollapse:"collapse", fontSize:"12px", fontFamily:"'Barlow',sans-serif" }}>
+          <table style={{ width:"100%", borderCollapse:"collapse", fontSize:"12px", fontFamily:FONT }}>
             <thead>
               <tr style={{ background:C.cardLt }}>
                 {sortableTh(SORT_COLS[0])}
                 <th style={thStyle}>Job ID</th>
                 {SORT_COLS.slice(1).map(sortableTh)}
-                <th style={{ padding:"8px 12px", textAlign:"left", color:C.muted, fontWeight:"700", letterSpacing:"1px", fontFamily:"'Barlow Condensed',sans-serif", borderBottom:`1px solid ${C.border}` }}>Line Items</th>
+                <th style={{ padding:"8px 12px", textAlign:"left", color:C.muted, fontWeight:"700", letterSpacing:"-0.01em", fontFamily:FONT, borderBottom:`1px solid ${C.border}` }}>Line Items</th>
               </tr>
             </thead>
             <tbody>
@@ -7234,12 +7238,12 @@ function UpsellAuditTab({ techs, upsells, jobs }) {
               )}
               {sorted.map((r,i)=>(
                 <tr key={r.id} style={{ background: r.flagged ? "#ef444414" : (i%2===0?C.cardLt:C.card) }}>
-                  <td style={{ padding:"8px 12px", color:C.muted, whiteSpace:"nowrap", borderBottom:`1px solid ${C.border}`, borderLeft:`3px solid ${r.flagged?"#ef4444":"transparent"}` }}>{r.date||"—"}</td>
-                  <td style={{ padding:"8px 12px", color:C.muted, whiteSpace:"nowrap", borderBottom:`1px solid ${C.border}`, fontFamily:"'SF Mono',Consolas,monospace", fontSize:"10px", userSelect:"text", cursor:"text" }}>{r.hcpJobId||"—"}</td>
+                  <td style={{ padding:"8px 12px", color:C.muted, whiteSpace:"nowrap", borderBottom:`1px solid ${C.border}`, borderLeft:`3px solid ${r.flagged?"#ff3b30":"transparent"}` }}>{r.date||"—"}</td>
+                  <td style={{ padding:"8px 12px", color:C.muted, whiteSpace:"nowrap", borderBottom:`1px solid ${C.border}`, fontFamily:"'SF Mono',Consolas,monospace", fontSize:"11px", userSelect:"text", cursor:"text" }}>{r.hcpJobId||"—"}</td>
                   <td style={{ padding:"8px 12px", color:C.black, whiteSpace:"nowrap", borderBottom:`1px solid ${C.border}` }}>{techById[r.techId]?.name||"Unknown"}{techById[r.techId]?.is_active===false&&<ArchivedTag/>}</td>
-                  <td style={{ padding:"8px 12px", color: r.customerName?C.black:"#ef4444", whiteSpace:"nowrap", borderBottom:`1px solid ${C.border}` }}>{r.customerName||(r.matched?"—":"No job match")}</td>
+                  <td style={{ padding:"8px 12px", color: r.customerName?C.black:"#ff3b30", whiteSpace:"nowrap", borderBottom:`1px solid ${C.border}` }}>{r.customerName||(r.matched?"—":"No job match")}</td>
                   <td style={{ padding:"8px 12px", color:C.green, fontWeight:"700", whiteSpace:"nowrap", borderBottom:`1px solid ${C.border}` }}>${r.amount.toFixed(2)}</td>
-                  <td style={{ padding:"8px 12px", color: r.note?C.black:"#ef4444", borderBottom:`1px solid ${C.border}` }}>{r.note||"⚠ No line-item note"}</td>
+                  <td style={{ padding:"8px 12px", color: r.note?C.black:"#ff3b30", borderBottom:`1px solid ${C.border}` }}>{r.note||"⚠ No line-item note"}</td>
                 </tr>
               ))}
             </tbody>
@@ -7288,16 +7292,16 @@ function TechMatchAdmin({ unmatchedTechs, refreshAll, showToast }) {
         <div style={{ padding:"32px 16px", textAlign:"center", color:C.muted, fontSize:"14px" }}>Nothing unmatched right now.</div>
       )}
       {unmatchedTechs.map(row => (
-        <div key={row.hcp_name} style={{ background:"#fff", border:`1px solid ${C.border}`, borderRadius:"10px", padding:"12px 16px", marginBottom:"10px", display:"flex", justifyContent:"space-between", alignItems:"center", gap:"12px", flexWrap:"wrap" }}>
+        <div key={row.hcp_name} style={{ background:"#fff", border:`1px solid ${C.border}`, borderRadius:"12px", padding:"12px 16px", marginBottom:"10px", display:"flex", justifyContent:"space-between", alignItems:"center", gap:"12px", flexWrap:"wrap" }}>
           <div>
-            <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"15px", color:C.black }}>{row.hcp_name}</div>
+            <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"15px", color:C.black }}>{row.hcp_name}</div>
             <div style={{ fontSize:"12px", color:C.muted, marginTop:"2px" }}>
               {row.job_count} job{row.job_count!==1?"s":""} · {row.first_seen&&fmtShortDate(row.first_seen)}–{row.last_seen&&fmtShortDate(row.last_seen)}
             </div>
           </div>
           <div style={{ display:"flex", gap:"8px", flexShrink:0 }}>
-            <button onClick={()=>copyName(row.hcp_name)} style={{ background:"#fff", border:`1px solid ${C.border}`, borderRadius:"8px", padding:"8px 14px", cursor:"pointer", fontSize:"12px", fontWeight:"700", color:C.black }}>Copy Name</button>
-            <button disabled={busyName===row.hcp_name} onClick={()=>ignoreName(row.hcp_name)} style={{ background:"#f0f0f0", border:"none", borderRadius:"8px", padding:"8px 14px", cursor:"pointer", fontSize:"12px", fontWeight:"700", color:C.black, opacity:busyName===row.hcp_name?0.6:1 }}>
+            <button onClick={()=>copyName(row.hcp_name)} style={{ background:"#fff", border:`1px solid ${C.border}`, borderRadius:"10px", padding:"8px 14px", cursor:"pointer", fontSize:"12px", fontWeight:"700", color:C.black }}>Copy Name</button>
+            <button disabled={busyName===row.hcp_name} onClick={()=>ignoreName(row.hcp_name)} style={{ background:"#f0f0f0", border:"none", borderRadius:"10px", padding:"8px 14px", cursor:"pointer", fontSize:"12px", fontWeight:"700", color:C.black, opacity:busyName===row.hcp_name?0.6:1 }}>
               {busyName===row.hcp_name ? "..." : "Ignore"}
             </button>
           </div>
@@ -7325,7 +7329,7 @@ const shiftWeek = (wk, weeks) => { const d = new Date(wk+"T12:00:00Z"); d.setUTC
 // Ford Pro driver scorecard: one box per driving day -- truck(s), miles, and
 // each penalty with its count.
 function DriverDetail({ driver, bare=false }) {
-  const box = { background:C.white, border:`1px solid ${C.border}`, borderRadius:"10px", padding:"10px 12px", marginTop:"8px" };
+  const box = { background:C.white, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"10px 12px", marginTop:"8px" };
   return (
     <div>
       {!bare && <div style={{ marginTop:"14px" }}><SectionTitle>🚗 Driving</SectionTitle></div>}
@@ -7354,7 +7358,7 @@ function DriverDetail({ driver, bare=false }) {
 // bare: show just the boxes (no section headings) -- used for one audit at a
 // time in the "Every audit" lists.
 function AuditTechDetail({ week, only="both", bare=false }) {
-  const box = { background:C.white, border:`1px solid ${C.border}`, borderRadius:"10px", padding:"10px 12px", marginTop:"8px" };
+  const box = { background:C.white, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"10px 12px", marginTop:"8px" };
   const flagList = flags => flags.map((f,i) => <div key={i} style={{ fontSize:"12px", color:C.gold, marginTop:"3px" }}>⚠ {f}</div>);
   return (
     <div>
@@ -7388,7 +7392,7 @@ function AuditTechDetail({ week, only="both", bare=false }) {
         <div key={d.date} style={box}>
           <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
             <div style={{ fontSize:"13px", color:C.black, fontWeight:"700" }}>{fmtShortDate(d.date)} {d.audit.test && <Pill color={C.purple}>TEST</Pill>}</div>
-            <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"16px", color:scoreColor(d.pct??0) }}>Day {fmtPct(d.pct)}</div>
+            <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"16px", color:scoreColor(d.pct??0) }}>Day {fmtPct(d.pct)}</div>
           </div>
           <div style={{ fontSize:"12px", color:C.muted, marginTop:"2px" }}>{d.audit.lead ? `Tech lead: ${d.audit.lead}` : ""}{d.replaced ? `${d.audit.lead ? " · " : ""}latest of ${d.replaced+1} submissions for this day` : ""}</div>
           {d.audit.jobs.map(j => (
@@ -7428,7 +7432,7 @@ function SectionChips({ sections, align="flex-end" }) {
   return (
     <div style={{ display:"flex", flexWrap:"wrap", gap:"4px", justifyContent:align }}>
       {SCORE_SECTIONS.map(s => { const v = sections[s.key]; return (
-        <span key={s.key} style={{ fontSize:"12px", color:C.black, background:C.cardLt, border:`1px solid ${C.border}`, borderRadius:"10px", padding:"2px 8px", whiteSpace:"nowrap" }}>
+        <span key={s.key} style={{ fontSize:"12px", color:C.black, background:C.cardLt, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"2px 8px", whiteSpace:"nowrap" }}>
           {s.label} <strong style={{ color:sectionColor(v) }}>{fmtScore(v)}</strong>
         </span>
       ); })}
@@ -7438,7 +7442,7 @@ function SectionChips({ sections, align="flex-end" }) {
 
 // What each section of one tech's overall score is made of.
 function ScoreBreakdown({ card }) {
-  const box = { background:C.white, border:`1px solid ${C.border}`, borderRadius:"10px", padding:"10px 12px", marginTop:"8px" };
+  const box = { background:C.white, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"10px 12px", marginTop:"8px" };
   const line = { display:"flex", justifyContent:"space-between", gap:"8px", fontSize:"13px", color:C.black, marginTop:"4px" };
   const muted = { fontSize:"13px", color:C.muted, marginTop:"4px" };
   const sub = { fontSize:"13px", fontWeight:"700", color:C.black, marginTop:"10px" };
@@ -7447,10 +7451,10 @@ function ScoreBreakdown({ card }) {
     return (
       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:"8px" }}>
         <div>
-          <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"17px", color:C.black }}>{s.icon} {s.label} <span style={{ fontSize:"13px", color:C.muted, fontWeight:"700" }}>· {s.weight}%</span></div>
+          <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"17px", color:C.black }}>{s.icon} {s.label} <span style={{ fontSize:"13px", color:C.muted, fontWeight:"700" }}>· {s.weight}%</span></div>
           {note && <div style={{ fontSize:"12px", color:C.muted, marginTop:"2px", lineHeight:1.4 }}>{note}</div>}
         </div>
-        <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"22px", color:sectionColor(v), whiteSpace:"nowrap" }}>{v==null ? "—" : fmtScore(v)}</div>
+        <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"22px", color:sectionColor(v), whiteSpace:"nowrap" }}>{v==null ? "—" : fmtScore(v)}</div>
       </div>
     );
   };
@@ -7611,10 +7615,10 @@ function AuditScoresTab({ techs, token, techId=null, canSync=false, view="overvi
   const unmappedAnswers = [...new Set(auditScored.flatMap(a => a.unmapped))].sort();
   const unmappedIds = [...new Set(auditScored.flatMap(a => a.unmappedFieldIds))].sort();
   const last = state.data?.last_run;
-  const arrow = { background:C.white, border:`1px solid ${C.border}`, borderRadius:"8px", padding:"6px 12px", cursor:"pointer", fontSize:"14px", color:C.black };
+  const arrow = { background:C.white, border:`1px solid ${C.border}`, borderRadius:"10px", padding:"6px 12px", cursor:"pointer", fontSize:"14px", color:C.black };
   const thisWeek = auditThisWeek();
   const driveNote = drive.error ? `Driving scores unavailable: ${drive.error}` : section==="overview" ? (d0 && !d0.daily.length ? "No Ford Pro data for these weeks yet, so Driving is left out of the overall score." : null) : driveWeek && !driveWeek.daily.length ? "No Ford Pro data for this week yet — an admin uploads Ford's daily reports on the Trucks tab." : null;
-  const big = (text, color, size=20) => <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:`${size}px`, color, lineHeight:1, textAlign:"right" }}>{text}</div>;
+  const big = (text, color, size=20) => <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:`${size}px`, color, lineHeight:1, textAlign:"right" }}>{text}</div>;
   const small = text => <div style={{ fontSize:"11px", color:C.muted, marginTop:"3px", textAlign:"right" }}>{text}</div>;
   const sectionLine = sec => <SectionChips sections={sec} align="flex-start"/>;
 
@@ -7624,12 +7628,12 @@ function AuditScoresTab({ techs, token, techId=null, canSync=false, view="overvi
       <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:"8px", marginBottom:"12px" }}>
         <button style={arrow} onClick={() => { setWk(shiftWeek(wk,-1)); setOpen(null); }}>◀</button>
         <div style={{ textAlign:"center" }}>
-          <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"16px", color:C.black }}>{formatWeekLabel(wk)}{wk===thisWeek ? " · this week" : ""}</div>
+          <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"16px", color:C.black }}>{formatWeekLabel(wk)}{wk===thisWeek ? " · this week" : ""}</div>
           {section==="overview" && <div style={{ fontSize:"12px", color:C.muted, marginTop:"2px" }}>{scoreWindowLabel(win.from, end)}</div>}
         </div>
         <button style={{ ...arrow, opacity:wk>=thisWeek?0.4:1 }} disabled={wk>=thisWeek} onClick={() => { setWk(shiftWeek(wk,1)); setOpen(null); }}>▶</button>
       </div>
-      {state.error && <div style={{ background:`${C.red}10`, border:`1px solid ${C.red}`, borderRadius:"10px", padding:"12px", fontSize:"13px", color:C.red, marginBottom:"10px" }}>Couldn't load: {state.error}</div>}
+      {state.error && <div style={{ background:`${C.red}10`, border:`1px solid ${C.red}`, borderRadius:"12px", padding:"12px", fontSize:"13px", color:C.red, marginBottom:"10px" }}>Couldn't load: {state.error}</div>}
       {state.loading && !state.data && <div style={{ color:C.muted, padding:"16px" }}>Loading...</div>}
     </>
   );
@@ -7642,10 +7646,10 @@ function AuditScoresTab({ techs, token, techId=null, canSync=false, view="overvi
   // A team / company score card. Admins can tap a team (onToggle) to see its
   // members underneath (children).
   const teamCard = (title, t, highlight=false, onToggle=null, isOpen=false, children=null) => (
-    <div key={title} style={{ background:highlight?C.blueXlt:C.white, border:`1px solid ${highlight?C.blue:C.border}`, borderRadius:"12px", padding:"12px 14px", marginBottom:"8px" }}>
+    <div key={title} style={{ background:highlight?C.blueXlt:C.white, border:`1px solid ${highlight?C.blue:C.border}`, borderRadius:"16px", padding:"12px 14px", marginBottom:"8px" }}>
       <div onClick={onToggle || undefined} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:"10px", cursor:onToggle?"pointer":"default" }}>
         <div>
-          <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"16px", color:C.black }}>{title} {onToggle && <span style={{ fontSize:"12px", color:C.muted }}>{isOpen?"▲":"▼"}</span>}</div>
+          <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"16px", color:C.black }}>{title} {onToggle && <span style={{ fontSize:"12px", color:C.muted }}>{isOpen?"▲":"▼"}</span>}</div>
           <div style={{ marginTop:"4px" }}>{sectionLine(t)}</div>
         </div>
         <div>{big(t.score==null ? "—" : `${fmtScore(t.score)}`, passColor(t.score, t.pass), 24)}{small(t.score==null ? "no scores yet" : `${t.pass?"PASS":"FAIL"} · ${t.scored} of ${t.members} scored`)}</div>
@@ -7734,9 +7738,9 @@ function AuditScoresTab({ techs, token, techId=null, canSync=false, view="overvi
           ? <>{big(`${fmtScore(driver.score)} ${driver.pass?"PASS":"FAIL"}`, passColor(driver.score, driver.pass))}{small(`${driver.scoredDays} day${driver.scoredDays!==1?"s":""} · ${Math.round(driver.days.reduce((s,d)=>s+d.miles,0))} mi`)}</>
           : big(driver?.days.length ? "No score" : "No driving", C.muted);
         return (
-          <div key={key} style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"12px 14px", marginBottom:"8px", opacity:canOpen?1:0.6 }}>
+          <div key={key} style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"12px 14px", marginBottom:"8px", opacity:canOpen?1:0.6 }}>
             <div onClick={() => canOpen && setOpen(isOpen?null:key)} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:"10px", cursor:canOpen?"pointer":"default" }}>
-              <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"18px", color:C.black }}>{section==="overview" && rankOf[tech.id] ? <span style={{ color:C.muted }}>#{rankOf[tech.id]} </span> : null}{tech.name} {canOpen && <span style={{ fontSize:"12px", color:C.muted }}>{isOpen?"▲":"▼"}</span>}</div>
+              <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"18px", color:C.black }}>{section==="overview" && rankOf[tech.id] ? <span style={{ color:C.muted }}>#{rankOf[tech.id]} </span> : null}{tech.name} {canOpen && <span style={{ fontSize:"12px", color:C.muted }}>{isOpen?"▲":"▼"}</span>}</div>
               <div>{summary}</div>
             </div>
             {section==="overview" && overall.score!=null && <div style={{ marginTop:"6px" }}><SectionChips sections={sections} align="flex-start"/></div>}
@@ -7776,20 +7780,20 @@ function AuditScoresTab({ techs, token, techId=null, canSync=false, view="overvi
       {header}
       <div style={{ fontSize:"13px", color:C.muted, marginBottom:"12px", lineHeight:"1.5" }}>{intro} Weeks run Wednesday–Tuesday. {section==="tote" ? "Items missing on a FAILED tote check come off that tech's pay on the Payroll tab." : "Display only — not tied to pay."}</div>
       {(section==="tote" || section==="audit") && (
-        <div style={{ background:C.cardLt, border:`1px solid ${C.border}`, borderRadius:"10px", padding:"10px 12px", marginBottom:"12px", fontSize:"12px", color:C.black }}>
+        <div style={{ background:C.cardLt, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"10px 12px", marginBottom:"12px", fontSize:"12px", color:C.black }}>
           {last ? <>Last GHL form sync: {new Date(last.finished_at || last.updated_at).toLocaleString("en-US", { month:"short", day:"numeric", hour:"numeric", minute:"2-digit", timeZone:"America/Denver" })}{last.errors?.length ? <span style={{ color:C.red }}> · {last.errors.join("; ")}</span> : ""}{last.labels?.source==="raw_keys" ? <div style={{ color:C.gold, marginTop:"4px" }}>⚠ Couldn't read the form's question labels from GHL ({last.labels.error}). The token may need the locations/customFields.readonly scope.</div> : null}</> : "Not synced yet."}
-          {canSync && <div><button onClick={syncNow} disabled={syncing} style={{ marginTop:"8px", background:C.green, color:C.white, border:"none", padding:"6px 14px", borderRadius:"18px", fontSize:"12px", fontWeight:"900", cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:"1px", textTransform:"uppercase" }}>{syncing ? "Syncing..." : "Sync now"}</button></div>}
+          {canSync && <div><button onClick={syncNow} disabled={syncing} style={{ marginTop:"8px", background:C.green, color:C.white, border:"none", padding:"6px 14px", borderRadius:"18px", fontSize:"12px", fontWeight:"700", cursor:"pointer", fontFamily:FONT, letterSpacing:"-0.01em", textTransform:"none" }}>{syncing ? "Syncing..." : "Sync now"}</button></div>}
           {syncMsg && <div style={{ marginTop:"6px" }}>{syncMsg}</div>}
         </div>
       )}
       {state.data && section!=="driver" && unmatched.length>0 && (
-        <div style={{ background:"rgba(239,68,68,0.08)", border:"1px solid #ef4444", borderRadius:"10px", padding:"10px 12px", marginBottom:"12px", fontSize:"12px", color:C.black }}>
+        <div style={{ background:"rgba(0,0,0,0.06)", border:"1px solid #ef4444", borderRadius:"12px", padding:"10px 12px", marginBottom:"12px", fontSize:"12px", color:C.black }}>
           <div style={{ fontWeight:"700", color:C.red }}>⚠ Forms this week with a Tech name that doesn't exactly match the roster — not shown below:</div>
           {unmatched.join(", ")}
         </div>
       )}
       {state.data && section==="audit" && (unmappedAnswers.length>0 || unmappedIds.length>0) && (
-        <div style={{ background:`${C.gold}12`, border:`1px solid ${C.gold}`, borderRadius:"10px", padding:"10px 12px", marginBottom:"12px", fontSize:"12px", color:C.black }}>
+        <div style={{ background:`${C.gold}12`, border:`1px solid ${C.gold}`, borderRadius:"12px", padding:"10px 12px", marginBottom:"12px", fontSize:"12px", color:C.black }}>
           <div style={{ fontWeight:"700" }}>⚠ Tech Audit answers the scoring doesn't recognize (fix the form or AUDIT_CONFIG):</div>
           {unmappedAnswers.map(u => <div key={u}>• {u}</div>)}
           {unmappedIds.map(id => <div key={id}>• Question id <code>{id}</code>{last?.unmapped_audit_fields?.[id] ? ` = "${last.unmapped_audit_fields[id].trim()}"` : ""} isn't in AUDIT_CONFIG — if it's a renamed question, add the id to that question's list</div>)}
@@ -7798,12 +7802,12 @@ function AuditScoresTab({ techs, token, techId=null, canSync=false, view="overvi
       {(section==="driver" || section==="overview") && (<>
         {driveNote && <div style={{ fontSize:"12px", color:C.muted, marginBottom:"10px" }}>🚗 {driveNote}</div>}
         {unassignedCount>0 && (
-          <div style={{ background:"rgba(239,68,68,0.08)", border:"1px solid #ef4444", borderRadius:"10px", padding:"10px 12px", marginBottom:"12px", fontSize:"12px", color:C.black }}>
+          <div style={{ background:"rgba(0,0,0,0.06)", border:"1px solid #ef4444", borderRadius:"12px", padding:"10px 12px", marginBottom:"12px", fontSize:"12px", color:C.black }}>
             🚨 <strong>{unassignedCount} day{unassignedCount!==1?"s":""} of unassigned driving</strong> this week (a truck drove with no tech's pick on it). Assign or dismiss them in Team Activity → 🚚 Trucks.
           </div>
         )}
         {section==="driver" && unknownFordTypes.length>0 && (
-          <div style={{ background:`${C.gold}12`, border:`1px solid ${C.gold}`, borderRadius:"10px", padding:"10px 12px", marginBottom:"12px", fontSize:"12px", color:C.black }}>
+          <div style={{ background:`${C.gold}12`, border:`1px solid ${C.gold}`, borderRadius:"12px", padding:"10px 12px", marginBottom:"12px", fontSize:"12px", color:C.black }}>
             ⚠ Ford event types not in DRIVER_CONFIG (scored 0 until mapped): {unknownFordTypes.join(", ")}
           </div>
         )}
@@ -7830,10 +7834,10 @@ function AuditScoresTab({ techs, token, techId=null, canSync=false, view="overvi
         return items.map(it => {
           const isOpen = open===`item:${it.key}`;
           return (
-            <div key={it.key} style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"10px 14px", marginBottom:"8px" }}>
+            <div key={it.key} style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"10px 14px", marginBottom:"8px" }}>
               <div onClick={() => setOpen(isOpen ? null : `item:${it.key}`)} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:"10px", cursor:"pointer" }}>
                 <div>
-                  <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"16px", color:C.black }}>{it.tech.name} <span style={{ fontSize:"12px", color:C.muted }}>{isOpen?"▲":"▼"}</span></div>
+                  <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"16px", color:C.black }}>{it.tech.name} <span style={{ fontSize:"12px", color:C.muted }}>{isOpen?"▲":"▼"}</span></div>
                   <div style={{ fontSize:"12px", color:C.muted, marginTop:"2px" }}>{fmtShortDate(it.date)}{it.sub ? ` · ${it.sub}` : ""}</div>
                 </div>
                 <div>{it.summary}</div>
@@ -7870,7 +7874,7 @@ function PhotoThumb({ photo, token }) {
       .catch(() => live && setBad(true));
     return () => { live = false; if (objUrl) URL.revokeObjectURL(objUrl); };
   }, [photo.documentId, token]);
-  const box = { display:"inline-flex", alignItems:"center", justifyContent:"center", width:"104px", height:"104px", borderRadius:"8px", border:`1px solid ${C.border}`, background:C.cardLt, overflow:"hidden", fontSize:"12px", color:C.muted, textDecoration:"none", textAlign:"center" };
+  const box = { display:"inline-flex", alignItems:"center", justifyContent:"center", width:"104px", height:"104px", borderRadius:"10px", border:`1px solid ${C.border}`, background:C.cardLt, overflow:"hidden", fontSize:"12px", color:C.muted, textDecoration:"none", textAlign:"center" };
   if (bad || (!photo.image && !photo.documentId)) return <a href={photo.url} target="_blank" rel="noopener noreferrer" style={{ ...box, color:C.blue }}>📎 Open file</a>;
   if (!src) return <div style={box}>Loading…</div>;
   return (
@@ -7904,8 +7908,8 @@ function TruckInspectionsTab({ techs, jobs=[], token, canGrade=false, showToast=
   const unmatched = [...new Set(subs.filter(s => !s.tech_id).map(s => s.tech_name || "(no name)"))].sort();
   const rows = techs.filter(t => t.is_active!==false && t.title!=="owner" && !isTruckExempt(t)).sort(byFirstName)
     .map(t => ({ tech:t, ...truckScore({ techId:t.id, tech:t, jobs, truckSubs:subs.filter(s => s.tech_id===t.id), grades, from:wk, to:end, today }) }));
-  const arrow = { background:C.white, border:`1px solid ${C.border}`, borderRadius:"8px", padding:"6px 12px", cursor:"pointer", fontSize:"14px", color:C.black };
-  const inp = { background:C.white, border:`1px solid ${C.border}`, color:C.black, padding:"8px 10px", borderRadius:"8px", fontSize:"15px", boxSizing:"border-box" };
+  const arrow = { background:C.white, border:`1px solid ${C.border}`, borderRadius:"10px", padding:"6px 12px", cursor:"pointer", fontSize:"14px", color:C.black };
+  const inp = { background:C.white, border:`1px solid ${C.border}`, color:C.black, padding:"8px 10px", borderRadius:"10px", fontSize:"15px", boxSizing:"border-box" };
 
   async function saveGrade(sub) {
     const e = edit[sub.id] || {};
@@ -7946,7 +7950,7 @@ function TruckInspectionsTab({ techs, jobs=[], token, canGrade=false, showToast=
           <div style={{ display:"flex", gap:"6px", flexWrap:"wrap", alignItems:"center", marginTop:"8px" }}>
             <input type="number" min="0" max="100" inputMode="decimal" placeholder="0–100" value={e.score} onChange={ev => set("score", ev.target.value)} style={{ ...inp, width:"90px" }} aria-label="Grade"/>
             <input placeholder="Notes (what was wrong)" value={e.notes} onChange={ev => set("notes", ev.target.value)} style={{ ...inp, flex:"1 1 180px" }} aria-label="Notes"/>
-            <button disabled={saving===sub.id} onClick={() => saveGrade(sub)} style={{ background:C.blue, border:"none", color:C.white, padding:"9px 16px", borderRadius:"8px", cursor:"pointer", fontSize:"14px", fontWeight:"700" }}>{saving===sub.id ? "Saving…" : g ? "Save override" : "Save grade"}</button>
+            <button disabled={saving===sub.id} onClick={() => saveGrade(sub)} style={{ background:C.blue, border:"none", color:C.white, padding:"9px 16px", borderRadius:"10px", cursor:"pointer", fontSize:"14px", fontWeight:"700" }}>{saving===sub.id ? "Saving…" : g ? "Save override" : "Save grade"}</button>
           </div>
         )}
       </div>
@@ -7957,16 +7961,16 @@ function TruckInspectionsTab({ techs, jobs=[], token, canGrade=false, showToast=
     <div>
       <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:"8px", marginBottom:"12px" }}>
         <button style={arrow} onClick={() => { setWk(shiftWeek(wk,-1)); setOpen(null); }}>◀</button>
-        <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"16px", color:C.black }}>{formatWeekLabel(wk)}{wk===thisWeek ? " · this week" : ""}</div>
+        <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"16px", color:C.black }}>{formatWeekLabel(wk)}{wk===thisWeek ? " · this week" : ""}</div>
         <button style={{ ...arrow, opacity:wk>=thisWeek?0.4:1 }} disabled={wk>=thisWeek} onClick={() => { setWk(shiftWeek(wk,1)); setOpen(null); }}>▶</button>
       </div>
       <div style={{ fontSize:"13px", color:C.muted, marginBottom:"12px", lineHeight:"1.5" }}>
         Nightly Truck Checks (GHL form) for every night a tech worked (a job with revenue). Graded = the grade; submitted but not graded yet counts {TECH_SCORE_CONFIG.truck.notGradedScore} for now; worked with no Truck Check counts 0. Apprentices in training aren't listed. Part of the Equipment &amp; Truck section of the Tech Score. Weeks run Wednesday–Tuesday. Display only — not tied to pay.
       </div>
-      {state.error && <div style={{ background:`${C.red}10`, border:`1px solid ${C.red}`, borderRadius:"10px", padding:"12px", fontSize:"13px", color:C.red, marginBottom:"10px" }}>Couldn't load: {state.error}</div>}
+      {state.error && <div style={{ background:`${C.red}10`, border:`1px solid ${C.red}`, borderRadius:"12px", padding:"12px", fontSize:"13px", color:C.red, marginBottom:"10px" }}>Couldn't load: {state.error}</div>}
       {state.loading && !state.data && <div style={{ color:C.muted, padding:"16px" }}>Loading...</div>}
       {state.data && unmatched.length>0 && (
-        <div style={{ background:"rgba(239,68,68,0.08)", border:"1px solid #ef4444", borderRadius:"10px", padding:"10px 12px", marginBottom:"12px", fontSize:"13px", color:C.black }}>
+        <div style={{ background:"rgba(0,0,0,0.06)", border:"1px solid #ef4444", borderRadius:"12px", padding:"10px 12px", marginBottom:"12px", fontSize:"13px", color:C.black }}>
           <div style={{ fontWeight:"700", color:C.red }}>⚠ Truck Checks this week with a name that doesn't match the roster — not counted:</div>
           {unmatched.join(", ")}
         </div>
@@ -7976,15 +7980,15 @@ function TruckInspectionsTab({ techs, jobs=[], token, canGrade=false, showToast=
         const missedNights = r.nights.filter(n => n.status==="missed");
         const canOpen = r.nights.length>0 || r.extra.length>0;
         return (
-          <div key={r.tech.id} style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"12px 14px", marginBottom:"8px", opacity:canOpen?1:0.6 }}>
+          <div key={r.tech.id} style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"12px 14px", marginBottom:"8px", opacity:canOpen?1:0.6 }}>
             <div onClick={() => canOpen && setOpen(isOpen ? null : r.tech.id)} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:"10px", cursor:canOpen?"pointer":"default" }}>
               <div>
-                <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"18px", color:C.black }}>{r.tech.name} {canOpen && <span style={{ fontSize:"12px", color:C.muted }}>{isOpen?"▲":"▼"}</span>}</div>
+                <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"18px", color:C.black }}>{r.tech.name} {canOpen && <span style={{ fontSize:"12px", color:C.muted }}>{isOpen?"▲":"▼"}</span>}</div>
                 <div style={{ fontSize:"14px", color:C.black, marginTop:"2px" }}>{r.worked ? `Submitted ${r.submitted} / ${r.worked} night${r.worked!==1?"s":""} worked` : r.nights.length ? "Worked tonight — Truck Check not in yet" : "No nights worked"}{r.notGraded ? <span style={{ color:C.gold }}> · {r.notGraded} not graded yet</span> : null}</div>
                 {missedNights.length>0 && <div style={{ fontSize:"14px", color:C.red, marginTop:"2px", fontWeight:"700" }}>Missing: {missedNights.map(n => fmtShortDate(n.date)).reverse().join(", ")}</div>}
               </div>
               <div style={{ textAlign:"right" }}>
-                <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"24px", color:sectionColor(r.score), lineHeight:1 }}>{fmtScore(r.score)}</div>
+                <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"24px", color:sectionColor(r.score), lineHeight:1 }}>{fmtScore(r.score)}</div>
                 <div style={{ fontSize:"11px", color:C.muted, marginTop:"3px" }}>average grade</div>
               </div>
             </div>
@@ -7997,7 +8001,7 @@ function TruckInspectionsTab({ techs, jobs=[], token, canGrade=false, showToast=
                     <div key={key} style={{ borderTop:`1px solid ${C.border}`, padding:"8px 0" }}>
                       <div onClick={() => setOpenNight(nOpen ? null : key)} style={{ display:"flex", justifyContent:"space-between", gap:"8px", cursor:"pointer", fontSize:"15px" }}>
                         <span style={{ color:st.color || C.black, fontWeight:"700" }}>{fmtShortDate(n.date)} · {st.label} <span style={{ fontSize:"12px", color:C.muted }}>{nOpen?"▲":"▼"}</span></span>
-                        <span style={{ color:sectionColor(n.score), fontWeight:"900", fontFamily:"'Barlow Condensed',sans-serif", fontSize:"17px" }}>{n.score==null ? "—" : fmtScore(n.score)}</span>
+                        <span style={{ color:sectionColor(n.score), fontWeight:"700", fontFamily:FONT, fontSize:"17px" }}>{n.score==null ? "—" : fmtScore(n.score)}</span>
                       </div>
                       {nOpen && nightDetail(n)}
                     </div>
@@ -8030,9 +8034,9 @@ function TrucksAdminTab({ techs, vehicles, timeEntries=[], token, refreshAll, sh
   const [impDate, setImpDate] = useState("");
   const [fileKey, setFileKey] = useState(0);
   const techName = id => techs.find(t=>t.id===id)?.name || "Unknown tech";
-  const inp = { background:C.white, border:`1px solid ${C.border}`, color:C.black, padding:"7px 9px", borderRadius:"6px", fontSize:"13px", width:"100%", boxSizing:"border-box" };
-  const smallBtn = (color) => ({ background:color, border:"none", color:C.white, padding:"6px 12px", borderRadius:"6px", cursor:busy?"not-allowed":"pointer", fontSize:"12px", fontWeight:"700", whiteSpace:"nowrap" });
-  const card = { background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"14px 16px" };
+  const inp = { background:C.white, border:`1px solid ${C.border}`, color:C.black, padding:"7px 9px", borderRadius:"10px", fontSize:"13px", width:"100%", boxSizing:"border-box" };
+  const smallBtn = (color) => ({ background:color, border:"none", color:C.white, padding:"6px 12px", borderRadius:"10px", cursor:busy?"not-allowed":"pointer", fontSize:"12px", fontWeight:"700", whiteSpace:"nowrap" });
+  const card = { background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"14px 16px" };
 
   useEffect(() => {
     let live = true;
@@ -8193,7 +8197,7 @@ function TrucksAdminTab({ techs, vehicles, timeEntries=[], token, refreshAll, sh
         </div>
         <input key={fileKey} type="file" accept=".csv,text/csv" multiple onChange={e => e.target.files?.length && readFordFiles(e.target.files)} style={{ fontSize:"13px", color:C.black }}/>
         {imp && (
-          <div style={{ marginTop:"10px", background:C.cardLt, border:`1px solid ${C.border}`, borderRadius:"8px", padding:"10px 12px", fontSize:"12px", color:C.black }}>
+          <div style={{ marginTop:"10px", background:C.cardLt, border:`1px solid ${C.border}`, borderRadius:"10px", padding:"10px 12px", fontSize:"12px", color:C.black }}>
             <div style={{ display:"flex", alignItems:"center", gap:"8px", flexWrap:"wrap", marginBottom:"6px" }}>
               <strong>Day these reports cover:</strong>
               <input type="date" value={impDate} max={today} onChange={e=>setImpDate(e.target.value)} style={{ ...inp, width:"auto" }}/>
@@ -8237,11 +8241,11 @@ function TrucksAdminTab({ techs, vehicles, timeEntries=[], token, refreshAll, sh
         ))}
         {assignedRows.length>0 && (
           <div style={{ marginTop:"10px" }}>
-            <div style={{ fontSize:"11px", color:C.muted, fontWeight:"700", letterSpacing:"1px" }}>ASSIGNED</div>
+            <div style={{ fontSize:"11px", color:C.muted, fontWeight:"700", letterSpacing:"-0.01em" }}>ASSIGNED</div>
             {assignedRows.map(r => (
               <div key={r.vin+r.work_date} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:"8px", fontSize:"12px", color:C.black, padding:"4px 0" }}>
                 <span>{vehicles.find(v=>v.vin===r.vin)?.name || r.vin} · {fmtShortDate(r.work_date)} → {techName(r.assigned_tech_id)}{r.assigned_by ? ` (by ${r.assigned_by})` : ""}</span>
-                <button disabled={busy} onClick={()=>driving("assign", r, null)} style={{ background:"none", border:`1px solid ${C.border}`, color:C.red, borderRadius:"4px", cursor:"pointer", fontSize:"11px", padding:"2px 8px" }}>Undo</button>
+                <button disabled={busy} onClick={()=>driving("assign", r, null)} style={{ background:"none", border:`1px solid ${C.border}`, color:C.red, borderRadius:"8px", cursor:"pointer", fontSize:"11px", padding:"2px 8px" }}>Undo</button>
               </div>
             ))}
           </div>
@@ -8290,9 +8294,9 @@ function CallbacksPanel({ techs, jobs, callbacks, refreshAll, showToast }) {
   const [cbCStart, setCbCStart] = useState("");
   const [cbCEnd, setCbCEnd] = useState("");
   const [saving, setSaving] = useState(false);
-  const inp={ background:C.white, border:`1px solid ${C.border}`, color:C.black, padding:"10px 14px", borderRadius:"8px", fontSize:"14px", fontFamily:"'Barlow',sans-serif", width:"100%", boxSizing:"border-box" };
+  const inp={ background:C.white, border:`1px solid ${C.border}`, color:C.black, padding:"10px 14px", borderRadius:"10px", fontSize:"14px", fontFamily:FONT, width:"100%", boxSizing:"border-box" };
   const sel=(val)=>({...inp, color:val?C.black:C.muted});
-  const btn=(color)=>({ background:saving?C.border:color||C.blue, border:"none", color:C.black, padding:"13px", borderRadius:"24px", cursor:saving?"not-allowed":"pointer", fontSize:"13px", fontWeight:"900", fontStyle:"italic", letterSpacing:"2px", fontFamily:"'Barlow Condensed',sans-serif", width:"100%", textTransform:"uppercase" });
+  const btn=(color)=>({ background:saving?C.border:color||C.blue, border:"none", color:C.black, padding:"13px", borderRadius:"24px", cursor:saving?"not-allowed":"pointer", fontSize:"13px", fontWeight:"700", fontStyle:"normal", letterSpacing:"-0.01em", fontFamily:FONT, width:"100%", textTransform:"none" });
   // The jobs a tech did recently, newest first -- picking one fills in the
   // date and client, and tells us who else was on it (split job).
   function recentJobsFor(techId, days) {
@@ -8371,20 +8375,20 @@ function CallbacksPanel({ techs, jobs, callbacks, refreshAll, showToast }) {
             return { t, count: mine.reduce((s,c)=>s+(c.weight==null?1:Number(c.weight)),0), pts: mine.reduce((s,c)=>s+callbackPoints(c),0) };
           }).filter(x=>x.count>0).sort((x,y)=>y.count-x.count);
           const fmtCount = n => Number.isInteger(n) ? String(n) : n.toFixed(1);
-          const chip = on => ({ display:"flex", alignItems:"flex-start", gap:"8px", padding:"6px 8px", borderRadius:"8px", border:`1px solid ${on?"#ef4444":C.border}`, background:on?"#ef444410":C.white, cursor:"pointer", fontSize:"13px", color:C.black });
+          const chip = on => ({ display:"flex", alignItems:"flex-start", gap:"8px", padding:"6px 8px", borderRadius:"10px", border:`1px solid ${on?"#ff3b30":C.border}`, background:on?"#ef444410":C.white, cursor:"pointer", fontSize:"13px", color:C.black });
           return (
           <div style={{ display:"flex", flexDirection:"column", gap:"16px" }}>
             {/* Date range + rate */}
-            <DateRangePicker label="📅 Callbacks by job date" color="#ef4444" preset={cbPreset} setPreset={setCbPreset} customStart={cbCStart} setCustomStart={setCbCStart} customEnd={cbCEnd} setCustomEnd={setCbCEnd}>
+            <DateRangePicker label="📅 Callbacks by job date" color="#ff3b30" preset={cbPreset} setPreset={setCbPreset} customStart={cbCStart} setCustomStart={setCbCStart} customEnd={cbCEnd} setCustomEnd={setCbCEnd}>
               <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:"8px", marginTop:"14px" }}>
                 {[
-                  { l:"Callback rate", v:`${rate.toFixed(2)}%`, c: rate>=2?"#ef4444":C.green },
+                  { l:"Callback rate", v:`${rate.toFixed(2)}%`, c: rate>=2?"#ff3b30":C.green },
                   { l:"Callbacks", v:fmtCount(cbCount), c:C.black },
                   { l:"Completed jobs", v:jobCount, c:C.black },
                 ].map(x=>(
-                  <div key={x.l} style={{ background:C.cardLt, borderRadius:"8px", padding:"10px", textAlign:"center" }}>
-                    <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"24px", color:x.c }}>{x.v}</div>
-                    <div style={{ fontSize:"9px", color:C.muted, textTransform:"uppercase", letterSpacing:"1px" }}>{x.l}</div>
+                  <div key={x.l} style={{ background:C.cardLt, borderRadius:"10px", padding:"10px", textAlign:"center" }}>
+                    <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"24px", color:x.c }}>{x.v}</div>
+                    <div style={{ fontSize:"11px", color:C.muted, textTransform:"none", letterSpacing:"-0.01em" }}>{x.l}</div>
                   </div>
                 ))}
               </div>
@@ -8392,8 +8396,8 @@ function CallbacksPanel({ techs, jobs, callbacks, refreshAll, showToast }) {
             </DateRangePicker>
 
             {/* Log a callback */}
-            <div style={{ background:C.white, border:`2px solid #ef444444`, borderTop:`3px solid #ef4444`, borderRadius:"12px", padding:"20px", display:"flex", flexDirection:"column", gap:"12px", boxShadow:"0 2px 8px rgba(239,68,68,0.08)" }}>
-              <Label color="#ef4444">📞 Log a Callback</Label>
+            <div style={{ background:C.white, border:`2px solid #ef444444`, borderTop:`3px solid #ef4444`, borderRadius:"16px", padding:"20px", display:"flex", flexDirection:"column", gap:"12px", boxShadow:"0 2px 8px rgba(0,0,0,0.06)" }}>
+              <Label color="#ff3b30">📞 Log a Callback</Label>
               <select value={f.techId} onChange={e=>setCbForm({...CB_EMPTY, techId:e.target.value, lookback:f.lookback})} style={sel(f.techId)}>
                 <option value="">— Select Tech —</option>
                 {techs.filter(t=>t.title!=="owner").map(t=><option key={t.id} value={t.id}>{t.name}{t.is_active===false?" (archived)":""}</option>)}
@@ -8410,19 +8414,19 @@ function CallbacksPanel({ techs, jobs, callbacks, refreshAll, showToast }) {
                   </select>
                 </div>
                 {picked&&(
-                  <div style={{ fontSize:"12px", color:C.black, background:C.cardLt, borderRadius:"8px", padding:"8px 10px" }}>
+                  <div style={{ fontSize:"12px", color:C.black, background:C.cardLt, borderRadius:"10px", padding:"8px 10px" }}>
                     Completed <strong>{fmtShortDate(picked.job_date)}</strong> · {picked.customer_name||"no client name"}
-                    {crew.length>1 && <> · <strong style={{ color:"#ef4444" }}>Split job:</strong> {crew.map(id=>techs.find(t=>t.id===id)?.name||"?").join(" & ")} — each gets 1/{crew.length} of the callback and points</>}
+                    {crew.length>1 && <> · <strong style={{ color:"#ff3b30" }}>Split job:</strong> {crew.map(id=>techs.find(t=>t.id===id)?.name||"?").join(" & ")} — each gets 1/{crew.length} of the callback and points</>}
                   </div>
                 )}
                 {f.jobId==="manual"&&(
                   <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"8px" }}>
                     <div>
-                      <div style={{ fontSize:"10px", color:C.muted, marginBottom:"4px" }}>Date the job was completed</div>
+                      <div style={{ fontSize:"11px", color:C.muted, marginBottom:"4px" }}>Date the job was completed</div>
                       <input type="date" value={f.jobDate} onChange={e=>setCbForm(v=>({...v, jobDate:e.target.value}))} style={inp}/>
                     </div>
                     <div>
-                      <div style={{ fontSize:"10px", color:C.muted, marginBottom:"4px" }}>Client name</div>
+                      <div style={{ fontSize:"11px", color:C.muted, marginBottom:"4px" }}>Client name</div>
                       <input value={f.customer} onChange={e=>setCbForm(v=>({...v, customer:e.target.value}))} style={inp}/>
                     </div>
                     <select value={f.splitTechId} onChange={e=>setCbForm(v=>({...v, splitTechId:e.target.value}))} style={{ ...sel(f.splitTechId), gridColumn:"1 / -1" }}>
@@ -8436,7 +8440,7 @@ function CallbacksPanel({ techs, jobs, callbacks, refreshAll, showToast }) {
                   <div style={{ fontSize:"12px", color:C.muted, marginBottom:"6px" }}>What was missed? (pick all that apply)</div>
                   {CALLBACK_AREAS.map(a=>(
                     <div key={a.area} style={{ marginBottom:"8px" }}>
-                      <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"13px", color:C.black, marginBottom:"4px" }}>{a.area}</div>
+                      <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"13px", color:C.black, marginBottom:"4px" }}>{a.area}</div>
                       <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(220px,1fr))", gap:"6px" }}>
                         {a.items.map(i=>{ const on=f.missed.includes(i.id); return (
                           <label key={i.id} style={chip(on)}>
@@ -8454,25 +8458,25 @@ function CallbacksPanel({ techs, jobs, callbacks, refreshAll, showToast }) {
                     {[1,2,3].map(l=>{ const on=f.severity===l, sv=CALLBACK_SEVERITY[l]; return (
                       <label key={l} style={chip(on)}>
                         <input type="radio" name="cb-severity" checked={on} onChange={()=>setCbForm(v=>({...v, severity:l}))} style={{ marginTop:"2px" }}/>
-                        <span><strong>{sv.label}</strong> — {sv.desc} <strong style={{ color:"#ef4444" }}>(−{sv.pts} pts)</strong></span>
+                        <span><strong>{sv.label}</strong> — {sv.desc} <strong style={{ color:"#ff3b30" }}>(−{sv.pts} pts)</strong></span>
                       </label>
                     ); })}
                   </div>
                 </div>
                 <input placeholder="Notes (optional)" value={f.reason} onChange={e=>setCbForm(v=>({...v, reason:e.target.value}))} style={inp}/>
-                <button onClick={logCallback} disabled={saving} style={{ ...btn("#ef4444"), color:C.white }}>{saving?"Saving...":"Log Callback — Deduct Points"}</button>
+                <button onClick={logCallback} disabled={saving} style={{ ...btn("#ff3b30"), color:C.white }}>{saving?"Saving...":"Log Callback — Deduct Points"}</button>
               </>)}
             </div>
 
             {/* Breakdown for the range */}
             {groups.length>0&&(
-              <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"16px 18px", boxShadow:"0 2px 8px rgba(43,156,240,0.08)", display:"flex", flexDirection:"column", gap:"12px" }}>
-                <Label color="#ef4444">📊 Breakdown</Label>
+              <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"16px 18px", boxShadow:"0 2px 8px rgba(0,0,0,0.06)", display:"flex", flexDirection:"column", gap:"12px" }}>
+                <Label color="#ff3b30">📊 Breakdown</Label>
                 <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:"8px" }}>
                   {[1,2,3].map((l,i)=>(
-                    <div key={l} style={{ background:C.cardLt, borderRadius:"8px", padding:"8px", textAlign:"center" }}>
-                      <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"20px", color:C.black }}>{sevCounts[i]}</div>
-                      <div style={{ fontSize:"9px", color:C.muted, textTransform:"uppercase", letterSpacing:"1px" }}>{CALLBACK_SEVERITY[l].label}</div>
+                    <div key={l} style={{ background:C.cardLt, borderRadius:"10px", padding:"8px", textAlign:"center" }}>
+                      <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"20px", color:C.black }}>{sevCounts[i]}</div>
+                      <div style={{ fontSize:"11px", color:C.muted, textTransform:"none", letterSpacing:"-0.01em" }}>{CALLBACK_SEVERITY[l].label}</div>
                     </div>
                   ))}
                 </div>
@@ -8488,8 +8492,8 @@ function CallbacksPanel({ techs, jobs, callbacks, refreshAll, showToast }) {
                   <div style={{ fontSize:"12px", color:C.muted, marginBottom:"4px" }}>By tech</div>
                   {techSummary.map(x=>(
                     <div key={x.t.id} style={{ display:"flex", justifyContent:"space-between", fontSize:"13px", color:C.black, padding:"2px 0" }}>
-                      <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>{x.t.name}</span>
-                      <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", color:"#ef4444" }}>{fmtCount(x.count)} callback{x.count!==1?"s":""} · {x.pts} pts</span>
+                      <span style={{ fontFamily:FONT, fontWeight:"700" }}>{x.t.name}</span>
+                      <span style={{ fontFamily:FONT, fontWeight:"700", color:"#ff3b30" }}>{fmtCount(x.count)} callback{x.count!==1?"s":""} · {x.pts} pts</span>
                     </div>
                   ))}
                 </div>
@@ -8497,9 +8501,9 @@ function CallbacksPanel({ techs, jobs, callbacks, refreshAll, showToast }) {
             )}
 
             {/* History for the range */}
-            <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:"12px", overflow:"hidden", boxShadow:"0 2px 8px rgba(43,156,240,0.08)" }}>
+            <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:"16px", overflow:"hidden", boxShadow:"0 2px 8px rgba(0,0,0,0.06)" }}>
               <div style={{ padding:"14px 18px", borderBottom:`1px solid ${C.border}`, background:C.cardLt }}>
-                <Label color="#ef4444">📋 Callback History</Label>
+                <Label color="#ff3b30">📋 Callback History</Label>
               </div>
               <div style={{ padding:"14px 18px", display:"flex", flexDirection:"column", gap:"8px" }}>
                 {groups.length===0&&<div style={{ fontSize:"13px", color:C.muted }}>No callbacks for jobs in this date range. Keep it that way! 💪</div>}
@@ -8507,22 +8511,22 @@ function CallbacksPanel({ techs, jobs, callbacks, refreshAll, showToast }) {
                   const c = g[0];
                   const names = g.map(r=>techs.find(t=>t.id===r.tech_id)?.name||"Unknown").join(" & ");
                   return (
-                    <div key={c.group_id||c.id} style={{ background:`#ef444410`, border:`1px solid #ef444433`, borderLeft:`3px solid #ef4444`, borderRadius:"8px", padding:"12px 14px", display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:"12px" }}>
+                    <div key={c.group_id||c.id} style={{ background:`#ef444410`, border:`1px solid #ef444433`, borderLeft:`3px solid #ef4444`, borderRadius:"10px", padding:"12px 14px", display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:"12px" }}>
                       <div>
-                        <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"15px", color:C.black }}>
-                          {names}{g.length>1&&<span style={{ fontSize:"11px", color:"#ef4444", marginLeft:"6px" }}>SPLIT</span>}
-                          {c.severity&&<span style={{ fontSize:"11px", color:C.white, background:"#ef4444", borderRadius:"8px", padding:"1px 7px", marginLeft:"6px" }}>{CALLBACK_SEVERITY[c.severity].label}</span>}
+                        <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"15px", color:C.black }}>
+                          {names}{g.length>1&&<span style={{ fontSize:"11px", color:"#ff3b30", marginLeft:"6px" }}>SPLIT</span>}
+                          {c.severity&&<span style={{ fontSize:"11px", color:C.white, background:"#ff3b30", borderRadius:"10px", padding:"1px 7px", marginLeft:"6px" }}>{CALLBACK_SEVERITY[c.severity].label}</span>}
                         </div>
                         <div style={{ fontSize:"12px", color:C.black, marginTop:"3px" }}>
                           Job {callbackDate(c)?fmtShortDate(callbackDate(c)):"?"}{c.customer_name?` · ${c.customer_name}`:""}{c.job_number?` · #${c.job_number}`:""}
                         </div>
                         {(c.missed_items||[]).length>0&&<div style={{ fontSize:"11px", color:C.muted, marginTop:"2px" }}>Missed: {c.missed_items.map(id=>CALLBACK_ITEM_LABEL[id]||id).join(", ")}</div>}
                         {c.reason&&<div style={{ fontSize:"11px", color:C.muted, marginTop:"2px" }}>{c.reason}</div>}
-                        <div style={{ fontSize:"10px", color:C.muted, marginTop:"2px" }}>Logged {new Date(c.created_at).toLocaleDateString("en-US",{month:"short",day:"numeric"})}</div>
+                        <div style={{ fontSize:"11px", color:C.muted, marginTop:"2px" }}>Logged {new Date(c.created_at).toLocaleDateString("en-US",{month:"short",day:"numeric"})}</div>
                       </div>
                       <div style={{ display:"flex", alignItems:"center", gap:"10px", flexShrink:0 }}>
-                        <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"15px", color:"#ef4444" }}>{callbackPoints(c)} pts{g.length>1?" each":""}</span>
-                        <button onClick={()=>deleteCallback(c)} disabled={saving} style={{ background:"none", border:`1px solid #ef4444`, color:"#ef4444", padding:"4px 10px", borderRadius:"6px", cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", fontSize:"11px" }}>DELETE</button>
+                        <span style={{ fontFamily:FONT, fontWeight:"700", fontSize:"15px", color:"#ff3b30" }}>{callbackPoints(c)} pts{g.length>1?" each":""}</span>
+                        <button onClick={()=>deleteCallback(c)} disabled={saving} style={{ background:"none", border:`1px solid #ef4444`, color:"#ff3b30", padding:"4px 10px", borderRadius:"10px", cursor:"pointer", fontFamily:FONT, fontWeight:"700", fontSize:"11px" }}>DELETE</button>
                       </div>
                     </div>
                   );
@@ -8735,9 +8739,9 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
   const wkUp={}; upsells.filter(u=>u.week_key===wk).forEach(u=>{wkUp[u.tech_id]=u.amount;});
   const mkRev={}; reviews.filter(r=>r.month_key===mk).forEach(r=>{mkRev[r.tech_id]=r.count;});
 
-  const inp={ background:C.white, border:`1px solid ${C.border}`, color:C.black, padding:"10px 14px", borderRadius:"8px", fontSize:"14px", fontFamily:"'Barlow',sans-serif", width:"100%", boxSizing:"border-box" };
+  const inp={ background:C.white, border:`1px solid ${C.border}`, color:C.black, padding:"10px 14px", borderRadius:"10px", fontSize:"14px", fontFamily:FONT, width:"100%", boxSizing:"border-box" };
   const sel=(val)=>({...inp, color:val?C.black:C.muted});
-  const btn=(color)=>({ background:saving?C.border:color||C.blue, border:"none", color:C.black, padding:"13px", borderRadius:"24px", cursor:saving?"not-allowed":"pointer", fontSize:"13px", fontWeight:"900", fontStyle:"italic", letterSpacing:"2px", fontFamily:"'Barlow Condensed',sans-serif", width:"100%", textTransform:"uppercase" });
+  const btn=(color)=>({ background:saving?C.border:color||C.blue, border:"none", color:C.black, padding:"13px", borderRadius:"24px", cursor:saving?"not-allowed":"pointer", fontSize:"13px", fontWeight:"700", fontStyle:"normal", letterSpacing:"-0.01em", fontFamily:FONT, width:"100%", textTransform:"none" });
 
   const adminNavSections = [
     { label:"Analytics", items:[
@@ -8795,7 +8799,7 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
   const adminTabLabel = adminNavSections.flatMap(s=>s.items).find(([id])=>id===tab)?.[2] || "Dashboard";
 
   return (
-    <div style={{ minHeight:"100vh", background:"#f0f8ff" }}>
+    <div style={{ minHeight:"100vh", background:"#f5f5f7" }}>
       <style>{GS}</style>
       <SideNav sections={adminNavSections} active={tab} setActive={setTab} open={menuOpen} onClose={()=>setMenuOpen(false)} name="Admin Panel" role="Skylo Standard Board"/>
       <Header left={<HamburgerBtn onClick={()=>setMenuOpen(true)}/>} title={adminTabLabel} right={<LogoutBtn onLogout={onLogout}/>}/>
@@ -8804,9 +8808,9 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
         {pendingSplits.length > 0 && tab !== "splits" && (()=>{
           const count = new Set(pendingSplits.map(r => r.hcp_job_id)).size;
           return (
-            <div style={{ background:"rgba(245,158,11,0.1)", border:"1px solid #f59e0b", borderRadius:"10px", padding:"12px 16px", marginBottom:"16px", display:"flex", justifyContent:"space-between", alignItems:"center", gap:"12px" }}>
+            <div style={{ background:"rgba(245,158,11,0.1)", border:"1px solid #f59e0b", borderRadius:"12px", padding:"12px 16px", marginBottom:"16px", display:"flex", justifyContent:"space-between", alignItems:"center", gap:"12px" }}>
               <div>
-                <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"14px", color:"#f59e0b", letterSpacing:"0.5px" }}>
+                <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"14px", color:"#ff9f0a", letterSpacing:"-0.01em" }}>
                   ⚠ {count} job{count !== 1 ? "s" : ""} need split confirmation
                 </div>
                 <div style={{ fontSize:"12px", color:C.muted, marginTop:"2px" }}>
@@ -8815,16 +8819,16 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
               </div>
               <button
                 onClick={() => setTab("splits")}
-                style={{ background:"#f59e0b", border:"none", color:C.black, padding:"8px 18px", borderRadius:"8px", cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"12px", letterSpacing:"1.5px", textTransform:"uppercase", whiteSpace:"nowrap", flexShrink:0 }}
+                style={{ background:"#ff9f0a", border:"none", color:C.black, padding:"8px 18px", borderRadius:"10px", cursor:"pointer", fontFamily:FONT, fontWeight:"700", fontSize:"12px", letterSpacing:"-0.01em", textTransform:"none", whiteSpace:"nowrap", flexShrink:0 }}
               >Review Now</button>
             </div>
           );
         })()}
 
         {unmatchedTechs.length > 0 && tab !== "techmatch" && (
-          <div style={{ background:"rgba(239,68,68,0.08)", border:"1px solid #ef4444", borderRadius:"10px", padding:"12px 16px", marginBottom:"16px", display:"flex", justifyContent:"space-between", alignItems:"center", gap:"12px" }}>
+          <div style={{ background:"rgba(0,0,0,0.06)", border:"1px solid #ef4444", borderRadius:"12px", padding:"12px 16px", marginBottom:"16px", display:"flex", justifyContent:"space-between", alignItems:"center", gap:"12px" }}>
             <div>
-              <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"14px", color:"#ef4444", letterSpacing:"0.5px" }}>
+              <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"14px", color:"#ff3b30", letterSpacing:"-0.01em" }}>
                 ⚠ {unmatchedTechs.length} HCP name{unmatchedTechs.length !== 1 ? "s" : ""} not matched to a tech
               </div>
               <div style={{ fontSize:"12px", color:C.muted, marginTop:"2px" }}>
@@ -8833,7 +8837,7 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
             </div>
             <button
               onClick={() => setTab("techmatch")}
-              style={{ background:"#ef4444", border:"none", color:"#fff", padding:"8px 18px", borderRadius:"8px", cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontSize:"12px", letterSpacing:"1.5px", textTransform:"uppercase", whiteSpace:"nowrap", flexShrink:0 }}
+              style={{ background:"#ff3b30", border:"none", color:"#fff", padding:"8px 18px", borderRadius:"10px", cursor:"pointer", fontFamily:FONT, fontWeight:"700", fontSize:"12px", letterSpacing:"-0.01em", textTransform:"none", whiteSpace:"nowrap", flexShrink:0 }}
             >Review Now</button>
           </div>
         )}
@@ -8881,9 +8885,9 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
           <AdminReviewEntry techs={techs} reviews={reviews} saving={saving} setSaving={setSaving} refreshAll={refreshAll} showToast={showToast}/>
         )}
         {tab==="switchovers"&&(
-          <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"20px", display:"flex", flexDirection:"column", gap:"12px" }}>
+          <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"20px", display:"flex", flexDirection:"column", gap:"12px" }}>
             <Label color={C.purple}>Log a Switchover</Label>
-            <div style={{ background:C.cardLt, borderRadius:"8px", padding:"8px 12px", fontSize:"12px", color:C.muted }}>
+            <div style={{ background:C.cardLt, borderRadius:"10px", padding:"8px 12px", fontSize:"12px", color:C.muted }}>
               {formatLastEntered(mostRecentTimestamp(switchovers)) ? (
                 <>Last entered: <strong style={{ color:C.black }}>{formatLastEntered(mostRecentTimestamp(switchovers))}</strong> — everything before that is already logged.</>
               ) : "No switchovers logged yet."}
@@ -8899,7 +8903,7 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
             <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"8px" }}>
               {[[false,"Interior only"],[true,"Interior + Exterior"]].map(([ext,label])=>{
                 const on = swForm.exterior===ext;
-                return <button key={label} onClick={()=>setSwForm(f=>({...f,exterior:ext}))} style={{ background:on?C.purple:C.cardLt, border:`1px solid ${on?C.purple:C.border}`, color:on?C.white:C.black, padding:"10px", borderRadius:"8px", cursor:"pointer", fontSize:"13px", fontWeight:"700" }}>{label}</button>;
+                return <button key={label} onClick={()=>setSwForm(f=>({...f,exterior:ext}))} style={{ background:on?C.purple:C.cardLt, border:`1px solid ${on?C.purple:C.border}`, color:on?C.white:C.black, padding:"10px", borderRadius:"10px", cursor:"pointer", fontSize:"13px", fontWeight:"700" }}>{label}</button>;
               })}
             </div>
             {swForm.planId&&swForm.exterior!==null&&SWITCHOVER_PAY[swForm.planId]!=null&&(
@@ -8926,13 +8930,13 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
             <>
               <div style={{ marginTop:"16px" }}>
                 <DateRangePicker label="📅 Date Range" color={C.purple} preset={swRangePreset} setPreset={setSwRangePreset} customStart={swCStart} setCustomStart={setSwCStart} customEnd={swCEnd} setCustomEnd={setSwCEnd}>
-                  <div style={{ fontSize:"11px", color:C.purple, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", marginTop:"8px" }}>
+                  <div style={{ fontSize:"11px", color:C.purple, fontFamily:FONT, fontWeight:"700", marginTop:"8px" }}>
                     {swStart} → {swEnd} · matched by week (switchovers are logged by week, not exact day)
                   </div>
                 </DateRangePicker>
               </div>
 
-              <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.purple}`, borderRadius:"12px", overflow:"hidden", marginTop:"16px" }}>
+              <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", overflow:"hidden", marginTop:"16px" }}>
                 <div style={{ padding:"14px 18px", borderBottom:`1px solid ${C.border}`, background:C.cardLt }}>
                   <Label color={C.purple}>🔄 Switchovers by Plan Type · {swStart} → {swEnd}</Label>
                 </div>
@@ -8940,8 +8944,8 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
                   <table style={{ width:"100%", borderCollapse:"collapse", fontSize:"13px" }}>
                     <thead>
                       <tr>
-                        <th style={{ padding:"8px 18px", textAlign:"left", color:C.muted, fontWeight:"700", letterSpacing:"1px", fontFamily:"'Barlow Condensed',sans-serif", fontSize:"11px", borderBottom:`1px solid ${C.border}`, whiteSpace:"nowrap" }}>TECH</th>
-                        <th style={{ padding:"8px 18px", textAlign:"left", color:C.muted, fontWeight:"700", letterSpacing:"1px", fontFamily:"'Barlow Condensed',sans-serif", fontSize:"11px", borderBottom:`1px solid ${C.border}` }}>BREAKDOWN</th>
+                        <th style={{ padding:"8px 18px", textAlign:"left", color:C.muted, fontWeight:"700", letterSpacing:"-0.01em", fontFamily:FONT, fontSize:"11px", borderBottom:`1px solid ${C.border}`, whiteSpace:"nowrap" }}>TECH</th>
+                        <th style={{ padding:"8px 18px", textAlign:"left", color:C.muted, fontWeight:"700", letterSpacing:"-0.01em", fontFamily:FONT, fontSize:"11px", borderBottom:`1px solid ${C.border}` }}>BREAKDOWN</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -8952,7 +8956,7 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
                         const breakdown = Object.entries(t.byPlan).sort((a,b)=>b[1]-a[1]).map(([planId,count])=>`${count} ${PLAN_MAP[planId]?.label||planId}`).join(", ");
                         return (
                           <tr key={t.id} style={{ borderBottom:`1px solid ${C.border}` }}>
-                            <td style={{ padding:"10px 18px", color:C.black, fontWeight:"700", fontFamily:"'Barlow Condensed',sans-serif", whiteSpace:"nowrap" }}>{medal(i)} {t.name}</td>
+                            <td style={{ padding:"10px 18px", color:C.black, fontWeight:"700", fontFamily:FONT, whiteSpace:"nowrap" }}>{medal(i)} {t.name}</td>
                             <td style={{ padding:"10px 18px", color:C.black }}>{breakdown} <span style={{ color:C.muted, fontSize:"11px" }}>({t.total} total)</span></td>
                           </tr>
                         );
@@ -8962,7 +8966,7 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
                 </div>
               </div>
 
-              <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.purple}`, borderRadius:"12px", overflow:"hidden", marginTop:"16px" }}>
+              <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", overflow:"hidden", marginTop:"16px" }}>
                 <div style={{ padding:"14px 18px", borderBottom:`1px solid ${C.border}`, background:C.cardLt }}>
                   <Label color={C.purple}>Individual Entries · {swStart} → {swEnd}</Label>
                 </div>
@@ -8973,18 +8977,18 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
                     const plan=PLAN_MAP[s.plan_id];
                     const pc=PLAN_COLORS[s.plan_id]||C.muted;
                     return (
-                      <div key={s.id} style={{ background:C.cardLt, borderRadius:"8px", padding:"10px 12px" }}>
+                      <div key={s.id} style={{ background:C.cardLt, borderRadius:"10px", padding:"10px 12px" }}>
                         {editingSwId===s.id ? (
                           <div style={{ display:"flex", flexDirection:"column", gap:"8px" }}>
-                            <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"14px", color:C.black }}>{tech?.name}</div>
+                            <div style={{ fontFamily:FONT, fontWeight:"600", fontSize:"14px", color:C.black }}>{tech?.name}</div>
                             <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"8px" }}>
                               <div>
-                                <div style={{ fontSize:"10px", color:C.muted, marginBottom:"4px" }}>Date sold</div>
-                                <input type="date" value={editSwForm.date} onChange={e=>setEditSwForm(f=>({...f,date:e.target.value}))} style={{ background:C.card, border:`1px solid ${C.border}`, color:C.black, padding:"8px", borderRadius:"8px", fontSize:"13px", width:"100%", boxSizing:"border-box" }}/>
+                                <div style={{ fontSize:"11px", color:C.muted, marginBottom:"4px" }}>Date sold</div>
+                                <input type="date" value={editSwForm.date} onChange={e=>setEditSwForm(f=>({...f,date:e.target.value}))} style={{ background:C.card, border:`1px solid ${C.border}`, color:C.black, padding:"8px", borderRadius:"10px", fontSize:"13px", width:"100%", boxSizing:"border-box" }}/>
                               </div>
                               <div>
-                                <div style={{ fontSize:"10px", color:C.muted, marginBottom:"4px" }}>Plan</div>
-                                <select value={editSwForm.planId} onChange={e=>setEditSwForm(f=>({...f,planId:e.target.value}))} style={{ background:C.card, border:`1px solid ${C.border}`, color:C.black, padding:"8px", borderRadius:"8px", fontSize:"13px", width:"100%", boxSizing:"border-box" }}>
+                                <div style={{ fontSize:"11px", color:C.muted, marginBottom:"4px" }}>Plan</div>
+                                <select value={editSwForm.planId} onChange={e=>setEditSwForm(f=>({...f,planId:e.target.value}))} style={{ background:C.card, border:`1px solid ${C.border}`, color:C.black, padding:"8px", borderRadius:"10px", fontSize:"13px", width:"100%", boxSizing:"border-box" }}>
                                   {SERVICE_PLANS.map(p=><option key={p.id} value={p.id}>{p.label}</option>)}
                                 </select>
                               </div>
@@ -8995,18 +8999,18 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
                             </label>
                             <div style={{ fontSize:"11px", color:C.muted }}>Will be attributed to the week of {formatWeekLabel(dateToWeekKey(editSwForm.date||s.week_key))}</div>
                             <div style={{ display:"flex", gap:"8px" }}>
-                              <button onClick={saveEditSwitchover} disabled={saving} style={{ flex:1, background:C.purple, border:"none", color:C.white, padding:"8px", borderRadius:"8px", cursor:"pointer", fontWeight:"700", fontSize:"12px" }}>Save</button>
-                              <button onClick={()=>setEditingSwId(null)} style={{ background:"none", border:`1px solid ${C.border}`, color:C.muted, padding:"8px 14px", borderRadius:"8px", cursor:"pointer", fontSize:"12px" }}>Cancel</button>
-                              <button onClick={()=>deleteSwitchoverEntry(s.id)} style={{ background:"none", border:"1px solid #ef4444", color:"#ef4444", padding:"8px 14px", borderRadius:"8px", cursor:"pointer", fontSize:"12px" }}>Delete</button>
+                              <button onClick={saveEditSwitchover} disabled={saving} style={{ flex:1, background:C.purple, border:"none", color:C.white, padding:"8px", borderRadius:"10px", cursor:"pointer", fontWeight:"700", fontSize:"12px" }}>Save</button>
+                              <button onClick={()=>setEditingSwId(null)} style={{ background:"none", border:`1px solid ${C.border}`, color:C.muted, padding:"8px 14px", borderRadius:"10px", cursor:"pointer", fontSize:"12px" }}>Cancel</button>
+                              <button onClick={()=>deleteSwitchoverEntry(s.id)} style={{ background:"none", border:"1px solid #ef4444", color:"#ff3b30", padding:"8px 14px", borderRadius:"10px", cursor:"pointer", fontSize:"12px" }}>Delete</button>
                             </div>
                           </div>
                         ) : (
                           <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:"12px" }}>
                             <div>
-                              <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"15px", color:C.black }}>{tech?.name}</div>
+                              <div style={{ fontFamily:FONT, fontWeight:"600", fontSize:"15px", color:C.black }}>{tech?.name}</div>
                               <div style={{ fontSize:"12px", color:C.muted }}>{s.sold_date ? fmtShortDate(s.sold_date) : formatWeekLabel(s.week_key)} · <span style={{ color:pc, fontWeight:"700" }}>{plan?.label||s.plan_id}{s.with_exterior?" + Ext":""} · +{plan?.pts||0}pts</span></div>
                             </div>
-                            <button onClick={()=>startEditSwitchover(s)} style={{ background:"none", border:`1px solid ${C.border}`, color:C.purple, padding:"4px 10px", borderRadius:"4px", cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", fontSize:"11px", flexShrink:0 }}>Edit</button>
+                            <button onClick={()=>startEditSwitchover(s)} style={{ background:"none", border:`1px solid ${C.border}`, color:C.purple, padding:"4px 10px", borderRadius:"8px", cursor:"pointer", fontFamily:FONT, fontWeight:"700", fontSize:"11px", flexShrink:0 }}>Edit</button>
                           </div>
                         )}
                       </div>
@@ -9029,7 +9033,7 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
         {tab==="callbacks"&&<CallbacksPanel techs={techs} jobs={jobs} callbacks={callbacks} refreshAll={refreshAll} showToast={showToast}/>}
 
         {tab==="award"&&(
-          <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"20px", display:"flex", flexDirection:"column", gap:"12px" }}>
+          <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"20px", display:"flex", flexDirection:"column", gap:"12px" }}>
             <Label color={C.blue}>Award a Badge</Label>
             <select value={awardForm.techId} onChange={e=>setAwardForm(f=>({...f,techId:e.target.value}))} style={sel(awardForm.techId)}>
               <option value="">— Select Tech —</option>
@@ -9044,7 +9048,7 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
         )}
 
         {tab==="add"&&(
-          <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"20px", display:"flex", flexDirection:"column", gap:"12px" }}>
+          <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"20px", display:"flex", flexDirection:"column", gap:"12px" }}>
             <Label color={C.green}>Add New Tech</Label>
             <input placeholder="Full Name" value={addForm.name} onChange={e=>setAddForm(f=>({...f,name:e.target.value}))} style={inp}/>
             <input placeholder="4-Digit PIN" value={addForm.pin} maxLength={4} onChange={e=>setAddForm(f=>({...f,pin:e.target.value.replace(/\D/g,"")}))} style={inp}/>
@@ -9072,7 +9076,7 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
         {tab==="manage"&&(
           <div style={{ display:"flex", flexDirection:"column", gap:"10px" }}>
             {techs.filter(t=>t.is_active!==false).map(t=>(
-              <div key={t.id} style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"16px 18px" }}>
+              <div key={t.id} style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"16px 18px" }}>
                 <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:"10px" }}>
                   <div style={{ display:"flex", flexDirection:"column", gap:"2px" }}>
                     <input
@@ -9084,16 +9088,16 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
                         await refreshAll();
                         showToast(`✅ Name updated to ${val}`);
                       }}
-                      style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"17px", color:C.black, background:"transparent", border:"none", borderBottom:`1px dashed ${C.border}`, padding:"2px 4px", width:"200px", cursor:"text" }}
+                      style={{ fontFamily:FONT, fontWeight:"600", fontSize:"17px", color:C.black, background:"transparent", border:"none", borderBottom:`1px dashed ${C.border}`, padding:"2px 4px", width:"200px", cursor:"text" }}
                     />
-                    <span style={{ fontSize:"11px", color:C.purple, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", paddingLeft:"4px" }}>{TITLE_LABELS[t.title] || "Detail Apprentice"}</span>
+                    <span style={{ fontSize:"11px", color:C.purple, fontFamily:FONT, fontWeight:"700", paddingLeft:"4px" }}>{TITLE_LABELS[t.title] || "Detail Apprentice"}</span>
                   </div>
-                  {!isManager&&t.title!=="owner"&&<button onClick={()=>changePin(t)} disabled={saving} style={{ background:"none", border:`1px solid ${C.border}`, color:C.muted, padding:"3px 10px", borderRadius:"6px", cursor:"pointer", fontSize:"11px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>🔒 Change PIN</button>}
+                  {!isManager&&t.title!=="owner"&&<button onClick={()=>changePin(t)} disabled={saving} style={{ background:"none", border:`1px solid ${C.border}`, color:C.muted, padding:"3px 10px", borderRadius:"10px", cursor:"pointer", fontSize:"11px", fontFamily:FONT, fontWeight:"700" }}>🔒 Change PIN</button>}
                 </div>
                 <div style={{ display:"flex", alignItems:"center", gap:"10px", marginBottom:"10px" }}>
                   <span style={{ fontSize:"12px", color:C.muted }}>Start date:</span>
-                  <input type="date" defaultValue={t.start_date||""} disabled={isManager&&!!t.start_date} onBlur={e=>updateStartDate(t.id,e.target.value)} style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"4px 8px", borderRadius:"4px", fontSize:"12px", fontFamily:"'Barlow Condensed',sans-serif" }}/>
-                  {t.start_date&&<span style={{ fontSize:"12px", color:C.blue, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>{formatTenure(t.start_date)}</span>}
+                  <input type="date" defaultValue={t.start_date||""} disabled={isManager&&!!t.start_date} onBlur={e=>updateStartDate(t.id,e.target.value)} style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"4px 8px", borderRadius:"8px", fontSize:"12px", fontFamily:FONT }}/>
+                  {t.start_date&&<span style={{ fontSize:"12px", color:C.blue, fontFamily:FONT, fontWeight:"700" }}>{formatTenure(t.start_date)}</span>}
                 </div>
                 <div style={{ display:"flex", alignItems:"center", gap:"10px", marginBottom:"10px" }}>
                   <span style={{ fontSize:"12px", color:C.muted }}>Title:</span>
@@ -9102,7 +9106,7 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
                       await sb(`techs?id=eq.${t.id}`,{method:"PATCH",body:JSON.stringify({title:e.target.value}),prefer:"return=minimal"});
                       await refreshAll(); showToast(`✅ Title saved for ${t.name}`);
                     }}
-                    style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.purple, padding:"4px 8px", borderRadius:"4px", fontSize:"13px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", cursor:"pointer" }}>
+                    style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.purple, padding:"4px 8px", borderRadius:"8px", fontSize:"13px", fontFamily:FONT, fontWeight:"700", cursor:"pointer" }}>
                     {Object.entries(TITLE_LABELS).filter(([val])=>!isManager||val===t.title||!OPS_EXCLUDED_TITLES.includes(val)).map(([val,label])=><option key={val} value={val}>{label}</option>)}
                   </select>
                 </div>
@@ -9114,14 +9118,14 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
                       await sb(`techs?id=eq.${t.id}`,{method:"PATCH",body:JSON.stringify({commission_rate:val}),prefer:"return=minimal"});
                       await refreshAll(); showToast(`✅ Rate saved for ${t.name}`);
                     }}
-                    style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"4px 8px", borderRadius:"4px", fontSize:"14px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", cursor:"pointer" }}>
+                    style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"4px 8px", borderRadius:"8px", fontSize:"14px", fontFamily:FONT, fontWeight:"700", cursor:"pointer" }}>
                     {[27,28,29,30,31,32].map(p=><option key={p} value={p}>{p}%</option>)}
                   </select>
                 </div>
                 <div style={{ display:"flex", flexWrap:"wrap", gap:"5px" }}>
                   {t.badges.map(bid=>{ const b=BADGE_MAP[bid]; return b?(
                     <span key={bid} style={{ background:`${C.blue}18`, border:`1px solid ${C.blue}44`, borderRadius:"3px", padding:"3px 8px", fontSize:"12px", display:"inline-flex", alignItems:"center", gap:"4px" }}>
-                      <span>{b.icon}</span><span style={{ color:C.black, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>{b.name}</span>
+                      <span>{b.icon}</span><span style={{ color:C.black, fontFamily:FONT, fontWeight:"700" }}>{b.name}</span>
                       <button onClick={()=>revokeBadge(t.id,bid)} style={{ background:"none", border:"none", color:"#ff4444", cursor:"pointer", fontSize:"13px", lineHeight:1, padding:"0 0 0 2px" }}>×</button>
                     </span>
                   ):null; })}
@@ -9136,15 +9140,15 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
                 </label>
                 <div style={{ marginTop:"12px", paddingTop:"12px", borderTop:`1px solid ${C.border}` }}>
                   {archivingId!==t.id ? (
-                    <button onClick={()=>startArchive(t)} disabled={saving} style={{ background:"none", border:"1px solid #f59e0b", color:"#f59e0b", padding:"7px 16px", borderRadius:"8px", cursor:saving?"not-allowed":"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"12px", letterSpacing:"1px", textTransform:"uppercase" }}>
+                    <button onClick={()=>startArchive(t)} disabled={saving} style={{ background:"none", border:"1px solid #f59e0b", color:"#ff9f0a", padding:"7px 16px", borderRadius:"10px", cursor:saving?"not-allowed":"pointer", fontFamily:FONT, fontWeight:"600", fontSize:"12px", letterSpacing:"-0.01em", textTransform:"none" }}>
                       📦 Archive {t.name}
                     </button>
                   ) : (
-                    <div style={{ background:"#fff8e6", border:"1px solid #f59e0b44", borderRadius:"10px", padding:"12px", display:"flex", flexDirection:"column", gap:"10px" }}>
+                    <div style={{ background:"#fff8e6", border:"1px solid #f59e0b44", borderRadius:"12px", padding:"12px", display:"flex", flexDirection:"column", gap:"10px" }}>
                       <div style={{ fontSize:"12px", color:C.black }}>Archiving removes {t.name} from the leaderboard. Their revenue and job history stay in the system.</div>
                       <div style={{ display:"flex", alignItems:"center", gap:"10px", flexWrap:"wrap" }}>
                         <span style={{ fontSize:"12px", color:C.muted }}>Last day:</span>
-                        <input type="date" value={archiveForm.left_date} onChange={e=>setArchiveForm(f=>({...f,left_date:e.target.value}))} style={{ background:C.white, border:`1px solid ${C.border}`, color:C.black, padding:"4px 8px", borderRadius:"4px", fontSize:"12px", fontFamily:"'Barlow Condensed',sans-serif" }}/>
+                        <input type="date" value={archiveForm.left_date} onChange={e=>setArchiveForm(f=>({...f,left_date:e.target.value}))} style={{ background:C.white, border:`1px solid ${C.border}`, color:C.black, padding:"4px 8px", borderRadius:"8px", fontSize:"12px", fontFamily:FONT }}/>
                       </div>
                       <div style={{ display:"flex", flexDirection:"column", gap:"6px" }}>
                         <span style={{ fontSize:"12px", color:C.muted }}>Why did they leave?</span>
@@ -9158,18 +9162,18 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
                       {archiveForm.leave_reason==="fired"&&(
                         <div style={{ display:"flex", flexDirection:"column", gap:"6px" }}>
                           <span style={{ fontSize:"12px", color:C.muted }}>Reason for firing (an admin has to approve it before it stops counting against the ops bonus):</span>
-                          <select value={archiveForm.fire_category} onChange={e=>setArchiveForm(f=>({...f,fire_category:e.target.value}))} style={{ background:C.white, border:`1px solid ${C.border}`, color:C.black, padding:"6px 8px", borderRadius:"4px", fontSize:"13px" }}>
+                          <select value={archiveForm.fire_category} onChange={e=>setArchiveForm(f=>({...f,fire_category:e.target.value}))} style={{ background:C.white, border:`1px solid ${C.border}`, color:C.black, padding:"6px 8px", borderRadius:"8px", fontSize:"13px" }}>
                             <option value="">Pick one…</option>
                             {FIRE_CATEGORIES.map(c=><option key={c.value} value={c.value}>{c.label}</option>)}
                           </select>
-                          <textarea value={archiveForm.fire_notes} onChange={e=>setArchiveForm(f=>({...f,fire_notes:e.target.value}))} placeholder="What happened? Production numbers, which policy, etc." rows={3} style={{ background:C.white, border:`1px solid ${C.border}`, color:C.black, padding:"6px 8px", borderRadius:"4px", fontSize:"13px", fontFamily:"inherit" }}/>
+                          <textarea value={archiveForm.fire_notes} onChange={e=>setArchiveForm(f=>({...f,fire_notes:e.target.value}))} placeholder="What happened? Production numbers, which policy, etc." rows={3} style={{ background:C.white, border:`1px solid ${C.border}`, color:C.black, padding:"6px 8px", borderRadius:"8px", fontSize:"13px", fontFamily:"inherit" }}/>
                         </div>
                       )}
                       <div style={{ display:"flex", gap:"8px" }}>
-                        <button onClick={()=>archiveTech(t)} disabled={saving} style={{ background:"#f59e0b", border:"none", color:C.white, padding:"7px 16px", borderRadius:"8px", cursor:saving?"not-allowed":"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"12px", letterSpacing:"1px", textTransform:"uppercase" }}>
+                        <button onClick={()=>archiveTech(t)} disabled={saving} style={{ background:"#ff9f0a", border:"none", color:C.white, padding:"7px 16px", borderRadius:"10px", cursor:saving?"not-allowed":"pointer", fontFamily:FONT, fontWeight:"600", fontSize:"12px", letterSpacing:"-0.01em", textTransform:"none" }}>
                           {saving?"Saving...":`Archive ${t.name}`}
                         </button>
-                        <button onClick={()=>setArchivingId(null)} disabled={saving} style={{ background:"none", border:`1px solid ${C.border}`, color:C.muted, padding:"7px 16px", borderRadius:"8px", cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"12px", letterSpacing:"1px", textTransform:"uppercase" }}>
+                        <button onClick={()=>setArchivingId(null)} disabled={saving} style={{ background:"none", border:`1px solid ${C.border}`, color:C.muted, padding:"7px 16px", borderRadius:"10px", cursor:"pointer", fontFamily:FONT, fontWeight:"600", fontSize:"12px", letterSpacing:"-0.01em", textTransform:"none" }}>
                           Cancel
                         </button>
                       </div>
@@ -9180,14 +9184,14 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
             ))}
             {/* Archived techs */}
             {techs.filter(t=>t.is_active===false).length>0&&(
-              <div style={{ background:"#fff8e6", border:"1px solid #f59e0b44", borderTop:"3px solid #f59e0b", borderRadius:"12px", padding:"16px 18px" }}>
-                <div style={{ fontSize:"11px", color:"#f59e0b", letterSpacing:"2px", textTransform:"uppercase", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", marginBottom:"12px" }}>📦 Archived Techs — Revenue still counted in totals</div>
+              <div style={{ background:"#fff8e6", border:"1px solid #f59e0b44", borderTop:"3px solid #f59e0b", borderRadius:"16px", padding:"16px 18px" }}>
+                <div style={{ fontSize:"11px", color:"#ff9f0a", letterSpacing:"-0.01em", textTransform:"none", fontFamily:FONT, fontWeight:"600", marginBottom:"12px" }}>📦 Archived Techs — Revenue still counted in totals</div>
                 <div style={{ display:"flex", flexDirection:"column", gap:"8px" }}>
                   {techs.filter(t=>t.is_active===false).map(t=>(
-                    <div key={t.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", background:"#fff", border:"1px solid #f59e0b33", borderRadius:"8px", padding:"10px 14px" }}>
+                    <div key={t.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", background:"#fff", border:"1px solid #f59e0b33", borderRadius:"10px", padding:"10px 14px" }}>
                       <div>
-                        <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"15px", color:C.muted }}>{t.name}</div>
-                        <div style={{ fontSize:"10px", color:C.muted, letterSpacing:"1px" }}>
+                        <div style={{ fontFamily:FONT, fontWeight:"600", fontSize:"15px", color:C.muted }}>{t.name}</div>
+                        <div style={{ fontSize:"11px", color:C.muted, letterSpacing:"-0.01em" }}>
                           ARCHIVED · NOT ON LEADERBOARD
                           {t.left_date&&` · LEFT ${fmtShortDate(t.left_date).toUpperCase()}`}
                           {t.leave_reason&&` · ${(LEAVE_REASONS.find(r=>r.value===t.leave_reason)?.short||"").toUpperCase()}`}
@@ -9195,19 +9199,19 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
                         {t.leave_reason==="fired"&&(
                           <div style={{ fontSize:"11px", color:C.black, marginTop:"4px" }}>
                             <strong>{FIRE_CATEGORIES.find(c=>c.value===t.fire_category)?.label||"No reason given"}</strong>{t.fire_notes&&` — ${t.fire_notes}`}
-                            <div style={{ fontSize:"10px", fontWeight:"700", marginTop:"2px", color:t.fire_approval==="approved"?C.green:t.fire_approval==="denied"?"#ef4444":"#f59e0b" }}>
+                            <div style={{ fontSize:"11px", fontWeight:"700", marginTop:"2px", color:t.fire_approval==="approved"?C.green:t.fire_approval==="denied"?"#ff3b30":"#ff9f0a" }}>
                               {t.fire_approval==="approved"?"✅ FIRING APPROVED — doesn't count against the ops bonus":t.fire_approval==="denied"?"❌ FIRING DENIED — counts as a loss":"⏳ WAITING FOR ADMIN APPROVAL"}
                             </div>
                             {t.fire_approval==="pending"&&!isManager&&(
                               <div style={{ display:"flex", gap:"6px", marginTop:"6px" }}>
-                                <button onClick={()=>reviewFiring(t,"approved")} disabled={saving} style={{ background:C.green, border:"none", color:C.white, padding:"4px 10px", borderRadius:"6px", cursor:"pointer", fontSize:"11px", fontWeight:"800" }}>APPROVE</button>
-                                <button onClick={()=>reviewFiring(t,"denied")} disabled={saving} style={{ background:"#ef4444", border:"none", color:C.white, padding:"4px 10px", borderRadius:"6px", cursor:"pointer", fontSize:"11px", fontWeight:"800" }}>DENY</button>
+                                <button onClick={()=>reviewFiring(t,"approved")} disabled={saving} style={{ background:C.green, border:"none", color:C.white, padding:"4px 10px", borderRadius:"10px", cursor:"pointer", fontSize:"11px", fontWeight:"600" }}>APPROVE</button>
+                                <button onClick={()=>reviewFiring(t,"denied")} disabled={saving} style={{ background:"#ff3b30", border:"none", color:C.white, padding:"4px 10px", borderRadius:"10px", cursor:"pointer", fontSize:"11px", fontWeight:"600" }}>DENY</button>
                               </div>
                             )}
                           </div>
                         )}
                       </div>
-                      <button onClick={()=>reactivateTech(t)} disabled={saving} style={{ background:"none", border:"1px solid #00c853", color:"#00c853", padding:"6px 14px", borderRadius:"8px", cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"11px", letterSpacing:"1px" }}>
+                      <button onClick={()=>reactivateTech(t)} disabled={saving} style={{ background:"none", border:"1px solid #00c853", color:"#34c759", padding:"6px 14px", borderRadius:"10px", cursor:"pointer", fontFamily:FONT, fontWeight:"600", fontSize:"11px", letterSpacing:"-0.01em" }}>
                         REACTIVATE
                       </button>
                     </div>
@@ -9221,25 +9225,25 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
 
         {tab==="teams"&&(
           <div style={{ display:"flex", flexDirection:"column", gap:"16px" }}>
-            <div style={{ background:C.white, border:`1px solid ${C.border}`, borderTop:`3px solid ${C.gold}`, borderRadius:"12px", padding:"20px", boxShadow:"0 2px 8px rgba(43,156,240,0.08)" }}>
+            <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"20px", boxShadow:"0 2px 8px rgba(0,0,0,0.06)" }}>
               <Label color={C.gold}>👥 Team Lead Assignments</Label>
               <div style={{ fontSize:"13px", color:C.muted, marginBottom:"16px" }}>Mark techs as team leads and assign members to their team. Teams can be changed anytime.</div>
               <div style={{ display:"flex", flexDirection:"column", gap:"12px" }}>
                 {techs.map(t=>(
-                  <div key={t.id} style={{ background:C.cardLt, border:`1px solid ${t.is_lead?C.gold:C.border}`, borderLeft:`3px solid ${t.is_lead?C.gold:C.border}`, borderRadius:"10px", padding:"12px 14px" }}>
+                  <div key={t.id} style={{ background:C.cardLt, border:`1px solid ${t.is_lead?C.gold:C.border}`, borderLeft:`3px solid ${t.is_lead?C.gold:C.border}`, borderRadius:"12px", padding:"12px 14px" }}>
                     <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:"8px" }}>
-                      <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontStyle:"italic", fontSize:"16px", color:C.black }}>
+                      <div style={{ fontFamily:FONT, fontWeight:"700", fontStyle:"normal", fontSize:"16px", color:C.black }}>
                         {t.name}
-                        {t.is_lead&&<span style={{ marginLeft:"8px", background:C.gold, color:C.white, fontSize:"9px", padding:"2px 8px", borderRadius:"8px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", verticalAlign:"middle" }}>TEAM LEAD</span>}
+                        {t.is_lead&&<span style={{ marginLeft:"8px", background:C.gold, color:C.white, fontSize:"11px", padding:"2px 8px", borderRadius:"10px", fontFamily:FONT, fontWeight:"700", verticalAlign:"middle" }}>TEAM LEAD</span>}
                       </div>
                       <button onClick={()=>toggleTeamLead(t)} disabled={saving}
-                        style={{ background:t.is_lead?"#ef444422":"transparent", border:`1px solid ${t.is_lead?"#ef4444":C.gold}`, color:t.is_lead?"#ef4444":C.gold, padding:"5px 14px", borderRadius:"20px", cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"800", fontSize:"11px", letterSpacing:"1px" }}>
+                        style={{ background:t.is_lead?"#ef444422":"transparent", border:`1px solid ${t.is_lead?"#ff3b30":C.gold}`, color:t.is_lead?"#ff3b30":C.gold, padding:"5px 14px", borderRadius:"20px", cursor:"pointer", fontFamily:FONT, fontWeight:"600", fontSize:"11px", letterSpacing:"-0.01em" }}>
                         {t.is_lead?"Remove Lead":"Make Lead"}
                       </button>
                     </div>
                     {t.is_lead&&(
                       <div>
-                        <div style={{ fontSize:"11px", color:C.muted, marginBottom:"6px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>TEAM NAME</div>
+                        <div style={{ fontSize:"11px", color:C.muted, marginBottom:"6px", fontFamily:FONT, fontWeight:"700" }}>TEAM NAME</div>
                         <div style={{ display:"flex", gap:"8px", marginBottom:"10px" }}>
                           <input
                             placeholder="e.g. Team Maverick"
@@ -9251,10 +9255,10 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
                               await refreshAll();
                               showToast(`✅ Team name saved!`);
                             }}
-                            style={{ flex:1, background:C.white, border:`1px solid ${C.border}`, color:C.black, padding:"8px 12px", borderRadius:"8px", fontSize:"14px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}
+                            style={{ flex:1, background:C.white, border:`1px solid ${C.border}`, color:C.black, padding:"8px 12px", borderRadius:"10px", fontSize:"14px", fontFamily:FONT, fontWeight:"700" }}
                           />
                         </div>
-                        <div style={{ fontSize:"11px", color:C.muted, marginBottom:"6px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700" }}>TEAM MEMBERS</div>
+                        <div style={{ fontSize:"11px", color:C.muted, marginBottom:"6px", fontFamily:FONT, fontWeight:"700" }}>TEAM MEMBERS</div>
                         <div style={{ display:"flex", flexWrap:"wrap", gap:"6px" }}>
                           {techs.filter(m=>m.id!==t.id).map(m=>{
                             const onTeam = m.team_lead_id===t.id;
@@ -9262,13 +9266,13 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
                             const otherLead = techs.find(x=>x.id===m.team_lead_id);
                             return (
                               <button key={m.id} onClick={()=>assignTeamMember(m,onTeam?null:t.id)} disabled={saving||m.is_lead}
-                                style={{ background:onTeam?`${C.gold}20`:"transparent", border:`1px solid ${onTeam?C.gold:C.border}`, color:onTeam?C.gold:C.muted, padding:"4px 12px", borderRadius:"16px", cursor:m.is_lead?"not-allowed":"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"700", fontSize:"11px", opacity:m.is_lead?0.4:1 }}>
+                                style={{ background:onTeam?`${C.gold}20`:"transparent", border:`1px solid ${onTeam?C.gold:C.border}`, color:onTeam?C.gold:C.muted, padding:"4px 12px", borderRadius:"16px", cursor:m.is_lead?"not-allowed":"pointer", fontFamily:FONT, fontWeight:"700", fontSize:"11px", opacity:m.is_lead?0.4:1 }}>
                                 {onTeam?"✓ ":""}{m.name}{onOtherTeam?` (${otherLead?.name}'s team)`:""}
                               </button>
                             );
                           })}
                         </div>
-                        <div style={{ fontSize:"10px", color:C.muted, marginTop:"6px" }}>Tap to add/remove. Can't add other leads.</div>
+                        <div style={{ fontSize:"11px", color:C.muted, marginTop:"6px" }}>Tap to add/remove. Can't add other leads.</div>
                       </div>
                     )}
                     {!t.is_lead&&t.team_lead_id&&(
@@ -9346,7 +9350,7 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
 
       </div>
       {toast&&(
-        <div style={{ position:"fixed", bottom:"24px", left:"50%", transform:"translateX(-50%)", background:toast.ok?C.green:"#ef4444", color:C.white, padding:"12px 28px", borderRadius:"24px", fontSize:"14px", fontWeight:"900", zIndex:999, whiteSpace:"nowrap", fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:"1px", fontStyle:"italic", boxShadow:"0 4px 20px rgba(0,0,0,0.15)" }}>
+        <div style={{ position:"fixed", bottom:"24px", left:"50%", transform:"translateX(-50%)", background:toast.ok?C.green:"#ff3b30", color:C.white, padding:"12px 28px", borderRadius:"24px", fontSize:"14px", fontWeight:"700", zIndex:999, whiteSpace:"nowrap", fontFamily:FONT, letterSpacing:"-0.01em", fontStyle:"normal", boxShadow:"0 4px 20px rgba(0,0,0,0.15)" }}>
           {toast.msg}
         </div>
       )}
@@ -9438,20 +9442,20 @@ export default function App() {
   const currentTech = user?.type==="tech" ? techs?.find(t=>t.id===user.techId) : null;
 
   if (loading) return (
-    <div style={{ minHeight:"100vh", background:"#f0f8ff", display:"flex", alignItems:"center", justifyContent:"center", flexDirection:"column", gap:"16px" }}>
+    <div style={{ minHeight:"100vh", background:"#f5f5f7", display:"flex", alignItems:"center", justifyContent:"center", flexDirection:"column", gap:"16px" }}>
       <style>{GS}</style>
       <Logo h={70}/>
-      <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontStyle:"italic", color:C.blue, letterSpacing:"4px", fontSize:"14px", fontWeight:"800" }}>LOADING...</div>
+      <div style={{ fontFamily:FONT, fontStyle:"normal", color:C.blue, letterSpacing:"-0.01em", fontSize:"14px", fontWeight:"600" }}>Loading…</div>
     </div>
   );
 
   if (dbError) return (
-    <div style={{ minHeight:"100vh", background:"#f0f8ff", display:"flex", alignItems:"center", justifyContent:"center", flexDirection:"column", gap:"16px", padding:"24px", textAlign:"center" }}>
+    <div style={{ minHeight:"100vh", background:"#f5f5f7", display:"flex", alignItems:"center", justifyContent:"center", flexDirection:"column", gap:"16px", padding:"24px", textAlign:"center" }}>
       <style>{GS}</style>
       <Logo h={70}/>
-      <div style={{ color:"#ef4444", fontSize:"13px", maxWidth:"560px" }}>
+      <div style={{ color:"#ff3b30", fontSize:"13px", maxWidth:"560px" }}>
         <strong>Database setup needed.</strong> Run this SQL in Supabase → SQL Editor:<br/><br/>
-        <code style={{ background:C.white, border:`1px solid ${C.border}`, padding:"12px", borderRadius:"10px", fontSize:"11px", display:"block", textAlign:"left", whiteSpace:"pre", color:C.black }}>
+        <code style={{ background:C.white, border:`1px solid ${C.border}`, padding:"12px", borderRadius:"12px", fontSize:"11px", display:"block", textAlign:"left", whiteSpace:"pre", color:C.black }}>
 {`alter table techs add column if not exists start_date date;
 alter table techs add column if not exists is_lead boolean default false;
 alter table techs add column if not exists team_lead_id uuid references techs(id);
@@ -9505,19 +9509,19 @@ create policy "public access" on jobs for all using (true) with check (true);
 create unique index if not exists jobs_hcp_job_id_key on jobs(hcp_job_id);
 alter table jobs add column if not exists tips numeric default 0;`}
         </code><br/>
-        <button onClick={()=>{setDbError(null);setLoading(true);loadAll().then(()=>setLoading(false));}} style={{ background:C.blue, border:"none", color:C.black, padding:"12px 28px", borderRadius:"24px", cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif", fontSize:"14px", fontWeight:"900", fontStyle:"italic", letterSpacing:"2px" }}>RETRY</button>
+        <button onClick={()=>{setDbError(null);setLoading(true);loadAll().then(()=>setLoading(false));}} style={{ background:C.blue, border:"none", color:C.black, padding:"12px 28px", borderRadius:"24px", cursor:"pointer", fontFamily:FONT, fontSize:"14px", fontWeight:"700", fontStyle:"normal", letterSpacing:"-0.01em" }}>RETRY</button>
       </div>
     </div>
   );
 
   if (!user) return (
-    <div style={{ minHeight:"100vh", background:"linear-gradient(160deg, #e8f4ff 0%, #f0f8ff 50%, #e0f0ff 100%)", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:"48px" }}>
+    <div style={{ minHeight:"100vh", background:"#f5f5f7", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:"48px" }}>
       <style>{GS}</style>
       <div style={{ textAlign:"center" }}>
         <Logo h={90}/>
-        <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontStyle:"italic", fontSize:"48px", color:C.black, letterSpacing:"2px", marginTop:"20px", lineHeight:1 }}>THE STANDARD</div>
-        <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"900", fontStyle:"italic", fontSize:"48px", color:C.blue, letterSpacing:"2px", lineHeight:1 }}>BOARD</div>
-        <div style={{ fontSize:"13px", color:C.muted, letterSpacing:"3px", marginTop:"12px", textTransform:"uppercase", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:"600" }}>Enter your PIN</div>
+        <div style={{ fontFamily:FONT, fontWeight:"700", fontStyle:"normal", fontSize:"40px", color:C.black, letterSpacing:"-0.03em", marginTop:"20px", lineHeight:1.05 }}>The Standard</div>
+        <div style={{ fontFamily:FONT, fontWeight:"700", fontStyle:"normal", fontSize:"40px", color:C.blue, letterSpacing:"-0.03em", lineHeight:1.05 }}>Board</div>
+        <div style={{ fontSize:"13px", color:C.muted, letterSpacing:"-0.01em", marginTop:"12px", textTransform:"none", fontFamily:FONT, fontWeight:"600" }}>Enter your PIN</div>
       </div>
       <PinPad onSubmit={handlePin}/>
     </div>
