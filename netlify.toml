@@ -70,6 +70,14 @@
   # Does nothing until Google is reconnected with Analytics access.
   schedule = "35 13 * * *"
 
+[functions."gsc-sync"]
+  timeout = 26
+
+[functions."gsc-sync-cron"]
+  # Organic Google search (Search Console), last 10 days, every morning.
+  # Does nothing until Google is reconnected with Search Console access.
+  schedule = "45 13 * * *"
+
 [functions."ghl-forms-sync"]
   # Pulls for up to ~20s (TIME_BUDGET_MS); the default 10s limit would cut it off.
   timeout = 26
