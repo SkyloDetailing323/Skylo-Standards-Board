@@ -501,7 +501,8 @@ function PageTools({ tools, left }) {
 }
 
 // Leaderboard as rounded "bubble" rows (rank, initials, name, total + chip).
-// rows: [{ id, name, value, chip?, sub? }] already sorted best-first.
+// rows: [{ id, name, value, chip?, sub?, bad? }] already sorted best-first;
+// bad: true shows the chip in red (e.g. callback deductions).
 function RankRows({ rows, currentId, empty="Nothing logged in this range." }) {
   if (!rows.length) return <div style={{ background:C.card, borderRadius:"16px", padding:"20px", textAlign:"center", color:C.muted, fontSize:"14px" }}>{empty}</div>;
   return (
@@ -519,7 +520,7 @@ function RankRows({ rows, currentId, empty="Nothing logged in this range." }) {
             </div>
             <div style={{ display:"flex", alignItems:"center", gap:"8px", flexShrink:0 }}>
               <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"18px", color:C.black }}>{r.value}</div>
-              {r.chip!=null&&<div style={{ background:C.blueLt, color:C.blue, borderRadius:"980px", padding:"4px 10px", fontFamily:FONT, fontWeight:"600", fontSize:"12px", whiteSpace:"nowrap" }}>{r.chip}</div>}
+              {r.chip!=null&&<div style={{ background:r.bad?"rgba(255,59,48,0.1)":C.blueLt, color:r.bad?C.red:C.blue, borderRadius:"980px", padding:"4px 10px", fontFamily:FONT, fontWeight:"600", fontSize:"12px", whiteSpace:"nowrap" }}>{r.chip}</div>}
             </div>
           </div>
         );
@@ -1036,42 +1037,11 @@ function ReviewLeaderboard({ techs, reviews, currentId }) {
 // ─── TOTAL LEADERBOARD ────────────────────────────────────────────────────────
 function TotalLeaderboard({ techs, upsells, switchovers, reviews, callbacks, jobs=[] }) {
   const ranked = [...techs].map(t=>{ const tt=calcTotals(t,upsells,switchovers,reviews,callbacks||[],jobs); return {...t,...tt,tier:getTier(tt.total)}; }).sort((a,b)=>b.total-a.total);
-  const top = ranked[0]?.total||1;
   return (
-    <div style={{ display:"flex", flexDirection:"column", gap:"8px" }}>
-      {ranked.map((t,idx)=>{
-        const pct=Math.round((t.total/top)*100);
-        return (
-          <div key={t.id} style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"16px 18px" }}>
-            <div style={{ display:"flex", alignItems:"center", gap:"12px", marginBottom:"12px" }}>
-              <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:idx<3?"26px":"16px", color:C.muted, width:"32px", textAlign:"center" }}>{medal(idx)}</div>
-              <div style={{ width:"42px", height:"42px", borderRadius:"50%", background:`${C.blue}22`, border:`1px solid ${C.blue}44`, display:"flex", alignItems:"center", justifyContent:"center", fontFamily:FONT, fontSize:"13px", fontWeight:"600", color:C.blue, flexShrink:0 }}>{t.avatar}</div>
-              <div style={{ flex:1 }}>
-                <div style={{ fontFamily:FONT, fontWeight:"600", fontSize:"18px", color:C.black }}>{t.name}</div>
-                <Pill color={t.tier.color}>{t.tier.icon} {t.tier.name}</Pill>
-              </div>
-              <div style={{ textAlign:"right" }}>
-                <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"28px", color:C.black }}>{t.total.toLocaleString()}</div>
-                <div style={{ fontSize:"11px", color:C.muted, letterSpacing:"-0.01em" }}>TOTAL PTS</div>
-              </div>
-            </div>
-            <Bar pct={pct} color={C.blue} h={4}/>
-            <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:"6px", marginTop:"10px" }}>
-              {[
-                {l:"Badges",    v:t.badgePts,               c:C.purple},
-                {l:"Upsells",   v:`$${Math.round(t.upsellAmt).toLocaleString()}`, c:C.green},
-                {l:"Switchovers",  v:t.switchPts,              c:C.blue},
-                {l:"Reviews",   v:t.reviewPts,              c:C.gold},
-              ].map(item=>(
-                <div key={item.l} style={{ background:C.cardLt, borderRadius:"8px", padding:"8px", textAlign:"center" }}>
-                  <div style={{ fontFamily:FONT, fontWeight:"600", fontSize:"15px", color:item.c }}>{item.v}</div>
-                  <div style={{ fontSize:"11px", color:C.muted, letterSpacing:"-0.01em", textTransform:"none" }}>{item.l}</div>
-                </div>
-              ))}
-            </div>
-          </div>
-        );
-      })}
+    <div style={{ display:"flex", flexDirection:"column", gap:"14px" }}>
+      <ListTitle right="all time">Total Score</ListTitle>
+      <RankRows rows={ranked.map(t=>({ id:t.id, name:t.name, value:`${t.total.toLocaleString()} pts`, chip:`${t.tier.icon} ${t.tier.name.charAt(0)+t.tier.name.slice(1).toLowerCase()}`,
+        sub:`Badges ${t.badgePts} · Upsells $${Math.round(t.upsellAmt).toLocaleString()} · Switchovers ${t.switchPts} · Reviews ${t.reviewPts}` }))} empty="No points yet."/>
     </div>
   );
 }
@@ -1230,10 +1200,10 @@ function ReportsTab({ techs, jobs, upsells=[], timeEntries=[], tipEntries=[], te
                 {repairRevResult.jobs && repairRevResult.jobs.length > 0 && (
                   <div style={{ display:"flex", gap:"6px" }}>
                     <button onClick={()=>setRevExpanded(v=>!v)} style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"5px 10px", borderRadius:"8px", cursor:"pointer", fontFamily:FONT, fontWeight:"700", fontSize:"11px", letterSpacing:"-0.01em" }}>
-                      {revExpanded ? "COLLAPSE" : "VIEW FULL REPORT"}
+                      {revExpanded ? "Collapse" : "View full report"}
                     </button>
                     <button onClick={exportRevenueCSV} style={{ background:C.blue, border:"none", color:C.white, padding:"5px 10px", borderRadius:"8px", cursor:"pointer", fontFamily:FONT, fontWeight:"700", fontSize:"11px", letterSpacing:"-0.01em" }}>
-                      EXPORT CSV
+                      Export CSV
                     </button>
                   </div>
                 )}
@@ -1513,7 +1483,7 @@ function PayrollTab({ techs, jobs, tipEntries=[], switchovers=[], timeEntries=[]
 
       {/* Team total */}
       <div style={{ background:`${C.green}15`, border:`2px solid ${C.green}44`, borderRadius:"16px", padding:"16px 20px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-        <div style={{ fontFamily:FONT, fontWeight:"700", fontStyle:"normal", fontSize:"13px", color:C.green, letterSpacing:"-0.01em" }}>TEAM TOTAL</div>
+        <div style={{ fontFamily:FONT, fontWeight:"700", fontStyle:"normal", fontSize:"13px", color:C.green, letterSpacing:"-0.01em" }}>Team total</div>
         <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"34px", color:C.black }}>${teamTotal.toFixed(2)}</div>
       </div>
 
@@ -1532,7 +1502,7 @@ function PayrollTab({ techs, jobs, tipEntries=[], switchovers=[], timeEntries=[]
                 <div style={{ fontFamily:FONT, fontWeight:"700", fontStyle:"normal", fontSize:"20px", color:C.black }}>{r.name}{r.is_active===false&&<ArchivedTag/>}</div>
                 <div style={{ textAlign:"right" }}>
                   <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"28px", color:C.green, lineHeight:1 }}>${r.total.toFixed(2)}</div>
-                  <div style={{ fontSize:"11px", color:C.muted, letterSpacing:"-0.01em" }}>TOTAL PAY</div>
+                  <div style={{ fontSize:"11px", color:C.muted, letterSpacing:"-0.01em" }}>Total pay</div>
                 </div>
               </div>
               <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:"8px", marginBottom:r.weeks.length>1?"10px":0 }}>
@@ -1655,84 +1625,58 @@ function Leaderboard({ techs, jobs, upsells, reviews, callbacks, switchovers, ti
     { id:"upsells",  label:"Upsells",    icon:"📈" },
     { id:"revhr",    label:"Rev / Hr",   icon:"⚡" },
     { id:"reviews",  label:"Reviews",    icon:"⭐" },
-    { id:"pts",      label:"Pts",        icon:"🏆" },
+    { id:"pts",      label:"Points",     icon:"🏆" },
   ];
   const [metric, setMetric] = useState("revenue");
+  const [rangePreset, setRangePreset] = useState("wtd");
+  const [cStart, setCStart] = useState("");
+  const [cEnd, setCEnd] = useState("");
+  const { start, end } = getDateRangeBounds(rangePreset, cStart, cEnd);
 
-  const wk = getWeekKey();
+  // Revenue, upsells and rev/hr use the exact range; reviews are logged by
+  // month (any month the range touches); points are all-time.
   const rows = techs.map(t => {
-    const tj      = jobs.filter(j=>j.tech_id===t.id&&j.week_key===wk);
-    const revenue = tj.reduce((s,j)=>s+(j.revenue||0),0);
-    const wkEnd   = new Date(wk+"T12:00:00Z"); wkEnd.setUTCDate(wkEnd.getUTCDate()+6);
-    const hours   = rangeHoursTotal(timeEntries, t.id, wk, wkEnd.toISOString().split("T")[0]);
-    const wkUps   = upsellAmountInRange(jobs, t.id, wk, weekEndDate(wk));
-    const mk      = getMonthKey();
-    const mRevs   = reviews.filter(r=>r.tech_id===t.id&&r.month_key===mk).reduce((s,r)=>s+r.count,0);
+    const revenue = jobs.filter(j=>j.tech_id===t.id&&j.job_date>=start&&j.job_date<=end).reduce((s,j)=>s+(j.revenue||0),0);
+    const hours   = rangeHoursTotal(timeEntries, t.id, start, end);
+    const ups     = upsellAmountInRange(jobs, t.id, start, end);
+    const revs    = reviews.filter(r=>r.tech_id===t.id&&r.month_key>=start.slice(0,7)&&r.month_key<=end.slice(0,7)).reduce((s,r)=>s+r.count,0);
     const tt      = calcTotals(t,upsells,switchovers,reviews,callbacks||[],jobs);
-    return { ...t, revenue, hours, revhr:hours>0?revenue/hours:0, wkUps, mRevs, pts:tt.total };
+    return { ...t, revenue, hours, revhr:hours>0?revenue/hours:0, ups, revs, pts:tt.total };
   });
-
-  const sorted = [...rows].sort((a,b) => {
-    if (metric==="revenue") return b.revenue-a.revenue;
-    if (metric==="upsells") return b.wkUps-a.wkUps;
-    if (metric==="revhr")   return b.revhr-a.revhr;
-    if (metric==="reviews") return b.mRevs-a.mRevs;
-    return b.pts-a.pts;
-  });
-
-  const getValue = r => {
-    if (metric==="revenue") return `$${Math.round(r.revenue).toLocaleString()}`;
-    if (metric==="upsells") return `$${Math.round(r.wkUps).toLocaleString()}`;
-    if (metric==="revhr")   return `$${r.revhr.toFixed(0)}/hr`;
-    if (metric==="reviews") return r.mRevs;
-    return r.pts.toLocaleString()+" pts";
+  const key = { revenue:"revenue", upsells:"ups", revhr:"revhr", reviews:"revs", pts:"pts" }[metric];
+  const sorted = rows.filter(r=>r[key]>0).sort((a,b)=>b[key]-a[key]);
+  const fmt = r => {
+    if (metric==="revenue") return { value:`$${Math.round(r.revenue).toLocaleString()}`, sub:r.hours>0?`${r.hours.toFixed(1)} hrs`:null };
+    if (metric==="upsells") return { value:`$${Math.round(r.ups).toLocaleString()}`, chip:`${Math.round(r.ups*UPSELL_PTS_PER_DOLLAR).toLocaleString()} pts` };
+    if (metric==="revhr")   return { value:`$${r.revhr.toFixed(0)}/hr`, sub:`$${Math.round(r.revenue).toLocaleString()} over ${r.hours.toFixed(1)} hrs` };
+    if (metric==="reviews") return { value:`${r.revs} ⭐` };
+    return { value:`${r.pts.toLocaleString()} pts`, sub:"all time" };
   };
-  const getLabel = r => {
-    if (metric==="revenue") return "this week";
-    if (metric==="upsells") return "this week";
-    if (metric==="revhr")   return "this week";
-    if (metric==="reviews") return "this month";
-    return "all time";
-  };
-
-  const medals = ["🥇","🥈","🥉"];
-  const colors = [C.gold, C.muted, "#cd7f32"];
 
   return (
-    <div style={{ display:"flex", flexDirection:"column", gap:"16px" }}>
-      {/* Metric toggle */}
-      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"14px 16px" }}>
-        <Label color={C.gold}>🏆 Leaderboard</Label>
-        <div style={{ display:"flex", gap:"6px", flexWrap:"wrap" }}>
-          {METRICS.map(m=>(
-            <button key={m.id} onClick={()=>setMetric(m.id)} style={{ background:metric===m.id?C.gold:C.cardLt, border:`1px solid ${metric===m.id?C.gold:C.border}`, color:metric===m.id?C.white:C.muted, padding:"6px 14px", borderRadius:"20px", cursor:"pointer", fontFamily:FONT, fontWeight:"700", fontSize:"12px", letterSpacing:"-0.01em" }}>
-              {m.icon} {m.label}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {sorted.length===0?(
-        <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"32px", textAlign:"center", color:C.muted, fontSize:"13px" }}>
-          No data yet for this period. Check back after jobs sync from HCP.
-        </div>
-      ):(
-        <div style={{ display:"flex", flexDirection:"column", gap:"8px" }}>
-          {sorted.map((r,i)=>(
-            <div key={r.id} style={{ background:C.card, border:`1px solid ${i<3?colors[i]+"55":C.border}`, borderLeft:`4px solid ${i<3?colors[i]:C.border}`, borderRadius:"16px", padding:"14px 16px", display:"flex", alignItems:"center", gap:"14px" }}>
-              <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"22px", width:"32px", textAlign:"center", color:i<3?colors[i]:C.muted }}>
-                {i<3?medals[i]:i+1}
-              </div>
-              <div style={{ width:"40px", height:"40px", borderRadius:"50%", background:i<3?`${colors[i]}22`:`${C.blue}15`, border:`2px solid ${i<3?colors[i]:C.border}`, display:"flex", alignItems:"center", justifyContent:"center", fontFamily:FONT, fontSize:"13px", fontWeight:"700", color:i<3?colors[i]:C.blue, flexShrink:0 }}>{r.avatar}</div>
-              <div style={{ flex:1 }}>
-                <div style={{ fontFamily:FONT, fontWeight:"700", fontStyle:"normal", fontSize:"17px", color:C.black }}>{r.name}</div>
-                <div style={{ fontSize:"11px", color:C.muted, letterSpacing:"-0.01em" }}>{getLabel(r)}</div>
-              </div>
-              <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"22px", color:i<3?colors[i]:C.black }}>{getValue(r)}</div>
-            </div>
-          ))}
-        </div>
+    <div style={{ display:"flex", flexDirection:"column", gap:"14px" }}>
+      <Segmented options={METRICS.map(m=>[m.id,`${m.icon} ${m.label}`])} value={metric} onChange={setMetric}/>
+      {metric!=="pts"&&(
+        <DateRangePicker label="📅 Date Range" preset={rangePreset} setPreset={setRangePreset} customStart={cStart} setCustomStart={setCStart} customEnd={cEnd} setCustomEnd={setCEnd}>
+          <div style={{ fontSize:"12px", color:C.muted, marginTop:"8px" }}>{fmtShortDate(start)} – {fmtShortDate(end)}{metric==="reviews"?" · reviews are logged by month":""}</div>
+        </DateRangePicker>
       )}
+      <ListTitle right={metric==="pts"?"all time":null}>{METRICS.find(m=>m.id===metric).label}</ListTitle>
+      <RankRows rows={sorted.map(r=>({ id:r.id, name:r.name, ...fmt(r) }))} empty="Nothing yet for this range."/>
+    </div>
+  );
+}
+
+// Apple-style segmented control. options: [[id, label], ...]
+function Segmented({ options, value, onChange }) {
+  return (
+    <div style={{ display:"flex", background:"rgba(118,118,128,0.12)", borderRadius:"10px", padding:"2px", overflowX:"auto", scrollbarWidth:"none" }}>
+      {options.map(([id,label])=>{
+        const on = id===value;
+        return (
+          <button key={id} onClick={()=>onChange(id)} style={{ flex:"1 0 auto", background:on?C.white:"transparent", border:"none", borderRadius:"8px", padding:"7px 12px", fontFamily:FONT, fontWeight:on?"600":"500", fontSize:"13px", color:C.black, cursor:"pointer", boxShadow:on?"0 1px 3px rgba(0,0,0,0.12)":"none", whiteSpace:"nowrap" }}>{label}</button>
+        );
+      })}
     </div>
   );
 }
@@ -1862,7 +1806,7 @@ function JourneyCard({ tech, rank, total, onClick, expanded, upsells, quota, job
               </div>
               <div style={{ textAlign:"right", flexShrink:0 }}>
                 <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"22px", color:tier.color, lineHeight:1 }}>{tech.ptsToNext.toLocaleString()}</div>
-                <div style={{ fontSize:"11px", color:C.muted, letterSpacing:"-0.01em" }}>PTS TO GO</div>
+                <div style={{ fontSize:"11px", color:C.muted, letterSpacing:"-0.01em" }}>Pts to go</div>
               </div>
             </div>
             <Bar pct={tech.tierPct} color={tier.color} h={7}/>
@@ -1912,7 +1856,7 @@ function JourneyCard({ tech, rank, total, onClick, expanded, upsells, quota, job
                       <div key={b.label} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", background:isCurrent?`${C.green}22`:isPast?`${C.green}08`:"transparent", border:isCurrent?`1px solid ${C.green}55`:"1px solid transparent", borderRadius:"10px", padding:"6px 10px" }}>
                         <div style={{ display:"flex", alignItems:"center", gap:"6px" }}>
                           <span style={{ fontSize:"11px", color:isCurrent?C.green:isPast?C.black:C.muted, fontFamily:FONT, fontWeight:isCurrent?"900":"600" }}>{b.label}</span>
-                          {isCurrent && <span style={{ fontSize:"11px", background:C.green, color:C.white, borderRadius:"10px", padding:"1px 7px", fontFamily:FONT, fontWeight:"700" }}>YOUR TIER</span>}
+                          {isCurrent && <span style={{ fontSize:"11px", background:C.green, color:C.white, borderRadius:"10px", padding:"1px 7px", fontFamily:FONT, fontWeight:"700" }}>Your tier</span>}
                           {backfilled && <span style={{ fontSize:"11px", background:`${C.green}22`, color:C.green, borderRadius:"10px", padding:"1px 7px", fontFamily:FONT, fontWeight:"600" }}>↑ BACKFILLED</span>}
                         </div>
                         <div style={{ display:"flex", alignItems:"center", gap:"5px" }}>
@@ -2217,9 +2161,9 @@ function OperationsProgressTab({ techs, switchovers, reviews, quota, callbacks=[
       <div style={{ background:r.gateOpen?C.white:"#fff5f5", border:`2px solid ${r.gateOpen?C.border:"#ff3b30"}`, borderTop:`3px solid ${r.gateOpen?C.blue:"#ff3b30"}`, borderRadius:"16px", padding:"18px" }}>
         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:"10px" }}>
           <div>
-            <div style={{ fontFamily:FONT, fontWeight:"700", fontStyle:"normal", fontSize:"13px", color:C.muted, letterSpacing:"-0.01em" }}>WILL'S OPERATIONS BONUS</div>
+            <div style={{ fontFamily:FONT, fontWeight:"700", fontStyle:"normal", fontSize:"13px", color:C.muted, letterSpacing:"-0.01em" }}>Will's operations bonus</div>
             <select value={monthKey} onChange={e=>{ setMonthKey(e.target.value); setShowLive(false); setMsg(null); }}
-              style={{ marginTop:"6px", background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"6px 10px", borderRadius:"10px", fontSize:"15px", fontFamily:FONT, fontWeight:"600" }}>
+              style={{ marginTop:"6px", maxWidth:"100%", background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"6px 10px", borderRadius:"10px", fontSize:"15px", fontFamily:FONT, fontWeight:"600" }}>
               {months.map(m=><option key={m} value={m}>{formatMonthLabel(m)}{m==="2026-09"?" (preview — plan starts Oct)":""}</option>)}
             </select>
           </div>
@@ -2489,7 +2433,7 @@ function WorkScheduleTab({ techs, showToast=()=>{} }) {
           </div>
           <button onClick={()=>{ setSwapMode(v=>!v); setSwapFirst(null); setEditing(null); }}
             style={{ background:swapMode?C.blue:C.cardLt, border:`1px solid ${swapMode?C.blue:C.border}`, color:swapMode?C.white:C.black, padding:"8px 14px", borderRadius:"20px", cursor:"pointer", fontFamily:FONT, fontWeight:"700", fontSize:"13px", letterSpacing:"-0.01em" }}>
-            🔁 {swapMode ? "SWAP MODE ON" : "SWAP"}
+            🔁 {swapMode ? "Swap mode on" : "Swap"}
           </button>
         </div>
         <div style={{ display:"flex", flexWrap:"wrap", gap:"10px", margin:"10px 0" }}>
@@ -2521,7 +2465,7 @@ function WorkScheduleTab({ techs, showToast=()=>{} }) {
                   return (
                     <tr key={t.id}>
                       <td style={{ fontSize:"13px", fontWeight:"600", color:C.black, padding:"6px 8px", whiteSpace:"nowrap", borderRadius:"10px", fontFamily:FONT, background:t.is_lead?C.blueLt:"transparent", border:t.is_lead?`1px solid ${C.blue}`:"1px solid transparent" }}>
-                        {t.is_lead&&"⭐ "}{t.name}{t.on_leave&&<span style={{ fontSize:"11px", color:C.gold, marginLeft:"4px" }}>ON LEAVE</span>}
+                        {t.is_lead&&"⭐ "}{t.name}{t.on_leave&&<span style={{ fontSize:"11px", color:C.gold, marginLeft:"4px" }}>On leave</span>}
                       </td>
                       {SCHEDULE_DAYS.map((d,i)=>{
                         const wd=i+1, v=cell(t.id,wd)?.vehicle||"";
@@ -2648,7 +2592,7 @@ function TeamLeadPanel({ tech, techs, upsells, switchovers, reviews, callbacks, 
             </div>
             <div style={{ textAlign:"right" }}>
               <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"22px", color:C.black }}>{hittingCount}/{totalMembers}</div>
-              <div style={{ fontSize:"11px", color:C.muted, letterSpacing:"-0.01em" }}>ON QUOTA</div>
+              <div style={{ fontSize:"11px", color:C.muted, letterSpacing:"-0.01em" }}>On quota</div>
             </div>
           </div>
 
@@ -2780,7 +2724,7 @@ function IncentiveBoard({ techs, upsells, switchovers, reviews, callbacks, curre
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:"16px" }}>
       <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"16px 18px" }}>
-        <div style={{ fontFamily:FONT, fontWeight:"700", fontStyle:"normal", fontSize:"28px", color:C.black, letterSpacing:"-0.01em", marginBottom:"4px" }}>SKYLO REWARDS PROGRAM</div>
+        <div style={{ fontFamily:FONT, fontWeight:"700", fontStyle:"normal", fontSize:"28px", color:C.black, letterSpacing:"-0.01em", marginBottom:"4px" }}>Skylo rewards program</div>
         <div style={{ fontSize:"13px", color:C.muted, marginBottom:"8px" }}>Stack your points from upsells, switchovers, reviews, and badges. Hit a tier, claim your Skylo Cash — then your points reset and the grind starts again.</div>
         <div style={{ background:`${C.blue}12`, border:`1px solid ${C.border}`, borderRadius:"10px", padding:"10px 14px", fontSize:"12px", color:C.muted, display:"flex", gap:"6px", alignItems:"flex-start" }}>
           <span style={{ color:C.blue, fontSize:"14px" }}>ℹ️</span>
@@ -3066,7 +3010,7 @@ function TimeSheetTab({ tech, techs=[], timeEntries, vehicles=[], truckAssignmen
             {myPick && !changingTruck ? (
               <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:"10px" }}>
                 <span style={{ fontFamily:FONT, fontWeight:"700", fontSize:"18px", color:C.black }}>{vehicles.find(v=>v.id===myPick.vehicle_id)?.name || "—"}</span>
-                <button onClick={()=>setChangingTruck(true)} style={{ background:"none", border:`1px solid ${C.border}`, color:C.blue, padding:"4px 10px", borderRadius:"8px", cursor:"pointer", fontFamily:FONT, fontWeight:"700", fontSize:"11px" }}>CHANGE</button>
+                <button onClick={()=>setChangingTruck(true)} style={{ background:"none", border:`1px solid ${C.border}`, color:C.blue, padding:"4px 10px", borderRadius:"8px", cursor:"pointer", fontFamily:FONT, fontWeight:"700", fontSize:"11px" }}>Change</button>
               </div>
             ) : (
               <select value={pickId} disabled={saving} onChange={e => myPick ? changeTruck(e.target.value) : setPickId(e.target.value)} style={{ background:C.white, border:`1px solid ${pickId?C.border:C.red}`, color:pickId?C.black:C.muted, padding:"10px 14px", borderRadius:"10px", fontSize:"14px", width:"100%", boxSizing:"border-box" }}>
@@ -3085,7 +3029,7 @@ function TimeSheetTab({ tech, techs=[], timeEntries, vehicles=[], truckAssignmen
         </div>
         <div style={{ textAlign:"center" }}>
           <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"32px", color:C.blue }}>{todayTotal.toFixed(2)}h</div>
-          <div style={{ fontSize:"11px", color:C.muted, letterSpacing:"-0.01em" }}>{isClockedInToday ? "CLOCKED IN — LIVE TOTAL FOR TODAY" : "TOTAL FOR TODAY"}</div>
+          <div style={{ fontSize:"11px", color:C.muted, letterSpacing:"-0.01em" }}>{isClockedInToday ? "Clocked in — live total for today" : "Total for today"}</div>
         </div>
       </div>
 
@@ -3100,7 +3044,7 @@ function TimeSheetTab({ tech, techs=[], timeEntries, vehicles=[], truckAssignmen
                 <span style={{ fontSize:"13px", color:C.black }}>{fmtShortDate(d)}{d===today?" (Today)":""}{isAutoClosed?" ⚠":""}</span>
                 <div style={{ display:"flex", alignItems:"center", gap:"10px" }}>
                   <span style={{ fontFamily:FONT, fontWeight:"600", fontSize:"13px", color:total>0?C.black:C.muted }}>{total.toFixed(2)}h</span>
-                  <button onClick={()=>{setEditDate(d);setEditingId(null);}} style={{ background:"none", border:`1px solid ${C.border}`, color:C.blue, padding:"3px 8px", borderRadius:"8px", cursor:"pointer", fontFamily:FONT, fontWeight:"700", fontSize:"11px" }}>EDIT</button>
+                  <button onClick={()=>{setEditDate(d);setEditingId(null);}} style={{ background:"none", border:`1px solid ${C.border}`, color:C.blue, padding:"3px 8px", borderRadius:"8px", cursor:"pointer", fontFamily:FONT, fontWeight:"700", fontSize:"11px" }}>Edit</button>
                 </div>
               </div>
             );
@@ -3237,7 +3181,7 @@ function TechDashboard({ tech, techs, upsells, switchovers, reviews, callbacks, 
           </div>
           <div style={{ textAlign:"right" }}>
             <div style={{ fontFamily:FONT, fontWeight:"700", fontStyle:"normal", fontSize:"34px", color:C.blue, lineHeight:1 }}>{tt.total.toLocaleString()}</div>
-            <div style={{ fontSize:"11px", color:C.muted, letterSpacing:"-0.01em" }}>TOTAL PTS</div>
+            <div style={{ fontSize:"11px", color:C.muted, letterSpacing:"-0.01em" }}>Total pts</div>
           </div>
         </div>
         {nextTier&&(
@@ -3371,7 +3315,7 @@ function TechDashboard({ tech, techs, upsells, switchovers, reviews, callbacks, 
                     ))}
                   </div>
                   <div style={{ background:`${C.green}15`, border:`1px solid ${C.green}44`, borderRadius:"10px", padding:"10px 14px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-                    <div style={{ fontSize:"11px", color:C.green, fontFamily:FONT, fontWeight:"700", letterSpacing:"-0.01em" }}>TOTAL THIS WEEK</div>
+                    <div style={{ fontSize:"11px", color:C.green, fontFamily:FONT, fontWeight:"700", letterSpacing:"-0.01em" }}>Total this week</div>
                     <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"26px", color:C.black }}>${total.toFixed(2)}</div>
                   </div>
                 </div>
@@ -3405,7 +3349,7 @@ function TechDashboard({ tech, techs, upsells, switchovers, reviews, callbacks, 
                           <div style={{ width:"32px", height:"32px", borderRadius:"50%", background:`${C.gold}22`, border:`1px solid ${C.gold}`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:"11px", fontFamily:FONT, fontWeight:"600", color:C.gold }}>{myLead.avatar}</div>
                           <div>
                             <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"14px", color:C.black }}>{myLead.name}</div>
-                            <div style={{ fontSize:"11px", color:C.gold, fontFamily:FONT, fontWeight:"700", letterSpacing:"-0.01em" }}>TEAM LEAD</div>
+                            <div style={{ fontSize:"11px", color:C.gold, fontFamily:FONT, fontWeight:"700", letterSpacing:"-0.01em" }}>Team lead</div>
                           </div>
                         </div>
                       )}
@@ -3566,7 +3510,7 @@ function DeleteTab({ techs, upsells, switchovers, reviews, saving, setSaving, re
                   <div style={{ fontFamily:FONT, fontWeight:"600", fontSize:"15px", color:C.black }}>{tech?.name}</div>
                   <div style={{ fontSize:"12px", color:C.muted }}>{formatWeekLabel(u.week_key)} · <span style={{ color:C.green, fontWeight:"700" }}>${u.amount?.toLocaleString()}</span></div>
                 </div>
-                <button onClick={()=>deleteUpsell(u.id)} disabled={saving} style={{ background:"none", border:`1px solid ${C.red}`, color:C.red, padding:"6px 12px", borderRadius:"8px", cursor:"pointer", fontFamily:FONT, fontWeight:"700", fontSize:"12px", letterSpacing:"-0.01em", flexShrink:0 }}>DELETE</button>
+                <button onClick={()=>deleteUpsell(u.id)} disabled={saving} style={{ background:"none", border:`1px solid ${C.red}`, color:C.red, padding:"6px 12px", borderRadius:"8px", cursor:"pointer", fontFamily:FONT, fontWeight:"700", fontSize:"12px", letterSpacing:"-0.01em", flexShrink:0 }}>Delete</button>
               </div>
             );
           })}
@@ -3587,7 +3531,7 @@ function DeleteTab({ techs, upsells, switchovers, reviews, saving, setSaving, re
                   <div style={{ fontFamily:FONT, fontWeight:"600", fontSize:"15px", color:C.black }}>{tech?.name}</div>
                   <div style={{ fontSize:"12px", color:C.muted }}>{formatWeekLabel(s.week_key)} · <span style={{ color:pc, fontWeight:"700" }}>{plan?.label||s.plan_id} · +{plan?.pts||0}pts</span></div>
                 </div>
-                <button onClick={()=>deleteSwitchover(s.id)} disabled={saving} style={{ background:"none", border:`1px solid ${C.red}`, color:C.red, padding:"6px 12px", borderRadius:"8px", cursor:"pointer", fontFamily:FONT, fontWeight:"700", fontSize:"12px", letterSpacing:"-0.01em", flexShrink:0 }}>DELETE</button>
+                <button onClick={()=>deleteSwitchover(s.id)} disabled={saving} style={{ background:"none", border:`1px solid ${C.red}`, color:C.red, padding:"6px 12px", borderRadius:"8px", cursor:"pointer", fontFamily:FONT, fontWeight:"700", fontSize:"12px", letterSpacing:"-0.01em", flexShrink:0 }}>Delete</button>
               </div>
             );
           })}
@@ -3606,7 +3550,7 @@ function DeleteTab({ techs, upsells, switchovers, reviews, saving, setSaving, re
                   <div style={{ fontFamily:FONT, fontWeight:"600", fontSize:"15px", color:C.black }}>{tech?.name}</div>
                   <div style={{ fontSize:"12px", color:C.muted }}>{formatMonthLabel(r.month_key)} · <span style={{ color:C.gold, fontWeight:"700" }}>{r.count} ⭐</span></div>
                 </div>
-                <button onClick={()=>deleteReview(r.id)} disabled={saving} style={{ background:"none", border:`1px solid ${C.red}`, color:C.red, padding:"6px 12px", borderRadius:"8px", cursor:"pointer", fontFamily:FONT, fontWeight:"700", fontSize:"12px", letterSpacing:"-0.01em", flexShrink:0 }}>DELETE</button>
+                <button onClick={()=>deleteReview(r.id)} disabled={saving} style={{ background:"none", border:`1px solid ${C.red}`, color:C.red, padding:"6px 12px", borderRadius:"8px", cursor:"pointer", fontFamily:FONT, fontWeight:"700", fontSize:"12px", letterSpacing:"-0.01em", flexShrink:0 }}>Delete</button>
               </div>
             );
           })}
@@ -3970,10 +3914,10 @@ function AdminUpsellEntry({ techs, refreshAll, showToast, upsells, jobs=[] }) {
               {repairResult.jobs && repairResult.jobs.length > 0 && (
                 <div style={{ display:"flex", gap:"6px" }}>
                   <button onClick={()=>setUpsExpanded(v=>!v)} style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"5px 10px", borderRadius:"8px", cursor:"pointer", fontFamily:FONT, fontWeight:"700", fontSize:"11px", letterSpacing:"-0.01em" }}>
-                    {upsExpanded ? "COLLAPSE" : "VIEW FULL REPORT"}
+                    {upsExpanded ? "Collapse" : "View full report"}
                   </button>
                   <button onClick={exportUpsellsCSV} style={{ background:C.blue, border:"none", color:C.white, padding:"5px 10px", borderRadius:"8px", cursor:"pointer", fontFamily:FONT, fontWeight:"700", fontSize:"11px", letterSpacing:"-0.01em" }}>
-                    EXPORT CSV
+                    Export CSV
                   </button>
                 </div>
               )}
@@ -4220,7 +4164,7 @@ function AdminTipEntry({ techs, tipEntries, refreshAll, showToast }) {
               <span style={{ fontSize:"13px", color:C.black }}>{techById[t.tech_id]?.name||"Unknown"} · {fmtShortDate(t.work_date)}</span>
               <div style={{ display:"flex", alignItems:"center", gap:"10px" }}>
                 <span style={{ fontFamily:FONT, fontWeight:"600", fontSize:"13px", color:C.gold }}>${t.amount.toFixed(2)}</span>
-                <button onClick={()=>deleteTip(t.id)} style={{ background:"none", border:"1px solid #ef4444", color:"#ff3b30", padding:"3px 8px", borderRadius:"8px", cursor:"pointer", fontFamily:FONT, fontWeight:"700", fontSize:"11px" }}>DELETE</button>
+                <button onClick={()=>deleteTip(t.id)} style={{ background:"none", border:"1px solid #ef4444", color:"#ff3b30", padding:"3px 8px", borderRadius:"8px", cursor:"pointer", fontFamily:FONT, fontWeight:"700", fontSize:"11px" }}>Delete</button>
               </div>
             </div>
           ))}
@@ -4371,11 +4315,7 @@ function RideAlongTab({ techs, rideAlongs, schedules, onSave, onSaveSchedule, sa
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:"16px" }}>
       {/* View switcher */}
-      <div style={{ display:"flex", gap:"8px", flexWrap:"wrap" }}>
-        {[["schedule","📅 Schedule"],["new","✏️ New Ride-Along"],["history","📋 History"]].map(([id,label])=>(
-          <button key={id} onClick={()=>{ setView(id); setViewDetail(null); }} style={{ background:view===id?C.blue:C.card, border:`1px solid ${view===id?C.blue:C.border}`, color:view===id?C.white:C.muted, padding:"8px 16px", borderRadius:"8px", cursor:"pointer", fontFamily:FONT, fontWeight:"700", fontSize:"12px", letterSpacing:"-0.01em", textTransform:"none" }}>{label}</button>
-        ))}
-      </div>
+      <Segmented options={[["schedule","📅 Schedule"],["new","✏️ New Ride-Along"],["history","📋 History"]]} value={view} onChange={id=>{ setView(id); setViewDetail(null); }}/>
 
       {/* SCHEDULE VIEW */}
       {view==="schedule"&&(
@@ -4509,8 +4449,8 @@ function RideAlongTab({ techs, rideAlongs, schedules, onSave, onSaveSchedule, sa
             <textarea value={generalNotes} onChange={e=>setGeneralNotes(e.target.value)} placeholder="Overall session notes, things to work on, wins, action items for next ride-along..." style={{...inp, minHeight:"100px"}}/>
           </div>
 
-          <button onClick={handleSaveRideAlong} disabled={saving||!selectedTech||!selectedDate} style={{ background:saving||!selectedTech||!selectedDate?C.border:C.green, border:"none", color:saving||!selectedTech||!selectedDate?"#666":C.black, padding:"14px", borderRadius:"16px", cursor:saving||!selectedTech||!selectedDate?"not-allowed":"pointer", fontFamily:FONT, fontWeight:"700", fontSize:"14px", letterSpacing:"-0.01em", textTransform:"none" }}>
-            {saving?"SAVING...":"SAVE RIDE-ALONG SESSION"}
+          <button onClick={handleSaveRideAlong} disabled={saving||!selectedTech||!selectedDate} style={{ background:saving||!selectedTech||!selectedDate?C.border:C.blue, border:"none", color:C.white, padding:"14px", borderRadius:"16px", cursor:saving||!selectedTech||!selectedDate?"not-allowed":"pointer", fontFamily:FONT, fontWeight:"700", fontSize:"14px", letterSpacing:"-0.01em", textTransform:"none" }}>
+            {saving?"Saving...":"Save ride-along session"}
           </button>
         </div>
       )}
@@ -4959,7 +4899,7 @@ function PerfectDayTrainingPanel({ tech=null, techs=[], admin=false, fixedSubjec
 
       {/* Progress */}
       <div style={{ background:training?`${C.purple}10`:C.card, border:`1px solid ${training?C.purple:C.border}`, borderRadius:"16px", padding:"16px" }}>
-        {training && <div style={{ fontSize:"11px", color:C.purple, letterSpacing:"-0.01em", ...heading, marginBottom:"4px" }}>TRAINING</div>}
+        {training && <div style={{ fontSize:"11px", color:C.purple, letterSpacing:"-0.01em", ...heading, marginBottom:"4px" }}>Training</div>}
         <div style={{ display:"flex", alignItems:"baseline", justifyContent:"space-between", gap:"10px", marginBottom:"8px" }}>
           <div style={{ ...heading, fontSize:"22px", color:C.black, letterSpacing:0 }}>{training ? subject.name : "Perfect Day Training"}</div>
           <div style={{ ...heading, fontSize:"28px", color:prog.complete ? C.green : accent, letterSpacing:0 }}>{prog.pct}%</div>
@@ -4995,7 +4935,7 @@ function PerfectDayTrainingPanel({ tech=null, techs=[], admin=false, fixedSubjec
         {/* Day picker */}
         {(training || dayList.length > 0) && (
           <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"12px 14px" }}>
-            <div style={{ ...small, marginBottom:"8px" }}>TRAINING DAY</div>
+            <div style={{ ...small, marginBottom:"8px" }}>Training day</div>
             <div style={{ display:"flex", gap:"6px", overflowX:"auto", paddingBottom:"4px" }}>
               {dayList.map(d => {
                 const n = prog.perDay[d] || 0, full = prog.daily.length && n >= prog.daily.length, on = d === day;
@@ -5100,17 +5040,17 @@ function PerfectDayTrainingPanel({ tech=null, techs=[], admin=false, fixedSubjec
             <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"16px", display:"flex", flexDirection:"column", gap:"14px" }}>
               <div style={{ ...heading, fontSize:"16px", color:C.black }}>Day {dayNumber(day)} notes · {day===today ? "Today" : fmtDay(day)}</div>
               <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"12px" }}>
-                <div><div style={{ ...small, marginBottom:"4px" }}>OVERALL DAY</div><Stars k="overall_rating"/></div>
-                <div><div style={{ ...small, marginBottom:"4px" }}>WITH CUSTOMERS</div><Stars k="customer_rating"/></div>
+                <div><div style={{ ...small, marginBottom:"4px" }}>Overall day</div><Stars k="overall_rating"/></div>
+                <div><div style={{ ...small, marginBottom:"4px" }}>With customers</div><Stars k="customer_rating"/></div>
                 <div>
-                  <div style={{ ...small, marginBottom:"4px" }}>PACE</div>
+                  <div style={{ ...small, marginBottom:"4px" }}>Pace</div>
                   <select value={noteForm.pace || ""} onChange={e => setNote("pace", e.target.value)} style={inp}>
                     <option value="">—</option>
                     {Object.entries(TRAINING_PACE).map(([k,v]) => <option key={k} value={k}>{v}</option>)}
                   </select>
                 </div>
                 <div>
-                  <div style={{ ...small, marginBottom:"4px" }}>JOBS TODAY</div>
+                  <div style={{ ...small, marginBottom:"4px" }}>Jobs today</div>
                   <input type="number" min="0" inputMode="numeric" value={noteForm.jobs_count ?? ""} onChange={e => setNote("jobs_count", e.target.value)} style={inp}/>
                 </div>
               </div>
@@ -5134,7 +5074,7 @@ function PerfectDayTrainingPanel({ tech=null, techs=[], admin=false, fixedSubjec
 
             {notes.filter(n => n.day_date !== day).length > 0 && (
               <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"14px 16px" }}>
-                <div style={{ ...small, marginBottom:"8px" }}>EARLIER DAYS</div>
+                <div style={{ ...small, marginBottom:"8px" }}>Earlier days</div>
                 {notes.filter(n => n.day_date !== day).map(n => (
                   <div key={n.day_date} onClick={() => setDay(n.day_date)} style={{ padding:"10px 0", borderTop:`1px solid ${C.border}40`, cursor:"pointer" }}>
                     <div style={{ display:"flex", justifyContent:"space-between", gap:"8px", fontSize:"12px" }}>
@@ -5348,7 +5288,7 @@ function FinalEvalRunner({ trainee, adminUser, rubricItems, priorAttempts, onExi
         <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"20px", color:C.black }}>🏁 Practical Test — {trainee.name}</div>
         <div style={{ fontSize:"12px", color:C.muted }}>Attempt {priorAttempts + 1}{priorAttempts >= 2 ? " (last chance — a third fail is a Hard Fail)" : ""}. Watch them run the full Perfect Day and mark every item. Every item must pass.</div>
         <div style={{ display:"flex", alignItems:"center", gap:"8px" }}>
-          <span style={{ fontSize:"11px", color:C.muted, fontWeight:"600" }}>DATE</span>
+          <span style={{ fontSize:"11px", color:C.muted, fontWeight:"600" }}>Date</span>
           <input type="date" value={date} onChange={e => setDate(e.target.value)} style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:"10px", padding:"6px 10px", fontSize:"14px" }}/>
         </div>
         <Bar pct={(scored / items.length) * 100} color={fails.length ? C.red : C.green} h={6}/>
@@ -5686,7 +5626,7 @@ function ConnectionCard({ title, connected, lastSync, steps, note, connectUrl, c
       </div>
       {note && <div style={{ fontSize:"12px", color:C.muted, marginTop:"4px" }}>{note}</div>}
       {open && steps && <ol style={{ margin:"8px 0 0", paddingLeft:"20px", fontSize:"12px", color:C.black, lineHeight:1.6 }}>{steps.map((s, i) => <li key={i}>{s}</li>)}</ol>}
-      {connected && syncFn && <button onClick={syncNow} disabled={syncing} style={{ marginTop:"10px", marginRight:"8px", background:C.green, color:C.white, border:"none", padding:"8px 16px", borderRadius:"18px", fontSize:"12px", fontWeight:"700", cursor:"pointer", fontFamily:FONT, letterSpacing:"-0.01em", textTransform:"none" }}>{syncing ? "Syncing..." : "Sync now"}</button>}
+      {connected && syncFn && <button onClick={syncNow} disabled={syncing} style={{ marginTop:"10px", marginRight:"8px", background:C.blue, color:C.white, border:"none", padding:"8px 16px", borderRadius:"18px", fontSize:"12px", fontWeight:"700", cursor:"pointer", fontFamily:FONT, letterSpacing:"-0.01em", textTransform:"none" }}>{syncing ? "Syncing..." : "Sync now"}</button>}
       {syncMsg && <div style={{ fontSize:"12px", color:C.black, marginTop:"6px" }}>{syncMsg}</div>}
       {connectUrl && <a href={connectUrl} style={{ display:"inline-block", marginTop:"10px", background:C.blue, color:C.white, padding:"8px 16px", borderRadius:"18px", fontSize:"12px", fontWeight:"700", textDecoration:"none", fontFamily:FONT, letterSpacing:"-0.01em", textTransform:"none" }}>{connectLabel || "Connect"}</a>}
     </div>
@@ -5815,7 +5755,7 @@ function AttributionSettings({ att, token, onSaved }) {
             <label style={{ display:"flex", flexDirection:"column", gap:"2px" }}>Target margin %<input type="number" step="0.1" value={f.tm} onChange={e => setF({ ...f, tm:e.target.value })} style={inp}/></label>
           </div>
           <div style={{ display:"flex", gap:"8px", alignItems:"center" }}>
-            <button onClick={save} style={{ background:C.green, color:C.white, border:"none", borderRadius:"14px", padding:"6px 14px", fontWeight:"700", cursor:"pointer" }}>Save</button>
+            <button onClick={save} style={{ background:C.blue, color:C.white, border:"none", borderRadius:"14px", padding:"6px 14px", fontWeight:"700", cursor:"pointer" }}>Save</button>
             <button onClick={() => setOpen(false)} style={{ background:"none", border:`1px solid ${C.border}`, borderRadius:"14px", padding:"6px 14px", cursor:"pointer" }}>Cancel</button>
             <span style={{ color:C.muted }}>{msg}</span>
           </div>
@@ -5841,7 +5781,7 @@ function MetaCampaigns({ campaigns }) {
     <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", overflowX:"auto" }}>
       <table style={{ width:"100%", borderCollapse:"collapse", minWidth:"700px" }}>
         <thead><tr style={{ background:C.cardLt }}>
-          <th style={{ ...th, textAlign:"left" }}>CAMPAIGN / AD</th><th style={th}>SPEND</th><th style={th}>LEADS</th><th style={th}>CPL</th><th style={th}>BOOKED</th><th style={th}>$/BOOKING</th><th style={th}>UPFRONT</th><th style={th}>COMMITTED</th><th style={th}>COMPLETED</th><th style={th}>ROAS UP / COMM.</th>
+          <th style={{ ...th, textAlign:"left" }}>Campaign / ad</th><th style={th}>Spend</th><th style={th}>Leads</th><th style={th}>CPL</th><th style={th}>Booked</th><th style={th}>$/BOOKING</th><th style={th}>Upfront</th><th style={th}>Committed</th><th style={th}>Completed</th><th style={th}>ROAS up / comm.</th>
         </tr></thead>
         <tbody>
           {campaigns.map(c => (<Fragment key={c.id}>
@@ -5869,7 +5809,7 @@ function SpendCampaigns({ rows }) {
   return (
     <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", overflowX:"auto" }}>
       <table style={{ width:"100%", borderCollapse:"collapse", minWidth:"520px" }}>
-        <thead><tr style={{ background:C.cardLt }}><th style={{ ...th, textAlign:"left" }}>CAMPAIGN</th><th style={th}>SPEND</th><th style={th}>CLICKS</th><th style={th}>CPC</th><th style={th}>CONV.</th><th style={th}>$/CONV.</th></tr></thead>
+        <thead><tr style={{ background:C.cardLt }}><th style={{ ...th, textAlign:"left" }}>Campaign</th><th style={th}>Spend</th><th style={th}>Clicks</th><th style={th}>CPC</th><th style={th}>Conv.</th><th style={th}>$/CONV.</th></tr></thead>
         <tbody>{rows.map(r => (
           <tr key={r.id} style={{ borderTop:`1px solid ${C.border}` }}>
             <td style={{ ...td, textAlign:"left", whiteSpace:"normal", fontWeight:"700" }}>{/^LocalServicesCampaign/.test(r.name) ? "Local Services Ads" : r.name}</td>
@@ -6191,7 +6131,7 @@ function TrainingOverviewTab({ techs, currentUser, refreshAll }) {
       <div style={{ display:"flex", flexDirection:"column", gap:"12px" }}>
         <button onClick={() => { setOpenId(null); setTrainerSel(""); load(); }} style={{ alignSelf:"flex-start", background:"none", border:`1px solid ${C.border}`, color:C.blue, padding:"6px 14px", borderRadius:"16px", cursor:"pointer", fontFamily:FONT, fontWeight:"600", fontSize:"13px" }}>← All apprentices</button>
         <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"10px 14px", display:"flex", alignItems:"center", gap:"10px" }}>
-          <span style={{ ...small, whiteSpace:"nowrap" }}>CHECKING OFF AS</span>
+          <span style={{ ...small, whiteSpace:"nowrap" }}>Checking off as</span>
           <select value={trainerSel || trainerOf(open.t) || ""} onChange={e => setTrainerSel(e.target.value)} style={{ flex:1, background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"8px 10px", borderRadius:"10px", fontSize:"14px" }}>
             <option value="">— No trainer —</option>
             {trainers.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
@@ -6669,7 +6609,7 @@ function DevelopmentTab({ techs, rideAlongs, refreshAll, showToast }) {
           )}
           {certTechSel && certs.filter(c=>c.tech_id===certTechSel).length > 0 && (
             <div style={{ display:"flex", flexDirection:"column", gap:"8px" }}>
-              <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"13px", color:C.muted, letterSpacing:"-0.01em" }}>PAST ATTEMPTS</div>
+              <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"13px", color:C.muted, letterSpacing:"-0.01em" }}>Past attempts</div>
               {certs.filter(c=>c.tech_id===certTechSel).map(cert => (
                 <div key={cert.id} style={{ background:C.card, border:`1px solid ${cert.overall_result==="pass" ? C.green : C.red}60`, borderRadius:"12px", padding:"10px 14px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
                   <div>
@@ -7161,7 +7101,7 @@ function DriverDetail({ driver, bare=false }) {
         <div key={d.date} style={box}>
           <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:"8px" }}>
             <div style={{ fontSize:"13px", color:C.black, fontWeight:"700" }}>{fmtShortDate(d.date)} · {d.vehicles.join(" + ") || "—"} · {Math.round(d.miles)} mi</div>
-            {d.score==null ? <span style={{ fontSize:"12px", color:C.muted }}>no score</span> : <Pill color={d.pass?C.green:C.red}>{fmtScore(d.score)} {d.pass?"PASS":"FAIL"}</Pill>}
+            {d.score==null ? <span style={{ fontSize:"12px", color:C.muted }}>no score</span> : <Pill color={d.pass?C.green:C.red}>{fmtScore(d.score)} {d.pass?"Pass":"Fail"}</Pill>}
           </div>
           {d.reason && <div style={{ fontSize:"12px", color:C.muted, marginTop:"3px" }}>{d.reason}</div>}
           {d.score!=null && d.penalties.length===0 && <div style={{ fontSize:"12px", color:C.green, marginTop:"3px" }}>Clean day — no driving events</div>}
@@ -7192,7 +7132,7 @@ function AuditTechDetail({ week, only="both", bare=false }) {
         <div key={t.id} style={box}>
           <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:"8px" }}>
             <div style={{ fontSize:"13px", color:C.black, fontWeight:"700" }}>{fmtShortDate(t.work_date)}{t.checkedBy ? ` · checked by ${t.checkedBy}` : ""}</div>
-            <Pill color={t.pass?C.green:C.red}>{fmtPct(t.score)} {t.pass?"PASS":"FAIL"}</Pill>
+            <Pill color={t.pass?C.green:C.red}>{fmtPct(t.score)} {t.pass?"Pass":"Fail"}</Pill>
           </div>
           {t.missing.length===0
             ? <div style={{ fontSize:"12px", color:C.green, marginTop:"4px" }}>Nothing missing</div>
@@ -7214,7 +7154,7 @@ function AuditTechDetail({ week, only="both", bare=false }) {
       {week.days.map(d => (
         <div key={d.date} style={box}>
           <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-            <div style={{ fontSize:"13px", color:C.black, fontWeight:"700" }}>{fmtShortDate(d.date)} {d.audit.test && <Pill color={C.purple}>TEST</Pill>}</div>
+            <div style={{ fontSize:"13px", color:C.black, fontWeight:"700" }}>{fmtShortDate(d.date)} {d.audit.test && <Pill color={C.purple}>Test</Pill>}</div>
             <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"16px", color:scoreColor(d.pct??0) }}>Day {fmtPct(d.pct)}</div>
           </div>
           <div style={{ fontSize:"12px", color:C.muted, marginTop:"2px" }}>{d.audit.lead ? `Tech lead: ${d.audit.lead}` : ""}{d.replaced ? `${d.audit.lead ? " · " : ""}latest of ${d.replaced+1} submissions for this day` : ""}</div>
@@ -7438,7 +7378,7 @@ function AuditScoresTab({ techs, token, techId=null, canSync=false, view="overvi
   const unmappedAnswers = [...new Set(auditScored.flatMap(a => a.unmapped))].sort();
   const unmappedIds = [...new Set(auditScored.flatMap(a => a.unmappedFieldIds))].sort();
   const last = state.data?.last_run;
-  const arrow = { background:C.white, border:`1px solid ${C.border}`, borderRadius:"10px", padding:"6px 12px", cursor:"pointer", fontSize:"14px", color:C.black };
+  const arrow = { background:C.white, border:`1px solid ${C.border}`, borderRadius:"50%", width:"36px", height:"36px", padding:0, display:"flex", alignItems:"center", justifyContent:"center", cursor:"pointer", fontSize:"13px", color:C.blue };
   const thisWeek = auditThisWeek();
   const driveNote = drive.error ? `Driving scores unavailable: ${drive.error}` : section==="overview" ? (d0 && !d0.daily.length ? "No Ford Pro data for these weeks yet, so Driving is left out of the overall score." : null) : driveWeek && !driveWeek.daily.length ? "No Ford Pro data for this week yet — an admin uploads Ford's daily reports on the Trucks tab." : null;
   const big = (text, color, size=20) => <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:`${size}px`, color, lineHeight:1, textAlign:"right" }}>{text}</div>;
@@ -7475,7 +7415,7 @@ function AuditScoresTab({ techs, token, techId=null, canSync=false, view="overvi
           <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"16px", color:C.black }}>{title} {onToggle && <span style={{ fontSize:"12px", color:C.muted }}>{isOpen?"▲":"▼"}</span>}</div>
           <div style={{ marginTop:"4px" }}>{sectionLine(t)}</div>
         </div>
-        <div>{big(t.score==null ? "—" : `${fmtScore(t.score)}`, passColor(t.score, t.pass), 24)}{small(t.score==null ? "no scores yet" : `${t.pass?"PASS":"FAIL"} · ${t.scored} of ${t.members} scored`)}</div>
+        <div>{big(t.score==null ? "—" : `${fmtScore(t.score)}`, passColor(t.score, t.pass), 24)}{small(t.score==null ? "no scores yet" : `${t.pass?"Pass":"Fail"} · ${t.scored} of ${t.members} scored`)}</div>
       </div>
       {isOpen && children && <div style={{ marginTop:"10px" }}>{children}</div>}
     </div>
@@ -7494,7 +7434,7 @@ function AuditScoresTab({ techs, token, techId=null, canSync=false, view="overvi
           {section==="overview" && (<>
             <div style={{ fontSize:"13px", color:C.muted, marginBottom:"12px", lineHeight:"1.5" }}>{SCORE_INTRO} Display only — not tied to pay.</div>
             <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(140px, 1fr))", gap:"8px", marginBottom:"12px" }}>
-              <StatBlock label="My Overall Score" value={fmtScore(full.overall.score)} color={passColor(full.overall.score, full.overall.pass)} sub={full.overall.score==null ? "no scores yet" : `${full.overall.pass?"PASS":"FAIL"} · pass ${TECH_SCORE_CONFIG.passLine}`}/>
+              <StatBlock label="My Overall Score" value={fmtScore(full.overall.score)} color={passColor(full.overall.score, full.overall.pass)} sub={full.overall.score==null ? "no scores yet" : `${full.overall.pass?"Pass":"Fail"} · pass ${TECH_SCORE_CONFIG.passLine}`}/>
               {SCORE_SECTIONS.map(s => {
                 const v = full.sections[s.key];
                 return <StatBlock key={s.key} label={`${s.icon} ${s.label}`} value={fmtScore(v)} color={sectionColor(v)} sub={v==null ? "no data — left out" : `${s.weight}% of overall`}/>;
@@ -7550,15 +7490,15 @@ function AuditScoresTab({ techs, token, techId=null, canSync=false, view="overvi
         let summary;
         if (section==="overview") summary = overall.score==null
           ? big("No scores", C.muted)
-          : <>{big(fmtScore(overall.score), passColor(overall.score, overall.pass), 28)}{small(`${overall.pass?"PASS":"FAIL"} · ${overall.sectionsScored} of ${SCORE_SECTIONS.length} sections`)}</>;
+          : <>{big(fmtScore(overall.score), passColor(overall.score, overall.pass), 28)}{small(`${overall.pass?"Pass":"Fail"} · ${overall.sectionsScored} of ${SCORE_SECTIONS.length} sections`)}</>;
         else if (section==="tote") summary = t
-          ? <>{big(`${fmtPct(t.score)} ${t.pass?"PASS":"FAIL"}`, t.pass?C.green:C.red)}{small(t.missingCents ? `${fmtCents(t.missingCents)} missing · ${fmtShortDate(t.work_date)}` : `Nothing missing · ${fmtShortDate(t.work_date)}`)}</>
+          ? <>{big(`${fmtPct(t.score)} ${t.pass?"Pass":"Fail"}`, t.pass?C.green:C.red)}{small(t.missingCents ? `${fmtCents(t.missingCents)} missing · ${fmtShortDate(t.work_date)}` : `Nothing missing · ${fmtShortDate(t.work_date)}`)}</>
           : <>{big("No check", C.muted)}{week.excluded.length>0 && small(`${week.excluded.length} not counted (wrong checker)`)}</>;
         else if (section==="audit") summary = week.days.length
           ? <>{big(fmtPct(week.auditPct), scoreColor(week.auditPct??0))}{small(`${week.days.length} day${week.days.length!==1?"s":""} audited`)}</>
           : big("No audits", C.muted);
         else summary = driver?.score!=null
-          ? <>{big(`${fmtScore(driver.score)} ${driver.pass?"PASS":"FAIL"}`, passColor(driver.score, driver.pass))}{small(`${driver.scoredDays} day${driver.scoredDays!==1?"s":""} · ${Math.round(driver.days.reduce((s,d)=>s+d.miles,0))} mi`)}</>
+          ? <>{big(`${fmtScore(driver.score)} ${driver.pass?"Pass":"Fail"}`, passColor(driver.score, driver.pass))}{small(`${driver.scoredDays} day${driver.scoredDays!==1?"s":""} · ${Math.round(driver.days.reduce((s,d)=>s+d.miles,0))} mi`)}</>
           : big(driver?.days.length ? "No score" : "No driving", C.muted);
         return (
           <div key={key} style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"12px 14px", marginBottom:"8px", opacity:canOpen?1:0.6 }}>
@@ -7580,7 +7520,7 @@ function AuditScoresTab({ techs, token, techId=null, canSync=false, view="overvi
     for (const c of cards) {
       if (section==="tote") {
         for (const t of c.week.totes) out.push({ key:`t:${t.id}`, tech:c.tech, date:t.work_date, sub:t.checkedBy ? `checked by ${t.checkedBy}` : "",
-          summary:<>{big(`${fmtPct(t.score)} ${t.pass?"PASS":"FAIL"}`, t.pass?C.green:C.red, 18)}{small(t.missingCents ? `${fmtCents(t.missingCents)} missing` : "Nothing missing")}</>,
+          summary:<>{big(`${fmtPct(t.score)} ${t.pass?"Pass":"Fail"}`, t.pass?C.green:C.red, 18)}{small(t.missingCents ? `${fmtCents(t.missingCents)} missing` : "Nothing missing")}</>,
           detail:<AuditTechDetail bare only="tote" week={{ totes:[t], excluded:[], days:[] }}/> });
         for (const t of c.week.excluded) out.push({ key:`x:${t.id}`, tech:c.tech, date:t.work_date, sub:"not counted",
           summary:big("Not counted", C.gold, 16), detail:<AuditTechDetail bare only="tote" week={{ totes:[], excluded:[t], days:[] }}/> });
@@ -7590,7 +7530,7 @@ function AuditScoresTab({ techs, token, techId=null, canSync=false, view="overvi
           detail:<AuditTechDetail bare only="audit" week={{ totes:[], excluded:[], days:[d] }}/> });
       } else if (c.driver) {
         for (const d of c.driver.days) out.push({ key:`d:${c.tech.id}:${d.date}`, tech:c.tech, date:d.date, sub:`${d.vehicles.join(" + ") || "—"} · ${Math.round(d.miles)} mi`,
-          summary:d.score==null ? big("No score", C.muted, 16) : big(`${fmtScore(d.score)} ${d.pass?"PASS":"FAIL"}`, passColor(d.score, d.pass), 18),
+          summary:d.score==null ? big("No score", C.muted, 16) : big(`${fmtScore(d.score)} ${d.pass?"Pass":"Fail"}`, passColor(d.score, d.pass), 18),
           detail:<DriverDetail bare driver={{ days:[d] }}/> });
       }
     }
@@ -7605,7 +7545,7 @@ function AuditScoresTab({ techs, token, techId=null, canSync=false, view="overvi
       {(section==="tote" || section==="audit") && (
         <div style={{ background:C.cardLt, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"10px 12px", marginBottom:"12px", fontSize:"12px", color:C.black }}>
           {last ? <>Last GHL form sync: {new Date(last.finished_at || last.updated_at).toLocaleString("en-US", { month:"short", day:"numeric", hour:"numeric", minute:"2-digit", timeZone:"America/Denver" })}{last.errors?.length ? <span style={{ color:C.red }}> · {last.errors.join("; ")}</span> : ""}{last.labels?.source==="raw_keys" ? <div style={{ color:C.gold, marginTop:"4px" }}>⚠ Couldn't read the form's question labels from GHL ({last.labels.error}). The token may need the locations/customFields.readonly scope.</div> : null}</> : "Not synced yet."}
-          {canSync && <div><button onClick={syncNow} disabled={syncing} style={{ marginTop:"8px", background:C.green, color:C.white, border:"none", padding:"6px 14px", borderRadius:"18px", fontSize:"12px", fontWeight:"700", cursor:"pointer", fontFamily:FONT, letterSpacing:"-0.01em", textTransform:"none" }}>{syncing ? "Syncing..." : "Sync now"}</button></div>}
+          {canSync && <div><button onClick={syncNow} disabled={syncing} style={{ marginTop:"8px", background:C.blue, color:C.white, border:"none", padding:"6px 14px", borderRadius:"18px", fontSize:"12px", fontWeight:"700", cursor:"pointer", fontFamily:FONT, letterSpacing:"-0.01em", textTransform:"none" }}>{syncing ? "Syncing..." : "Sync now"}</button></div>}
           {syncMsg && <div style={{ marginTop:"6px" }}>{syncMsg}</div>}
         </div>
       )}
@@ -7731,7 +7671,7 @@ function TruckInspectionsTab({ techs, jobs=[], token, canGrade=false, showToast=
   const unmatched = [...new Set(subs.filter(s => !s.tech_id).map(s => s.tech_name || "(no name)"))].sort();
   const rows = techs.filter(t => t.is_active!==false && t.title!=="owner" && !isTruckExempt(t)).sort(byFirstName)
     .map(t => ({ tech:t, ...truckScore({ techId:t.id, tech:t, jobs, truckSubs:subs.filter(s => s.tech_id===t.id), grades, from:wk, to:end, today }) }));
-  const arrow = { background:C.white, border:`1px solid ${C.border}`, borderRadius:"10px", padding:"6px 12px", cursor:"pointer", fontSize:"14px", color:C.black };
+  const arrow = { background:C.white, border:`1px solid ${C.border}`, borderRadius:"50%", width:"36px", height:"36px", padding:0, display:"flex", alignItems:"center", justifyContent:"center", cursor:"pointer", fontSize:"13px", color:C.blue };
   const inp = { background:C.white, border:`1px solid ${C.border}`, color:C.black, padding:"8px 10px", borderRadius:"10px", fontSize:"15px", boxSizing:"border-box" };
 
   async function saveGrade(sub) {
@@ -8064,7 +8004,7 @@ function TrucksAdminTab({ techs, vehicles, timeEntries=[], token, refreshAll, sh
         ))}
         {assignedRows.length>0 && (
           <div style={{ marginTop:"10px" }}>
-            <div style={{ fontSize:"11px", color:C.muted, fontWeight:"700", letterSpacing:"-0.01em" }}>ASSIGNED</div>
+            <div style={{ fontSize:"11px", color:C.muted, fontWeight:"700", letterSpacing:"-0.01em" }}>Assigned</div>
             {assignedRows.map(r => (
               <div key={r.vin+r.work_date} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:"8px", fontSize:"12px", color:C.black, padding:"4px 0" }}>
                 <span>{vehicles.find(v=>v.vin===r.vin)?.name || r.vin} · {fmtShortDate(r.work_date)} → {techName(r.assigned_tech_id)}{r.assigned_by ? ` (by ${r.assigned_by})` : ""}</span>
@@ -8200,27 +8140,10 @@ function CallbacksPanel({ techs, jobs, callbacks, refreshAll, showToast }) {
           const fmtCount = n => Number.isInteger(n) ? String(n) : n.toFixed(1);
           const chip = on => ({ display:"flex", alignItems:"flex-start", gap:"8px", padding:"6px 8px", borderRadius:"10px", border:`1px solid ${on?"#ff3b30":C.border}`, background:on?"#ef444410":C.white, cursor:"pointer", fontSize:"13px", color:C.black });
           return (
-          <div style={{ display:"flex", flexDirection:"column", gap:"16px" }}>
-            {/* Date range + rate */}
-            <DateRangePicker label="📅 Callbacks by job date" color="#ff3b30" preset={cbPreset} setPreset={setCbPreset} customStart={cbCStart} setCustomStart={setCbCStart} customEnd={cbCEnd} setCustomEnd={setCbCEnd}>
-              <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:"8px", marginTop:"14px" }}>
-                {[
-                  { l:"Callback rate", v:`${rate.toFixed(2)}%`, c: rate>=2?"#ff3b30":C.green },
-                  { l:"Callbacks", v:fmtCount(cbCount), c:C.black },
-                  { l:"Completed jobs", v:jobCount, c:C.black },
-                ].map(x=>(
-                  <div key={x.l} style={{ background:C.cardLt, borderRadius:"10px", padding:"10px", textAlign:"center" }}>
-                    <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"24px", color:x.c }}>{x.v}</div>
-                    <div style={{ fontSize:"11px", color:C.muted, textTransform:"none", letterSpacing:"-0.01em" }}>{x.l}</div>
-                  </div>
-                ))}
-              </div>
-              <div style={{ fontSize:"11px", color:C.muted, marginTop:"6px" }}>{cbStart} → {cbEnd} · Standard is under 2% · split-job callbacks count ½ per tech</div>
-            </DateRangePicker>
-
-            {/* Log a callback */}
-            <div style={{ background:C.white, border:`2px solid #ef444444`, borderTop:`3px solid #ef4444`, borderRadius:"16px", padding:"20px", display:"flex", flexDirection:"column", gap:"12px", boxShadow:"0 2px 8px rgba(0,0,0,0.06)" }}>
-              <Label color="#ff3b30">📞 Log a Callback</Label>
+          <div style={{ display:"flex", flexDirection:"column", gap:"14px" }}>
+            <PageTools tools={[{ id:"log", label:"Log Callback", icon:"📞", primary:true, render:()=>(
+              <div style={{ display:"flex", flexDirection:"column", gap:"12px" }}>
+                <div style={{ fontFamily:FONT, fontWeight:"600", fontSize:"16px", color:C.black }}>Log a Callback</div>
               <select value={f.techId} onChange={e=>setCbForm({...CB_EMPTY, techId:e.target.value, lookback:f.lookback})} style={sel(f.techId)}>
                 <option value="">— Select Tech —</option>
                 {techs.filter(t=>t.title!=="owner").map(t=><option key={t.id} value={t.id}>{t.name}{t.is_active===false?" (archived)":""}</option>)}
@@ -8289,7 +8212,27 @@ function CallbacksPanel({ techs, jobs, callbacks, refreshAll, showToast }) {
                 <input placeholder="Notes (optional)" value={f.reason} onChange={e=>setCbForm(v=>({...v, reason:e.target.value}))} style={inp}/>
                 <button onClick={logCallback} disabled={saving} style={{ ...btn("#ff3b30"), color:C.white }}>{saving?"Saving...":"Log Callback — Deduct Points"}</button>
               </>)}
-            </div>
+              </div>
+            )}]}/>
+            {/* Date range + rate */}
+            <DateRangePicker label="📅 Callbacks by job date" color="#ff3b30" preset={cbPreset} setPreset={setCbPreset} customStart={cbCStart} setCustomStart={setCbCStart} customEnd={cbCEnd} setCustomEnd={setCbCEnd}>
+              <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:"8px", marginTop:"14px" }}>
+                {[
+                  { l:"Callback rate", v:`${rate.toFixed(2)}%`, c: rate>=2?"#ff3b30":C.green },
+                  { l:"Callbacks", v:fmtCount(cbCount), c:C.black },
+                  { l:"Completed jobs", v:jobCount, c:C.black },
+                ].map(x=>(
+                  <div key={x.l} style={{ background:C.cardLt, borderRadius:"10px", padding:"10px", textAlign:"center" }}>
+                    <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"24px", color:x.c }}>{x.v}</div>
+                    <div style={{ fontSize:"11px", color:C.muted, textTransform:"none", letterSpacing:"-0.01em" }}>{x.l}</div>
+                  </div>
+                ))}
+              </div>
+              <div style={{ fontSize:"11px", color:C.muted, marginTop:"6px" }}>{cbStart} → {cbEnd} · Standard is under 2% · split-job callbacks count ½ per tech</div>
+            </DateRangePicker>
+
+            <ListTitle right={`${fmtCount(cbCount)} total`}>Callbacks by Tech</ListTitle>
+            <RankRows rows={techSummary.map(x=>({ id:x.t.id, name:x.t.name, value:`${fmtCount(x.count)}`, chip:`${x.pts} pts`, bad:true }))} empty="No callbacks in this range. Keep it that way! 💪"/>
 
             {/* Breakdown for the range */}
             {groups.length>0&&(
@@ -8311,15 +8254,6 @@ function CallbacksPanel({ techs, jobs, callbacks, refreshAll, showToast }) {
                     ))}
                   </div>
                 )}
-                <div>
-                  <div style={{ fontSize:"12px", color:C.muted, marginBottom:"4px" }}>By tech</div>
-                  {techSummary.map(x=>(
-                    <div key={x.t.id} style={{ display:"flex", justifyContent:"space-between", fontSize:"13px", color:C.black, padding:"2px 0" }}>
-                      <span style={{ fontFamily:FONT, fontWeight:"700" }}>{x.t.name}</span>
-                      <span style={{ fontFamily:FONT, fontWeight:"700", color:"#ff3b30" }}>{fmtCount(x.count)} callback{x.count!==1?"s":""} · {x.pts} pts</span>
-                    </div>
-                  ))}
-                </div>
               </div>
             )}
 
@@ -8337,7 +8271,7 @@ function CallbacksPanel({ techs, jobs, callbacks, refreshAll, showToast }) {
                     <div key={c.group_id||c.id} style={{ background:`#ef444410`, border:`1px solid #ef444433`, borderLeft:`3px solid #ef4444`, borderRadius:"10px", padding:"12px 14px", display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:"12px" }}>
                       <div>
                         <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"15px", color:C.black }}>
-                          {names}{g.length>1&&<span style={{ fontSize:"11px", color:"#ff3b30", marginLeft:"6px" }}>SPLIT</span>}
+                          {names}{g.length>1&&<span style={{ fontSize:"11px", color:"#ff3b30", marginLeft:"6px" }}>Split</span>}
                           {c.severity&&<span style={{ fontSize:"11px", color:C.white, background:"#ff3b30", borderRadius:"10px", padding:"1px 7px", marginLeft:"6px" }}>{CALLBACK_SEVERITY[c.severity].label}</span>}
                         </div>
                         <div style={{ fontSize:"12px", color:C.black, marginTop:"3px" }}>
@@ -8349,7 +8283,7 @@ function CallbacksPanel({ techs, jobs, callbacks, refreshAll, showToast }) {
                       </div>
                       <div style={{ display:"flex", alignItems:"center", gap:"10px", flexShrink:0 }}>
                         <span style={{ fontFamily:FONT, fontWeight:"700", fontSize:"15px", color:"#ff3b30" }}>{callbackPoints(c)} pts{g.length>1?" each":""}</span>
-                        <button onClick={()=>deleteCallback(c)} disabled={saving} style={{ background:"none", border:`1px solid #ef4444`, color:"#ff3b30", padding:"4px 10px", borderRadius:"10px", cursor:"pointer", fontFamily:FONT, fontWeight:"700", fontSize:"11px" }}>DELETE</button>
+                        <button onClick={()=>deleteCallback(c)} disabled={saving} style={{ background:"none", border:`1px solid #ef4444`, color:"#ff3b30", padding:"4px 10px", borderRadius:"10px", cursor:"pointer", fontFamily:FONT, fontWeight:"700", fontSize:"11px" }}>Delete</button>
                       </div>
                     </div>
                   );
@@ -8999,15 +8933,15 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
                             </div>
                             {t.fire_approval==="pending"&&!isManager&&(
                               <div style={{ display:"flex", gap:"6px", marginTop:"6px" }}>
-                                <button onClick={()=>reviewFiring(t,"approved")} disabled={saving} style={{ background:C.green, border:"none", color:C.white, padding:"4px 10px", borderRadius:"10px", cursor:"pointer", fontSize:"11px", fontWeight:"600" }}>APPROVE</button>
-                                <button onClick={()=>reviewFiring(t,"denied")} disabled={saving} style={{ background:"#ff3b30", border:"none", color:C.white, padding:"4px 10px", borderRadius:"10px", cursor:"pointer", fontSize:"11px", fontWeight:"600" }}>DENY</button>
+                                <button onClick={()=>reviewFiring(t,"approved")} disabled={saving} style={{ background:C.green, border:"none", color:C.white, padding:"4px 10px", borderRadius:"10px", cursor:"pointer", fontSize:"11px", fontWeight:"600" }}>Approve</button>
+                                <button onClick={()=>reviewFiring(t,"denied")} disabled={saving} style={{ background:"#ff3b30", border:"none", color:C.white, padding:"4px 10px", borderRadius:"10px", cursor:"pointer", fontSize:"11px", fontWeight:"600" }}>Deny</button>
                               </div>
                             )}
                           </div>
                         )}
                       </div>
                       <button onClick={()=>reactivateTech(t)} disabled={saving} style={{ background:"none", border:"1px solid #00c853", color:"#34c759", padding:"6px 14px", borderRadius:"10px", cursor:"pointer", fontFamily:FONT, fontWeight:"600", fontSize:"11px", letterSpacing:"-0.01em" }}>
-                        REACTIVATE
+                        Reactivate
                       </button>
                     </div>
                   ))}
@@ -9029,7 +8963,7 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
                     <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:"8px" }}>
                       <div style={{ fontFamily:FONT, fontWeight:"700", fontStyle:"normal", fontSize:"16px", color:C.black }}>
                         {t.name}
-                        {t.is_lead&&<span style={{ marginLeft:"8px", background:C.gold, color:C.white, fontSize:"11px", padding:"2px 8px", borderRadius:"10px", fontFamily:FONT, fontWeight:"700", verticalAlign:"middle" }}>TEAM LEAD</span>}
+                        {t.is_lead&&<span style={{ marginLeft:"8px", background:C.gold, color:C.white, fontSize:"11px", padding:"2px 8px", borderRadius:"10px", fontFamily:FONT, fontWeight:"700", verticalAlign:"middle" }}>Team lead</span>}
                       </div>
                       <button onClick={()=>toggleTeamLead(t)} disabled={saving}
                         style={{ background:t.is_lead?"#ef444422":"transparent", border:`1px solid ${t.is_lead?"#ff3b30":C.gold}`, color:t.is_lead?"#ff3b30":C.gold, padding:"5px 14px", borderRadius:"20px", cursor:"pointer", fontFamily:FONT, fontWeight:"600", fontSize:"11px", letterSpacing:"-0.01em" }}>
@@ -9038,7 +8972,7 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
                     </div>
                     {t.is_lead&&(
                       <div>
-                        <div style={{ fontSize:"11px", color:C.muted, marginBottom:"6px", fontFamily:FONT, fontWeight:"700" }}>TEAM NAME</div>
+                        <div style={{ fontSize:"11px", color:C.muted, marginBottom:"6px", fontFamily:FONT, fontWeight:"700" }}>Team name</div>
                         <div style={{ display:"flex", gap:"8px", marginBottom:"10px" }}>
                           <input
                             placeholder="e.g. Team Maverick"
@@ -9053,7 +8987,7 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
                             style={{ flex:1, background:C.white, border:`1px solid ${C.border}`, color:C.black, padding:"8px 12px", borderRadius:"10px", fontSize:"14px", fontFamily:FONT, fontWeight:"700" }}
                           />
                         </div>
-                        <div style={{ fontSize:"11px", color:C.muted, marginBottom:"6px", fontFamily:FONT, fontWeight:"700" }}>TEAM MEMBERS</div>
+                        <div style={{ fontSize:"11px", color:C.muted, marginBottom:"6px", fontFamily:FONT, fontWeight:"700" }}>Team members</div>
                         <div style={{ display:"flex", flexWrap:"wrap", gap:"6px" }}>
                           {techs.filter(m=>m.id!==t.id).map(m=>{
                             const onTeam = m.team_lead_id===t.id;
@@ -9304,7 +9238,7 @@ create policy "public access" on jobs for all using (true) with check (true);
 create unique index if not exists jobs_hcp_job_id_key on jobs(hcp_job_id);
 alter table jobs add column if not exists tips numeric default 0;`}
         </code><br/>
-        <button onClick={()=>{setDbError(null);setLoading(true);loadAll().then(()=>setLoading(false));}} style={{ background:C.blue, border:"none", color:C.white, padding:"12px 28px", borderRadius:"24px", cursor:"pointer", fontFamily:FONT, fontSize:"14px", fontWeight:"700", fontStyle:"normal", letterSpacing:"-0.01em" }}>RETRY</button>
+        <button onClick={()=>{setDbError(null);setLoading(true);loadAll().then(()=>setLoading(false));}} style={{ background:C.blue, border:"none", color:C.white, padding:"12px 28px", borderRadius:"24px", cursor:"pointer", fontFamily:FONT, fontSize:"14px", fontWeight:"700", fontStyle:"normal", letterSpacing:"-0.01em" }}>Retry</button>
       </div>
     </div>
   );
