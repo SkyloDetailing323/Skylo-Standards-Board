@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, Fragment } from "react";
 import { TEST_QUESTIONS, TESTS, TEST_KEYS, questionsFor, shuffle } from "./trainingTest.js";
-import { scorecard, fixList, pageKind, pageLabel, SEO_GOALS } from "./seoScore.js";
+import { scorecard, fixList, pageKind, pageLabel, offered, SEO_GOALS } from "./seoScore.js";
 import { tierFor, BONUS_TIERS, FREQ_LABEL, CHARGEBACK_SERVICES, buildSales, monthPoints, reviewList } from "./salesPoints.js";
 import { computeOpsMonth, monthRange, mountainDate, CALLBACK_TIERS, QUOTA_TIERS, RETENTION_TIERS, NON_ROUTE_VEHICLES, OPS_EXCLUDED_TITLES } from "./opsBonus.js";
 import { techDriverDays, weeklyDriverScore, findUnassignedDriving, DRIVER_CONFIG } from "./driverScoring.js";
@@ -6101,8 +6101,8 @@ function SearchConsolePanel({ range, token }) {
   const days = d?.daily?.length || 0;
   const change = (a, b) => b ? `${a >= b ? "▲" : "▼"} ${Math.abs(Math.round(((a - b) / b) * 100))}% vs the ${days} days before` : "no earlier data yet";
   const nb = (d?.queries || []).filter(q => !q.brand);
-  const almost = nb.filter(q => q.position >= 4 && q.position <= 20).sort((a, b) => b.impressions - a.impressions);
-  const unclicked = nb.filter(q => q.position <= 10 && q.impressions >= 10 && q.clicks / q.impressions < 0.02).sort((a, b) => b.impressions - a.impressions);
+  const almost = nb.filter(offered).filter(q => q.position >= 4 && q.position <= 20).sort((a, b) => b.impressions - a.impressions);
+  const unclicked = nb.filter(offered).filter(q => q.position <= 10 && q.impressions >= 10 && q.clicks / q.impressions < 0.02).sort((a, b) => b.impressions - a.impressions);
   const cities = (d?.pages || []).filter(p => pageKind(p.page) === "city");
   const others = (d?.pages || []).filter(p => pageKind(p.page) === "page" || pageKind(p.page) === "maps");
   const sm = conn.last_result?.sitemaps || [];

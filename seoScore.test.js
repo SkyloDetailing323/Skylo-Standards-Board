@@ -51,7 +51,7 @@ test("scorecard", () => {
 test("fix list: biggest city pages first, rank-1-no-clicks flagged, forms/legal skipped", () => {
   const f = fixList(report);
   assert.match(f[0].title, /^American Fork page: shown 159 times/);
-  assert.ok(f.some(x => x.title.includes("car ceramic coating near me")));
+  assert.ok(!f.some(x => /ceramic/i.test(x.title + x.body)));   // a service Skylo doesn't sell
   assert.ok(!f.some(x => /quote|tos/.test(x.title)));
   assert.ok(!f.some(x => x.title.startsWith("Homepage")));   // already top 3
 });
@@ -62,6 +62,7 @@ test("indexing problems go to the top", () => {
 });
 
 test("a #1 rank nobody clicks outranks smaller city pages in the fix list", () => {
-  const titles = fixList(report).map(f => f.title);
-  assert.ok(titles.findIndex(t => t.includes("car ceramic coating")) < titles.findIndex(t => t.startsWith("Provo page")));
+  const r = { ...report, queries: [...report.queries, { query: "mobile detailing near me", clicks: 0, impressions: 11, position: 1, brand: false }] };
+  const titles = fixList(r).map(f => f.title);
+  assert.ok(titles.findIndex(t => t.includes("mobile detailing near me")) < titles.findIndex(t => t.startsWith("Provo page")));
 });

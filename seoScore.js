@@ -10,6 +10,11 @@ export const SEO_GOALS = {
   pageOneClickRate: 3,   // % of non-brand page-one appearances that get a click
 };
 
+// Searches for services Skylo doesn't sell. Never suggested as work to do,
+// and left out of the opportunity lists, however well they rank.
+export const NOT_OFFERED = /ceramic/i;
+export const offered = q => !NOT_OFFERED.test(q.query || "");
+
 const path = url => String(url || "").replace(/^https?:\/\/[^/]+/, "") || "/";
 const MAPS = /utm_campaign=gbp/i;
 const CITY = /^\/(car-detailing-[a-z-]+|salt-lake-city|park-city)\/?$/i;
@@ -97,7 +102,7 @@ export function fixList(d, limit = 6) {
       body:`It ranks about ${spot}. Rewrite its Google headline and description (e.g. "Mobile Car Detailing in ${kind === "city" ? pageLabel(p.page).replace(/ page$/, "") : "Utah"} | We Come to You | 1,100+ 5★ Reviews"), add photos and reviews from local customers, and link to it from the homepage. Aim for the top 3.` });
   }
   for (const q of d.queries || []) {
-    if (q.brand || q.position == null || q.position > 3 || q.impressions < 10 || rate(q.clicks, q.impressions) >= 2) continue;
+    if (q.brand || !offered(q) || q.position == null || q.position > 3 || q.impressions < 10 || rate(q.clicks, q.impressions) >= 2) continue;
     out.push({ weight:q.impressions * 10, title:`"${q.query}": you rank #${Math.round(q.position)} but nobody clicks`,
       body:"People see you near the top and still skip you — usually the page Google shows isn't about this exact service. Give it its own page with a headline that matches the search." });
   }
