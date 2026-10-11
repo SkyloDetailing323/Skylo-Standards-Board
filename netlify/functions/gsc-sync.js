@@ -93,7 +93,8 @@ exports.handler = async (event) => {
     const sitemaps = ((await gfetch(`${API}/sites/${encodeURIComponent(site)}/sitemaps`, token).catch(() => ({}))).sitemap || [])
       .map(s => ({ path: s.path, last_downloaded: s.lastDownloaded || null, errors: Number(s.errors) || 0, warnings: Number(s.warnings) || 0, pending: !!s.isPending }));
     const byPage = {};
-    for (const r of pRows) byPage[r.page] = (byPage[r.page] || 0) + r.impressions;
+    // Tracking links (?utm_...) aren't real pages -- Google never indexes them.
+    for (const r of pRows) if (!r.page.includes("?")) byPage[r.page] = (byPage[r.page] || 0) + r.impressions;
     const top = Object.entries(byPage).sort((a, b) => b[1] - a[1]).slice(0, INSPECT_PAGES).map(([p]) => p);
     const status = [];
     for (let i = 0; i < top.length; i += 5) {
