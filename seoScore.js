@@ -10,9 +10,10 @@ export const SEO_GOALS = {
   pageOneClickRate: 3,   // % of non-brand page-one appearances that get a click
 };
 
-// Searches for services Skylo doesn't sell. Never suggested as work to do,
-// and left out of the opportunity lists, however well they rank.
-export const NOT_OFFERED = /ceramic/i;
+// Searches for services Skylo doesn't sell or places it doesn't serve
+// (owner, Oct 2026). Never suggested as work to do, and left out of the
+// opportunity lists, however well they rank.
+export const NOT_OFFERED = /ceramic|roosevelt/i;
 export const offered = q => !NOT_OFFERED.test(q.query || "");
 
 const path = url => String(url || "").replace(/^https?:\/\/[^/]+/, "") || "/";

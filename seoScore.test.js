@@ -66,3 +66,8 @@ test("a #1 rank nobody clicks outranks smaller city pages in the fix list", () =
   const titles = fixList(r).map(f => f.title);
   assert.ok(titles.findIndex(t => t.includes("mobile detailing near me")) < titles.findIndex(t => t.startsWith("Provo page")));
 });
+
+test("places Skylo doesn't serve are never suggested", () => {
+  const r = { ...report, queries: [...report.queries, { query: "mobile detailing roosevelt ut", clicks: 0, impressions: 30, position: 1, brand: false }] };
+  assert.ok(!fixList(r).some(x => /roosevelt/i.test(x.title + x.body)));
+});
