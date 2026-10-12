@@ -71,3 +71,13 @@ test("places Skylo doesn't serve are never suggested", () => {
   const r = { ...report, queries: [...report.queries, { query: "mobile detailing roosevelt ut", clicks: 0, impressions: 30, position: 1, brand: false }] };
   assert.ok(!fixList(r).some(x => /roosevelt/i.test(x.title + x.body)));
 });
+
+test("redirects and tracking links aren't site-health issues", () => {
+  const r = { ...report, page_status: [
+    { page: "http://skylod.com/", verdict: "NEUTRAL", coverage: "Page with redirect" },
+    { page: `${site}/?utm_campaign=gbp`, verdict: "NEUTRAL", coverage: "URL is unknown to Google" },
+    { page: `${site}/`, verdict: "PASS" },
+  ] };
+  assert.equal(Object.fromEntries(scorecard(r, 6).map(x => [x.key, x])).health.status, "good");
+  assert.ok(!fixList(r).some(x => x.title.startsWith("Google can't show")));
+});
