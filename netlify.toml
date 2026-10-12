@@ -91,3 +91,10 @@
   # Nightly ~1:52 AM Mountain (07:52 UTC): re-reads the open pay period(s)
   # from HCP so edits made after a job first synced reach Payroll.
   schedule = "52 7 * * *"
+
+[functions."tech-bookings-scan"]
+  # Hourly, after hcp-sales-sync (:07): finds HCP jobs with a "Technician
+  # Booking - " line item so an admin can pick who booked it. Never pays
+  # anything by itself.
+  schedule = "37 * * * *"
+  timeout = 26
