@@ -22,6 +22,10 @@ const CITY = /^\/(car-detailing-[a-z-]+|salt-lake-city|park-city)\/?$/i;
 // Pages that aren't worth working on for search (legal, forms).
 const SKIP = /^\/(tos|terms|privacy|quote)(\/|$)/i;
 
+// A page Google isn't showing. Redirects (http:// -> https://) and tracking
+// links (?utm_...) are expected and aren't problems.
+const notShown = p => p.verdict && p.verdict !== "PASS" && !/redirect/i.test(p.coverage || "") && !String(p.page).includes("?");
+
 export function pageKind(url) {
   if (MAPS.test(url)) return "maps";
   const p = path(url);
@@ -57,7 +61,7 @@ export function scorecard(d, days) {
   const p1Rate = rate(p1.reduce((s, q) => s + q.clicks, 0), p1.reduce((s, q) => s + q.impressions, 0));
   const maps = (d.pages || []).filter(p => pageKind(p.page) === "maps").reduce((s, p) => s + p.clicks, 0);
   const prevMaps = d.prev_maps?.clicks || 0;
-  const notIndexed = (d.page_status || []).filter(p => p.verdict && p.verdict !== "PASS").length;
+  const notIndexed = (d.page_status || []).filter(notShown).length;
   const sm = d.connection?.last_result?.sitemaps || [];
   const smErrors = sm.reduce((s, x) => s + (x.errors || 0), 0);
   const healthIssues = notIndexed + smErrors + (sm.length ? 0 : 1);
@@ -89,7 +93,7 @@ export function scorecard(d, days) {
 export function fixList(d, limit = 6) {
   const out = [];
   for (const p of d.page_status || []) {
-    if (p.verdict && p.verdict !== "PASS") out.push({ weight:1e6, title:`Google can't show ${pageLabel(p.page)}`,
+    if (notShown(p)) out.push({ weight:1e6, title:`Google can't show ${pageLabel(p.page)}`,
       body:`Google says: "${p.coverage || p.verdict}". Ask whoever manages skylod.com to check this page is published and listed in the sitemap.` });
   }
   const sm = d.connection?.last_result?.sitemaps || [];
