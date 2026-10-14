@@ -6452,6 +6452,16 @@ const SALES_SELF_VIEW = { "4641f4da-a16f-411b-8688-8b81ac06eda7": "trevor" };
 // completed; points from ticket price x frequency; plans that stop inside the
 // chargeback window come back off in the month the first visit was missed.
 // The month's net points pick one tier.
+// Tap-to-open header for the long customer lists on the bonus.
+function SalesDrop({ open, toggle, title, right }) {
+  return (
+    <button onClick={toggle} style={{ width:"100%", display:"flex", justifyContent:"space-between", alignItems:"center", gap:"8px", background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"12px 14px", cursor:"pointer", fontFamily:FONT, textAlign:"left" }}>
+      <span style={{ fontWeight:"600", fontSize:"15px", color:C.black }}>{title}</span>
+      <span style={{ fontWeight:"600", fontSize:"14px", color:C.muted, whiteSpace:"nowrap" }}>{right} {open ? "▲" : "▼"}</span>
+    </button>
+  );
+}
+
 function SalesPointsBonus({ token, canReview=false }) {
   const thisMonth = mountainDate(new Date().toISOString()).slice(0, 7);
   const [month, setMonth] = useState(thisMonth);
@@ -6460,6 +6470,8 @@ function SalesPointsBonus({ token, canReview=false }) {
   const [saving, setSaving] = useState(null);
   const [showUntagged, setShowUntagged] = useState(false);
   const [showClawbacks, setShowClawbacks] = useState(false);
+  const [showSales, setShowSales] = useState(false);
+  const [showReview, setShowReview] = useState(false);
   const s = useGrowthReport({ type:"sales_deals", rep:"trevor", from:"2026-06-01", to:today, v:bump }, token);
   const overrides = useMemo(() => Object.fromEntries((s.data?.overrides || []).map(o => [o.hcp_job_id, o.rep])), [s.data]);
   const sales = useMemo(() => s.data ? buildSales(s.data.jobs || [], { tag:s.data.tag, revenueByJob:s.data.revenue || {}, overrides, repKey:"trevor" }) : [], [s.data, overrides]);
@@ -6570,8 +6582,9 @@ function SalesPointsBonus({ token, canReview=false }) {
         )}
         {canReview && s.data.evidence_failed && <div style={{ fontSize:"12px", color:C.muted }}>The "Needs a look" list didn't load this time (the database was slow). The bonus numbers above aren't affected.</div>}
         {review && (review.mismatch.length + review.missed.length + review.untagged.length > 0) && (<>
-          <ListTitle right="last 100 days">Needs a look</ListTitle>
-          <div style={{ fontSize:"12px", color:C.muted, marginTop:"-4px" }}>HCP can't tell us who booked a job, so credit comes from the "sold by" tag. These don't line up with who was on the calls and texts with the customer in GHL, or have no tag. Pick who sold it; your pick wins over the tag.</div>
+          <SalesDrop open={showReview} toggle={() => setShowReview(v => !v)} title={`Needs a look · ${review.mismatch.length + review.missed.length} to check${review.untagged.length ? ` · ${review.untagged.length} untagged` : ""}`} right="last 100 days"/>
+          {showReview && (<>
+          <div style={{ fontSize:"12px", color:C.muted }}>HCP can't tell us who booked a job, so credit comes from the "sold by" tag. These don't line up with who was on the calls and texts with the customer in GHL, or have no tag. Pick who sold it; your pick wins over the tag.</div>
           {review.mismatch.map(e => reviewRow(e, <span style={{ color:C.red }}>Tagged Trevor, but {e.ghl_rep} was talking to them</span>))}
           {review.missed.map(e => reviewRow(e, <span style={{ color:C.red }}>No "sold by" tag, but Trevor was talking to them</span>))}
           {review.untagged.length > 0 && (
@@ -6580,10 +6593,11 @@ function SalesPointsBonus({ token, canReview=false }) {
             </button>
           )}
           {showUntagged && review.untagged.map(e => reviewRow(e, e.ghl_rep ? `No "sold by" tag · ${e.ghl_rep} was talking to them` : `No "sold by" tag · ${(e.tags||[]).join(", ") || "no tags at all"}`))}
+          </>)}
         </>)}
-        <ListTitle right={`${m.earned.length} sale${m.earned.length === 1 ? "" : "s"}`}>Sales completed in {label.split(" ")[0]}</ListTitle>
-        <RankRows rows={m.earned.map(d => ({ id:d.hcp_job_id, name:d.name, value:`${d.points.toLocaleString()} pts`,
-          sub:<>{fmtShortDate(d.done_on)} · {money2(d.price)} · {freqText(d)}{d.returning ? " · returning" : ""} · {statusText(d)}{overrides[d.hcp_job_id] ? " · credited by an owner" : ""}</> }))} empty={`No sales completed in ${label} yet.`}/>
+        <SalesDrop open={showSales} toggle={() => setShowSales(v => !v)} title={`Sales completed in ${label.split(" ")[0]} · ${m.earned.length} sale${m.earned.length === 1 ? "" : "s"}`} right={`${m.gross.toLocaleString()} pts`}/>
+        {showSales && <RankRows rows={m.earned.map(d => ({ id:d.hcp_job_id, name:d.name, value:`${d.points.toLocaleString()} pts`,
+          sub:<>{fmtShortDate(d.done_on)} · {money2(d.price)} · {freqText(d)}{d.returning ? " · returning" : ""} · {statusText(d)}{overrides[d.hcp_job_id] ? " · credited by an owner" : ""}</> }))} empty={`No sales completed in ${label} yet.`}/>}
         <div style={{ fontSize:"12px", color:C.muted }}>A sale is a completed HCP job tagged "sold by trevor", counted in the month it was completed. Points = first-visit price (no tips) × frequency from the points table; frequency comes from the job's plan tag, or else the client's scheduled visits over the next 6 months. A plan has to finish its first {Object.entries(CHARGEBACK_SERVICES).filter(([f,n])=>n>1).map(([f,n])=>`${n} ${FREQ_LABEL[f].toLowerCase()}`).join(", ")} services; if it stops sooner, it's at risk for {CHARGEBACK_GRACE_DAYS} days after the missed visit, then the points come off in the month those days end.</div>
         {s.loading && <div style={{ fontSize:"11px", color:C.muted }}>Refreshing...</div>}
       </>)}
