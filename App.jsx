@@ -6452,6 +6452,71 @@ const SALES_SELF_VIEW = { "4641f4da-a16f-411b-8688-8b81ac06eda7": "trevor" };
 // completed; points from ticket price x frequency; plans that stop inside the
 // chargeback window come back off in the month the first visit was missed.
 // The month's net points pick one tier.
+// Trevor's month at a glance: net points, bonus, and a 5-step track -- one
+// equal-width step per tier, each filling with the points between the tier
+// before it and that tier, so he can see how close he is to every one.
+function TierTrack({ m, t, isNow, today }) {
+  const net = Math.max(0, m.net);
+  const steps = BONUS_TIERS.map((b, i) => {
+    const from = i ? BONUS_TIERS[i - 1].points : 0;
+    return { ...b, from, fill:Math.min(1, Math.max(0, (net - from) / (b.points - from))) };
+  });
+  const cur = steps.findIndex(x => x.fill < 1);
+  const pos = cur < 0 ? 100 : (cur + steps[cur].fill) / steps.length * 100;
+  // Pace: this month's net so far, stretched to the whole month.
+  const [y, mo, d] = today.split("-").map(Number);
+  const dim = new Date(Date.UTC(y, mo, 0)).getUTCDate();
+  const pace = isNow && d >= 3 && net > 0 ? Math.round(net / d * dim) : null;
+  const paceTier = pace != null ? tierFor(pace) : null;
+  const done = "#34c759";
+  return (
+    <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"20px", padding:"18px 16px 14px", boxShadow:"0 1px 3px rgba(0,0,0,0.05)" }}>
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:"12px", flexWrap:"wrap" }}>
+        <div>
+          <div style={{ fontSize:"12px", color:C.muted, fontWeight:"600", fontFamily:FONT }}>Net points</div>
+          <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"48px", color:C.black, lineHeight:1, letterSpacing:"-0.03em", marginTop:"4px" }}>{m.net.toLocaleString()}</div>
+          <div style={{ fontSize:"12px", color:C.muted, marginTop:"4px" }}>{m.gross.toLocaleString()} earned{m.back ? <> − <span style={{ color:C.red }}>{m.back.toLocaleString()} clawed back</span></> : null}</div>
+        </div>
+        <div style={{ textAlign:"right" }}>
+          <div style={{ display:"inline-block", background:t.tier ? `${done}1a` : C.blueLt, color:t.tier ? "#248a3d" : C.blue, borderRadius:"980px", padding:"4px 12px", fontFamily:FONT, fontWeight:"700", fontSize:"13px" }}>{t.tier ? `Tier ${t.tier} unlocked` : "Tier 1 not reached yet"}</div>
+          <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"28px", color:C.black, marginTop:"6px", lineHeight:1.1 }}>{usd(t.pay)}</div>
+          <div style={{ fontSize:"12px", color:C.muted }}>bonus {isNow ? "so far" : "for the month"}</div>
+        </div>
+      </div>
+
+      <div style={{ marginTop:"16px", fontFamily:FONT, fontSize:"15px", color:C.black }}>
+        {t.next
+          ? <><b style={{ color:C.blue }}>{t.toNext.toLocaleString()} pts</b> to Tier {t.next.tier}: bonus goes to <b>{usd(t.next.pay)}</b>{t.pay ? <span style={{ color:C.muted }}> (+{usd(t.next.pay - t.pay)})</span> : null}</>
+          : <b style={{ color:"#248a3d" }}>Top tier reached. Max bonus locked in.</b>}
+      </div>
+      {pace != null && <div style={{ fontSize:"12px", color:C.muted, marginTop:"2px" }}>On pace for about <b style={{ color:C.black }}>{pace.toLocaleString()} pts</b>{paceTier.tier ? <>: Tier {paceTier.tier}, {usd(paceTier.pay)}</> : <>: short of Tier 1</>}</div>}
+
+      <div style={{ position:"relative", marginTop:"30px" }}>
+        <div style={{ position:"absolute", left:`${pos}%`, top:"-24px", transform:`translateX(${pos > 92 ? "-100%" : pos < 8 ? "0" : "-50%"})`, transition:"left .6s ease", background:C.black, color:"#fff", borderRadius:"6px", padding:"2px 7px", fontSize:"11px", fontWeight:"700", fontFamily:FONT, whiteSpace:"nowrap" }}>{m.net.toLocaleString()}</div>
+        <div style={{ display:"grid", gridTemplateColumns:`repeat(${steps.length}, 1fr)`, gap:"3px" }}>
+          {steps.map((x, i) => (
+            <div key={x.tier} style={{ height:"14px", background:C.blueLt, borderRadius:i === 0 ? "7px 3px 3px 7px" : i === steps.length - 1 ? "3px 7px 7px 3px" : "3px", overflow:"hidden" }}>
+              <div style={{ width:`${x.fill * 100}%`, height:"100%", background:x.fill >= 1 ? done : `linear-gradient(90deg, ${C.blue}, #4db3ff)`, boxShadow:x.fill > 0 && x.fill < 1 ? `0 0 10px ${C.blue}80` : "none", transition:"width .6s ease" }}/>
+            </div>
+          ))}
+        </div>
+        <div style={{ display:"grid", gridTemplateColumns:`repeat(${steps.length}, 1fr)`, gap:"3px", marginTop:"8px" }}>
+          {steps.map((x, i) => {
+            const hit = x.fill >= 1, next = i === cur;
+            return (
+              <div key={x.tier} style={{ textAlign:"right", fontFamily:FONT, minWidth:0 }}>
+                <div style={{ fontSize:"12px", fontWeight:"700", color:hit ? "#248a3d" : next ? C.blue : C.muted }}>{hit ? "✓ " : ""}Tier {x.tier}</div>
+                <div style={{ fontSize:"13px", fontWeight:"700", color:hit || next ? C.black : C.muted }}>{usd(x.pay)}</div>
+                <div style={{ fontSize:"11px", color:C.muted, whiteSpace:"nowrap" }}>{hit ? `${x.points.toLocaleString()} pts` : `${(x.points - net).toLocaleString()} to go`}</div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // Tap-to-open header for the long customer lists on the bonus.
 function SalesDrop({ open, toggle, title, right }) {
   return (
@@ -6471,6 +6536,7 @@ function SalesPointsBonus({ token, canReview=false }) {
   const [showUntagged, setShowUntagged] = useState(false);
   const [showClawbacks, setShowClawbacks] = useState(false);
   const [showSales, setShowSales] = useState(false);
+  const [salesSort, setSalesSort] = useState("recent");
   const [showReview, setShowReview] = useState(false);
   const s = useGrowthReport({ type:"sales_deals", rep:"trevor", from:"2026-06-01", to:today, v:bump }, token);
   const overrides = useMemo(() => Object.fromEntries((s.data?.overrides || []).map(o => [o.hcp_job_id, o.rep])), [s.data]);
@@ -6510,7 +6576,6 @@ function SalesPointsBonus({ token, canReview=false }) {
   const t = tierFor(Math.max(0, m.net));
   const shift = n => { const [y, mo] = month.split("-").map(Number); const d = new Date(Date.UTC(y, mo - 1 + n, 1)); setMonth(d.toISOString().slice(0, 7)); };
   const label = new Date(month + "-15T12:00:00Z").toLocaleDateString("en-US", { month:"long", year:"numeric", timeZone:"UTC" });
-  const top = BONUS_TIERS[BONUS_TIERS.length - 1].points;
   const arrow = { background:C.white, border:`1px solid ${C.border}`, borderRadius:"50%", width:"34px", height:"34px", display:"flex", alignItems:"center", justifyContent:"center", fontSize:"13px", cursor:"pointer", fontFamily:FONT, color:C.blue };
   const statusText = d => d.status === "cleared" ? <span style={{ color:C.green }}>Cleared</span>
     : d.status === "pending" ? <span style={{ color:C.muted }}>{d.completed} of {d.needed} services</span>
@@ -6528,24 +6593,7 @@ function SalesPointsBonus({ token, canReview=false }) {
       </div>
       <ReportState s={s}/>
       {s.data && (<>
-        <TileGrid>
-          <StatTile label="Net points" value={m.net.toLocaleString()} sub={`${m.gross.toLocaleString()} earned${m.back ? ` − ${m.back.toLocaleString()} clawed back` : ""}`}/>
-          <StatTile label="Current tier" value={t.tier ? `Tier ${t.tier}` : "None yet"} sub={t.tier ? `${BONUS_TIERS[t.tier - 1].points.toLocaleString()}+ points` : "Tier 1 at 1,400 points"}/>
-          <StatTile label="Points to next tier" value={t.next ? t.toNext.toLocaleString() : "Top tier"} sub={t.next ? `Tier ${t.next.tier} pays ${usd(t.next.pay)}` : "Highest bonus reached"}/>
-          <StatTile label="Bonus earned" value={usd(t.pay)} sub={month === thisMonth ? "so far this month" : "for the month"}/>
-        </TileGrid>
-        <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"12px 14px" }}>
-          <div style={{ height:"10px", background:C.cardLt, borderRadius:"5px", overflow:"hidden" }}>
-            <div style={{ width:`${Math.min(100, Math.max(0, m.net) / top * 100)}%`, height:"100%", background:t.tier ? C.green : C.blue, borderRadius:"5px" }}/>
-          </div>
-          <div style={{ display:"grid", gridTemplateColumns:`repeat(${BONUS_TIERS.length}, 1fr)`, gap:"4px", marginTop:"8px" }}>
-            {BONUS_TIERS.map(b => (
-              <div key={b.tier} style={{ textAlign:"center", fontSize:"11px", color:m.net >= b.points ? C.green : C.muted, fontWeight:t.tier === b.tier ? "700" : "500" }}>
-                <div>Tier {b.tier}</div><div>{b.points.toLocaleString()} pts</div><div>{usd(b.pay)}</div>
-              </div>
-            ))}
-          </div>
-        </div>
+        <TierTrack m={m} t={t} isNow={month === thisMonth} today={today}/>
         {(m.chargebacks.length > 0 || atRisk.length > 0) && (
           <div style={{ background:C.card, border:`1px solid ${C.red}30`, borderRadius:"16px", overflow:"hidden" }}>
             <button onClick={() => setShowClawbacks(v => !v)} style={{ width:"100%", display:"flex", justifyContent:"space-between", alignItems:"center", gap:"8px", background:`${C.red}08`, border:"none", padding:"12px 14px", cursor:"pointer", fontFamily:FONT, textAlign:"left" }}>
@@ -6596,7 +6644,14 @@ function SalesPointsBonus({ token, canReview=false }) {
           </>)}
         </>)}
         <SalesDrop open={showSales} toggle={() => setShowSales(v => !v)} title={`Sales completed in ${label.split(" ")[0]} · ${m.earned.length} sale${m.earned.length === 1 ? "" : "s"}`} right={`${m.gross.toLocaleString()} pts`}/>
-        {showSales && <RankRows rows={m.earned.map(d => ({ id:d.hcp_job_id, name:d.name, value:`${d.points.toLocaleString()} pts`,
+        {showSales && m.earned.length > 1 && (
+          <div style={{ display:"inline-flex", alignSelf:"flex-start", background:C.cardLt, borderRadius:"980px", padding:"3px" }}>
+            {[["recent","Most recent"],["points","Highest points"]].map(([k, l]) => (
+              <button key={k} onClick={() => setSalesSort(k)} style={{ background:salesSort === k ? C.white : "transparent", color:salesSort === k ? C.black : C.muted, border:"none", borderRadius:"980px", padding:"6px 14px", fontSize:"13px", fontWeight:"600", fontFamily:FONT, cursor:"pointer", boxShadow:salesSort === k ? "0 1px 3px rgba(0,0,0,0.12)" : "none" }}>{l}</button>
+            ))}
+          </div>
+        )}
+        {showSales && <RankRows rows={(salesSort === "points" ? [...m.earned].sort((a, b) => b.points - a.points) : m.earned).map(d => ({ id:d.hcp_job_id, name:d.name, value:`${d.points.toLocaleString()} pts`,
           sub:<>{fmtShortDate(d.done_on)} · {money2(d.price)} · {freqText(d)}{d.returning ? " · returning" : ""} · {statusText(d)}{overrides[d.hcp_job_id] ? " · credited by an owner" : ""}</> }))} empty={`No sales completed in ${label} yet.`}/>}
         <div style={{ fontSize:"12px", color:C.muted }}>A sale is a completed HCP job tagged "sold by trevor", counted in the month it was completed. Points = first-visit price (no tips) × frequency from the points table; frequency comes from the job's plan tag, or else the client's scheduled visits over the next 6 months. A plan has to finish its first {Object.entries(CHARGEBACK_SERVICES).filter(([f,n])=>n>1).map(([f,n])=>`${n} ${FREQ_LABEL[f].toLowerCase()}`).join(", ")} services; if it stops sooner, it's at risk for {CHARGEBACK_GRACE_DAYS} days after the missed visit, then the points come off in the month those days end.</div>
         {s.loading && <div style={{ fontSize:"11px", color:C.muted }}>Refreshing...</div>}
