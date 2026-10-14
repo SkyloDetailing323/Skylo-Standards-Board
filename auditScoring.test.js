@@ -46,6 +46,12 @@ test("arrival answers map from config", () => {
   assert.equal(round1(pts("5 min or more")), 0.5);
   assert.equal(round1(pts("1-10 min late")), 0.5);
   assert.equal(round1(pts("More than 10 min late")), 0);
+  // The form's current wording (Oct 2026).
+  assert.equal(round1(pts("1 min-10 min Late")), 0.5);
+  assert.equal(round1(pts("10 min+ Late")), 0);
+  const a = scoreTechAudit({ ...workedExample, fields: { ...workedExample.fields, "zRIHBlKBZT8KrcY6l7rI": "10 min+ Late" } });
+  assert.deepEqual(a.unmapped, []);
+  assert.ok(job(a, "9am").missed.includes("Late: 10 min+ Late"));
 });
 
 test("TEST Landon Bliss 2026-10-01: all complete, on time -> 100% (Marketing question didn't exist yet)", () => {

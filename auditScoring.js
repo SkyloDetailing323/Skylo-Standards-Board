@@ -121,13 +121,13 @@ export const AUDIT_CONFIG = {
       { key: "marketing", name: "Tech Marketing (3 flyers)",  missed: "No flyers" },
       { key: "nightText", name: "Night Before Text",          missed: "No night-before text" },
     ],
-    // 9 AM only. The form currently offers "On time" / "5 min or more"; the
-    // other two are the planned answers.
+    // 9 AM only. aliases = every wording the form has used (GHL answers
+    // "1 min-10 min Late" / "10 min+ Late" since Oct 2026).
     arrivalOptions: [
       { answer: "On time",               points: 1 },
       { answer: "5 min or more",         points: 0.5 },
-      { answer: "1-10 min late",         points: 0.5 },
-      { answer: "More than 10 min late", points: 0 },
+      { answer: "1-10 min late",         points: 0.5, aliases: ["1 min-10 min Late"] },
+      { answer: "More than 10 min late", points: 0,   aliases: ["10 min+ Late"] },
     ],
     // Submissions made while the form was being built. Shown with a TEST tag;
     // delete them in GHL and in ghl_form_submissions once testing is done.
@@ -142,7 +142,11 @@ export const AUDIT_CONFIG = {
   // since the last meeting -- owner's call. Only this tab; the rest of the
   // app (pay, HCP) stays Sun-Sat.
   weekStartsOn: 3,
+  // On the roster but never audited (they do the audits, or aren't detail
+  // techs): left off the Audit Scores lists and the overall leaderboard.
+  hiddenFromAudits: ["Ethan Hamilton", "Will Faulkner", "Trevor Prince"],
 };
+export const hiddenFromAudits = t => !!t && AUDIT_CONFIG.hiddenFromAudits.some(n => norm(n) === norm(t.name));
 
 // ─── matching helpers ──────────────────────────────────────────────────────
 export const norm = s => String(s ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -362,7 +366,7 @@ export function scoreTechAudit(sub, cfg = AUDIT_CONFIG.audit) {
     if (onForm(q.arrival)) {
       job.max += 1;
       const v = firstText(val(q.arrival));
-      const opt = cfg.arrivalOptions.find(o => norm(o.answer) === norm(v));
+      const opt = cfg.arrivalOptions.find(o => [o.answer, ...(o.aliases || [])].some(a => norm(a) === norm(v)));
       if (opt) { job.points += opt.points; if (opt.points < 1) job.missed.push(`Late: ${v}`); }
       else if (!v) { job.missed.push("Arrival: no answer"); job.flags.push("Arrival on time left blank — incomplete"); }
       else { job.missed.push(`Arrival: "${v}"`); job.flags.push(`Unrecognized arrival answer "${v}"`); unmapped.push(`${slot.label} arrival: "${v}"`); }

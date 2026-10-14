@@ -108,3 +108,14 @@ test("severe speeding events within 60s on one truck count once", () => {
   const apart = scoreDriverDay({ date: "2026-10-06", miles: 100, events: [ev("00", 22), { ...ev("00", 22), event_time: "2026-10-06T10:05:00-06:00" }] });
   assert.equal(apart.counts.speeding_severe, 2);
 });
+
+test("Fleet Activity's truck column may be called \"Vehicle\" (Ford renamed it) and still maps names to VINs", () => {
+  const fleet = "﻿VIN,Vehicle,Distance Driven (mi),Engine Hours (hr),Total Idle Time (hr),Trips,Speeding Over Posted Duration (min)\n3FTTW8J34SRA88072,Mav/3,50,1,0.5,3,2\n";
+  const speeding = "Date,Time,Vehicle,Speed Limit (mph),Event Type,Speed (mph),Duration (Seconds)\n" + '10/8/26,"9:00:00 AM",Mav/3,25,"Speeding Over Posted Limit",31,<10\n';
+  // No vehicles list passed: the VIN has to come from the Fleet Activity file itself.
+  const imp = buildFordImport([{ name: "fleet.csv", text: fleet }, { name: "speeding.csv", text: speeding }], []);
+  assert.equal(imp.daily[0].vehicle, "Mav/3");
+  assert.equal(imp.events.length, 1);
+  assert.equal(imp.events[0].vin, "3FTTW8J34SRA88072");
+  assert.ok(!imp.warnings.some(w => /No VIN/.test(w)));
+});

@@ -178,7 +178,9 @@ async function salesJobs(repKey, rep) {
     rest(`hcp_sales_jobs?select=${cols}&raw->>tags=ilike.*${encodeURIComponent(rep.salesTag)}*`),
     rest("sales_credit_overrides?select=hcp_job_id,rep,set_by,set_at"),
     // Last ~100 days is plenty to review (and stays under the 1,000-row cap).
-    rpc("sales_credit_review_rows", { p_from: new Date(Date.now() - 100 * 864e5).toISOString() }),
+    // Owners' review list only -- if it's slow or fails, the bonus still loads.
+    rpc("sales_credit_review_rows", { p_from: new Date(Date.now() - 100 * 864e5).toISOString() })
+      .catch(e => { console.error("sales_credit_review_rows:", e.message); return null; }),
   ]);
   // Jobs an owner credited to this rep without the tag.
   const extraIds = overrides.filter(o => o.rep === repKey).map(o => o.hcp_job_id).filter(id => !tagged.some(j => j.hcp_job_id === id));
@@ -192,7 +194,7 @@ async function salesJobs(repKey, rep) {
   const revRows = sales.length ? await restIn("jobs?select=hcp_job_id,revenue", "hcp_job_id", sales.map(j => j.hcp_job_id)) : [];
   const revenue = {};
   for (const r of revRows) revenue[r.hcp_job_id] = (revenue[r.hcp_job_id] || 0) + (Number(r.revenue) || 0);
-  return { jobs, revenue, overrides, evidence: evidence || [] };
+  return { jobs, revenue, overrides, evidence: evidence || [], evidence_failed: evidence == null };
 }
 
 const isDate = s => /^\d{4}-\d{2}-\d{2}$/.test(s || "");
@@ -305,7 +307,7 @@ exports.handler = async (event) => {
       if (!REPS[q.rep]?.salesTag) return json(400, { error: "No points bonus for this rep" });
       const data = await salesJobs(q.rep, REPS[q.rep]);
       // The review list (evidence + overrides) is for owners only.
-      if (who.role !== "owner") { delete data.evidence; }
+      if (who.role !== "owner") { delete data.evidence; delete data.evidence_failed; }
       return json(200, { rep: q.rep, tag: REPS[q.rep].salesTag, ...data });
     }
     return json(400, { error: "Unknown report type" });

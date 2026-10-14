@@ -1,6 +1,6 @@
 // techScores.js
 // The overall Tech Score: five sections, each 0-100, weighted --
-//   Job Audit (Tech Audit form), Callbacks (quality), Quota (production,
+//   Job Audit (Tech Audit form), Callbacks & Damage (quality), Quota (production,
 //   month to date), Driving (Ford Pro) and Equipment & Truck (Tote Checks +
 //   nightly Truck Check grades)
 // -- over the last 4 Wed-Tue weeks, plus team scores (company-wide and per
@@ -23,13 +23,25 @@ export const TECH_SCORE_CONFIG = {
   // re-normalized, so missing data never counts as 0.
   sections: [
     { key: "audit",      label: "Job Audit",         icon: "📋", weight: 30 },
-    { key: "quality",    label: "Callbacks",         icon: "📞", weight: 25 },
+    { key: "quality",    label: "Callbacks & Damage", icon: "📞", weight: 25 },
     { key: "production", label: "Quota",             icon: "💰", weight: 20 },
     { key: "driver",     label: "Driving",           icon: "🚗", weight: 15 },
     { key: "equipment",  label: "Equipment & Truck", icon: "🧰", weight: 10 },
   ],
-  // Callbacks: start at 100, minus this per callback by severity level, times
-  // the callback's split share (weight). Legacy rows with no level count as L3.
+  // What the score cards show. Callbacks and Damage are two pills for
+  // reporting, but both come out of the one weighted "quality" section above:
+  // a Level 2 damage costs exactly what a Level 2 callback does.
+  pills: [
+    { key: "audit",      label: "Job Audit",         icon: "📋" },
+    { key: "callbacks",  label: "Callbacks",         icon: "📞" },
+    { key: "damage",     label: "Damage",            icon: "💥" },
+    { key: "production", label: "Quota",             icon: "💰" },
+    { key: "driver",     label: "Driving",           icon: "🚗" },
+    { key: "equipment",  label: "Equipment & Truck", icon: "🧰" },
+  ],
+  // Callbacks & Damage: start at 100, minus this per callback or damage
+  // report by severity level, times the tech's split share (weight). Legacy
+  // callbacks with no level count as L3.
   callbackDeduction: { 1: 25, 2: 50, 3: 100 },
   // Quota: month to date for the month holding the window's last day. Each
   // target is prorated by days elapsed (at least minDaysElapsed, so the 1st
@@ -50,7 +62,8 @@ export const TECH_SCORE_CONFIG = {
   // graded = the grade; submitted but not graded yet = notGradedScore;
   // worked but no Truck Check = missedScore. Apprentices still in training
   // (title detail_apprentice) don't have a truck of their own: no score.
-  truck: { notGradedScore: 100, missedScore: 0, exemptTitles: ["detail_apprentice"] },
+  // Nights before startDate (when Truck Checks began) aren't counted.
+  truck: { notGradedScore: 100, missedScore: 0, exemptTitles: ["detail_apprentice"], startDate: "2026-10-07" },
 };
 
 // ─── helpers ────────────────────────────────────────────────────────────────
@@ -103,12 +116,13 @@ export function callbackDateOf(c) {
 }
 // callbacks: this tech's callbacks in the window. worked: the tech had jobs
 // in the window (no jobs and no callbacks = no score).
+// Damage reports can be passed in too (kind: "damage"); they score the same.
 export function qualityScore(callbacks, worked, cfg = TECH_SCORE_CONFIG) {
   const items = (callbacks || []).map(c => {
     const level = [1, 2, 3].includes(Number(c.severity)) ? Number(c.severity) : 3;
     const share = c.weight == null || !Number.isFinite(Number(c.weight)) ? 1 : Number(c.weight);
-    return { id: c.id, date: callbackDateOf(c), level, legacy: c.severity == null, share, deduction: cfg.callbackDeduction[level] * share,
-      customer: c.customer_name || null, reason: c.reason || null, missed: c.missed_items || null };
+    return { id: c.id, kind: c.kind === "damage" ? "damage" : "callback", date: callbackDateOf(c), level, legacy: c.severity == null, share, deduction: cfg.callbackDeduction[level] * share,
+      customer: c.customer_name || null, reason: c.reason || null, missed: c.missed_items || c.damaged_items || null };
   }).sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")));
   const totalDeduction = items.reduce((s, i) => s + i.deduction, 0);
   if (!items.length && !worked) return { score: null, items, totalDeduction };
@@ -151,7 +165,7 @@ export function truckScore({ techId, tech, jobs = [], truckSubs = [], grades = [
   const byDay = Object.fromEntries(latestPerDay(truckSubs).map(s => [s.work_date, s]));
   if (isTruckExempt(tech, cfg)) return { score: null, exempt: true, nights: [], extra: [], worked: 0, submitted: 0, missed: 0 };
   const gradeById = Object.fromEntries(grades.map(g => [g.submission_id, g]));
-  const worked = workedDates(jobs, techId, from, to).filter(d => !today || d <= today);
+  const worked = workedDates(jobs, techId, from, to).filter(d => (!today || d <= today) && (!cfg.truck.startDate || d >= cfg.truck.startDate));
   const nights = worked.map(date => {
     const sub = byDay[date] || null, grade = sub ? gradeById[sub.id] || null : null;
     if (!sub) return date === today ? { date, sub, grade, status: "pending", score: null } : { date, sub, grade, status: "missed", score: cfg.truck.missedScore };
@@ -189,23 +203,27 @@ export function overallScore(sections, cfg = TECH_SCORE_CONFIG) {
 // Everything for one tech over the window [from, to]:
 //   subs        their GHL submissions (tote, audit, truck) -- any dates
 //   driverData  driver-scores data for the window, or null
-//   jobs, callbacks, reviews, switchovers  all rows (filtered here)
+//   jobs, callbacks, damage, reviews, switchovers  all rows (filtered here)
 //   quota       the quota setting; truckGrades: truck_check_grades rows
 //   today       YYYY-MM-DD (Mountain); quota runs month to date through
 //               min(to, today)
-export function techScoreCard({ techId, tech = null, subs = [], driverData = null, jobs = [], callbacks = [], reviews = [], switchovers = [], quota = null, truckGrades = [], from, to, today }, cfg = TECH_SCORE_CONFIG) {
+export function techScoreCard({ techId, tech = null, subs = [], driverData = null, jobs = [], callbacks = [], damage = [], reviews = [], switchovers = [], quota = null, truckGrades = [], from, to, today }, cfg = TECH_SCORE_CONFIG) {
   const inWin = (subs || []).filter(s => inRange(s.work_date, from, to));
   const week = techWeekScores(inWin);
   const totes = week.totes.map(t => ({ ...t, equipScore: toteEquipmentScore(t.missingCents, cfg) }));
   let driver = null;
   if (driverData) { const days = techDriverDays(techId, driverData).filter(d => inRange(d.date, from, to)); driver = { days, ...weeklyDriverScore(days) }; }
   const worked = workedDates(jobs, techId, from, to).length > 0;
-  const quality = qualityScore((callbacks || []).filter(c => c.tech_id === techId && inRange(callbackDateOf(c), from, to)), worked, cfg);
+  const mineIn = rows => (rows || []).filter(c => c.tech_id === techId && inRange(callbackDateOf(c), from, to));
+  const myCallbacks = mineIn(callbacks), myDamage = mineIn(damage).map(d => ({ ...d, kind: "damage" }));
+  const quality = qualityScore([...myCallbacks, ...myDamage], worked, cfg);
+  const callbacksOnly = qualityScore(myCallbacks, worked, cfg), damageOnly = qualityScore(myDamage, worked, cfg);
   const asOf = today && today < to ? today : to;
   const production = productionScore({ techId, tech, jobs, reviews, switchovers, quota, asOf }, cfg);
   const truck = truckScore({ techId, tech, jobs, truckSubs: inWin.filter(s => formKind(s.form_id) === "truck"), grades: truckGrades || [], from, to, today }, cfg);
   const equipment = equipmentScore(totes.map(t => t.equipScore), truck);
-  const sections = { audit: week.auditPct, quality: quality.score, production: production.score, driver: driver?.score ?? null, equipment: equipment.score };
+  // callbacks / damage: display-only pills; the overall uses quality (both).
+  const sections = { audit: week.auditPct, quality: quality.score, callbacks: callbacksOnly.score, damage: damageOnly.score, production: production.score, driver: driver?.score ?? null, equipment: equipment.score };
   return { techId, from, to, week, totes, driver, quality, production, truck, equipment, sections, overall: overallScore(sections, cfg) };
 }
 
@@ -224,7 +242,7 @@ export function teamsOf(techs) {
 // are left out); section averages likewise.
 function summarize(cards, cfg) {
   const out = { score: avg(cards.map(c => c.overall.score)), scored: cards.filter(c => c.overall.score != null).length, members: cards.length };
-  for (const s of cfg.sections) out[s.key] = avg(cards.map(c => c.sections[s.key]));
+  for (const s of [...cfg.sections, ...cfg.pills]) out[s.key] = avg(cards.map(c => c.sections[s.key]));
   out.pass = out.score == null ? null : out.score >= cfg.passLine;
   return out;
 }

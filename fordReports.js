@@ -53,6 +53,8 @@ const num = v => { const t = String(v ?? "").replace(/[^0-9.\-]/g, ""); if (!/[0
 const seconds = v => String(v || "").trim().startsWith("<") ? Math.max(0, (num(v) ?? 10) / 2) : num(v);
 // "Mav/1" (Ford) -> "mav1"; "Mav 1" (ours) -> "mav1".
 export const vehicleKey = s => String(s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+// Ford has named the truck column both "Vehicle Name" and "Vehicle".
+const fordVehicleName = r => r["Vehicle Name"] ?? r.Vehicle ?? "";
 
 // Ford's "10/6/26" + "6:56:58 AM" (Mountain time) -> { work_date, event_time }.
 // Fixed -6h, the same Mountain-time convention as the rest of the app.
@@ -76,7 +78,7 @@ export function buildFordImport(files, vehicles = []) {
   // then from our own vehicles list.
   const vinByName = {};
   vehicles.forEach(v => { vinByName[vehicleKey(v.name)] = v.vin; });
-  parsed.filter(f => f.kind === "fleet_activity").forEach(f => f.rows.forEach(r => { if (r.VIN) vinByName[vehicleKey(r["Vehicle Name"])] = r.VIN.toUpperCase(); }));
+  parsed.filter(f => f.kind === "fleet_activity").forEach(f => f.rows.forEach(r => { if (r.VIN) vinByName[vehicleKey(fordVehicleName(r))] = r.VIN.toUpperCase(); }));
   const knownVins = new Set(vehicles.map(v => v.vin));
 
   const daily = [], events = [], dates = {};
@@ -112,8 +114,8 @@ export function buildFordImport(files, vehicles = []) {
         // threshold is already inside it (and 85+ also gets its own flat
         // penalty per event), so adding it would count it twice.
         const posted = num(r["Speeding Over Posted Duration (min)"]) ?? 0;
-        if (dailyByVin[vin]) warnings.push(`${r["Vehicle Name"] || vin} is in more than one Fleet Activity file — using the last one.`);
-        dailyByVin[vin] = { vin, vehicle: r["Vehicle Name"], miles: num(r["Distance Driven (mi)"]) ?? 0, trips: num(r.Trips),
+        if (dailyByVin[vin]) warnings.push(`${fordVehicleName(r) || vin} is in more than one Fleet Activity file — using the last one.`);
+        dailyByVin[vin] = { vin, vehicle: fordVehicleName(r), miles: num(r["Distance Driven (mi)"]) ?? 0, trips: num(r.Trips),
           idle_minutes: num(r["Total Idle Time (hr)"]) != null ? Math.round(num(r["Total Idle Time (hr)"]) * 60 * 10) / 10 : null,
           speeding_minutes: Math.round(posted * 100) / 100 };
         continue;
