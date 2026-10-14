@@ -27,6 +27,7 @@ create table if not exists test_assignments (
 );
 create index if not exists test_assignments_tech_idx on test_assignments (tech_id);
 alter table test_assignments enable row level security;
+drop policy if exists "public access" on test_assignments;
 create policy "public access" on test_assignments for all using (true) with check (true);
 grant select, insert, update on test_assignments to anon, authenticated;
 

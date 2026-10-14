@@ -4896,8 +4896,8 @@ const RUBRIC_ITEMS_SEED = [
   { id:"item_38", sort_order:42, section:"daily", phase:"closeout", description:"Google review ask made via AirDrop, with a picture added", has_script:true, script_text:"We're doing a competition with our company for a monthly prize of the most Google reviews. If you wouldn't mind leaving me a quick 5-star review it would help me out a lot. I can AirDrop you the link right now. I'll just be cleaning up the equipment, so if you could fill it out and mention my name, that would be amazing!" },
   { id:"item_39", sort_order:43, section:"daily", phase:"closeout", description:"Referral ask made", has_script:true, script_text:"Is there any friends, family, or neighbors that you could think of that would love this service? If so, would you mind giving me their number or address so I could reach out to them? You get $20 off your next service for any referral that books and pays for the detail!" },
   { id:"item_40", sort_order:44, section:"daily", phase:"no_show", description:"30-second video walkthrough recorded and sent (interior: front seats, vacuum/LVP, windows, back area; exterior: rims, tires, wheel wells, windows, grill, back end)", has_script:false, script_text:"" },
-  { id:"item_41", sort_order:45, section:"daily", phase:"no_show", description:"Google review link sent via text (same wording as #41)", has_script:true, script_text:"Hey, if you loved your premium detail and thought I did a great job I would love it if you could leave me a 5-star rating on Google, here's the link, and if you just mention my name it would help a ton with a competition we're currently running!" },
-  { id:"item_42", sort_order:46, section:"daily", phase:"no_show", description:"Referral ask sent via text (same wording as #42)", has_script:true, script_text:"Is there any friends, family, or neighbors that you could think of that would love this service? If so, would you mind giving me their number or address so I could reach out to them? You get $20 off your next service for any referral that books and pays for the detail!" },
+  { id:"item_41", sort_order:45, section:"daily", phase:"no_show", description:"Google review link sent via text (same wording as #42)", has_script:true, script_text:"Hey, if you loved your premium detail and thought I did a great job I would love it if you could leave me a 5-star rating on Google, here's the link, and if you just mention my name it would help a ton with a competition we're currently running!" },
+  { id:"item_42", sort_order:46, section:"daily", phase:"no_show", description:"Referral ask sent via text (same wording as #43)", has_script:true, script_text:"Is there any friends, family, or neighbors that you could think of that would love this service? If so, would you mind giving me their number or address so I could reach out to them? You get $20 off your next service for any referral that books and pays for the detail!" },
   { id:"item_43", sort_order:47, section:"daily", phase:"job_closeout", description:"3 door hangers placed", has_script:false, script_text:"" },
   { id:"item_44", sort_order:48, section:"daily", phase:"job_closeout", description:"Customer satisfaction card placed", has_script:false, script_text:"" },
   { id:"item_45", sort_order:49, section:"daily", phase:"job_closeout", description:"Photos of door hangers/card attached in HCP", has_script:false, script_text:"" },
@@ -4982,7 +4982,7 @@ async function scheduleCheckins(techId, startDate) {
     { milestone:"week_1",  days:7  },
     { milestone:"week_2",  days:14 },
     { milestone:"week_4",  days:28 },
-    { milestone:"week_8",  days:56 },
+    { milestone:"week_6",  days:42 },
     { milestone:"week_12", days:84 },
   ];
   const base = new Date(startDate + "T12:00:00Z");
@@ -4995,7 +4995,7 @@ async function scheduleCheckins(techId, startDate) {
   }
 }
 
-// Check-ins (week 1, 2, 4, 8, 12) count from the day a tech finishes
+// Check-ins (week 1, 2, 4, 6, 12) count from the day a tech finishes
 // onboarding, not their hire date. Apprentices have no check-ins until the
 // Final Onboarding Cert is signed; anyone hired straight in at another title
 // still counts from their start date.
@@ -5017,6 +5017,10 @@ const MISC_REPS = 3;
 const MISC_OPTIONAL_PHASES = new Set(["misc_rv_boats"]);
 const TRAINING_PACE = { ahead:"Ahead of pace", on_track:"On track", behind:"Behind pace" };
 
+// Daily items added after training was underway: a day logged before an
+// item existed only needs the items it had, so adding one never takes away
+// a trainee's finished Perfect Days.
+const DAILY_ITEM_SINCE = { item_59: "2026-10-15" };   // door hangers
 function trainingProgress(items, checks) {
   const daily = items.filter(i => (i.section || "daily") === "daily");
   const misc = items.filter(i => i.section === "misc" && !MISC_OPTIONAL_PHASES.has(i.phase));
@@ -5026,17 +5030,18 @@ function trainingProgress(items, checks) {
     if (dailyIds.has(c.rubric_item_id)) perDay[c.day_date] = (perDay[c.day_date] || 0) + 1;
     else if (miscIds.has(c.rubric_item_id)) miscCount[c.rubric_item_id] = (miscCount[c.rubric_item_id] || 0) + 1;
   }
-  const dayCounts = Object.values(perDay);
-  const fullDays = daily.length ? dayCounts.filter(n => n >= daily.length).length : 0;
+  const neededOn = day => daily.filter(i => !DAILY_ITEM_SINCE[i.id] || day >= DAILY_ITEM_SINCE[i.id]).length;
+  const dayFrac = Object.entries(perDay).map(([day, n]) => { const need = neededOn(day); return need ? Math.min(n, need) / need : 0; });
+  const fullDays = daily.length ? dayFrac.filter(f => f >= 1).length : 0;
   // Best TRAINING_MIN_DAYS days count toward the bar, so a partial day
   // still moves it but extra days can't push past 100%.
-  const dailyDone = dayCounts.sort((a, b) => b - a).slice(0, TRAINING_MIN_DAYS).reduce((s, n) => s + Math.min(n, daily.length), 0);
+  const dailyDone = Math.round(dayFrac.sort((a, b) => b - a).slice(0, TRAINING_MIN_DAYS).reduce((s, f) => s + f * daily.length, 0));
   const dailyMax = TRAINING_MIN_DAYS * daily.length;
   const miscDone = misc.reduce((s, i) => s + Math.min(miscCount[i.id] || 0, MISC_REPS), 0);
   const miscMax = MISC_REPS * misc.length;
   const max = dailyMax + miscMax;
   return {
-    daily, misc, perDay, miscCount, fullDays, dailyDone, dailyMax, miscDone, miscMax,
+    daily, misc, perDay, miscCount, fullDays, dailyDone, dailyMax, miscDone, miscMax, neededOn,
     pct: max ? Math.round(((dailyDone + miscDone) / max) * 100) : 0,
     complete: daily.length > 0 && fullDays >= TRAINING_MIN_DAYS && miscDone >= miscMax,
   };
@@ -5241,11 +5246,11 @@ function PerfectDayTrainingPanel({ tech=null, techs=[], admin=false, fixedSubjec
             <div style={{ ...small, marginBottom:"8px" }}>TRAINING DAY</div>
             <div style={{ display:"flex", gap:"6px", overflowX:"auto", paddingBottom:"4px" }}>
               {dayList.map(d => {
-                const n = prog.perDay[d] || 0, full = prog.daily.length && n >= prog.daily.length, on = d === day;
+                const n = prog.perDay[d] || 0, full = prog.daily.length && n >= prog.neededOn(d), on = d === day;
                 return (
                   <button key={d} onClick={() => setDay(d)} style={{ flexShrink:0, background:on ? accent : C.cardLt, color:on ? C.white : C.black, border:`1px solid ${on ? accent : full ? C.green : C.border}`, borderRadius:"12px", padding:"6px 10px", cursor:"pointer", textAlign:"left", fontFamily:FONT }}>
                     <div style={{ fontWeight:"700", fontSize:"13px" }}>Day {dayNumber(d)}{full ? " ✓" : ""}</div>
-                    <div style={{ fontSize:"11px", opacity:0.85 }}>{d === today ? "Today" : fmtDay(d)} · {n}/{prog.daily.length}</div>
+                    <div style={{ fontSize:"11px", opacity:0.85 }}>{d === today ? "Today" : fmtDay(d)} · {n}/{prog.neededOn(d)}</div>
                   </button>
                 );
               })}

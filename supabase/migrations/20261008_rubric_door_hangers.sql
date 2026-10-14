@@ -15,5 +15,8 @@ begin
     values ('item_59', 7, 'daily', 'pre_job',
             'Truck stocked with 3 door hangers per job, as well as a customer satisfaction card per job',
             false, '');
+    -- The two "same wording as #N" items point at the items that moved down one.
+    update rubric_items set description = 'Google review link sent via text (same wording as #42)' where id = 'item_41';
+    update rubric_items set description = 'Referral ask sent via text (same wording as #43)' where id = 'item_42';
   end if;
 end $$;
