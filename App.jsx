@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef, Fragment } from "react";
 import { TEST_QUESTIONS, TESTS, TEST_KEYS, questionsFor, shuffle } from "./trainingTest.js";
 import { scorecard, fixList, pageKind, pageLabel, offered, SEO_GOALS } from "./seoScore.js";
-import { tierFor, BONUS_TIERS, FREQ_LABEL, CHARGEBACK_SERVICES, buildSales, monthPoints, reviewList } from "./salesPoints.js";
+import { tierFor, BONUS_TIERS, FREQ_LABEL, CHARGEBACK_SERVICES, CHARGEBACK_GRACE_DAYS, buildSales, monthPoints, reviewList } from "./salesPoints.js";
 import { computeOpsMonth, monthRange, mountainDate, CALLBACK_TIERS, QUOTA_TIERS, RETENTION_TIERS, NON_ROUTE_VEHICLES, OPS_EXCLUDED_TITLES } from "./opsBonus.js";
 import { techDriverDays, weeklyDriverScore, findUnassignedDriving, DRIVER_CONFIG } from "./driverScoring.js";
 import { buildFordImport } from "./fordReports.js";
@@ -6493,6 +6493,8 @@ function SalesPointsBonus({ token, canReview=false }) {
     </div>
   );
   const m = monthPoints(sales, month);
+  const atRisk = month === thisMonth ? sales.filter(d => d.status === "at_risk") : [];
+  const riskPts = atRisk.reduce((a, d) => a + d.points, 0);
   const t = tierFor(Math.max(0, m.net));
   const shift = n => { const [y, mo] = month.split("-").map(Number); const d = new Date(Date.UTC(y, mo - 1 + n, 1)); setMonth(d.toISOString().slice(0, 7)); };
   const label = new Date(month + "-15T12:00:00Z").toLocaleDateString("en-US", { month:"long", year:"numeric", timeZone:"UTC" });
@@ -6500,7 +6502,8 @@ function SalesPointsBonus({ token, canReview=false }) {
   const arrow = { background:C.white, border:`1px solid ${C.border}`, borderRadius:"50%", width:"34px", height:"34px", display:"flex", alignItems:"center", justifyContent:"center", fontSize:"13px", cursor:"pointer", fontFamily:FONT, color:C.blue };
   const statusText = d => d.status === "cleared" ? <span style={{ color:C.green }}>Cleared</span>
     : d.status === "pending" ? <span style={{ color:C.muted }}>{d.completed} of {d.needed} services</span>
-    : d.status === "charged_back" ? <span style={{ color:C.red }}>Charged back {fmtShortDate(d.chargeback_on)}</span>
+    : d.status === "at_risk" ? <span style={{ color:C.blue }}>At risk · nothing booked since {fmtShortDate(d.missed_on)}</span>
+    : d.status === "charged_back" ? <span style={{ color:C.red }}>Clawed back {fmtShortDate(d.chargeback_on)}</span>
     : <span style={{ color:C.muted }}>—</span>;
   const freqText = d => `${FREQ_LABEL[d.freq] || d.freq}${d.freq_source === "visits" ? " (from schedule)" : ""}`;
   return (
@@ -6531,10 +6534,10 @@ function SalesPointsBonus({ token, canReview=false }) {
             ))}
           </div>
         </div>
-        {m.chargebacks.length > 0 && (
+        {(m.chargebacks.length > 0 || atRisk.length > 0) && (
           <div style={{ background:C.card, border:`1px solid ${C.red}30`, borderRadius:"16px", overflow:"hidden" }}>
             <button onClick={() => setShowClawbacks(v => !v)} style={{ width:"100%", display:"flex", justifyContent:"space-between", alignItems:"center", gap:"8px", background:`${C.red}08`, border:"none", padding:"12px 14px", cursor:"pointer", fontFamily:FONT, textAlign:"left" }}>
-              <span style={{ fontWeight:"600", fontSize:"15px", color:C.black }}>Clawbacks · {m.chargebacks.length} plan{m.chargebacks.length === 1 ? "" : "s"} cancelled</span>
+              <span style={{ fontWeight:"600", fontSize:"15px", color:C.black }}>Clawbacks · {m.chargebacks.length} plan{m.chargebacks.length === 1 ? "" : "s"} cancelled{atRisk.length ? ` · ${atRisk.length} at risk` : ""}</span>
               <span style={{ fontWeight:"700", fontSize:"15px", color:C.red, whiteSpace:"nowrap" }}>−{m.back.toLocaleString()} pts {showClawbacks ? "▲" : "▼"}</span>
             </button>
             {showClawbacks && (
@@ -6543,12 +6546,24 @@ function SalesPointsBonus({ token, canReview=false }) {
                   <div key={"cb" + d.hcp_job_id} style={{ display:"flex", justifyContent:"space-between", gap:"8px", padding:"10px 0", borderBottom:`1px solid ${C.border}40` }}>
                     <div style={{ minWidth:0 }}>
                       <div style={{ fontFamily:FONT, fontWeight:"600", fontSize:"14px", color:C.black }}>{d.name}</div>
-                      <div style={{ fontSize:"12px", color:C.muted, marginTop:"2px" }}>{FREQ_LABEL[d.freq]} · {money2(d.price)} · sold {fmtShortDate(d.done_on)} · stopped after {d.completed} of {d.needed} services · cancelled visit {fmtShortDate(d.chargeback_on)}</div>
+                      <div style={{ fontSize:"12px", color:C.muted, marginTop:"2px" }}>{FREQ_LABEL[d.freq]} · {money2(d.price)} · sold {fmtShortDate(d.done_on)} · stopped after {d.completed} of {d.needed} services · missed visit {fmtShortDate(d.missed_on)}</div>
                     </div>
                     <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"14px", color:C.red, whiteSpace:"nowrap" }}>−{d.points.toLocaleString()} pts</div>
                   </div>
                 ))}
-                <div style={{ fontSize:"12px", color:C.muted, paddingTop:"8px" }}>{m.gross.toLocaleString()} earned − {m.back.toLocaleString()} clawed back = <b style={{ color:C.black }}>{m.net.toLocaleString()} net points</b>. A plan that stops before its minimum services loses its points in the month of the cancelled visit.</div>
+                {atRisk.length > 0 && (<>
+                  <div style={{ fontFamily:FONT, fontWeight:"600", fontSize:"13px", color:C.blue, paddingTop:"10px" }}>At risk · {riskPts.toLocaleString()} pts not taken off yet</div>
+                  {atRisk.map(d => (
+                    <div key={"ar" + d.hcp_job_id} style={{ display:"flex", justifyContent:"space-between", gap:"8px", padding:"10px 0", borderBottom:`1px solid ${C.border}40` }}>
+                      <div style={{ minWidth:0 }}>
+                        <div style={{ fontFamily:FONT, fontWeight:"600", fontSize:"14px", color:C.black }}>{d.name}</div>
+                        <div style={{ fontSize:"12px", color:C.muted, marginTop:"2px" }}>{FREQ_LABEL[d.freq]} · {money2(d.price)} · sold {fmtShortDate(d.done_on)} · {d.completed} of {d.needed} services · no visit booked since {fmtShortDate(d.missed_on)} · get them rebooked by {fmtShortDate(new Date(new Date(d.missed_on + "T12:00:00Z").getTime() + CHARGEBACK_GRACE_DAYS * 864e5).toISOString().slice(0, 10))}</div>
+                      </div>
+                      <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"14px", color:C.blue, whiteSpace:"nowrap" }}>{d.points.toLocaleString()} pts</div>
+                    </div>
+                  ))}
+                </>)}
+                <div style={{ fontSize:"12px", color:C.muted, paddingTop:"8px" }}>{m.gross.toLocaleString()} earned − {m.back.toLocaleString()} clawed back = <b style={{ color:C.black }}>{m.net.toLocaleString()} net points</b>. A plan that stops before its minimum services is at risk for {CHARGEBACK_GRACE_DAYS} days after the missed visit. If a visit gets booked in that time, nothing comes off; if not, the points come off in the month the {CHARGEBACK_GRACE_DAYS} days end.</div>
               </div>
             )}
           </div>
@@ -6569,7 +6584,7 @@ function SalesPointsBonus({ token, canReview=false }) {
         <ListTitle right={`${m.earned.length} sale${m.earned.length === 1 ? "" : "s"}`}>Sales completed in {label.split(" ")[0]}</ListTitle>
         <RankRows rows={m.earned.map(d => ({ id:d.hcp_job_id, name:d.name, value:`${d.points.toLocaleString()} pts`,
           sub:<>{fmtShortDate(d.done_on)} · {money2(d.price)} · {freqText(d)}{d.returning ? " · returning" : ""} · {statusText(d)}{overrides[d.hcp_job_id] ? " · credited by an owner" : ""}</> }))} empty={`No sales completed in ${label} yet.`}/>
-        <div style={{ fontSize:"12px", color:C.muted }}>A sale is a completed HCP job tagged "sold by trevor", counted in the month it was completed. Points = first-visit price (no tips) × frequency from the points table; frequency comes from the job's plan tag, or else the client's scheduled visits over the next 6 months. A plan has to finish its first {Object.entries(CHARGEBACK_SERVICES).filter(([f,n])=>n>1).map(([f,n])=>`${n} ${FREQ_LABEL[f].toLowerCase()}`).join(", ")} services; if it stops sooner, the points come off in the month of the first missed visit.</div>
+        <div style={{ fontSize:"12px", color:C.muted }}>A sale is a completed HCP job tagged "sold by trevor", counted in the month it was completed. Points = first-visit price (no tips) × frequency from the points table; frequency comes from the job's plan tag, or else the client's scheduled visits over the next 6 months. A plan has to finish its first {Object.entries(CHARGEBACK_SERVICES).filter(([f,n])=>n>1).map(([f,n])=>`${n} ${FREQ_LABEL[f].toLowerCase()}`).join(", ")} services; if it stops sooner, it's at risk for {CHARGEBACK_GRACE_DAYS} days after the missed visit, then the points come off in the month those days end.</div>
         {s.loading && <div style={{ fontSize:"11px", color:C.muted }}>Refreshing...</div>}
       </>)}
     </div>

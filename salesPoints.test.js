@@ -91,19 +91,34 @@ test("no plan tag: frequency from the next 6 months of scheduled visits", () => 
   assert.equal(s.needed, 3);
 });
 
-test("chargeback: plan stops before the window clears -> points off in the month of the first missed visit", () => {
+test("chargeback: plan stops before the window clears -> points off when the 14-day grace after the missed visit ends", () => {
   const jobs = [
     job("e1", "eve", "2026-08-03", { done: true, tags: ["sold by trevor", "Monthly"] }),
     job("e2", "eve", "2026-08-31", { done: true }),
-    job("e3", "eve", "2026-09-28", { status: "pro canceled" }),
+    job("e3", "eve", "2026-09-20", { status: "pro canceled" }),
     job("e4", "eve", "2026-10-26", { status: "pro canceled" }),
   ];
   const [s] = buildSales(jobs, { tag: "sold by trevor", now: NOW });
   assert.equal(s.status, "charged_back");
-  assert.equal(s.chargeback_on, "2026-09-28");
-  const sep = monthPoints([s], "2026-09"), aug = monthPoints([s], "2026-08");
+  assert.equal(s.missed_on, "2026-09-20");
+  assert.equal(s.chargeback_on, "2026-10-04");
+  const oct = monthPoints([s], "2026-10"), aug = monthPoints([s], "2026-08");
   assert.equal(aug.net, s.points);
-  assert.equal(sep.net, -s.points);
+  assert.equal(oct.net, -s.points);
+});
+
+test("grace period: a recently missed visit is only at risk; a rebooked visit puts it back to pending", () => {
+  const base = [
+    job("h1", "hal", "2026-08-25", { done: true, tags: ["sold by trevor", "Monthly"] }),
+    job("h2", "hal", "2026-09-25", { done: true }),
+    job("h3", "hal", "2026-10-02", { status: "pro canceled" }),   // moved -- cancelled 7 days ago
+  ];
+  const [risk] = buildSales(base, { tag: "sold by trevor", now: NOW });
+  assert.equal(risk.status, "at_risk");
+  assert.equal(risk.chargeback_month, null);
+  assert.equal(monthPoints([risk], "2026-10").back, 0);
+  const [rebooked] = buildSales([...base, job("h4", "hal", "2026-10-16")], { tag: "sold by trevor", now: NOW });
+  assert.equal(rebooked.status, "pending");
 });
 
 test("window cleared after enough completed services; a plan switch with visits still booked isn't a chargeback", () => {
