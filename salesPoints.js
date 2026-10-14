@@ -42,12 +42,14 @@ export const POINTS_TABLE = [
 ];
 
 // Highest tier reached pays; below the first tier pays $0.
+// Tier 2-5 payouts raised by the owner, Oct 14 2026 (were $800 / $1,250 /
+// $1,550 / $1,850); point levels unchanged.
 export const BONUS_TIERS = [
   { tier:1, points:1400, pay:400 },
-  { tier:2, points:1800, pay:800 },
-  { tier:3, points:2200, pay:1250 },
-  { tier:4, points:2600, pay:1550 },
-  { tier:5, points:3200, pay:1850 },
+  { tier:2, points:1800, pay:900 },
+  { tier:3, points:2200, pay:1450 },
+  { tier:4, points:2600, pay:1850 },
+  { tier:5, points:3200, pay:2400 },
 ];
 
 // The table row a ticket price lands on: { price, points:[...6 freqs] }.
@@ -95,8 +97,15 @@ export function tierFor(points) {
 //   visit included) before it's safe. If the plan stops first -- no visits
 //   left on the schedule -- the points come back off in the month of the first
 //   visit that didn't happen.
+// - Grace period (owner, Oct 14 2026): a visit that gets moved or rebooked
+//   isn't a cancellation. A plan with nothing left on the schedule is only
+//   "at risk" for CHARGEBACK_GRACE_DAYS after the visit that didn't happen;
+//   if a visit gets booked in that time it's back to pending. After that the
+//   points come off in the month the grace period ends, so a month that's
+//   already been paid never changes.
 
 export const FREQ_WEEKS = { weekly:1, biweekly:2, monthly:4, bimonthly:8, quarterly:12, biannual:26 };
+export const CHARGEBACK_GRACE_DAYS = 14;
 export const CHARGEBACK_SERVICES = { weekly:4, biweekly:4, monthly:3, bimonthly:2, quarterly:2, biannual:2, one_time:0 };
 const FREQ_TAGS = { weekly:"weekly", biweekly:"biweekly", "bi-weekly":"biweekly", monthly:"monthly", bimonthly:"bimonthly", "bi-monthly":"bimonthly", quarterly:"quarterly", biannual:"biannual", "bi-annual":"biannual", semiannual:"biannual" };
 const DAY = 86400e3;
@@ -161,7 +170,7 @@ export function buildSales(jobs, { tag, revenueByJob = {}, now = Date.now(), ove
       price, freq, freq_source: tagFreq ? "tag" : visitFreq ? "visits" : "none",
       returning: (j.tags || []).some(t => /^returning$/i.test(String(t).trim())),
       points: pointsFor(price, freq),
-      needed: CHARGEBACK_SERVICES[freq] || 0, completed: 1, status: "counted", chargeback_on: null, chargeback_month: null,
+      needed: CHARGEBACK_SERVICES[freq] || 0, completed: 1, status: "counted", chargeback_on: null, chargeback_month: null, missed_on: null,
     };
     if (sale.needed > 1) {
       const after = mine.filter(x => x.scheduled_start && new Date(x.scheduled_start).getTime() >= first - DAY);
@@ -174,9 +183,14 @@ export function buildSales(jobs, { tag, revenueByJob = {}, now = Date.now(), ove
         const lastDone = Math.max(...after.filter(isDone).map(x => new Date(x.completed_at).getTime()));
         const missed = after.filter(x => isCanceled(x) && new Date(x.scheduled_start).getTime() > lastDone).map(x => new Date(x.scheduled_start).getTime()).sort((a, b) => a - b)[0];
         const when = missed || lastDone + FREQ_WEEKS[freq] * 7 * DAY;
-        sale.status = "charged_back";
-        sale.chargeback_on = mtDay(Math.min(when, now));
-        sale.chargeback_month = sale.chargeback_on.slice(0, 7);
+        const final = when + CHARGEBACK_GRACE_DAYS * DAY;
+        sale.missed_on = mtDay(Math.min(when, now));
+        if (now < final) sale.status = "at_risk";
+        else {
+          sale.status = "charged_back";
+          sale.chargeback_on = mtDay(final);
+          sale.chargeback_month = sale.chargeback_on.slice(0, 7);
+        }
       }
     }
     sales.push(sale);
