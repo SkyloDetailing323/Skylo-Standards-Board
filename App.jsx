@@ -581,6 +581,29 @@ function calcTeamOverride(tech, allTechs, upsells, switchovers, reviews, callbac
   return { overridePts, overridePct, teamMembers, teamMemberStats, allTeamHit, partialHit:twoThirdsHit&&!allTeamHit, leadHitsQuota, teamTotalPts, hittingCount, totalMembers };
 }
 
+// ─── TECHNICIAN BOOKINGS ──────────────────────────────────────────────────────
+// Jobs a tech booked themselves (HCP "Technician Booking - " line item / lead
+// source "Tech Booking - <Name>"). Once an admin confirms the booker:
+//   booker serviced it  -> +10% of their own revenue on that job (27% → 37%)
+//   someone else did    -> booker gets 10% of the job's total revenue
+// plus 20 points. Paid in the pay period the job was completed (job_date).
+// Approved by Truxton, Oct 2026.
+const TECH_BOOKING_RATE = 0.10;
+const TECH_BOOKING_PTS = 20;
+// Loaded with everything else in loadAll; read by calcTotals so every points
+// view includes bookings without threading a new prop through each of them.
+let TECH_BOOKINGS = [];
+const confirmedBookingsFor = techId => TECH_BOOKINGS.filter(b => b.status === "confirmed" && b.booker_id === techId);
+// Pay for one confirmed booking, from the jobs table. null = job not completed/synced yet.
+function techBookingPay(b, jobs) {
+  const rows = (jobs || []).filter(j => j.hcp_job_id === b.hcp_job_id);
+  if (!rows.length) return null;
+  const own = rows.filter(j => j.tech_id === b.booker_id);
+  const serviced = own.length > 0;
+  const base = (serviced ? own : rows).reduce((s, j) => s + (j.revenue || 0), 0);
+  const date = rows.map(j => j.job_date).sort()[0];
+  return { date, serviced, base, pay: Math.round(base * TECH_BOOKING_RATE * 100) / 100, servicers: [...new Set(rows.map(j => j.tech_id))] };
+}
 // Damage reports (damage a tech caused to a client's vehicle or property),
 // loaded with everything else in loadAll. They cost the same Journey points as
 // a callback of the same level, so calcTotals counts them with callbacks;
@@ -599,8 +622,10 @@ function calcTotals(tech, upsells, switchovers, reviews, callbacks=[], jobs=[]) 
   const techCallbacks = callbacks.filter(c=>c.tech_id===tech.id).concat(DAMAGE_REPORTS.filter(d=>d.tech_id===tech.id)); // damage reports cost the same points as callbacks
   const callbackCount = techCallbacks.length;
   const callbackPts = techCallbacks.reduce((s,c)=>s+callbackPoints(c),0);
-  const total = Math.max(0, badgePts+upsellPts+switchPts+reviewPts+callbackPts);
-  return { badgePts, upsellAmt, upsellPts, switchPts, reviewPts, callbackPts, callbackCount, total };
+  const bookingCount = confirmedBookingsFor(tech.id).length;
+  const bookingPts = bookingCount * TECH_BOOKING_PTS;
+  const total = Math.max(0, badgePts+upsellPts+switchPts+reviewPts+callbackPts+bookingPts);
+  return { badgePts, upsellAmt, upsellPts, switchPts, reviewPts, callbackPts, callbackCount, bookingCount, bookingPts, total };
 }
 
 // ─── UPSELL PAY ───────────────────────────────────────────────────────────────
@@ -1050,7 +1075,7 @@ function TotalLeaderboard({ techs, upsells, switchovers, reviews, callbacks, job
     <div style={{ display:"flex", flexDirection:"column", gap:"14px" }}>
       <ListTitle right="all time">Total Score</ListTitle>
       <RankRows rows={ranked.map(t=>({ id:t.id, name:t.name, value:`${t.total.toLocaleString()} pts`, chip:`${t.tier.icon} ${t.tier.name.charAt(0)+t.tier.name.slice(1).toLowerCase()}`,
-        sub:`Badges ${t.badgePts} · Upsells $${Math.round(t.upsellAmt).toLocaleString()} · Switchovers ${t.switchPts} · Reviews ${t.reviewPts}` }))} empty="No points yet."/>
+        sub:`Badges ${t.badgePts} · Upsells $${Math.round(t.upsellAmt).toLocaleString()} · Switchovers ${t.switchPts} · Reviews ${t.reviewPts}${t.bookingPts ? ` · Bookings ${t.bookingPts}` : ""}` }))} empty="No points yet."/>
     </div>
   );
 }
@@ -1498,7 +1523,154 @@ function saveOwnerSession(user) {
 }
 
 // ─── PAYROLL TAB ──────────────────────────────────────────────────────────────
-function PayrollTab({ techs, jobs, tipEntries=[], switchovers=[], timeEntries=[], token=null, canWaive=false }) {
+// Calls the tech-bookings function (admin job lookup / add).
+async function techBookingApi(token, { invoice, add=false, booker_id=null }) {
+  const r = add
+    ? await fetch("/.netlify/functions/tech-bookings", { method:"POST", headers:{ "Content-Type":"application/json", Authorization:`Bearer ${token || ""}` }, body:JSON.stringify({ invoice, booker_id }) })
+    : await fetch(`/.netlify/functions/tech-bookings?invoice=${encodeURIComponent(invoice)}`, { headers:{ Authorization:`Bearer ${token || ""}` } });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+  return j.job;
+}
+
+function BookingJobPreview({ job }) {
+  if (!job) return null;
+  const when = job.scheduled_start ? fmtShortDate(mtDateStr(Date.parse(job.scheduled_start))) : "not scheduled yet";
+  return (
+    <div style={{ background:C.cardLt, borderRadius:"10px", padding:"10px 12px", fontSize:"13px", color:C.black, display:"flex", flexDirection:"column", gap:"3px" }}>
+      <div><b>#{job.invoice_number}</b> · {job.customer_name || "Unknown customer"} · {when}{job.completed ? " · completed" : ""}</div>
+      {job.has_booking_item
+        ? <div style={{ color:C.green }}>✓ {job.booking_items.join(" · ")}</div>
+        : <div style={{ color:C.gold }}>⚠ No "Technician Booking - " line item on this job yet</div>}
+      {job.existing_status && <div style={{ color:C.muted }}>Already in Tech Bookings ({job.existing_status === "confirmed" ? "confirmed" : job.existing_status === "rejected" ? "marked not a booking" : "needs a booker"}). Adding it again replaces the booker.</div>}
+    </div>
+  );
+}
+
+// Admin view: confirm who booked each technician booking before it pays.
+function TechBookingsAdmin({ techs, techBookings=[], jobs=[], token, reviewerName, refreshAll, showToast }) {
+  const [pick, setPick] = useState({});
+  const [busy, setBusy] = useState(null);
+  const [addNum, setAddNum] = useState("");
+  const [addTech, setAddTech] = useState("");
+  const [addJob, setAddJob] = useState(null);
+  const toast = showToast || (m => window.alert(m));
+  const active = techs.filter(t => t.is_active !== false && t.title !== "owner").sort((a,b) => a.name.localeCompare(b.name));
+  const nameOf = id => techs.find(t => t.id === id)?.name || null;
+  const pending = techBookings.filter(b => b.status === "pending");
+  const confirmed = techBookings.filter(b => b.status === "confirmed").slice(0, 40);
+  const rejected = techBookings.filter(b => b.status === "rejected").slice(0, 20);
+  const fmtWhen = b => b.scheduled_start ? fmtShortDate(mtDateStr(Date.parse(b.scheduled_start))) : "";
+
+  async function patch(b, body, msg) {
+    setBusy(b.id);
+    // Through tech-bookings (owner / manager token): the table is read-only
+    // from the browser because confirming a booking pays the booker.
+    try {
+      const r = await fetch("/.netlify/functions/tech-bookings", { method:"POST", headers:{ "Content-Type":"application/json", Authorization:`Bearer ${token||""}` },
+        body:JSON.stringify({ action:"update", id:b.id, status:body.status, ...("booker_id" in body ? { booker_id:body.booker_id } : {}) }) });
+      const j = await r.json().catch(()=>({}));
+      if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+      toast(msg); await refreshAll();
+    }
+    catch(e) { toast("Error: " + e.message, false); }
+    setBusy(null);
+  }
+  async function lookupAdd() {
+    setBusy("add"); setAddJob(null);
+    try { setAddJob(await techBookingApi(token, { invoice:addNum.trim() })); } catch(e) { toast(e.message, false); }
+    setBusy(null);
+  }
+  async function add() {
+    if (!addTech) return toast("Pick who booked it", false);
+    setBusy("add");
+    try { await techBookingApi(token, { invoice:addJob.invoice_number, add:true, booker_id:addTech }); toast(`✅ Added for ${nameOf(addTech)}`); setAddNum(""); setAddTech(""); setAddJob(null); await refreshAll(); }
+    catch(e) { toast(e.message, false); }
+    setBusy(null);
+  }
+
+  const card = { background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"14px 16px", display:"flex", flexDirection:"column", gap:"10px" };
+  const sel = { background:C.white, border:`1px solid ${C.border}`, color:C.black, padding:"8px 10px", borderRadius:"10px", fontSize:"13px", fontFamily:FONT };
+  const btn = bg => ({ background:bg, border:"none", color:C.white, padding:"8px 12px", borderRadius:"10px", cursor:"pointer", fontSize:"12px", fontWeight:"700", fontFamily:FONT });
+  return (
+    <div style={{ display:"flex", flexDirection:"column", gap:"14px" }}>
+      <div style={{ fontSize:"12px", color:C.muted }}>
+        Jobs techs booked themselves. When an HCP job has a "Technician Booking - " line item, it shows up here (checked every hour). Pick which tech booked it. Once the job is serviced, the booker gets +10% on top of their commission if they serviced it, or 10% of the ticket if someone else did, plus {TECH_BOOKING_PTS} points. Nothing pays until you pick the booker.
+      </div>
+
+      <div style={card}>
+        <Label color={C.gold}>Needs a booker · {pending.length}</Label>
+        {pending.length === 0 && <div style={{ fontSize:"12px", color:C.muted }}>Nothing to confirm.</div>}
+        {pending.map(b => {
+          const rows = jobs.filter(j => j.hcp_job_id === b.hcp_job_id);
+          const servicers = [...new Set(rows.map(j => j.tech_id))].map(nameOf).filter(Boolean);
+          const choice = pick[b.id] ?? (b.booker_id || "");
+          return (
+            <div key={b.id} style={{ borderTop:`1px solid ${C.border}40`, paddingTop:"10px", display:"flex", flexDirection:"column", gap:"6px", fontSize:"13px", color:C.black }}>
+              <div><b>#{b.invoice_number || "—"}</b> · {b.customer_name || "Unknown customer"} · {fmtWhen(b)}</div>
+              <div style={{ color:C.muted, fontSize:"12px" }}>
+                {rows.length ? `Serviced by ${servicers.join(", ") || "?"} · $${rows.reduce((s,j)=>s+(j.revenue||0),0).toFixed(2)}` : "Not serviced yet — pays once it's done"}
+              </div>
+              {b.booking_items && <div style={{ color:C.green, fontSize:"12px" }}>✓ {b.booking_items}</div>}
+              <div style={{ display:"flex", gap:"8px", flexWrap:"wrap", alignItems:"center" }}>
+                <select value={choice} onChange={e => setPick(p => ({ ...p, [b.id]:e.target.value }))} style={sel}>
+                  <option value="">Who booked it?</option>
+                  {active.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                </select>
+                <button onClick={() => choice ? patch(b, { status:"confirmed", booker_id:choice, confirmed_by:reviewerName, confirmed_at:new Date().toISOString() }, `✅ Confirmed for ${nameOf(choice)}`) : toast("Pick who booked it", false)} disabled={busy === b.id} style={btn(choice ? C.green : C.border)}>Confirm</button>
+                <button onClick={() => window.confirm("Not a technician booking? It won't pay or earn points.") && patch(b, { status:"rejected", confirmed_by:reviewerName, confirmed_at:new Date().toISOString() }, "Marked not a booking")} disabled={busy === b.id} style={{ background:"transparent", border:`1px solid ${C.border}`, color:C.muted, padding:"7px 10px", borderRadius:"10px", cursor:"pointer", fontSize:"12px" }}>Not a booking</button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div style={card}>
+        <Label color={C.blue}>Add one by job number</Label>
+        <div style={{ fontSize:"12px", color:C.muted }}>For a tech booking that's missing the "Technician Booking - " line item in HCP.</div>
+        <div style={{ display:"flex", gap:"8px", flexWrap:"wrap" }}>
+          <input value={addNum} onChange={e => { setAddNum(e.target.value); setAddJob(null); }} placeholder="HCP job #" inputMode="numeric" style={{ ...sel, flex:1, minWidth:"120px", fontSize:"14px" }}/>
+          <button onClick={lookupAdd} disabled={!addNum.trim() || busy === "add"} style={btn(addNum.trim() ? C.blue : C.border)}>Look up</button>
+        </div>
+        <BookingJobPreview job={addJob}/>
+        {addJob && (
+          <div style={{ display:"flex", gap:"8px", flexWrap:"wrap" }}>
+            <select value={addTech} onChange={e => setAddTech(e.target.value)} style={sel}>
+              <option value="">Who booked it?</option>
+              {active.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+            </select>
+            <button onClick={add} disabled={busy === "add"} style={btn(C.green)}>Add</button>
+          </div>
+        )}
+      </div>
+
+      <div style={card}>
+        <Label color={C.green}>Confirmed · {techBookings.filter(b => b.status === "confirmed").length}</Label>
+        {confirmed.length === 0 && <div style={{ fontSize:"12px", color:C.muted }}>None yet.</div>}
+        {confirmed.map(b => { const p = techBookingPay(b, jobs); return (
+          <div key={b.id} style={{ display:"flex", justifyContent:"space-between", gap:"8px", alignItems:"center", fontSize:"12px", color:C.black, borderTop:`1px solid ${C.border}40`, paddingTop:"6px" }}>
+            <span><b>{nameOf(b.booker_id)}</b> · #{b.invoice_number || "—"} {b.customer_name || ""} · {p ? `${p.serviced ? "booked & serviced" : "booked"} · $${p.pay.toFixed(2)} (${fmtShortDate(p.date)})` : "pays once completed"}</span>
+            <button onClick={() => patch(b, { status:"pending", booker_id:null, confirmed_by:null, confirmed_at:null }, "Moved back to Needs a booker")} disabled={busy === b.id} style={{ background:"transparent", border:`1px solid ${C.border}`, color:C.muted, padding:"5px 8px", borderRadius:"8px", cursor:"pointer", fontSize:"11px", whiteSpace:"nowrap" }}>Undo</button>
+          </div>
+        ); })}
+      </div>
+
+      {rejected.length > 0 && (
+        <div style={card}>
+          <Label color={C.muted}>Not bookings · {rejected.length}</Label>
+          {rejected.map(b => (
+            <div key={b.id} style={{ display:"flex", justifyContent:"space-between", gap:"8px", alignItems:"center", fontSize:"12px", color:C.muted }}>
+              <span>#{b.invoice_number || "—"} {b.customer_name || ""}</span>
+              <button onClick={() => patch(b, { status:"pending", confirmed_by:null, confirmed_at:null }, "Moved back to Needs a booker")} disabled={busy === b.id} style={{ background:"transparent", border:`1px solid ${C.border}`, color:C.muted, padding:"5px 8px", borderRadius:"8px", cursor:"pointer", fontSize:"11px" }}>Undo</button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PayrollTab({ techs, jobs, tipEntries=[], switchovers=[], timeEntries=[], techBookings=[], token=null, canWaive=false }) {
   const allPeriods = getPayPeriods();
   const activePeriods = allPeriods.filter(p=>jobs.some(j=>j.job_date>=p.start&&j.job_date<=p.end)||p.key===currentPPKey());
   const [selKey, setSelKey] = useState(currentPPKey());
@@ -1566,7 +1738,9 @@ function PayrollTab({ techs, jobs, tipEntries=[], switchovers=[], timeEntries=[]
     const trainingDays = [...new Set(trEntries.map(e=>e.work_date))].sort();
     const trainingPay = Math.round(trainingHours*TRAINING_RATE_NOW*100)/100;
     const heldDue = tr && t.is_active!==false && tr.day90>=period.start && tr.day90<=period.end ? Math.round(tr.totalHours*TRAINING_RATE_HELD*100)/100 : 0;
-    const total   = commission+tips+upsellPay+switchPay-toteDeduct+trainingPay+heldDue;
+    const bks = showBonuses ? techBookings.filter(b=>b.status==="confirmed"&&b.booker_id===t.id).map(b=>({ b, p:techBookingPay(b, jobs) })).filter(x=>x.p&&x.p.date>=period.start&&x.p.date<=period.end).sort((a,b)=>a.p.date.localeCompare(b.p.date)) : [];
+    const bookingPay = Math.round(bks.reduce((s,x)=>s+x.p.pay,0)*100)/100;
+    const total   = commission+tips+upsellPay+switchPay+bookingPay-toteDeduct+trainingPay+heldDue;
     const weeks   = wkKeys.map(wk=>{
       const wj=tj.filter(j=>j.week_key===wk);
       const wkEndDate = new Date(wk+"T12:00:00Z"); wkEndDate.setUTCDate(wkEndDate.getUTCDate()+6);
@@ -1574,13 +1748,14 @@ function PayrollTab({ techs, jobs, tipEntries=[], switchovers=[], timeEntries=[]
       const wkTips = tipsRangeTotal(tipEntries, t.id, wk, wkEndStr);
       return { wk, rev:wj.reduce((s,j)=>s+(j.revenue||0),0), tips:wkTips, count:wj.length };
     }).filter(w=>w.rev>0||w.tips>0);
-    return { ...t, revenue, tips, rate, commission, upsellAmt, upsellPay, upsellRate, sws, switchPay, switchUnpriced, toteHere, toteDeduct, tr, trainingHours, trainingDays, trainingPay, heldDue, total, weeks };
-  }).filter(r=>r.revenue>0||r.tips>0||r.upsellAmt>0||r.sws.length>0||r.toteHere.length>0||r.trainingHours>0||r.heldDue>0).sort(PAYROLL_SORTS[sortBy] || byLastName);
+    return { ...t, revenue, tips, rate, commission, upsellAmt, upsellPay, upsellRate, sws, switchPay, switchUnpriced, bks, bookingPay, toteHere, toteDeduct, tr, trainingHours, trainingDays, trainingPay, heldDue, total, weeks };
+  }).filter(r=>r.revenue>0||r.tips>0||r.upsellAmt>0||r.sws.length>0||r.bks.length>0||r.toteHere.length>0||r.trainingHours>0||r.heldDue>0).sort(PAYROLL_SORTS[sortBy] || byLastName);
 
   const teamTotal = rows.reduce((s,r)=>s+r.total,0);
+  const unconfirmedBookings = showBonuses ? techBookings.filter(b=>b.status==="pending").filter(b=>{ const d=(jobs.filter(j=>j.hcp_job_id===b.hcp_job_id).map(j=>j.job_date).sort()[0]); return d && d>=period.start && d<=period.end; }).length : 0;
 
   function exportCSV() {
-    const lines=["Tech,Revenue,Commission Rate,Commission,Tips,Upsells,Upsell Rate,Upsell Bonus,Switchovers,Switchover Bonus,Tote Deduction,Training Hours,Training Pay,90-Day Training Pay,Total Pay",...rows.map(r=>[r.name,`$${r.revenue.toFixed(2)}`,`${r.rate}%`,`$${r.commission.toFixed(2)}`,`$${r.tips.toFixed(2)}`,`$${r.upsellAmt.toFixed(2)}`,`${Math.round(r.upsellRate*100)}%`,`$${r.upsellPay.toFixed(2)}`,r.sws.length,`$${r.switchPay.toFixed(2)}`,`-$${r.toteDeduct.toFixed(2)}`,r.trainingHours.toFixed(2),`$${r.trainingPay.toFixed(2)}`,`$${r.heldDue.toFixed(2)}`,`$${r.total.toFixed(2)}`].join(","))].join("\n");
+    const lines=["Tech,Revenue,Commission Rate,Commission,Tips,Upsells,Upsell Rate,Upsell Bonus,Switchovers,Switchover Bonus,Tech Bookings,Tech Booking Pay,Tote Deduction,Training Hours,Training Pay,90-Day Training Pay,Total Pay",...rows.map(r=>[r.name,`$${r.revenue.toFixed(2)}`,`${r.rate}%`,`$${r.commission.toFixed(2)}`,`$${r.tips.toFixed(2)}`,`$${r.upsellAmt.toFixed(2)}`,`${Math.round(r.upsellRate*100)}%`,`$${r.upsellPay.toFixed(2)}`,r.sws.length,`$${r.switchPay.toFixed(2)}`,r.bks.length,`$${r.bookingPay.toFixed(2)}`,`-$${r.toteDeduct.toFixed(2)}`,r.trainingHours.toFixed(2),`$${r.trainingPay.toFixed(2)}`,`$${r.heldDue.toFixed(2)}`,`$${r.total.toFixed(2)}`].join(","))].join("\n");
     const url=URL.createObjectURL(new Blob([lines],{type:"text/csv"}));
     const a=Object.assign(document.createElement("a"),{href:url,download:`skylo-payroll-${selKey}.csv`});
     a.click(); URL.revokeObjectURL(url);
@@ -1588,6 +1763,12 @@ function PayrollTab({ techs, jobs, tipEntries=[], switchovers=[], timeEntries=[]
 
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:"16px" }}>
+
+      {unconfirmedBookings>0&&(
+        <div style={{ background:`${C.gold}14`, border:`1px solid ${C.gold}55`, borderRadius:"12px", padding:"10px 14px", fontSize:"13px", color:C.black }}>
+          ⚠ {unconfirmedBookings} technician booking{unconfirmedBookings!==1?"s":""} in this pay period still need{unconfirmedBookings===1?"s":""} a booker picked — not paid until then. Pick the booker in <b>Tech Bookings</b>.
+        </div>
+      )}
 
       {/* Period selector */}
       <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"16px 18px" }}>
@@ -1694,6 +1875,23 @@ function PayrollTab({ techs, jobs, tipEntries=[], switchovers=[], timeEntries=[]
                     })}
                     {r.switchUnpriced>0&&<div style={{ fontSize:"11px", color:C.red, marginTop:"6px" }}>⚠ {r.switchUnpriced} switchover{r.switchUnpriced!==1?"s":""} on a plan with no pay amount set — not included in the total.</div>}
                   </div>
+                  {r.bks.length>0&&(
+                    <div style={{ background:C.cardLt, borderRadius:"10px", padding:"10px 12px" }}>
+                      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:"10px" }}>
+                        <div>
+                          <div style={{ fontSize:"11px", color:C.muted, letterSpacing:"-0.01em", textTransform:"none", fontFamily:FONT, fontWeight:"700" }}>📅 Technician Bookings</div>
+                          <div style={{ fontSize:"13px", color:C.black, marginTop:"2px" }}>{r.bks.length} booking{r.bks.length!==1?"s":""} · 10% each</div>
+                        </div>
+                        <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"18px", color:C.purple }}>${r.bookingPay.toFixed(2)}</div>
+                      </div>
+                      {r.bks.map(({b,p})=>(
+                        <div key={b.id} style={{ display:"flex", justifyContent:"space-between", gap:"8px", fontSize:"12px", color:C.black, borderTop:`1px solid ${C.border}`, marginTop:"6px", paddingTop:"6px" }}>
+                          <span>{fmtShortDate(p.date)} · #{b.invoice_number||"—"} {b.customer_name||""} · {p.serviced ? "booked & serviced (+10% of own revenue)" : `serviced by ${p.servicers.map(id=>techs.find(t=>t.id===id)?.name||"?").join(", ")}`}</span>
+                          <span style={{ fontWeight:"700", whiteSpace:"nowrap" }}>10% × ${p.base.toFixed(2)} = ${p.pay.toFixed(2)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                   {r.toteHere.length>0&&(
                     <div style={{ background:`${C.red}0d`, border:`1px solid ${C.red}33`, borderRadius:"10px", padding:"10px 12px" }}>
                       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:"10px" }}>
@@ -3233,7 +3431,7 @@ function TimeSheetTab({ tech, techs=[], timeEntries, vehicles=[], truckAssignmen
 }
 
 // ─── TECH DASHBOARD ───────────────────────────────────────────────────────────
-function TechDashboard({ damageReports=[], tech, techs, upsells, switchovers, reviews, callbacks, quota, jobs, timeEntries=[], tipEntries=[], refreshAll=async()=>{}, rideAlongs=[], token=null, vehicles=[], truckAssignments=[], onLogout }) {
+function TechDashboard({ techBookings=[], damageReports=[], tech, techs, upsells, switchovers, reviews, callbacks, quota, jobs, timeEntries=[], tipEntries=[], refreshAll=async()=>{}, rideAlongs=[], token=null, vehicles=[], truckAssignments=[], onLogout }) {
   const q = quota || DEFAULT_QUOTA;
   const [tab, setTab] = useState("overview");
   const [menuOpen, setMenuOpen] = useState(false);
@@ -9303,7 +9501,7 @@ function CallbackLogPanel({ techs, jobs, callbacks, refreshAll, showToast }) {
 // isManager: logged in as the Field Supervisor. Same panel as the owners, but
 // read-only on anything that decides his own bonus (quota targets, trucks and
 // holidays, firing approvals, calibration) so he can't move his own numbers.
-function AdminPanel({ damageReports=[], techs, upsells, switchovers, reviews, callbacks, rideAlongs, schedules, quota, setQuota, jobs, timeEntries=[], tipEntries=[], pendingSplits=[], unmatchedTechs=[], vehicles=[], truckAssignments=[], onLogout, refreshAll, isManager=false, currentUser=null }) {
+function AdminPanel({ techBookings=[], damageReports=[], techs, upsells, switchovers, reviews, callbacks, rideAlongs, schedules, quota, setQuota, jobs, timeEntries=[], tipEntries=[], pendingSplits=[], unmatchedTechs=[], vehicles=[], truckAssignments=[], onLogout, refreshAll, isManager=false, currentUser=null }) {
   // Live-standings views (Leaderboard, Journey Map) should only show active
   // techs, matching what the tech-facing app already does — archived techs
   // stay fully visible in Reports/Payroll/Upsell Audit where historical
@@ -9313,6 +9511,7 @@ function AdminPanel({ damageReports=[], techs, upsells, switchovers, reviews, ca
   // the raw `techs` prop, unaffected by this filter) but shouldn't appear in
   // gamified rankings.
   const activeTechs = techs.filter(t => t.is_active !== false && t.title !== "owner");
+  const pendingBookings = techBookings.filter(b => b.status === "pending").length;
   const [tab, setTab] = useState("upsells");
   const [menuOpen, setMenuOpen] = useState(false);
   const [awardForm, setAwardForm] = useState({techId:"",badgeId:""});
@@ -9540,6 +9739,7 @@ function AdminPanel({ damageReports=[], techs, upsells, switchovers, reviews, ca
     ]},
     { label:"HCP Sync", items:[
       ["splits","✂️", pendingSplits.length > 0 ? `Split Jobs (${new Set(pendingSplits.map(r=>r.hcp_job_id)).size})` : "Split Jobs"],
+      ["techbookings","📅", pendingBookings > 0 ? `Tech Bookings (${pendingBookings})` : "Tech Bookings"],
       ["upsellaudit","🔍","Upsell Audit"],
       ["techmatch","🔗", unmatchedTechs.length > 0 ? `Tech Matching (${unmatchedTechs.length})` : "Tech Matching"],
     ]},
@@ -9569,6 +9769,15 @@ function AdminPanel({ damageReports=[], techs, upsells, switchovers, reviews, ca
       <Header left={<HamburgerBtn onClick={()=>setMenuOpen(true)}/>} title={adminTabLabel} right={<LogoutBtn onLogout={onLogout}/>}/>
       <div style={{ padding:"20px", maxWidth:(tab==="marketing"||tab==="sales") ? "1280px" : "700px", margin:"0 auto" }}>
 
+        {pendingBookings > 0 && tab !== "techbookings" && (
+          <div style={{ background:C.blueLt, border:"1px solid rgba(0,146,249,0.25)", borderRadius:"16px", padding:"12px 16px", marginBottom:"16px", display:"flex", justifyContent:"space-between", alignItems:"center", gap:"12px" }}>
+            <div>
+              <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"14px", color:"#0077d4", letterSpacing:"-0.01em" }}>📅 {pendingBookings} technician booking{pendingBookings !== 1 ? "s" : ""} need{pendingBookings === 1 ? "s" : ""} a booker</div>
+              <div style={{ fontSize:"12px", color:C.muted, marginTop:"2px" }}>Pick which tech booked {pendingBookings === 1 ? "it" : "each one"} so they get paid.</div>
+            </div>
+            <button onClick={() => setTab("techbookings")} style={{ background:"#0077d4", border:"none", color:C.white, padding:"8px 18px", borderRadius:"10px", cursor:"pointer", fontFamily:FONT, fontWeight:"700", fontSize:"12px", whiteSpace:"nowrap", flexShrink:0 }}>Review Now</button>
+          </div>
+        )}
         {pendingSplits.length > 0 && tab !== "splits" && (()=>{
           const count = new Set(pendingSplits.map(r => r.hcp_job_id)).size;
           return (
@@ -9648,6 +9857,7 @@ function AdminPanel({ damageReports=[], techs, upsells, switchovers, reviews, ca
         {tab==="reviews"&&(
           <AdminReviewEntry techs={techs} reviews={reviews} saving={saving} setSaving={setSaving} refreshAll={refreshAll} showToast={showToast}/>
         )}
+        {tab==="techbookings"&&<TechBookingsAdmin techs={techs} techBookings={techBookings} jobs={jobs||[]} token={currentUser?.token} reviewerName={currentUser?.name || "Admin"} refreshAll={refreshAll} showToast={showToast}/>}
         {tab==="switchovers"&&(() => {
           const { start: swStart, end: swEnd } = getDateRangeBounds(swRangePreset, swCStart, swCEnd);
           const swFromWk = dateToWeekKey(swStart);
@@ -10056,7 +10266,7 @@ function AdminPanel({ damageReports=[], techs, upsells, switchovers, reviews, ca
           <Leaderboard techs={activeTechs} jobs={jobs||[]} upsells={upsells} reviews={reviews} callbacks={callbacks||[]} switchovers={switchovers} timeEntries={timeEntries}/>
         )}
         {tab==="payroll"&&(
-          <PayrollTab techs={techs} jobs={jobs||[]} upsells={upsells} tipEntries={tipEntries} switchovers={switchovers||[]} timeEntries={timeEntries||[]} token={currentUser?.token} canWaive={!isManager}/>
+          <PayrollTab techs={techs} jobs={jobs||[]} upsells={upsells} tipEntries={tipEntries} switchovers={switchovers||[]} timeEntries={timeEntries||[]} techBookings={techBookings||[]} token={currentUser?.token} canWaive={!isManager}/>
         )}
 
         {tab==="ridealong"&&(
@@ -10102,6 +10312,7 @@ export default function App() {
   const [rideAlongs, setRideAlongs] = useState([]);
   const [schedules, setSchedules] = useState([]);
   const [jobs, setJobs] = useState([]);
+  const [techBookings, setTechBookings] = useState([]);
   const [damageReports, setDamageReports] = useState([]);
   const [timeEntries, setTimeEntries] = useState([]);
   const [tipEntries, setTipEntries] = useState([]);
@@ -10132,7 +10343,7 @@ export default function App() {
     try {
       // Truck picks: the last ~4 months (the Trucks tab looks older days up itself).
       const truckSince = mtDateStr(Date.now() - 120*864e5);
-      const [t,u,s,r,ra,sch,settings,cb,jb,te,tp,ps,ut,vh,ta,dmg] = await Promise.all([
+      const [t,u,s,r,ra,sch,settings,cb,jb,te,tp,ps,ut,vh,ta,tb,dmg] = await Promise.all([
         sb(`techs?select=${TECH_COLUMNS}&order=name`),
         sb("upsells?select=*"),
         sb("switchovers?select=*"),
@@ -10148,12 +10359,14 @@ export default function App() {
         sb("unmatched_hcp_employees?select=*&order=hcp_name").catch(()=>[]),
         sb("vehicles?select=*&order=name").catch(()=>[]),
         sbAll(`truck_assignments?select=*&work_date=gte.${truckSince}&order=work_date.desc,id.asc`).catch(()=>[]),
+        sb("tech_bookings?select=*&order=created_at.desc").catch(()=>[]),
         sb("damage_reports?select=*&order=created_at.desc").catch(()=>[]),
       ]);
+      TECH_BOOKINGS = tb || [];
       DAMAGE_REPORTS = dmg || [];
       setTechs(t||[]); setUpsells(u||[]); setSwitchovers(s||[]); setReviews(r||[]);
       setRideAlongs(ra||[]); setSchedules(sch||[]); setCallbacks(cb||[]); setJobs(jb||[]); setTimeEntries(te||[]); setTipEntries(tp||[]);
-      setPendingSplits(ps||[]); setUnmatchedTechs(ut||[]); setVehicles(vh||[]); setTruckAssignments(ta||[]); setDamageReports(dmg||[]);
+      setPendingSplits(ps||[]); setUnmatchedTechs(ut||[]); setVehicles(vh||[]); setTruckAssignments(ta||[]); setTechBookings(tb||[]); setDamageReports(dmg||[]);
       if (settings&&settings.length>0) {
         try { setQuota(JSON.parse(settings[0].value)); } catch {}
       }
@@ -10277,14 +10490,14 @@ alter table jobs add column if not exists tips numeric default 0;`}
   );
 
   if (user.type==="admin") return (
-    <AdminPanel damageReports={damageReports} techs={techs} setTechs={setTechs} upsells={upsells} setUpsells={setUpsells}
+    <AdminPanel techBookings={techBookings} damageReports={damageReports} techs={techs} setTechs={setTechs} upsells={upsells} setUpsells={setUpsells}
       switchovers={switchovers} setSwitchovers={setSwitchovers} reviews={reviews} setReviews={setReviews}
       callbacks={callbacks} rideAlongs={rideAlongs} schedules={schedules} quota={quota} setQuota={setQuota}
       jobs={jobs} timeEntries={timeEntries} tipEntries={tipEntries} pendingSplits={pendingSplits} unmatchedTechs={unmatchedTechs} vehicles={vehicles} truckAssignments={truckAssignments} onLogout={()=>setUser(null)} refreshAll={loadAll}
       isManager={user.role==="manager"} currentUser={user}/>
   );
   if (user.type==="tech"&&currentTech) return (
-    <TechDashboard damageReports={damageReports} tech={currentTech} techs={activeTechs} upsells={upsells} switchovers={switchovers}
+    <TechDashboard techBookings={techBookings} damageReports={damageReports} tech={currentTech} techs={activeTechs} upsells={upsells} switchovers={switchovers}
       reviews={reviews} callbacks={callbacks} quota={quota} jobs={jobs} timeEntries={timeEntries} tipEntries={tipEntries} refreshAll={loadAll} rideAlongs={rideAlongs} token={user.token} vehicles={vehicles} truckAssignments={truckAssignments} onLogout={()=>setUser(null)}/>
   );
   return null;
