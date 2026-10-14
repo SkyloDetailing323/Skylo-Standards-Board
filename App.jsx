@@ -1049,10 +1049,11 @@ function TotalLeaderboard({ techs, upsells, switchovers, reviews, callbacks, job
 }
 
 // ─── REPORTS TAB ─────────────────────────────────────────────────────────────
-// Labor cost is owners-only. Tech logins that may also see it on their own
-// Reports page (everyone else, including the Field Supervisor, doesn't).
+// Labor cost: owners, plus these logins (by tech id). Everyone else's Reports
+// page leaves it out.
 const LABOR_VIEWER_TECH_IDS = [
   "7709e828-baec-41be-8e7e-055024b0a863", // Zak Lundblade
+  "9623b18e-0e3d-41e0-a1a7-bb8891a6aacc", // Will Faulkner (Field Supervisor)
 ];
 
 function ReportsTab({ techs, jobs, upsells=[], switchovers=[], timeEntries=[], tipEntries=[], techId=null, refreshAll=async()=>{}, showToast=()=>{}, token=null, isOwner=false, showLabor=false }) {
@@ -9722,7 +9723,7 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
         )}
 
         {tab==="reports"&&(
-          <ReportsTab techs={techs} jobs={jobs||[]} upsells={upsells||[]} switchovers={switchovers||[]} timeEntries={timeEntries} tipEntries={tipEntries} techId={null} refreshAll={refreshAll} showToast={showToast} token={currentUser?.token} isOwner={!isManager} showLabor={!isManager}/>
+          <ReportsTab techs={techs} jobs={jobs||[]} upsells={upsells||[]} switchovers={switchovers||[]} timeEntries={timeEntries} tipEntries={tipEntries} techId={null} refreshAll={refreshAll} showToast={showToast} token={currentUser?.token} isOwner={!isManager} showLabor={!isManager || LABOR_VIEWER_TECH_IDS.includes(currentUser?.techId)}/>
         )}
         {tab==="leaderboard"&&(
           <Leaderboard techs={activeTechs} jobs={jobs||[]} upsells={upsells} reviews={reviews} callbacks={callbacks||[]} switchovers={switchovers} timeEntries={timeEntries}/>
