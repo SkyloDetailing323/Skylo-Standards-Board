@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef, Fragment } from "react";
 import { TEST_QUESTIONS, TESTS, TEST_KEYS, questionsFor, shuffle } from "./trainingTest.js";
 import { scorecard, fixList, pageKind, pageLabel, offered, SEO_GOALS } from "./seoScore.js";
-import { tierFor, BONUS_TIERS, FREQ_LABEL, CHARGEBACK_SERVICES, CHARGEBACK_GRACE_DAYS, buildSales, monthPoints, reviewList } from "./salesPoints.js";
+import { tierFor, BONUS_TIERS, FREQ_LABEL, CHARGEBACK_SERVICES, CHARGEBACK_GRACE_DAYS, FREQ_WEEKS, buildSales, monthPoints, reviewList } from "./salesPoints.js";
 import { computeOpsMonth, monthRange, mountainDate, CALLBACK_TIERS, QUOTA_TIERS, RETENTION_TIERS, NON_ROUTE_VEHICLES, OPS_EXCLUDED_TITLES } from "./opsBonus.js";
 import { techDriverDays, weeklyDriverScore, findUnassignedDriving, DRIVER_CONFIG } from "./driverScoring.js";
 import { buildFordImport } from "./fordReports.js";
@@ -6455,7 +6455,7 @@ const SALES_SELF_VIEW = { "4641f4da-a16f-411b-8688-8b81ac06eda7": "trevor" };
 // Trevor's month at a glance: net points, bonus, and a 5-step track -- one
 // equal-width step per tier, each filling with the points between the tier
 // before it and that tier, so he can see how close he is to every one.
-function TierTrack({ m, t, isNow, today }) {
+function TierTrack({ m, t, isNow, today, monthName }) {
   const net = Math.max(0, m.net);
   const steps = BONUS_TIERS.map((b, i) => {
     const from = i ? BONUS_TIERS[i - 1].points : 0;
@@ -6468,45 +6468,71 @@ function TierTrack({ m, t, isNow, today }) {
   const dim = new Date(Date.UTC(y, mo, 0)).getUTCDate();
   const pace = isNow && d >= 3 && net > 0 ? Math.round(net / d * dim) : null;
   const paceTier = pace != null ? tierFor(pace) : null;
-  const done = "#34c759";
+  // The month's sales: how many, how many recurring (by plan), revenue.
+  const plans = m.earned.filter(x => x.freq !== "one_time");
+  const byPlan = {};
+  for (const x of plans) byPlan[x.freq] = (byPlan[x.freq] || 0) + 1;
+  const planText = Object.keys(FREQ_WEEKS).filter(f => byPlan[f]).map(f => `${byPlan[f]} ${FREQ_LABEL[f].toLowerCase()}`).join(" · ");
+  const revenue = m.earned.reduce((a, x) => a + (x.price || 0), 0);
+  const done = "#34c759", doneInk = "#248a3d";
+  const label = { fontSize:"12px", color:C.muted, fontWeight:"600", fontFamily:FONT };
+  const rule = { borderTop:`1px solid ${C.border}`, margin:"16px 0" };
+  const stat = (name, value, sub) => (
+    <div style={{ minWidth:0 }}>
+      <div style={label}>{name}</div>
+      <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"24px", color:C.black, lineHeight:1.15, marginTop:"2px" }}>{value}</div>
+      <div style={{ fontSize:"12px", color:C.muted, marginTop:"2px" }}>{sub}</div>
+    </div>
+  );
   return (
-    <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"20px", padding:"18px 16px 14px", boxShadow:"0 1px 3px rgba(0,0,0,0.05)" }}>
-      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:"12px", flexWrap:"wrap" }}>
+    <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"20px", padding:"18px 18px 16px", boxShadow:"0 1px 3px rgba(0,0,0,0.05)" }}>
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-end", gap:"12px", flexWrap:"wrap" }}>
         <div>
-          <div style={{ fontSize:"12px", color:C.muted, fontWeight:"600", fontFamily:FONT }}>Net points</div>
+          <div style={label}>{monthName} net points</div>
           <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"48px", color:C.black, lineHeight:1, letterSpacing:"-0.03em", marginTop:"4px" }}>{m.net.toLocaleString()}</div>
           <div style={{ fontSize:"12px", color:C.muted, marginTop:"4px" }}>{m.gross.toLocaleString()} earned{m.back ? <> − <span style={{ color:C.red }}>{m.back.toLocaleString()} clawed back</span></> : null}</div>
         </div>
         <div style={{ textAlign:"right" }}>
-          <div style={{ display:"inline-block", background:t.tier ? `${done}1a` : C.blueLt, color:t.tier ? "#248a3d" : C.blue, borderRadius:"980px", padding:"4px 12px", fontFamily:FONT, fontWeight:"700", fontSize:"13px" }}>{t.tier ? `Tier ${t.tier} unlocked` : "Tier 1 not reached yet"}</div>
-          <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"28px", color:C.black, marginTop:"6px", lineHeight:1.1 }}>{usd(t.pay)}</div>
-          <div style={{ fontSize:"12px", color:C.muted }}>bonus {isNow ? "so far" : "for the month"}</div>
+          <div style={{ display:"inline-block", background:t.tier ? `${done}1a` : C.blueLt, color:t.tier ? doneInk : C.blue, borderRadius:"980px", padding:"4px 12px", fontFamily:FONT, fontWeight:"700", fontSize:"12px" }}>{t.tier ? `Tier ${t.tier} unlocked` : "No tier yet"}</div>
+          <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"32px", color:C.black, marginTop:"6px", lineHeight:1 }}>{usd(t.pay)}</div>
+          <div style={{ fontSize:"12px", color:C.muted, marginTop:"4px" }}>bonus {isNow ? "so far" : "for the month"}</div>
         </div>
       </div>
 
-      <div style={{ marginTop:"16px", fontFamily:FONT, fontSize:"15px", color:C.black }}>
-        {t.next
-          ? <><b style={{ color:C.blue }}>{t.toNext.toLocaleString()} pts</b> to Tier {t.next.tier}: bonus goes to <b>{usd(t.next.pay)}</b>{t.pay ? <span style={{ color:C.muted }}> (+{usd(t.next.pay - t.pay)})</span> : null}</>
-          : <b style={{ color:"#248a3d" }}>Top tier reached. Max bonus locked in.</b>}
+      <div style={rule}/>
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(130px, 1fr))", gap:"14px" }}>
+        {stat("Jobs sold", m.earned.length, "completed this month")}
+        {stat("Recurring plans", plans.length, planText || "none yet")}
+        {stat("One-time", m.earned.length - plans.length, "single visits")}
+        {stat("Sales revenue", usd(revenue), "first visits, no tips")}
       </div>
-      {pace != null && <div style={{ fontSize:"12px", color:C.muted, marginTop:"2px" }}>On pace for about <b style={{ color:C.black }}>{pace.toLocaleString()} pts</b>{paceTier.tier ? <>: Tier {paceTier.tier}, {usd(paceTier.pay)}</> : <>: short of Tier 1</>}</div>}
 
-      <div style={{ position:"relative", marginTop:"30px" }}>
-        <div style={{ position:"absolute", left:`${pos}%`, top:"-24px", transform:`translateX(${pos > 92 ? "-100%" : pos < 8 ? "0" : "-50%"})`, transition:"left .6s ease", background:C.black, color:"#fff", borderRadius:"6px", padding:"2px 7px", fontSize:"11px", fontWeight:"700", fontFamily:FONT, whiteSpace:"nowrap" }}>{m.net.toLocaleString()}</div>
-        <div style={{ display:"grid", gridTemplateColumns:`repeat(${steps.length}, 1fr)`, gap:"3px" }}>
+      <div style={rule}/>
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", gap:"8px", flexWrap:"wrap", fontFamily:FONT }}>
+        <div style={{ fontSize:"15px", color:C.black }}>
+          {t.next
+            ? <><b style={{ color:C.blue }}>{t.toNext.toLocaleString()} pts</b> to Tier {t.next.tier} → <b>{usd(t.next.pay)}</b>{t.pay ? <span style={{ color:C.muted }}> (+{usd(t.next.pay - t.pay)})</span> : null}</>
+            : <b style={{ color:doneInk }}>Top tier reached. Max bonus locked in.</b>}
+        </div>
+        {pace != null && <div style={{ fontSize:"12px", color:C.muted }}>On pace for ~<b style={{ color:C.black }}>{pace.toLocaleString()} pts</b>{paceTier.tier ? ` · Tier ${paceTier.tier} (${usd(paceTier.pay)})` : " · short of Tier 1"}</div>}
+      </div>
+
+      <div style={{ position:"relative", marginTop:"32px" }}>
+        <div style={{ position:"absolute", left:`${pos}%`, top:"-26px", transform:`translateX(${pos > 92 ? "-100%" : pos < 8 ? "0" : "-50%"})`, transition:"left .6s ease", background:C.black, color:"#fff", borderRadius:"6px", padding:"2px 8px", fontSize:"11px", fontWeight:"700", fontFamily:FONT, whiteSpace:"nowrap" }}>{m.net.toLocaleString()} pts</div>
+        <div style={{ display:"grid", gridTemplateColumns:`repeat(${steps.length}, 1fr)`, gap:"4px" }}>
           {steps.map((x, i) => (
-            <div key={x.tier} style={{ height:"14px", background:C.blueLt, borderRadius:i === 0 ? "7px 3px 3px 7px" : i === steps.length - 1 ? "3px 7px 7px 3px" : "3px", overflow:"hidden" }}>
+            <div key={x.tier} style={{ height:"12px", background:C.blueLt, borderRadius:i === 0 ? "6px 3px 3px 6px" : i === steps.length - 1 ? "3px 6px 6px 3px" : "3px", overflow:"hidden" }}>
               <div style={{ width:`${x.fill * 100}%`, height:"100%", background:x.fill >= 1 ? done : `linear-gradient(90deg, ${C.blue}, #4db3ff)`, boxShadow:x.fill > 0 && x.fill < 1 ? `0 0 10px ${C.blue}80` : "none", transition:"width .6s ease" }}/>
             </div>
           ))}
         </div>
-        <div style={{ display:"grid", gridTemplateColumns:`repeat(${steps.length}, 1fr)`, gap:"3px", marginTop:"8px" }}>
+        <div style={{ display:"grid", gridTemplateColumns:`repeat(${steps.length}, 1fr)`, gap:"4px", marginTop:"10px" }}>
           {steps.map((x, i) => {
             const hit = x.fill >= 1, next = i === cur;
             return (
               <div key={x.tier} style={{ textAlign:"right", fontFamily:FONT, minWidth:0 }}>
-                <div style={{ fontSize:"12px", fontWeight:"700", color:hit ? "#248a3d" : next ? C.blue : C.muted }}>{hit ? "✓ " : ""}Tier {x.tier}</div>
-                <div style={{ fontSize:"13px", fontWeight:"700", color:hit || next ? C.black : C.muted }}>{usd(x.pay)}</div>
+                <div style={{ fontSize:"11px", fontWeight:"700", color:hit ? doneInk : next ? C.blue : C.muted, textTransform:"uppercase", letterSpacing:"0.02em" }}>{hit ? "✓ " : ""}Tier {x.tier}</div>
+                <div style={{ fontSize:"15px", fontWeight:"700", color:hit || next ? C.black : C.muted, marginTop:"1px" }}>{usd(x.pay)}</div>
                 <div style={{ fontSize:"11px", color:C.muted, whiteSpace:"nowrap" }}>{hit ? `${x.points.toLocaleString()} pts` : `${(x.points - net).toLocaleString()} to go`}</div>
               </div>
             );
@@ -6537,6 +6563,7 @@ function SalesPointsBonus({ token, canReview=false }) {
   const [showClawbacks, setShowClawbacks] = useState(false);
   const [showSales, setShowSales] = useState(false);
   const [salesSort, setSalesSort] = useState("recent");
+  const [showHow, setShowHow] = useState(false);
   const [showReview, setShowReview] = useState(false);
   const s = useGrowthReport({ type:"sales_deals", rep:"trevor", from:"2026-06-01", to:today, v:bump }, token);
   const overrides = useMemo(() => Object.fromEntries((s.data?.overrides || []).map(o => [o.hcp_job_id, o.rep])), [s.data]);
@@ -6593,12 +6620,12 @@ function SalesPointsBonus({ token, canReview=false }) {
       </div>
       <ReportState s={s}/>
       {s.data && (<>
-        <TierTrack m={m} t={t} isNow={month === thisMonth} today={today}/>
+        <TierTrack m={m} t={t} isNow={month === thisMonth} today={today} monthName={label.split(" ")[0]}/>
         {(m.chargebacks.length > 0 || atRisk.length > 0) && (
-          <div style={{ background:C.card, border:`1px solid ${C.red}30`, borderRadius:"16px", overflow:"hidden" }}>
-            <button onClick={() => setShowClawbacks(v => !v)} style={{ width:"100%", display:"flex", justifyContent:"space-between", alignItems:"center", gap:"8px", background:`${C.red}08`, border:"none", padding:"12px 14px", cursor:"pointer", fontFamily:FONT, textAlign:"left" }}>
-              <span style={{ fontWeight:"600", fontSize:"15px", color:C.black }}>Clawbacks · {m.chargebacks.length} plan{m.chargebacks.length === 1 ? "" : "s"} cancelled{atRisk.length ? ` · ${atRisk.length} at risk` : ""}</span>
-              <span style={{ fontWeight:"700", fontSize:"15px", color:C.red, whiteSpace:"nowrap" }}>−{m.back.toLocaleString()} pts {showClawbacks ? "▲" : "▼"}</span>
+          <div style={{ background:C.card, border:`1px solid ${m.back ? `${C.red}30` : C.border}`, borderRadius:"16px", overflow:"hidden" }}>
+            <button onClick={() => setShowClawbacks(v => !v)} style={{ width:"100%", display:"flex", justifyContent:"space-between", alignItems:"center", gap:"8px", background:m.back ? `${C.red}08` : C.card, border:"none", padding:"12px 14px", cursor:"pointer", fontFamily:FONT, textAlign:"left" }}>
+              <span style={{ fontWeight:"600", fontSize:"15px", color:C.black }}>{[m.chargebacks.length && `Clawbacks · ${m.chargebacks.length} plan${m.chargebacks.length === 1 ? "" : "s"} cancelled`, atRisk.length && `${atRisk.length} plan${atRisk.length === 1 ? "" : "s"} at risk`].filter(Boolean).join(" · ")}</span>
+              <span style={{ fontWeight:"700", fontSize:"14px", color:m.back ? C.red : C.blue, whiteSpace:"nowrap" }}>{m.back ? `−${m.back.toLocaleString()} pts` : `${riskPts.toLocaleString()} pts at risk`} {showClawbacks ? "▲" : "▼"}</span>
             </button>
             {showClawbacks && (
               <div style={{ padding:"4px 14px 10px" }}>
@@ -6653,7 +6680,8 @@ function SalesPointsBonus({ token, canReview=false }) {
         )}
         {showSales && <RankRows rows={(salesSort === "points" ? [...m.earned].sort((a, b) => b.points - a.points) : m.earned).map(d => ({ id:d.hcp_job_id, name:d.name, value:`${d.points.toLocaleString()} pts`,
           sub:<>{fmtShortDate(d.done_on)} · {money2(d.price)} · {freqText(d)}{d.returning ? " · returning" : ""} · {statusText(d)}{overrides[d.hcp_job_id] ? " · credited by an owner" : ""}</> }))} empty={`No sales completed in ${label} yet.`}/>}
-        <div style={{ fontSize:"12px", color:C.muted }}>A sale is a completed HCP job tagged "sold by trevor", counted in the month it was completed. Points = first-visit price (no tips) × frequency from the points table; frequency comes from the job's plan tag, or else the client's scheduled visits over the next 6 months. A plan has to finish its first {Object.entries(CHARGEBACK_SERVICES).filter(([f,n])=>n>1).map(([f,n])=>`${n} ${FREQ_LABEL[f].toLowerCase()}`).join(", ")} services; if it stops sooner, it's at risk for {CHARGEBACK_GRACE_DAYS} days after the missed visit, then the points come off in the month those days end.</div>
+        <button onClick={() => setShowHow(v => !v)} style={{ alignSelf:"flex-start", background:"none", border:"none", padding:"2px 4px", color:C.blue, fontSize:"13px", fontWeight:"600", fontFamily:FONT, cursor:"pointer" }}>How points work {showHow ? "▲" : "▼"}</button>
+        {showHow && <div style={{ fontSize:"12px", color:C.muted, padding:"0 4px" }}>A sale is a completed HCP job tagged "sold by trevor", counted in the month it was completed. Points = first-visit price (no tips) × frequency from the points table; frequency comes from the job's plan tag, or else the client's scheduled visits over the next 6 months. A plan has to finish its first {Object.entries(CHARGEBACK_SERVICES).filter(([f,n])=>n>1).map(([f,n])=>`${n} ${FREQ_LABEL[f].toLowerCase()}`).join(", ")} services; if it stops sooner, it's at risk for {CHARGEBACK_GRACE_DAYS} days after the missed visit, then the points come off in the month those days end.</div>}
         {s.loading && <div style={{ fontSize:"11px", color:C.muted }}>Refreshing...</div>}
       </>)}
     </div>
