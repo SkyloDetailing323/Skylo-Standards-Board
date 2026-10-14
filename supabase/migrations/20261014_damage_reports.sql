@@ -23,6 +23,7 @@ create table if not exists damage_reports (
 );
 create index if not exists damage_reports_tech_idx on damage_reports (tech_id);
 alter table damage_reports enable row level security;
+drop policy if exists "public access" on damage_reports;
 create policy "public access" on damage_reports for all using (true) with check (true);
 grant select, insert, update, delete on damage_reports to anon, authenticated;
 

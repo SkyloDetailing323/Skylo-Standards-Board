@@ -9012,7 +9012,7 @@ function DamagePanel({ techs, jobs, damage, refreshAll, showToast }) {
                   </div>
                   {(d.damaged_items||[]).length>0&&<div style={{ fontSize:"11px", color:C.muted, marginTop:"2px" }}>Damaged: {d.damaged_items.map(id=>DAMAGE_ITEM_LABEL[id]||id).join(", ")}</div>}
                   {d.reason&&<div style={{ fontSize:"11px", color:C.muted, marginTop:"2px" }}>{d.reason}</div>}
-                  <div style={{ fontSize:"11px", color:C.muted, marginTop:"2px" }}>Logged {new Date(d.created_at).toLocaleDateString("en-US",{month:"short",day:"numeric"})}</div>
+                  <div style={{ fontSize:"11px", color:C.muted, marginTop:"2px" }}>Logged {fmtShortDate(mtDateStr(Date.parse(d.created_at)))}</div>
                 </div>
                 <div style={{ display:"flex", alignItems:"center", gap:"10px", flexShrink:0 }}>
                   <span style={{ fontFamily:FONT, fontWeight:"700", fontSize:"15px", color:OR }}>{dmgPoints(d)} pts{g.length>1?" each":""}</span>
