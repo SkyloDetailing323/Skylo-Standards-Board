@@ -24,9 +24,15 @@ create table if not exists tech_bookings (
   created_at timestamptz not null default now()
 );
 create index if not exists tech_bookings_booker_idx on tech_bookings (booker_id);
+-- Read-only from the browser (points and pay are computed in the app);
+-- every write goes through netlify/functions/tech-bookings.js (owner /
+-- manager token) or the scan, with the service key -- confirming a booking
+-- pays the booker, so no browser can write it.
 alter table tech_bookings enable row level security;
-create policy "public access" on tech_bookings for all using (true) with check (true);
-grant select, insert, update, delete on tech_bookings to anon, authenticated;
+drop policy if exists "public access" on tech_bookings;
+drop policy if exists "read" on tech_bookings;
+create policy "read" on tech_bookings for select using (true);
+grant select on tech_bookings to anon, authenticated;
 
 -- Which HCP jobs the scan has already checked for a "Technician Booking - "
 -- line item: once when new ("<job id>:new") and once when completed

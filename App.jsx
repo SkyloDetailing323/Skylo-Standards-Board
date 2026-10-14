@@ -1522,7 +1522,7 @@ async function techBookingApi(token, { invoice, add=false, booker_id=null }) {
 
 function BookingJobPreview({ job }) {
   if (!job) return null;
-  const when = job.scheduled_start ? fmtShortDate(String(job.scheduled_start).slice(0,10)) : "not scheduled yet";
+  const when = job.scheduled_start ? fmtShortDate(mtDateStr(Date.parse(job.scheduled_start))) : "not scheduled yet";
   return (
     <div style={{ background:C.cardLt, borderRadius:"10px", padding:"10px 12px", fontSize:"13px", color:C.black, display:"flex", flexDirection:"column", gap:"3px" }}>
       <div><b>#{job.invoice_number}</b> · {job.customer_name || "Unknown customer"} · {when}{job.completed ? " · completed" : ""}</div>
@@ -1547,11 +1547,19 @@ function TechBookingsAdmin({ techs, techBookings=[], jobs=[], token, reviewerNam
   const pending = techBookings.filter(b => b.status === "pending");
   const confirmed = techBookings.filter(b => b.status === "confirmed").slice(0, 40);
   const rejected = techBookings.filter(b => b.status === "rejected").slice(0, 20);
-  const fmtWhen = b => b.scheduled_start ? fmtShortDate(String(b.scheduled_start).slice(0,10)) : "";
+  const fmtWhen = b => b.scheduled_start ? fmtShortDate(mtDateStr(Date.parse(b.scheduled_start))) : "";
 
   async function patch(b, body, msg) {
     setBusy(b.id);
-    try { await sb(`tech_bookings?id=eq.${b.id}`, { method:"PATCH", prefer:"return=minimal", body:JSON.stringify(body) }); toast(msg); await refreshAll(); }
+    // Through tech-bookings (owner / manager token): the table is read-only
+    // from the browser because confirming a booking pays the booker.
+    try {
+      const r = await fetch("/.netlify/functions/tech-bookings", { method:"POST", headers:{ "Content-Type":"application/json", Authorization:`Bearer ${token||""}` },
+        body:JSON.stringify({ action:"update", id:b.id, status:body.status, ...("booker_id" in body ? { booker_id:body.booker_id } : {}) }) });
+      const j = await r.json().catch(()=>({}));
+      if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+      toast(msg); await refreshAll();
+    }
     catch(e) { toast("Error: " + e.message, false); }
     setBusy(null);
   }

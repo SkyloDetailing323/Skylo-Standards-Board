@@ -35,7 +35,9 @@ exports.handler = async (event) => {
       if (Date.now() - started > TIME_BUDGET_MS) break;
       if (checked.has(j.key)) continue;
       checked.add(j.key);
-      const items = bookingItems(await lineItemNames(j.hcp_job_id));
+      const names = await lineItemNames(j.hcp_job_id);
+      if (names === null) { stats.errors = (stats.errors || 0) + 1; continue; }   // HCP down: try again next run
+      const items = bookingItems(names);
       await sb("tech_booking_item_checks?on_conflict=check_key", { method: "POST", prefer: "resolution=merge-duplicates,return=minimal", body: JSON.stringify({ check_key: j.key, has_item: items.length > 0, items: items.join(" · ") || null }) });
       stats.checked++;
       if (!items.length || existing.has(j.hcp_job_id)) continue;

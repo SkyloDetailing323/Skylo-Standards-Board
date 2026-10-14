@@ -36,19 +36,17 @@ async function hcp(path, attempt = 1) {
 
 // Line item names on a job. Uses the job's line items (exist before the job
 // is done), falling back to its invoices (same source the revenue sync uses).
+// null = HCP couldn't be read (the scan then leaves the job to check again).
 async function lineItemNames(hcpJobId) {
   const names = [];
-  try {
-    const li = await hcp(`jobs/${encodeURIComponent(hcpJobId)}/line_items`);
-    const arr = Array.isArray(li) ? li : (li?.data || li?.line_items || []);
-    for (const it of arr) if (it?.name) names.push(String(it.name).trim());
-  } catch (e) { /* fall through to invoices */ }
+  const li = await hcp(`jobs/${encodeURIComponent(hcpJobId)}/line_items`).catch(() => undefined);
+  const arr = Array.isArray(li) ? li : (li?.data || li?.line_items || []);
+  for (const it of arr) if (it?.name) names.push(String(it.name).trim());
   if (!names.length) {
-    try {
-      const inv = await hcp(`jobs/${encodeURIComponent(hcpJobId)}/invoices`);
-      const invoices = Array.isArray(inv) ? inv : (inv?.invoices || inv?.data || []);
-      for (const i of invoices) for (const it of (i.items || i.line_items || [])) if (it?.name) names.push(String(it.name).trim());
-    } catch (e) { /* none found */ }
+    const inv = await hcp(`jobs/${encodeURIComponent(hcpJobId)}/invoices`).catch(() => undefined);
+    if (li === undefined && inv === undefined) return null;
+    const invoices = Array.isArray(inv) ? inv : (inv?.invoices || inv?.data || []);
+    for (const i of invoices) for (const it of (i.items || i.line_items || [])) if (it?.name) names.push(String(it.name).trim());
   }
   return names;
 }
