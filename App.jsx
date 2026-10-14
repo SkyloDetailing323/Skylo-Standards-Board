@@ -6459,6 +6459,7 @@ function SalesPointsBonus({ token, canReview=false }) {
   const [bump, setBump] = useState(0);
   const [saving, setSaving] = useState(null);
   const [showUntagged, setShowUntagged] = useState(false);
+  const [showClawbacks, setShowClawbacks] = useState(false);
   const s = useGrowthReport({ type:"sales_deals", rep:"trevor", from:"2026-06-01", to:today, v:bump }, token);
   const overrides = useMemo(() => Object.fromEntries((s.data?.overrides || []).map(o => [o.hcp_job_id, o.rep])), [s.data]);
   const sales = useMemo(() => s.data ? buildSales(s.data.jobs || [], { tag:s.data.tag, revenueByJob:s.data.revenue || {}, overrides, repKey:"trevor" }) : [], [s.data, overrides]);
@@ -6513,7 +6514,7 @@ function SalesPointsBonus({ token, canReview=false }) {
       <ReportState s={s}/>
       {s.data && (<>
         <TileGrid>
-          <StatTile label="Net points" value={m.net.toLocaleString()} sub={`${m.gross.toLocaleString()} earned${m.back ? ` − ${m.back.toLocaleString()} charged back` : ""}`}/>
+          <StatTile label="Net points" value={m.net.toLocaleString()} sub={`${m.gross.toLocaleString()} earned${m.back ? ` − ${m.back.toLocaleString()} clawed back` : ""}`}/>
           <StatTile label="Current tier" value={t.tier ? `Tier ${t.tier}` : "None yet"} sub={t.tier ? `${BONUS_TIERS[t.tier - 1].points.toLocaleString()}+ points` : "Tier 1 at 1,400 points"}/>
           <StatTile label="Points to next tier" value={t.next ? t.toNext.toLocaleString() : "Top tier"} sub={t.next ? `Tier ${t.next.tier} pays ${usd(t.next.pay)}` : "Highest bonus reached"}/>
           <StatTile label="Bonus earned" value={usd(t.pay)} sub={month === thisMonth ? "so far this month" : "for the month"}/>
@@ -6530,6 +6531,29 @@ function SalesPointsBonus({ token, canReview=false }) {
             ))}
           </div>
         </div>
+        {m.chargebacks.length > 0 && (
+          <div style={{ background:C.card, border:`1px solid ${C.red}30`, borderRadius:"16px", overflow:"hidden" }}>
+            <button onClick={() => setShowClawbacks(v => !v)} style={{ width:"100%", display:"flex", justifyContent:"space-between", alignItems:"center", gap:"8px", background:`${C.red}08`, border:"none", padding:"12px 14px", cursor:"pointer", fontFamily:FONT, textAlign:"left" }}>
+              <span style={{ fontWeight:"600", fontSize:"15px", color:C.black }}>Clawbacks · {m.chargebacks.length} plan{m.chargebacks.length === 1 ? "" : "s"} cancelled</span>
+              <span style={{ fontWeight:"700", fontSize:"15px", color:C.red, whiteSpace:"nowrap" }}>−{m.back.toLocaleString()} pts {showClawbacks ? "▲" : "▼"}</span>
+            </button>
+            {showClawbacks && (
+              <div style={{ padding:"4px 14px 10px" }}>
+                {m.chargebacks.map(d => (
+                  <div key={"cb" + d.hcp_job_id} style={{ display:"flex", justifyContent:"space-between", gap:"8px", padding:"10px 0", borderBottom:`1px solid ${C.border}40` }}>
+                    <div style={{ minWidth:0 }}>
+                      <div style={{ fontFamily:FONT, fontWeight:"600", fontSize:"14px", color:C.black }}>{d.name}</div>
+                      <div style={{ fontSize:"12px", color:C.muted, marginTop:"2px" }}>{FREQ_LABEL[d.freq]} · {money2(d.price)} · sold {fmtShortDate(d.done_on)} · stopped after {d.completed} of {d.needed} services · cancelled visit {fmtShortDate(d.chargeback_on)}</div>
+                    </div>
+                    <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"14px", color:C.red, whiteSpace:"nowrap" }}>−{d.points.toLocaleString()} pts</div>
+                  </div>
+                ))}
+                <div style={{ fontSize:"12px", color:C.muted, paddingTop:"8px" }}>{m.gross.toLocaleString()} earned − {m.back.toLocaleString()} clawed back = <b style={{ color:C.black }}>{m.net.toLocaleString()} net points</b>. A plan that stops before its minimum services loses its points in the month of the cancelled visit.</div>
+              </div>
+            )}
+          </div>
+        )}
+        {canReview && s.data.evidence_failed && <div style={{ fontSize:"12px", color:C.muted }}>The "Needs a look" list didn't load this time (the database was slow). The bonus numbers above aren't affected.</div>}
         {review && (review.mismatch.length + review.missed.length + review.untagged.length > 0) && (<>
           <ListTitle right="last 100 days">Needs a look</ListTitle>
           <div style={{ fontSize:"12px", color:C.muted, marginTop:"-4px" }}>HCP can't tell us who booked a job, so credit comes from the "sold by" tag. These don't line up with who was on the calls and texts with the customer in GHL, or have no tag. Pick who sold it; your pick wins over the tag.</div>
@@ -6545,11 +6569,6 @@ function SalesPointsBonus({ token, canReview=false }) {
         <ListTitle right={`${m.earned.length} sale${m.earned.length === 1 ? "" : "s"}`}>Sales completed in {label.split(" ")[0]}</ListTitle>
         <RankRows rows={m.earned.map(d => ({ id:d.hcp_job_id, name:d.name, value:`${d.points.toLocaleString()} pts`,
           sub:<>{fmtShortDate(d.done_on)} · {money2(d.price)} · {freqText(d)}{d.returning ? " · returning" : ""} · {statusText(d)}{overrides[d.hcp_job_id] ? " · credited by an owner" : ""}</> }))} empty={`No sales completed in ${label} yet.`}/>
-        {m.chargebacks.length > 0 && (<>
-          <ListTitle right={`−${m.back.toLocaleString()} pts`}>Chargebacks</ListTitle>
-          <RankRows rows={m.chargebacks.map(d => ({ id:"cb" + d.hcp_job_id, name:d.name, value:`−${d.points.toLocaleString()} pts`, bad:true,
-            sub:`${FREQ_LABEL[d.freq]} sold ${fmtShortDate(d.done_on)} · stopped after ${d.completed} of ${d.needed} services · first missed visit ${fmtShortDate(d.chargeback_on)}` }))}/>
-        </>)}
         <div style={{ fontSize:"12px", color:C.muted }}>A sale is a completed HCP job tagged "sold by trevor", counted in the month it was completed. Points = first-visit price (no tips) × frequency from the points table; frequency comes from the job's plan tag, or else the client's scheduled visits over the next 6 months. A plan has to finish its first {Object.entries(CHARGEBACK_SERVICES).filter(([f,n])=>n>1).map(([f,n])=>`${n} ${FREQ_LABEL[f].toLowerCase()}`).join(", ")} services; if it stops sooner, the points come off in the month of the first missed visit.</div>
         {s.loading && <div style={{ fontSize:"11px", color:C.muted }}>Refreshing...</div>}
       </>)}
