@@ -8399,7 +8399,7 @@ function TruckInspectionsTab({ techs, jobs=[], token, canGrade=false, showToast=
         <button style={{ ...arrow, opacity:wk>=thisWeek?0.4:1 }} disabled={wk>=thisWeek} onClick={() => { setWk(shiftWeek(wk,1)); setOpen(null); }}>▶</button>
       </div>
       <div style={{ fontSize:"13px", color:C.muted, marginBottom:"12px", lineHeight:"1.5" }}>
-        Nightly Truck Checks (GHL form) for every night a tech worked (a job with revenue). Graded = the grade; submitted but not graded yet counts {TECH_SCORE_CONFIG.truck.notGradedScore} for now; worked with no Truck Check counts 0. Apprentices in training aren't listed. Part of the Equipment &amp; Truck section of the Tech Score. Weeks run Wednesday–Tuesday. Display only — not tied to pay.
+        Nightly Truck Checks (GHL form) for every night a tech worked (a job with revenue). Graded = the grade; submitted but not graded yet counts {TECH_SCORE_CONFIG.truck.notGradedScore} for now; worked with no Truck Check counts 0. Nights before {fmtShortDate(TECH_SCORE_CONFIG.truck.startDate)} (when Truck Checks started) don't count. Apprentices in training aren't listed. Part of the Equipment &amp; Truck section of the Tech Score. Weeks run Wednesday–Tuesday. Display only — not tied to pay.
       </div>
       {state.error && <div style={{ background:`${C.red}10`, border:`1px solid ${C.red}`, borderRadius:"12px", padding:"12px", fontSize:"13px", color:C.red, marginBottom:"10px" }}>Couldn't load: {state.error}</div>}
       {state.loading && !state.data && <div style={{ color:C.muted, padding:"16px" }}>Loading...</div>}

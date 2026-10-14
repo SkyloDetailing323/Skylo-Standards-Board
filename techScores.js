@@ -50,7 +50,8 @@ export const TECH_SCORE_CONFIG = {
   // graded = the grade; submitted but not graded yet = notGradedScore;
   // worked but no Truck Check = missedScore. Apprentices still in training
   // (title detail_apprentice) don't have a truck of their own: no score.
-  truck: { notGradedScore: 100, missedScore: 0, exemptTitles: ["detail_apprentice"] },
+  // Nights before startDate (when Truck Checks began) aren't counted.
+  truck: { notGradedScore: 100, missedScore: 0, exemptTitles: ["detail_apprentice"], startDate: "2026-10-07" },
 };
 
 // ─── helpers ────────────────────────────────────────────────────────────────
@@ -151,7 +152,7 @@ export function truckScore({ techId, tech, jobs = [], truckSubs = [], grades = [
   const byDay = Object.fromEntries(latestPerDay(truckSubs).map(s => [s.work_date, s]));
   if (isTruckExempt(tech, cfg)) return { score: null, exempt: true, nights: [], extra: [], worked: 0, submitted: 0, missed: 0 };
   const gradeById = Object.fromEntries(grades.map(g => [g.submission_id, g]));
-  const worked = workedDates(jobs, techId, from, to).filter(d => !today || d <= today);
+  const worked = workedDates(jobs, techId, from, to).filter(d => (!today || d <= today) && (!cfg.truck.startDate || d >= cfg.truck.startDate));
   const nights = worked.map(date => {
     const sub = byDay[date] || null, grade = sub ? gradeById[sub.id] || null : null;
     if (!sub) return date === today ? { date, sub, grade, status: "pending", score: null } : { date, sub, grade, status: "missed", score: cfg.truck.missedScore };

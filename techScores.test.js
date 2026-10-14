@@ -73,20 +73,23 @@ test("production: early month uses 7 days; no jobs this month = no score; part-t
   assert.deepEqual(monthlyTargets({ title: "detail_pro" }, null), { upsells: 400, reviews: 6, switchovers: 1 });
 });
 
+// The truck tests below use early-October dates: score them without the
+// Truck Check start date (it has its own test).
+const NOSTART = { ...TECH_SCORE_CONFIG, truck: { ...TECH_SCORE_CONFIG.truck, startDate: null } };
 const truckSub = (id, date, at = `${date}T03:00:00Z`) => ({ id, form_id: AUDIT_CONFIG.truck.formId, work_date: date, submitted_at: at, tech_id: "t1" });
 
 test("truck: graded / not graded yet (100) / missed (0) over nights worked", () => {
   const jobs = [job("2026-10-01"), job("2026-10-01"), job("2026-10-02"), job("2026-10-03"), job("2026-10-05", 0, 0), job("2026-10-06")];
   const subs = [truckSub("a", "2026-10-01"), truckSub("a2", "2026-10-01", "2026-10-01T05:00:00Z"), truckSub("b", "2026-10-02"), truckSub("x", "2026-10-04")];
   const grades = [{ submission_id: "a2", score: 70 }, { submission_id: "a", score: 10 }];
-  const r = truckScore({ techId: "t1", tech: { title: "detail_pro" }, jobs, truckSubs: subs, grades, from: "2026-09-30", to: "2026-10-06", today: "2026-10-06" });
+  const r = truckScore({ techId: "t1", tech: { title: "detail_pro" }, jobs, truckSubs: subs, grades, from: "2026-09-30", to: "2026-10-06", today: "2026-10-06" }, NOSTART);
   // Oct 1 graded 70 (latest submission), Oct 2 not graded = 100, Oct 3 missed = 0, Oct 6 = today, pending.
   assert.deepEqual(r.nights.map(n => [n.date, n.status, n.score]), [["2026-10-06", "pending", null], ["2026-10-03", "missed", 0], ["2026-10-02", "not_graded", 100], ["2026-10-01", "graded", 70]]);
   close(r.score, 170 / 3);
   assert.equal(r.worked, 3); assert.equal(r.submitted, 2); assert.equal(r.missed, 1);
   assert.deepEqual(r.extra.map(e => e.date), ["2026-10-04"]);   // submitted, no paid job
-  assert.equal(truckScore({ techId: "t1", tech: { title: "detail_pro" }, jobs: [], truckSubs: subs, from: "2026-09-30", to: "2026-10-06" }).score, null);
-  const appr = truckScore({ techId: "t1", tech: { title: "detail_apprentice" }, jobs, truckSubs: subs, from: "2026-09-30", to: "2026-10-06" });
+  assert.equal(truckScore({ techId: "t1", tech: { title: "detail_pro" }, jobs: [], truckSubs: subs, from: "2026-09-30", to: "2026-10-06" }, NOSTART).score, null);
+  const appr = truckScore({ techId: "t1", tech: { title: "detail_apprentice" }, jobs, truckSubs: subs, from: "2026-09-30", to: "2026-10-06" }, NOSTART);
   assert.equal(appr.score, null); assert.equal(appr.exempt, true);
 });
 
@@ -105,7 +108,16 @@ test("full card: empty tables don't break anything", () => {
     from: "2026-09-16", to: "2026-10-13", today: "2026-10-08" });
   assert.equal(w.sections.quality, 50);              // the August callback is outside the window
   assert.equal(w.production.asOf, "2026-10-08");     // month to date runs through today
-  assert.equal(w.sections.equipment, 0);             // worked Oct 1, no Truck Check
+  assert.equal(w.sections.equipment, null);          // Oct 1 is before Truck Checks started (Oct 7)
+  const w2 = techScoreCard({ techId: "t1", tech: { title: "detail_pro" }, jobs: [job("2026-10-01", 0), job("2026-10-07", 0)], from: "2026-09-16", to: "2026-10-13", today: "2026-10-08" });
+  assert.equal(w2.sections.equipment, 0);            // worked Oct 7, no Truck Check
+});
+
+test("truck: nights before the Truck Check start date don't count", () => {
+  const jobs = [job("2026-09-24"), job("2026-10-01"), job("2026-10-06"), job("2026-10-07"), job("2026-10-08")];
+  const r = truckScore({ techId: "t1", tech: { title: "detail_pro" }, jobs, truckSubs: [truckSub("a", "2026-10-08")], from: "2026-09-16", to: "2026-10-13", today: "2026-10-13" });
+  assert.deepEqual(r.nights.map(n => [n.date, n.status]), [["2026-10-08", "not_graded"], ["2026-10-07", "missed"]]);
+  assert.equal(r.worked, 2); assert.equal(r.missed, 1); close(r.score, 50);
 });
 
 const techs = [
