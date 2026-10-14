@@ -2,8 +2,8 @@
 // Tote Check and Tech Audit submissions for the Audit Scores tab. The
 // ghl_form_submissions table isn't readable from the browser (same as the
 // other GHL tables), so this checks the login token and reads it with the
-// service key: owners and the Field Supervisor get every tech, a tech gets
-// only their own submissions. Scoring happens in the app (auditScoring.js).
+// service key: owners and the Field Supervisor get every tech, a team lead
+// gets their own and their team members', any other tech only their own. Scoring happens in the app (auditScoring.js).
 //
 // GET ?from=YYYY-MM-DD&to=YYYY-MM-DD[&kind=tote|truck]
 //   Admins also get tote_waivers (items waived from the Payroll deduction).
@@ -124,7 +124,17 @@ exports.handler = async (event) => {
 
   const admin = who.role === "owner" || who.role === "manager";
   if (!admin && !who.techId) return json(403, { error: "No tech on this login" });
-  const techFilter = admin ? "" : `&tech_id=eq.${encodeURIComponent(who.techId)}`;
+  // A team lead also gets their team members' forms, so they can go over each
+  // day's misses with them. Everyone else sees only their own.
+  let ids = [who.techId];
+  if (!admin) {
+    const me = await sbGetAll(`techs?select=id,is_lead&id=eq.${encodeURIComponent(who.techId)}`).catch(() => []);
+    if (me[0] && me[0].is_lead) {
+      const team = await sbGetAll(`techs?select=id&team_lead_id=eq.${encodeURIComponent(who.techId)}`).catch(() => []);
+      ids = ids.concat(team.map(t => t.id));
+    }
+  }
+  const techFilter = admin ? "" : `&tech_id=in.(${ids.map(encodeURIComponent).join(",")})`;
   const kindFilter = q.kind === "tote" ? `&form_id=eq.${TOTE_FORM_ID}` : q.kind === "truck" ? `&form_id=eq.${TRUCK_FORM_ID}` : "";
   try {
     const rows = await sbGetAll(`ghl_form_submissions?select=id,form_id,submitted_at,work_date,tech_name,tech_id,answers,fields:raw->others&work_date=gte.${q.from}&work_date=lte.${q.to}${techFilter}${kindFilter}&order=work_date.desc,submitted_at.desc`);

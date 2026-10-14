@@ -142,7 +142,11 @@ export const AUDIT_CONFIG = {
   // since the last meeting -- owner's call. Only this tab; the rest of the
   // app (pay, HCP) stays Sun-Sat.
   weekStartsOn: 3,
+  // On the roster but never audited (they do the audits, or aren't detail
+  // techs): left off the Audit Scores lists and the overall leaderboard.
+  hiddenFromAudits: ["Ethan Hamilton", "Will Faulkner", "Trevor Prince"],
 };
+export const hiddenFromAudits = t => !!t && AUDIT_CONFIG.hiddenFromAudits.some(n => norm(n) === norm(t.name));
 
 // ─── matching helpers ──────────────────────────────────────────────────────
 export const norm = s => String(s ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");

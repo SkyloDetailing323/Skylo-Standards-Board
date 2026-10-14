@@ -8,7 +8,7 @@ import { buildFordImport } from "./fordReports.js";
 import { techWeekCard, techScoreCard, teamSummary, scoreWindow, truckScore, isTruckExempt, TECH_SCORE_CONFIG } from "./techScores.js";
 import { AD_HEALTH, groupAds, trend, grade, metrics, sumWeeks, rolling, adAdvice, marketShift, toAdSets } from "./adTrends.js";
 import { LABOR_TARGET_PCT, payrollTaxRate, tipsPaidByMonth, qbLaborMonth } from "./laborCost.js";
-import { formKind, scoreToteCheck, scoreTechAudit, latestPerDay, auditDays, weeklyAuditPct, auditWeekStart, toteCharges, submissionPhotoUrls } from "./auditScoring.js";
+import { formKind, scoreToteCheck, scoreTechAudit, latestPerDay, auditDays, weeklyAuditPct, auditWeekStart, toteCharges, submissionPhotoUrls, hiddenFromAudits } from "./auditScoring.js";
 
 // ─── SUPABASE CONFIG ──────────────────────────────────────────────────────────
 const SUPABASE_URL = "https://mjmwxxvqcsptrocwucis.supabase.co";
@@ -8072,6 +8072,9 @@ function AuditScoresTab({ techs, token, techId=null, canSync=false, view="overvi
   if (techId) {
     const me = cardFor(techId);
     const meTech = techs.find(t => t.id===techId) || { id:techId };
+    // Team leads also see each of their members' days (audit-scores sends
+    // a lead their team's forms too).
+    const myTeam = meTech.is_lead ? techs.filter(t => t.team_lead_id===techId && t.is_active!==false && !hiddenFromAudits(t)).sort((a,b) => a.name.localeCompare(b.name)) : [];
     const full = section==="overview" ? fullCardFor(meTech) : null;
     const team = teamState.data;
     return (
@@ -8103,6 +8106,27 @@ function AuditScoresTab({ techs, token, techId=null, canSync=false, view="overvi
           </>)}
           {section==="tote" && <AuditTechDetail week={me.week} only="tote"/>}
           {section==="audit" && <AuditTechDetail week={me.week} only="audit"/>}
+          {(section==="audit" || section==="tote") && myTeam.length>0 && (<>
+            <div style={{ marginTop:"18px" }}><SectionTitle>👥 My Team</SectionTitle></div>
+            <div style={{ fontSize:"12px", color:C.muted, marginTop:"2px", marginBottom:"8px" }}>Tap a teammate to see each day and what they missed — go over it together this week.</div>
+            {myTeam.map(t => {
+              const w = cardFor(t.id).week, key = `team:${t.id}`, isOpen = open===key;
+              const has = section==="audit" ? w.days.length>0 : !!(w.latestTote || w.excluded.length);
+              const lt = w.latestTote;
+              const summary = section==="audit"
+                ? (has ? <>{big(fmtPct(w.auditPct), scoreColor(w.auditPct??0))}{small(`${w.days.length} day${w.days.length!==1?"s":""} audited`)}</> : big("No audits", C.muted))
+                : (lt ? <>{big(`${fmtPct(lt.score)} ${lt.pass?"Pass":"Fail"}`, lt.pass?C.green:C.red)}{small(lt.missingCents ? `${fmtCents(lt.missingCents)} missing` : "Nothing missing")}</> : big("No check", C.muted));
+              return (
+                <div key={key} style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"12px 14px", marginBottom:"8px", opacity:has?1:0.6 }}>
+                  <div onClick={() => has && setOpen(isOpen?null:key)} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:"10px", cursor:has?"pointer":"default" }}>
+                    <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"17px", color:C.black }}>{t.name} {has && <span style={{ fontSize:"12px", color:C.muted }}>{isOpen?"▲":"▼"}</span>}</div>
+                    <div>{summary}</div>
+                  </div>
+                  {isOpen && <div style={{ marginTop:"8px" }}><AuditTechDetail week={w} only={section}/></div>}
+                </div>
+              );
+            })}
+          </>)}
           {section==="driver" && (<>
             {driveNote && <div style={{ fontSize:"12px", color:C.muted, marginBottom:"8px" }}>{driveNote}</div>}
             {me.driver && <DriverDetail driver={me.driver}/>}
@@ -8117,8 +8141,8 @@ function AuditScoresTab({ techs, token, techId=null, canSync=false, view="overvi
   // Overview: every active non-owner tech's overall score for the window.
   // Section pages: the picked week (plus archived techs who had a check).
   const cards = overview
-    ? techs.filter(t => t.is_active!==false && t.title!=="owner").map(t => ({ tech:t, ...fullCardFor(t) }))
-    : techs.filter(t => (t.is_active!==false && t.title!=="owner") || byTechWeek[t.id]).map(t => ({ tech:t, ...cardFor(t.id) }));
+    ? techs.filter(t => t.is_active!==false && t.title!=="owner" && !hiddenFromAudits(t)).map(t => ({ tech:t, ...fullCardFor(t) }))
+    : techs.filter(t => ((t.is_active!==false && t.title!=="owner") || byTechWeek[t.id]) && !hiddenFromAudits(t)).map(t => ({ tech:t, ...cardFor(t.id) }));
   const teams = overview ? teamSummary(cards, techs) : null;
   const dd = overview ? d0 : driveWeek;
   const unassignedCount = dd ? findUnassignedDriving(dd).filter(f => !dd.unassigned.some(u => u.vin===f.vin && u.work_date===f.work_date && (u.assigned_tech_id || u.dismissed))).length : 0;
