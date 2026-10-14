@@ -593,6 +593,9 @@ const TECH_BOOKING_PTS = 20;
 // Loaded with everything else in loadAll; read by calcTotals so every points
 // view includes bookings without threading a new prop through each of them.
 let TECH_BOOKINGS = [];
+// HCP job ids in the jobs table (the revenue sync adds a job when it's
+// completed), so a confirmed booking only earns points once its job is done.
+let COMPLETED_JOB_IDS = new Set();
 const confirmedBookingsFor = techId => TECH_BOOKINGS.filter(b => b.status === "confirmed" && b.booker_id === techId);
 // Pay for one confirmed booking, from the jobs table. null = job not completed/synced yet.
 function techBookingPay(b, jobs) {
@@ -622,7 +625,7 @@ function calcTotals(tech, upsells, switchovers, reviews, callbacks=[], jobs=[]) 
   const techCallbacks = callbacks.filter(c=>c.tech_id===tech.id).concat(DAMAGE_REPORTS.filter(d=>d.tech_id===tech.id)); // damage reports cost the same points as callbacks
   const callbackCount = techCallbacks.length;
   const callbackPts = techCallbacks.reduce((s,c)=>s+callbackPoints(c),0);
-  const bookingCount = confirmedBookingsFor(tech.id).length;
+  const bookingCount = confirmedBookingsFor(tech.id).filter(b => COMPLETED_JOB_IDS.has(b.hcp_job_id)).length;   // points once the job is done
   const bookingPts = bookingCount * TECH_BOOKING_PTS;
   const total = Math.max(0, badgePts+upsellPts+switchPts+reviewPts+callbackPts+bookingPts);
   return { badgePts, upsellAmt, upsellPts, switchPts, reviewPts, callbackPts, callbackCount, bookingCount, bookingPts, total };
@@ -2411,7 +2414,7 @@ function OpsCard({ title, color, pay, status, statusColor, children }) {
       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:"10px", marginBottom:"10px" }}>
         <Label color={color}>{title}</Label>
         <div style={{ textAlign:"right" }}>
-          <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"24px", color:pay>0?C.green:C.muted, lineHeight:1 }}>{money(pay)}</div>
+          {pay!=null && <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"24px", color:pay>0?C.green:C.muted, lineHeight:1 }}>{money(pay)}</div>}
           {status && <div style={{ fontSize:"11px", fontWeight:"600", letterSpacing:"-0.01em", color:statusColor||C.muted, marginTop:"3px" }}>{status}</div>}
         </div>
       </div>
@@ -2436,7 +2439,7 @@ function TierTable({ tiers, activeLabel, suffix="" }) {
 const statLine = { fontSize:"12px", color:C.muted, marginTop:"4px" };
 const bigNum = { fontFamily:FONT, fontWeight:"700", fontSize:"32px", color:C.black, lineHeight:1 };
 
-function OperationsProgressTab({ techs, switchovers, reviews, quota, callbacks=[], jobs=[], isManager=false }) {
+function OperationsProgressTab({ techs, switchovers, reviews, quota, callbacks=[], damageReports=[], jobs=[], isManager=false }) {
   const today = mountainDate(new Date().toISOString());
   const months = opsMonthOptions(today);
   const [monthKey, setMonthKey] = useState(months[0]);
@@ -2552,6 +2555,28 @@ function OperationsProgressTab({ techs, switchovers, reviews, quota, callbacks=[
           </div>
         )}
       </OpsCard>
+
+      {/* Damage: tracked here next to callbacks, but NOT part of Will's bonus
+          (owner's call, Oct 2026). Dated by job like callbacks; a split job's
+          rows carry weight 1/n so it adds up to one. */}
+      {(() => {
+        const { start, end } = monthRange(monthKey);
+        const mine = (damageReports||[]).filter(d => { const day = d.job_date || (d.created_at && mountainDate(d.created_at)); return day && day>=start && day<=end; });
+        const count = Math.round(mine.reduce((t,d)=>t+(Number(d.weight)||1),0)*100)/100;
+        const cost = mine.reduce((t,d)=>t+(Number(d.repair_cost)||0)*(Number(d.weight)||1),0);
+        const rate = cb.jobCount>0 ? count/cb.jobCount*100 : 0;
+        const nameOf = id => techs.find(t=>t.id===id)?.name || "Unknown";
+        return (
+          <OpsCard title="🛠 Damage Reports" color={C.blue} pay={null} status="Tracking only — not part of the bonus">
+            <div style={{ display:"flex", alignItems:"baseline", gap:"10px" }}>
+              <div style={bigNum}>{rate.toFixed(2)}%</div>
+              <div style={{ fontSize:"13px", color:C.muted }}>{count} damage report{count!==1?"s":""} ÷ {cb.jobCount} jobs{cost>0?` · ${money(cost)} in repairs`:""}</div>
+            </div>
+            {mine.length>0 && <div style={{ ...statLine, color:C.black }}>{mine.map(d=>`${nameOf(d.tech_id)} · ${d.customer_name||"—"}${d.job_date?` (${fmtShortDate(d.job_date)})`:""}`).join(" · ")}</div>}
+            <div style={statLine}>Logged on the Customer Satisfaction page. Shown for the record; it doesn't change the operations bonus.</div>
+          </OpsCard>
+        );
+      })()}
 
       {/* 3. Quota */}
       <OpsCard title="📋 Team Quota" color={C.green} pay={r.gateOpen?qt.pay:0} status={gateNote || (qt.tier?`${qt.tier.label} tier`:"Under 60% — no bonus")} statusColor={gateNote?"#ff3b30":qt.tier?C.green:C.muted}>
@@ -10241,7 +10266,7 @@ function AdminPanel({ techBookings=[], damageReports=[], techs, upsells, switcho
           </div>
         )}
         {tab==="operations"&&(
-          <OperationsProgressTab techs={techs} switchovers={switchovers} reviews={reviews} quota={quota} callbacks={callbacks||[]} jobs={jobs||[]} isManager={isManager}/>
+          <OperationsProgressTab techs={techs} switchovers={switchovers} reviews={reviews} quota={quota} callbacks={callbacks||[]} damageReports={damageReports||[]} jobs={jobs||[]} isManager={isManager}/>
         )}
         {tab==="schedule"&&(
           <WorkScheduleTab techs={techs} showToast={showToast}/>
@@ -10363,6 +10388,7 @@ export default function App() {
         sb("damage_reports?select=*&order=created_at.desc").catch(()=>[]),
       ]);
       TECH_BOOKINGS = tb || [];
+      COMPLETED_JOB_IDS = new Set((jb||[]).map(j=>j.hcp_job_id).filter(Boolean));
       DAMAGE_REPORTS = dmg || [];
       setTechs(t||[]); setUpsells(u||[]); setSwitchovers(s||[]); setReviews(r||[]);
       setRideAlongs(ra||[]); setSchedules(sch||[]); setCallbacks(cb||[]); setJobs(jb||[]); setTimeEntries(te||[]); setTipEntries(tp||[]);
