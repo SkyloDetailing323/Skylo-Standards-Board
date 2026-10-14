@@ -490,7 +490,7 @@ function PageTools({ tools, left }) {
           {tools.map(t=>{
             const on = t.id===openId;
             return (
-              <button key={t.id} onClick={()=>setOpenId(on?null:t.id)} aria-expanded={on} style={{ display:"flex", alignItems:"center", gap:"6px", background:t.primary||on?C.blue:C.white, color:t.primary||on?"#fff":C.blue, border:`1px solid ${t.primary||on?C.blue:C.border}`, padding:"8px 14px", borderRadius:"980px", cursor:"pointer", fontFamily:FONT, fontWeight:"600", fontSize:"14px", whiteSpace:"nowrap" }}>
+              <button key={t.id} onClick={()=>setOpenId(on?null:t.id)} aria-expanded={on} style={{ display:"flex", alignItems:"center", gap:"6px", background:t.primary||on?(t.color||C.blue):C.white, color:t.primary||on?"#fff":(t.color||C.blue), border:`1px solid ${t.primary||on?(t.color||C.blue):C.border}`, padding:"8px 14px", borderRadius:"980px", cursor:"pointer", fontFamily:FONT, fontWeight:"600", fontSize:"14px", whiteSpace:"nowrap" }}>
                 {t.icon&&<span>{t.icon}</span>}{t.label}<span style={{ fontSize:"10px", transform:on?"rotate(180deg)":"none", transition:"transform .2s" }}>▾</span>
               </button>
             );
@@ -581,6 +581,13 @@ function calcTeamOverride(tech, allTechs, upsells, switchovers, reviews, callbac
   return { overridePts, overridePct, teamMembers, teamMemberStats, allTeamHit, partialHit:twoThirdsHit&&!allTeamHit, leadHitsQuota, teamTotalPts, hittingCount, totalMembers };
 }
 
+// Damage reports (damage a tech caused to a client's vehicle or property),
+// loaded with everything else in loadAll. They cost the same Journey points as
+// a callback of the same level, so calcTotals counts them with callbacks;
+// read here instead of threading a new prop through every points view.
+let DAMAGE_REPORTS = [];
+const damageTotalsFor = techId => { const mine = DAMAGE_REPORTS.filter(d=>d.tech_id===techId); return { count:mine.length, pts:mine.reduce((s,d)=>s+callbackPoints(d),0) }; };
+
 function calcTotals(tech, upsells, switchovers, reviews, callbacks=[], jobs=[]) {
   const badgePts = calcBadgePts(tech.badges);
   const upsellAmt = (jobs||[]).filter(j=>j.tech_id===tech.id).reduce((s,j)=>s+(j.upsell_amount||0),0);
@@ -589,7 +596,7 @@ function calcTotals(tech, upsells, switchovers, reviews, callbacks=[], jobs=[]) 
   const byMonth = {};
   reviews.filter(r=>r.tech_id===tech.id).forEach(r=>{ byMonth[r.month_key]=(byMonth[r.month_key]||0)+r.count; });
   const reviewPts = Object.values(byMonth).reduce((s,cnt)=>s+(cnt*REVIEW_PTS)+(cnt>=10?REVIEW_BONUS_PTS:0),0);
-  const techCallbacks = callbacks.filter(c=>c.tech_id===tech.id);
+  const techCallbacks = callbacks.filter(c=>c.tech_id===tech.id).concat(DAMAGE_REPORTS.filter(d=>d.tech_id===tech.id)); // damage reports cost the same points as callbacks
   const callbackCount = techCallbacks.length;
   const callbackPts = techCallbacks.reduce((s,c)=>s+callbackPoints(c),0);
   const total = Math.max(0, badgePts+upsellPts+switchPts+reviewPts+callbackPts);
@@ -3226,7 +3233,7 @@ function TimeSheetTab({ tech, techs=[], timeEntries, vehicles=[], truckAssignmen
 }
 
 // ─── TECH DASHBOARD ───────────────────────────────────────────────────────────
-function TechDashboard({ tech, techs, upsells, switchovers, reviews, callbacks, quota, jobs, timeEntries=[], tipEntries=[], refreshAll=async()=>{}, rideAlongs=[], token=null, vehicles=[], truckAssignments=[], onLogout }) {
+function TechDashboard({ damageReports=[], tech, techs, upsells, switchovers, reviews, callbacks, quota, jobs, timeEntries=[], tipEntries=[], refreshAll=async()=>{}, rideAlongs=[], token=null, vehicles=[], truckAssignments=[], onLogout }) {
   const q = quota || DEFAULT_QUOTA;
   const [tab, setTab] = useState("overview");
   const [menuOpen, setMenuOpen] = useState(false);
@@ -3283,7 +3290,7 @@ function TechDashboard({ tech, techs, upsells, switchovers, reviews, callbacks, 
     ]},
     ...(SALES_SELF_VIEW[tech.id]||CALLBACK_ENTRY_TECHS.has(tech.id)?[{ label:"Sales", items:[
       ...(SALES_SELF_VIEW[tech.id]?[["mysales","🤝","My Sales"]]:[]),
-      ...(CALLBACK_ENTRY_TECHS.has(tech.id)?[["callbacks","📞","Callbacks"]]:[]),
+      ...(CALLBACK_ENTRY_TECHS.has(tech.id)?[["callbacks","🤝","Customer Satisfaction"]]:[]),
     ] }]:[]),
     ...(!isApprenticeTech(tech)?[{ label:"Forms", items:[["forms","📝","Forms"]] }]:[]),
     { label:"Training", items:[
@@ -3508,7 +3515,10 @@ function TechDashboard({ tech, techs, upsells, switchovers, reviews, callbacks, 
                   {l:"💰 Upsells",   v:tt.upsellPts,  c:C.green},
                   {l:"🔄 Switchovers",  v:tt.switchPts,  c:C.blue},
                   {l:"⭐ Reviews",   v:tt.reviewPts,  c:C.gold},
-                  ...(tt.callbackCount>0?[{l:`📞 Callbacks (${tt.callbackCount})`, v:tt.callbackPts, c:"#ff3b30"}]:[]),
+                  ...(()=>{ const dm=damageTotalsFor(tech.id), cbN=tt.callbackCount-dm.count, cbP=tt.callbackPts-dm.pts; return [
+                    ...(cbN>0?[{l:`📞 Callbacks (${cbN})`, v:cbP, c:"#ff3b30"}]:[]),
+                    ...(dm.count>0?[{l:`💥 Damage (${dm.count})`, v:dm.pts, c:DAMAGE_COLOR}]:[]),
+                  ]; })(),
                   ...(tech.is_lead?(()=>{ const {overridePts,overridePct,allTeamHit,partialHit}=calcTeamOverride(tech,techs,upsells,switchovers,reviews,callbacks||[],q,jobs); const active=allTeamHit||partialHit; return [{l:`👥 Team Override (${active?Math.round(overridePct*100)+"% unlocked":"locked"})`,v:active?`+${overridePts}`:"—",c:active?C.gold:C.muted}]; })():[]),
                 ].map(item=>(
                   <div key={item.l} style={{ background:C.cardLt, borderRadius:"8px", padding:"10px 12px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
@@ -3561,9 +3571,9 @@ function TechDashboard({ tech, techs, upsells, switchovers, reviews, callbacks, 
         )}
         {tab==="training"&&<PerfectDayTrainingPanel tech={tech} techs={techs}/>}
         {tab==="forms"&&<FormsTab me={tech} role="tech"/>}
-        {tab==="auditscores"&&<AuditScoresTab techs={techs} token={token} techId={tech.id} jobs={jobs||[]} callbacks={callbacks||[]} reviews={reviews||[]} switchovers={switchovers||[]} quota={q}/>}
+        {tab==="auditscores"&&<AuditScoresTab techs={techs} token={token} techId={tech.id} jobs={jobs||[]} callbacks={callbacks||[]} damage={damageReports||[]} reviews={reviews||[]} switchovers={switchovers||[]} quota={q}/>}
         {tab==="mysales"&&SALES_SELF_VIEW[tech.id]&&<SalesTab token={token} onlyRep={SALES_SELF_VIEW[tech.id]}/>}
-        {tab==="callbacks"&&CALLBACK_ENTRY_TECHS.has(tech.id)&&<CallbacksPanel techs={techs} jobs={jobs||[]} callbacks={callbacks||[]} refreshAll={refreshAll} showToast={showToast}/>}
+        {tab==="callbacks"&&CALLBACK_ENTRY_TECHS.has(tech.id)&&<CallbacksPanel techs={techs} jobs={jobs||[]} callbacks={callbacks||[]} damage={damageReports||[]} refreshAll={refreshAll} showToast={showToast}/>}
       </div>
       {toast&&(
         <div style={{ position:"fixed", bottom:"24px", left:"50%", transform:"translateX(-50%)", background:toast.ok?C.green:"#ff3b30", color:C.white, padding:"12px 28px", borderRadius:"24px", fontSize:"14px", fontWeight:"700", zIndex:999, whiteSpace:"nowrap", fontFamily:FONT, letterSpacing:"-0.01em", fontStyle:"normal", boxShadow:"0 4px 20px rgba(0,0,0,0.15)" }}>
@@ -7861,6 +7871,10 @@ function AuditTechDetail({ week, only="both", bare=false }) {
 
 // ─── Overall Tech Score (techScores.js) ──────────────────────────────────────
 const SCORE_SECTIONS = TECH_SCORE_CONFIG.sections;
+// What the cards show: Callbacks and Damage as separate pills (both count in
+// the one 25% Callbacks & Damage section).
+const SCORE_PILLS = TECH_SCORE_CONFIG.pills;
+const DAMAGE_COLOR = "#ff9500";
 const fmtMoney0 = n => `$${Math.round(n||0).toLocaleString()}`;
 const scoreWindowLabel = (from, to) => `Last ${TECH_SCORE_CONFIG.windowWeeks} weeks · ${fmtShortDate(from)} – ${fmtShortDate(to)}`;
 const sectionColor = v => v==null ? C.muted : v>=TECH_SCORE_CONFIG.passLine ? C.green : C.red;
@@ -7872,11 +7886,11 @@ const TRUCK_STATUS = {
   pending:    { label:"Today — not in yet",                  color:C.muted },
 };
 
-// The five section scores, labeled.
+// The section scores, labeled (Callbacks and Damage as their own pills).
 function SectionChips({ sections, align="flex-end" }) {
   return (
     <div style={{ display:"flex", flexWrap:"wrap", gap:"4px", justifyContent:align }}>
-      {SCORE_SECTIONS.map(s => { const v = sections[s.key]; return (
+      {SCORE_PILLS.map(s => { const v = sections[s.key]; return (
         <span key={s.key} style={{ fontSize:"12px", color:C.black, background:C.cardLt, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"2px 8px", whiteSpace:"nowrap" }}>
           {s.label} <strong style={{ color:sectionColor(v) }}>{fmtScore(v)}</strong>
         </span>
@@ -7914,13 +7928,13 @@ function ScoreBreakdown({ card }) {
         ))}
       </div>
       <div style={box}>
-        {head("quality", `Starts at 100. Each callback takes off Level 1 −${ded[1]}, Level 2 −${ded[2]}, Level 3 −${ded[3]} (times the tech's share of a split job).`)}
-        {quality.score==null ? <div style={muted}>No jobs or callbacks — left out.</div>
-          : quality.items.length===0 ? <div style={{ ...muted, color:C.green }}>No callbacks</div>
+        {head("quality", `Starts at 100. Each callback or damage report takes off Level 1 −${ded[1]}, Level 2 −${ded[2]}, Level 3 −${ded[3]} (times the tech's share of a split job). Damage counts exactly like a callback.`)}
+        {quality.score==null ? <div style={muted}>No jobs, callbacks or damage — left out.</div>
+          : quality.items.length===0 ? <div style={{ ...muted, color:C.green }}>No callbacks or damage</div>
           : quality.items.map((c,i) => (
             <div key={c.id || i} style={line}>
-              <span>{c.date ? fmtShortDate(c.date) : "—"}{c.customer ? ` · ${c.customer}` : ""} · Level {c.level}{c.legacy ? " (no level logged)" : ""}{c.share!==1 ? ` · ${Math.round(c.share*100)}% share` : ""}</span>
-              <span style={{ color:C.red, fontWeight:"700", whiteSpace:"nowrap" }}>−{Math.round(c.deduction*10)/10}</span>
+              <span><strong style={{ color:c.kind==="damage" ? DAMAGE_COLOR : C.red }}>{c.kind==="damage" ? "💥 Damage" : "📞 Callback"}</strong> · {c.date ? fmtShortDate(c.date) : "—"}{c.customer ? ` · ${c.customer}` : ""} · Level {c.level}{c.legacy ? " (no level logged)" : ""}{c.share!==1 ? ` · ${Math.round(c.share*100)}% share` : ""}</span>
+              <span style={{ color:c.kind==="damage" ? DAMAGE_COLOR : C.red, fontWeight:"700", whiteSpace:"nowrap" }}>−{Math.round(c.deduction*10)/10}</span>
             </div>
           ))}
       </div>
@@ -7977,7 +7991,7 @@ const passColor = (score, pass) => score==null ? C.muted : pass ? C.green : C.re
 
 // hideTabs: the admin menu opens each section as its own page (Tech Scores >
 // Overview / Tote Checks / Audit Scores / Driving Scores), so no section bar.
-function AuditScoresTab({ techs, token, techId=null, canSync=false, view="overview", hideTabs=false, jobs=[], callbacks=[], reviews=[], switchovers=[], quota=null }) {
+function AuditScoresTab({ techs, token, techId=null, canSync=false, view="overview", hideTabs=false, jobs=[], callbacks=[], damage=[], reviews=[], switchovers=[], quota=null }) {
   const [section, setSection] = useState(view==="both" ? "overview" : view);
   const [wk, setWk] = useState(auditDefaultWeek());
   const [state, setState] = useState({ loading:true, error:null, data:null });
@@ -8052,7 +8066,7 @@ function AuditScoresTab({ techs, token, techId=null, canSync=false, view="overvi
   const driveWeek = d0 ? { ...d0, assignments:d0.assignments.filter(r=>inWeek(r.work_date)), daily:d0.daily.filter(r=>inWeek(r.work_date)), events:d0.events.filter(r=>inWeek(r.work_date)), unassigned:d0.unassigned.filter(r=>inWeek(r.work_date)) } : null;
   const today = mtDateStr(Date.now());
   const cardFor = id => techWeekCard(byTechWeek[id] || [], driveWeek, id);
-  const fullCardFor = t => techScoreCard({ techId:t.id, tech:t, subs:byTech[t.id] || [], driverData:d0, jobs, callbacks, reviews, switchovers, quota,
+  const fullCardFor = t => techScoreCard({ techId:t.id, tech:t, subs:byTech[t.id] || [], driverData:d0, jobs, callbacks, damage, reviews, switchovers, quota,
     truckGrades:state.data?.truck_grades || [], from:win.from, to:end, today });
   const unmatched = [...new Set((section==="overview" ? subs : weekSubs).filter(s => !s.tech_id && (section==="overview" ? !!formKind(s.form_id) : formKind(s.form_id)===section)).map(s => s.tech_name || "(no Tech answer)"))].sort();
   // Answers and question ids on the Tech Audit form that AUDIT_CONFIG can't map.
@@ -8120,9 +8134,11 @@ function AuditScoresTab({ techs, token, techId=null, canSync=false, view="overvi
             <div style={{ fontSize:"13px", color:C.muted, marginBottom:"12px", lineHeight:"1.5" }}>{SCORE_INTRO} Display only — not tied to pay.</div>
             <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(140px, 1fr))", gap:"8px", marginBottom:"12px" }}>
               <StatBlock label="My Overall Score" value={fmtScore(full.overall.score)} color={passColor(full.overall.score, full.overall.pass)} sub={full.overall.score==null ? "no scores yet" : `${full.overall.pass?"Pass":"Fail"} · pass ${TECH_SCORE_CONFIG.passLine}`}/>
-              {SCORE_SECTIONS.map(s => {
+              {SCORE_PILLS.map(s => {
                 const v = full.sections[s.key];
-                return <StatBlock key={s.key} label={`${s.icon} ${s.label}`} value={fmtScore(v)} color={sectionColor(v)} sub={v==null ? "no data — left out" : `${s.weight}% of overall`}/>;
+                const shared = s.key==="callbacks" || s.key==="damage";
+                const w = SCORE_SECTIONS.find(x => x.key===(shared ? "quality" : s.key))?.weight;
+                return <StatBlock key={s.key} label={`${s.icon} ${s.label}`} value={fmtScore(v)} color={sectionColor(v)} sub={v==null ? "no data — left out" : shared ? `${w}% of overall, shared` : `${w}% of overall`}/>;
               })}
             </div>
             <SectionTitle>🔍 What my score is made of</SectionTitle>
@@ -8756,7 +8772,290 @@ function TrucksAdminTab({ techs, vehicles, timeEntries=[], token, refreshAll, sh
 // Used by the admin panel and by Trevor's login (CALLBACK_ENTRY_TECHS) --
 // he's the one who enters callbacks as they come in.
 const CALLBACK_ENTRY_TECHS = new Set(["4641f4da-a16f-411b-8688-8b81ac06eda7"]);   // Trevor Prince
-function CallbacksPanel({ techs, jobs, callbacks, refreshAll, showToast }) {
+// Callbacks page: two tabs Trevor flips between -- Callbacks (red, unchanged)
+// and Damage (orange). Damage scores exactly like a callback of the same
+// level, but is logged and reported separately.
+function CallbacksPanel({ techs, jobs, callbacks, damage=[], refreshAll, showToast }) {
+  const [view, setView] = useState("callbacks");
+  const tabBtn = (id, label, color) => (
+    <button onClick={() => setView(id)} style={{ flex:1, background:view===id ? color : C.white, color:view===id ? C.white : C.black, border:`1px solid ${view===id ? color : C.border}`, padding:"10px 14px", borderRadius:"12px", cursor:"pointer", fontFamily:FONT, fontWeight:"700", fontSize:"14px" }}>{label}</button>
+  );
+  return (
+    <div style={{ display:"flex", flexDirection:"column", gap:"14px" }}>
+      <div style={{ display:"flex", gap:"8px" }}>
+        {tabBtn("callbacks", "📞 Callbacks", "#ff3b30")}
+        {tabBtn("damage", "💥 Damage", DAMAGE_COLOR)}
+      </div>
+      {view==="callbacks"
+        ? <CallbackLogPanel techs={techs} jobs={jobs} callbacks={callbacks} refreshAll={refreshAll} showToast={showToast}/>
+        : <DamagePanel techs={techs} jobs={jobs} damage={damage} refreshAll={refreshAll} showToast={showToast}/>}
+    </div>
+  );
+}
+
+// Damage levels: same points as callback levels.
+const DAMAGE_SEVERITY = {
+  1: { pts:100, label:"Level 1", desc:"Minor — cosmetic, fixed on the spot, no cost (a scuff buffed out)" },
+  2: { pts:200, label:"Level 2", desc:"Moderate — needs a repair or a reimbursement" },
+  3: { pts:300, label:"Level 3", desc:"Major — expensive repair, insurance claim, or broken property" },
+};
+const DAMAGE_AREAS = [
+  { area:"Vehicle", items:[
+    { id:"veh_paint",    label:"Paint / clear coat", hint:"scratches, swirls, burns, chemical etching" },
+    { id:"veh_interior", label:"Interior surfaces", hint:"leather, plastic, screens, headliner, carpet" },
+    { id:"veh_glass",    label:"Glass, mirrors & lights", hint:"" },
+    { id:"veh_trim",     label:"Trim, emblems & badges", hint:"" },
+    { id:"veh_wheels",   label:"Wheels & tires", hint:"" },
+    { id:"veh_electric", label:"Electronics & buttons", hint:"water in electronics, broken controls" },
+  ]},
+  { area:"Property", items:[
+    { id:"prop_garage",  label:"Garage, driveway & floors", hint:"stains, chemical spills, scratches" },
+    { id:"prop_home",    label:"Home exterior", hint:"siding, doors, landscaping" },
+    { id:"prop_items",   label:"Personal belongings", hint:"items in or around the vehicle" },
+    { id:"prop_other",   label:"Other", hint:"" },
+  ]},
+];
+const DAMAGE_ITEM_LABEL = Object.fromEntries(DAMAGE_AREAS.flatMap(a=>a.items.map(i=>[i.id, `${a.area}: ${i.label}`])));
+
+function DamagePanel({ techs, jobs, damage, refreshAll, showToast }) {
+  const EMPTY = { techId:"", jobId:"", lookback:14, jobDate:"", customer:"", jobNumber:"", splitTechId:"", items:[], severity:0, cost:"", reason:"" };
+  const [form, setForm] = useState(EMPTY);
+  const [preset, setPreset] = useState("mtd");
+  const [cStart, setCStart] = useState("");
+  const [cEnd, setCEnd] = useState("");
+  const [saving, setSaving] = useState(false);
+  const OR = DAMAGE_COLOR;
+  const inp={ background:C.white, border:`1px solid ${C.border}`, color:C.black, padding:"10px 14px", borderRadius:"10px", fontSize:"14px", fontFamily:FONT, width:"100%", boxSizing:"border-box" };
+  const sel=(val)=>({...inp, color:val?C.black:C.muted});
+  const btn={ background:saving?C.border:OR, border:"none", color:C.white, padding:"13px", borderRadius:"24px", cursor:saving?"not-allowed":"pointer", fontSize:"13px", fontWeight:"700", fontFamily:FONT, width:"100%" };
+  const dmgPoints = d => callbackPoints(d);
+  function recentJobsFor(techId, days) {
+    if (!techId) return [];
+    const since = new Date(); since.setDate(since.getDate()-days);
+    const sinceStr = since.toLocaleDateString("en-CA",{timeZone:"America/Denver"});
+    const seen = new Set();
+    return (jobs||[]).filter(j=>j.tech_id===techId && j.job_date>=sinceStr && (j.revenue||0)>0 && !seen.has(j.hcp_job_id) && seen.add(j.hcp_job_id))
+      .sort((x,y)=>y.job_date.localeCompare(x.job_date));
+  }
+  const techsOnJob = id => [...new Set((jobs||[]).filter(j=>j.hcp_job_id===id).map(j=>j.tech_id))];
+  async function logDamage() {
+    const f = form;
+    if (!f.techId) return showToast("Select a tech",false);
+    const picked = f.jobId && f.jobId!=="manual" ? (jobs||[]).find(j=>j.hcp_job_id===f.jobId && j.tech_id===f.techId) : null;
+    if (!picked && f.jobId!=="manual") return showToast("Pick the job (or choose 'Job not listed')",false);
+    const jobDate = picked ? picked.job_date : f.jobDate;
+    if (!jobDate) return showToast("Enter the date of the job",false);
+    if (!f.items.length) return showToast("Pick what was damaged",false);
+    if (!f.severity) return showToast("Pick the level",false);
+    const techIds = picked ? techsOnJob(picked.hcp_job_id) : [f.techId, ...(f.splitTechId && f.splitTechId!==f.techId ? [f.splitTechId] : [])];
+    const weight = Math.round(1/techIds.length*10000)/10000;
+    const group_id = crypto.randomUUID();
+    const cost = f.cost==="" ? null : Number(String(f.cost).replace(/[$,]/g,""));
+    if (cost!=null && !Number.isFinite(cost)) return showToast("Repair cost should be a number",false);
+    setSaving(true);
+    try {
+      const rows = techIds.map(id=>({
+        tech_id:id, weight, group_id, job_date:jobDate,
+        customer_name:(picked?.customer_name || f.customer || "").trim() || null,
+        job_number:f.jobNumber.trim() || null,
+        hcp_job_id:picked ? picked.hcp_job_id : null,
+        damaged_items:f.items, severity:f.severity, repair_cost:cost, reason:f.reason || "",
+      }));
+      await sb("damage_reports",{method:"POST",body:JSON.stringify(rows)});
+      await refreshAll();
+      const names = techIds.map(id=>techs.find(t=>t.id===id)?.name||"?").join(" & ");
+      showToast(`💥 Damage logged for ${names} — ${Math.round(DAMAGE_SEVERITY[f.severity].pts*weight)} pts deducted${techIds.length>1?" each (split)":""}`);
+      setForm(EMPTY);
+    } catch(e){ showToast("Error: "+e.message,false); }
+    setSaving(false);
+  }
+  async function remove(d) {
+    const both = d.group_id && damage.filter(x=>x.group_id===d.group_id).length>1;
+    if (!window.confirm(both ? "Delete this damage report for everyone on the job?" : "Delete this damage report?")) return;
+    setSaving(true);
+    try { await sb(d.group_id ? `damage_reports?group_id=eq.${d.group_id}` : `damage_reports?id=eq.${d.id}`,{method:"DELETE",prefer:"return=minimal"}); await refreshAll(); showToast("Damage report removed"); }
+    catch(e){ showToast("Error: "+e.message,false); }
+    setSaving(false);
+  }
+
+  const f = form;
+  const recent = recentJobsFor(f.techId, f.lookback);
+  const picked = f.jobId && f.jobId!=="manual" ? recent.find(j=>j.hcp_job_id===f.jobId) : null;
+  const crew = picked ? techsOnJob(picked.hcp_job_id) : [];
+  const toggle = id => setForm(v=>({...v, items: v.items.includes(id) ? v.items.filter(x=>x!==id) : [...v.items, id]}));
+  const { start, end } = getDateRangeBounds(preset, cStart, cEnd);
+  const inRange = damage.filter(d=>{ const x=callbackDate(d); return x && x>=start && x<=end; });
+  const groups = Object.values(inRange.reduce((acc,d)=>{ const k=d.group_id||d.id; (acc[k]=acc[k]||[]).push(d); return acc; },{}))
+    .sort((x,y)=>(callbackDate(y[0])||"").localeCompare(callbackDate(x[0])||""));
+  const count = inRange.reduce((s,d)=>s+(d.weight==null?1:Number(d.weight)),0);
+  const cost = groups.reduce((s,g)=>s+(Number(g[0].repair_cost)||0),0);
+  const jobCount = new Set((jobs||[]).filter(j=>j.job_date>=start && j.job_date<=end && (j.revenue||0)>0).map(j=>j.hcp_job_id)).size;
+  const itemCounts = {};
+  groups.forEach(g=>(g[0].damaged_items||[]).forEach(id=>{ itemCounts[id]=(itemCounts[id]||0)+1; }));
+  const topItems = Object.entries(itemCounts).sort((x,y)=>y[1]-x[1]);
+  const sevCounts = [1,2,3].map(l=>groups.filter(g=>g[0].severity===l).length);
+  const techSummary = techs.map(t=>{
+    const mine = inRange.filter(d=>d.tech_id===t.id);
+    return { t, count: mine.reduce((s,d)=>s+(d.weight==null?1:Number(d.weight)),0), pts: mine.reduce((s,d)=>s+dmgPoints(d),0) };
+  }).filter(x=>x.count>0).sort((x,y)=>y.count-x.count);
+  const fmtCount = n => Number.isInteger(n) ? String(n) : n.toFixed(1);
+  const chip = on => ({ display:"flex", alignItems:"flex-start", gap:"8px", padding:"6px 8px", borderRadius:"10px", border:`1px solid ${on?OR:C.border}`, background:on?`${OR}14`:C.white, cursor:"pointer", fontSize:"13px", color:C.black });
+
+  return (
+    <div style={{ display:"flex", flexDirection:"column", gap:"14px" }}>
+      <PageTools tools={[{ id:"log", label:"Log Damage", icon:"💥", primary:true, color:OR, render:()=>(
+        <div style={{ display:"flex", flexDirection:"column", gap:"12px" }}>
+          <div style={{ fontFamily:FONT, fontWeight:"600", fontSize:"16px", color:C.black }}>Log Damage</div>
+          <select value={f.techId} onChange={e=>setForm({...EMPTY, techId:e.target.value, lookback:f.lookback})} style={sel(f.techId)}>
+            <option value="">— Select Tech —</option>
+            {techs.filter(t=>t.title!=="owner").map(t=><option key={t.id} value={t.id}>{t.name}{t.is_active===false?" (archived)":""}</option>)}
+          </select>
+          {f.techId&&(<>
+            <div style={{ display:"flex", gap:"8px", alignItems:"center" }}>
+              <select value={f.jobId} onChange={e=>setForm(v=>({...v, jobId:e.target.value}))} style={{ ...sel(f.jobId), flex:1 }}>
+                <option value="">— Pick the job —</option>
+                {recent.map(j=><option key={j.hcp_job_id} value={j.hcp_job_id}>{fmtShortDate(j.job_date)} · {j.customer_name||"(no client name)"} · ${Math.round(j.revenue)}{techsOnJob(j.hcp_job_id).length>1?" · split":""}</option>)}
+                <option value="manual">Job not listed — enter it by hand</option>
+              </select>
+              <select value={f.lookback} onChange={e=>setForm(v=>({...v, lookback:Number(e.target.value), jobId:""}))} style={{ ...sel(true), width:"auto" }}>
+                {[14,30,60,90].map(d=><option key={d} value={d}>Last {d} days</option>)}
+              </select>
+            </div>
+            {picked&&(
+              <div style={{ fontSize:"12px", color:C.black, background:C.cardLt, borderRadius:"10px", padding:"8px 10px" }}>
+                Job <strong>{fmtShortDate(picked.job_date)}</strong> · {picked.customer_name||"no client name"}
+                {crew.length>1 && <> · <strong style={{ color:OR }}>Split job:</strong> {crew.map(id=>techs.find(t=>t.id===id)?.name||"?").join(" & ")} — each gets 1/{crew.length} of the damage and points</>}
+              </div>
+            )}
+            {f.jobId==="manual"&&(
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"8px" }}>
+                <div>
+                  <div style={{ fontSize:"11px", color:C.muted, marginBottom:"4px" }}>Date of the job</div>
+                  <input type="date" value={f.jobDate} onChange={e=>setForm(v=>({...v, jobDate:e.target.value}))} style={inp}/>
+                </div>
+                <div>
+                  <div style={{ fontSize:"11px", color:C.muted, marginBottom:"4px" }}>Client name</div>
+                  <input value={f.customer} onChange={e=>setForm(v=>({...v, customer:e.target.value}))} style={inp}/>
+                </div>
+                <select value={f.splitTechId} onChange={e=>setForm(v=>({...v, splitTechId:e.target.value}))} style={{ ...sel(f.splitTechId), gridColumn:"1 / -1" }}>
+                  <option value="">Split job? Pick the other tech (optional)</option>
+                  {techs.filter(t=>t.id!==f.techId && t.title!=="owner").map(t=><option key={t.id} value={t.id}>{t.name}</option>)}
+                </select>
+              </div>
+            )}
+            <input placeholder="HCP job # (optional)" value={f.jobNumber} onChange={e=>setForm(v=>({...v, jobNumber:e.target.value}))} style={inp}/>
+            <div>
+              <div style={{ fontSize:"12px", color:C.muted, marginBottom:"6px" }}>What was damaged? (pick all that apply)</div>
+              {DAMAGE_AREAS.map(a=>(
+                <div key={a.area} style={{ marginBottom:"8px" }}>
+                  <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"13px", color:C.black, marginBottom:"4px" }}>{a.area}</div>
+                  <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(220px,1fr))", gap:"6px" }}>
+                    {a.items.map(i=>{ const on=f.items.includes(i.id); return (
+                      <label key={i.id} style={chip(on)}>
+                        <input type="checkbox" checked={on} onChange={()=>toggle(i.id)} style={{ marginTop:"2px" }}/>
+                        <span><strong>{i.label}</strong>{i.hint&&<span style={{ display:"block", fontSize:"11px", color:C.muted }}>{i.hint}</span>}</span>
+                      </label>
+                    ); })}
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div>
+              <div style={{ fontSize:"12px", color:C.muted, marginBottom:"6px" }}>How bad was it?</div>
+              <div style={{ display:"flex", flexDirection:"column", gap:"6px" }}>
+                {[1,2,3].map(l=>{ const on=f.severity===l, sv=DAMAGE_SEVERITY[l]; return (
+                  <label key={l} style={chip(on)}>
+                    <input type="radio" name="dmg-severity" checked={on} onChange={()=>setForm(v=>({...v, severity:l}))} style={{ marginTop:"2px" }}/>
+                    <span><strong>{sv.label}</strong> — {sv.desc} <strong style={{ color:OR }}>(−{sv.pts} pts)</strong></span>
+                  </label>
+                ); })}
+              </div>
+            </div>
+            <input placeholder="Repair cost $ (optional)" inputMode="decimal" value={f.cost} onChange={e=>setForm(v=>({...v, cost:e.target.value}))} style={inp}/>
+            <input placeholder="What happened? (optional)" value={f.reason} onChange={e=>setForm(v=>({...v, reason:e.target.value}))} style={inp}/>
+            <button onClick={logDamage} disabled={saving} style={btn}>{saving?"Saving...":"Log Damage — Deduct Points"}</button>
+          </>)}
+        </div>
+      )}]}/>
+
+      <DateRangePicker label="📅 Damage by job date" color={OR} preset={preset} setPreset={setPreset} customStart={cStart} setCustomStart={setCStart} customEnd={cEnd} setCustomEnd={setCEnd}>
+        <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:"8px", marginTop:"14px" }}>
+          {[
+            { l:"Damage reports", v:fmtCount(count), c:count>0?OR:C.green },
+            { l:"Repair cost", v:`$${Math.round(cost).toLocaleString()}`, c:C.black },
+            { l:"Completed jobs", v:jobCount, c:C.black },
+          ].map(x=>(
+            <div key={x.l} style={{ background:C.cardLt, borderRadius:"10px", padding:"10px", textAlign:"center" }}>
+              <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"24px", color:x.c }}>{x.v}</div>
+              <div style={{ fontSize:"11px", color:C.muted, textTransform:"none", letterSpacing:"-0.01em" }}>{x.l}</div>
+            </div>
+          ))}
+        </div>
+        <div style={{ fontSize:"11px", color:C.muted, marginTop:"6px" }}>{start} → {end} · Standard is zero · counts exactly like a callback of the same level · split jobs count ½ per tech</div>
+      </DateRangePicker>
+
+      <ListTitle right={`${fmtCount(count)} total`}>Damage by Tech</ListTitle>
+      <RankRows rows={techSummary.map(x=>({ id:x.t.id, name:x.t.name, value:`${fmtCount(x.count)}`, chip:`${x.pts} pts`, bad:true }))} empty="No damage in this range. Keep it that way! 💪"/>
+
+      {groups.length>0&&(
+        <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"16px 18px", boxShadow:"0 2px 8px rgba(0,0,0,0.06)", display:"flex", flexDirection:"column", gap:"12px" }}>
+          <Label color={OR}>📊 Breakdown</Label>
+          <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:"8px" }}>
+            {[1,2,3].map((l,i)=>(
+              <div key={l} style={{ background:C.cardLt, borderRadius:"10px", padding:"8px", textAlign:"center" }}>
+                <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"20px", color:C.black }}>{sevCounts[i]}</div>
+                <div style={{ fontSize:"11px", color:C.muted, textTransform:"none", letterSpacing:"-0.01em" }}>{DAMAGE_SEVERITY[l].label}</div>
+              </div>
+            ))}
+          </div>
+          {topItems.length>0&&(
+            <div>
+              <div style={{ fontSize:"12px", color:C.muted, marginBottom:"4px" }}>Most damaged</div>
+              {topItems.map(([id,n])=>(
+                <div key={id} style={{ display:"flex", justifyContent:"space-between", fontSize:"13px", color:C.black, padding:"2px 0" }}><span>{DAMAGE_ITEM_LABEL[id]||id}</span><strong>{n}</strong></div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:"16px", overflow:"hidden", boxShadow:"0 2px 8px rgba(0,0,0,0.06)" }}>
+        <div style={{ padding:"14px 18px", borderBottom:`1px solid ${C.border}`, background:C.cardLt }}>
+          <Label color={OR}>📋 Damage History</Label>
+        </div>
+        <div style={{ padding:"14px 18px", display:"flex", flexDirection:"column", gap:"8px" }}>
+          {groups.length===0&&<div style={{ fontSize:"13px", color:C.muted }}>No damage for jobs in this date range. Keep it that way! 💪</div>}
+          {groups.map(g=>{
+            const d = g[0];
+            const names = g.map(r=>techs.find(t=>t.id===r.tech_id)?.name||"Unknown").join(" & ");
+            return (
+              <div key={d.group_id||d.id} style={{ background:`${OR}10`, border:`1px solid ${OR}33`, borderLeft:`3px solid ${OR}`, borderRadius:"10px", padding:"12px 14px", display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:"12px" }}>
+                <div>
+                  <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"15px", color:C.black }}>
+                    {names}{g.length>1&&<span style={{ fontSize:"11px", color:OR, marginLeft:"6px" }}>Split</span>}
+                    {d.severity&&<span style={{ fontSize:"11px", color:C.white, background:OR, borderRadius:"10px", padding:"1px 7px", marginLeft:"6px" }}>{DAMAGE_SEVERITY[d.severity]?.label}</span>}
+                  </div>
+                  <div style={{ fontSize:"12px", color:C.black, marginTop:"3px" }}>
+                    Job {callbackDate(d)?fmtShortDate(callbackDate(d)):"?"}{d.customer_name?` · ${d.customer_name}`:""}{d.job_number?` · #${d.job_number}`:""}{d.repair_cost!=null?` · $${Number(d.repair_cost).toLocaleString()} repair`:""}
+                  </div>
+                  {(d.damaged_items||[]).length>0&&<div style={{ fontSize:"11px", color:C.muted, marginTop:"2px" }}>Damaged: {d.damaged_items.map(id=>DAMAGE_ITEM_LABEL[id]||id).join(", ")}</div>}
+                  {d.reason&&<div style={{ fontSize:"11px", color:C.muted, marginTop:"2px" }}>{d.reason}</div>}
+                  <div style={{ fontSize:"11px", color:C.muted, marginTop:"2px" }}>Logged {fmtShortDate(mtDateStr(Date.parse(d.created_at)))}</div>
+                </div>
+                <div style={{ display:"flex", alignItems:"center", gap:"10px", flexShrink:0 }}>
+                  <span style={{ fontFamily:FONT, fontWeight:"700", fontSize:"15px", color:OR }}>{dmgPoints(d)} pts{g.length>1?" each":""}</span>
+                  <button onClick={()=>remove(d)} disabled={saving} style={{ background:"none", border:`1px solid ${OR}`, color:OR, padding:"4px 10px", borderRadius:"10px", cursor:"pointer", fontFamily:FONT, fontWeight:"700", fontSize:"11px" }}>Delete</button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CallbackLogPanel({ techs, jobs, callbacks, refreshAll, showToast }) {
   const CB_EMPTY = { techId:"", jobId:"", lookback:14, jobDate:"", customer:"", jobNumber:"", splitTechId:"", missed:[], severity:0, reason:"" };
   const [cbForm, setCbForm] = useState(CB_EMPTY);
   const [cbPreset, setCbPreset] = useState("mtd");
@@ -9004,7 +9303,7 @@ function CallbacksPanel({ techs, jobs, callbacks, refreshAll, showToast }) {
 // isManager: logged in as the Field Supervisor. Same panel as the owners, but
 // read-only on anything that decides his own bonus (quota targets, trucks and
 // holidays, firing approvals, calibration) so he can't move his own numbers.
-function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlongs, schedules, quota, setQuota, jobs, timeEntries=[], tipEntries=[], pendingSplits=[], unmatchedTechs=[], vehicles=[], truckAssignments=[], onLogout, refreshAll, isManager=false, currentUser=null }) {
+function AdminPanel({ damageReports=[], techs, upsells, switchovers, reviews, callbacks, rideAlongs, schedules, quota, setQuota, jobs, timeEntries=[], tipEntries=[], pendingSplits=[], unmatchedTechs=[], vehicles=[], truckAssignments=[], onLogout, refreshAll, isManager=false, currentUser=null }) {
   // Live-standings views (Leaderboard, Journey Map) should only show active
   // techs, matching what the tech-facing app already does — archived techs
   // stay fully visible in Reports/Payroll/Upsell Audit where historical
@@ -9223,7 +9522,7 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
       ["upsells","💰","Upsells"],
       ["reviews","⭐","Reviews"],
       ["switchovers","🔄","Switchovers"],
-      ["callbacks","📞","Callbacks"],
+      ["callbacks","🤝","Customer Satisfaction"],
       ["ridealong","🚗","Ride-Alongs"],
       ["forms","📝","Forms"],
     ]},
@@ -9320,7 +9619,7 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
         )}
 
         {[["scoresoverview","overview"],["totechecks","tote"],["auditscores","audit"],["driving","driver"]].map(([id, view]) => tab===id && (
-          <AuditScoresTab key={id} view={view} hideTabs techs={techs} token={currentUser?.token} canSync={!isManager} jobs={jobs||[]} callbacks={callbacks||[]} reviews={reviews||[]} switchovers={switchovers||[]} quota={quota}/>
+          <AuditScoresTab key={id} view={view} hideTabs techs={techs} token={currentUser?.token} canSync={!isManager} jobs={jobs||[]} callbacks={callbacks||[]} damage={damageReports||[]} reviews={reviews||[]} switchovers={switchovers||[]} quota={quota}/>
         ))}
         {tab==="truckinspections"&&(
           <TruckInspectionsTab techs={techs} jobs={jobs||[]} token={currentUser?.token} canGrade showToast={showToast}/>
@@ -9465,7 +9764,7 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
           <AdminTipEntry techs={techs} tipEntries={tipEntries} refreshAll={refreshAll} showToast={showToast}/>
         )}
 
-        {tab==="callbacks"&&<CallbacksPanel techs={techs} jobs={jobs} callbacks={callbacks} refreshAll={refreshAll} showToast={showToast}/>}
+        {tab==="callbacks"&&<CallbacksPanel techs={techs} jobs={jobs} callbacks={callbacks} damage={damageReports||[]} refreshAll={refreshAll} showToast={showToast}/>}
 
         {tab==="award"&&(
           <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"20px", display:"flex", flexDirection:"column", gap:"12px" }}>
@@ -9803,6 +10102,7 @@ export default function App() {
   const [rideAlongs, setRideAlongs] = useState([]);
   const [schedules, setSchedules] = useState([]);
   const [jobs, setJobs] = useState([]);
+  const [damageReports, setDamageReports] = useState([]);
   const [timeEntries, setTimeEntries] = useState([]);
   const [tipEntries, setTipEntries] = useState([]);
   const [pendingSplits, setPendingSplits] = useState([]);
@@ -9832,7 +10132,7 @@ export default function App() {
     try {
       // Truck picks: the last ~4 months (the Trucks tab looks older days up itself).
       const truckSince = mtDateStr(Date.now() - 120*864e5);
-      const [t,u,s,r,ra,sch,settings,cb,jb,te,tp,ps,ut,vh,ta] = await Promise.all([
+      const [t,u,s,r,ra,sch,settings,cb,jb,te,tp,ps,ut,vh,ta,dmg] = await Promise.all([
         sb(`techs?select=${TECH_COLUMNS}&order=name`),
         sb("upsells?select=*"),
         sb("switchovers?select=*"),
@@ -9848,10 +10148,12 @@ export default function App() {
         sb("unmatched_hcp_employees?select=*&order=hcp_name").catch(()=>[]),
         sb("vehicles?select=*&order=name").catch(()=>[]),
         sbAll(`truck_assignments?select=*&work_date=gte.${truckSince}&order=work_date.desc,id.asc`).catch(()=>[]),
+        sb("damage_reports?select=*&order=created_at.desc").catch(()=>[]),
       ]);
+      DAMAGE_REPORTS = dmg || [];
       setTechs(t||[]); setUpsells(u||[]); setSwitchovers(s||[]); setReviews(r||[]);
       setRideAlongs(ra||[]); setSchedules(sch||[]); setCallbacks(cb||[]); setJobs(jb||[]); setTimeEntries(te||[]); setTipEntries(tp||[]);
-      setPendingSplits(ps||[]); setUnmatchedTechs(ut||[]); setVehicles(vh||[]); setTruckAssignments(ta||[]);
+      setPendingSplits(ps||[]); setUnmatchedTechs(ut||[]); setVehicles(vh||[]); setTruckAssignments(ta||[]); setDamageReports(dmg||[]);
       if (settings&&settings.length>0) {
         try { setQuota(JSON.parse(settings[0].value)); } catch {}
       }
@@ -9975,14 +10277,14 @@ alter table jobs add column if not exists tips numeric default 0;`}
   );
 
   if (user.type==="admin") return (
-    <AdminPanel techs={techs} setTechs={setTechs} upsells={upsells} setUpsells={setUpsells}
+    <AdminPanel damageReports={damageReports} techs={techs} setTechs={setTechs} upsells={upsells} setUpsells={setUpsells}
       switchovers={switchovers} setSwitchovers={setSwitchovers} reviews={reviews} setReviews={setReviews}
       callbacks={callbacks} rideAlongs={rideAlongs} schedules={schedules} quota={quota} setQuota={setQuota}
       jobs={jobs} timeEntries={timeEntries} tipEntries={tipEntries} pendingSplits={pendingSplits} unmatchedTechs={unmatchedTechs} vehicles={vehicles} truckAssignments={truckAssignments} onLogout={()=>setUser(null)} refreshAll={loadAll}
       isManager={user.role==="manager"} currentUser={user}/>
   );
   if (user.type==="tech"&&currentTech) return (
-    <TechDashboard tech={currentTech} techs={activeTechs} upsells={upsells} switchovers={switchovers}
+    <TechDashboard damageReports={damageReports} tech={currentTech} techs={activeTechs} upsells={upsells} switchovers={switchovers}
       reviews={reviews} callbacks={callbacks} quota={quota} jobs={jobs} timeEntries={timeEntries} tipEntries={tipEntries} refreshAll={loadAll} rideAlongs={rideAlongs} token={user.token} vehicles={vehicles} truckAssignments={truckAssignments} onLogout={()=>setUser(null)}/>
   );
   return null;

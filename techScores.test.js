@@ -102,7 +102,7 @@ test("equipment = average of the tote and truck sub-scores that exist", () => {
 
 test("full card: empty tables don't break anything", () => {
   const c = techScoreCard({ techId: "t1", from: "2026-09-16", to: "2026-10-13", today: "2026-10-08" });
-  assert.deepEqual(c.sections, { audit: null, quality: null, production: null, driver: null, equipment: null });
+  assert.deepEqual(c.sections, { audit: null, quality: null, callbacks: null, damage: null, production: null, driver: null, equipment: null });
   assert.equal(c.overall.score, null);
   const w = techScoreCard({ techId: "t1", tech: { title: "detail_pro" }, jobs: [job("2026-10-01", 0)], callbacks: [{ tech_id: "t1", job_date: "2026-10-01", severity: 2, weight: 1 }, { tech_id: "t1", job_date: "2026-08-01", severity: 3 }],
     from: "2026-09-16", to: "2026-10-13", today: "2026-10-08" });
@@ -144,4 +144,23 @@ test("team and company scores average members' overall scores (unscored members 
   assert.equal(teams[1].score, 80);
   close(company.score, (l1 + 80 + 60 + 100) / 4);
   assert.equal(company.pass, false);
+});
+
+test("damage scores exactly like a callback, shown as its own pill", () => {
+  const base = { techId: "t1", jobs: [{ tech_id: "t1", job_date: "2026-10-08", revenue: 200 }], from: "2026-09-17", to: "2026-10-14", today: "2026-10-14" };
+  const cb = techScoreCard({ ...base, callbacks: [{ tech_id: "t1", severity: 2, weight: 1, job_date: "2026-10-08" }] });
+  const dm = techScoreCard({ ...base, damage: [{ tech_id: "t1", severity: 2, weight: 1, job_date: "2026-10-08" }] });
+  assert.equal(cb.sections.quality, 50);
+  assert.equal(dm.sections.quality, 50);                 // same hit
+  assert.equal(dm.sections.callbacks, 100);              // pills stay separate
+  assert.equal(dm.sections.damage, 50);
+  assert.equal(cb.sections.damage, 100);
+  assert.equal(cb.overall.score, dm.overall.score);
+  const both = techScoreCard({ ...base, callbacks: [{ tech_id: "t1", severity: 1, weight: 1, job_date: "2026-10-08" }], damage: [{ tech_id: "t1", severity: 1, weight: 0.5, job_date: "2026-10-08" }] });
+  assert.equal(both.sections.quality, 62.5);             // 100 - 25 - 12.5
+  assert.equal(both.quality.items.filter(i => i.kind === "damage").length, 1);
+  // Outside the 4-week window: no effect.
+  const old = techScoreCard({ ...base, damage: [{ tech_id: "t1", severity: 3, weight: 1, job_date: "2026-09-01" }] });
+  assert.equal(old.sections.damage, 100);
+  assert.deepEqual(TECH_SCORE_CONFIG.pills.map(p => p.key), ["audit", "callbacks", "damage", "production", "driver", "equipment"]);
 });
