@@ -42,12 +42,14 @@ export const POINTS_TABLE = [
 ];
 
 // Highest tier reached pays; below the first tier pays $0.
+// Tier 2-5 payouts raised by the owner, Oct 14 2026 (were $800 / $1,250 /
+// $1,550 / $1,850); point levels unchanged.
 export const BONUS_TIERS = [
   { tier:1, points:1400, pay:400 },
-  { tier:2, points:1800, pay:800 },
-  { tier:3, points:2200, pay:1250 },
-  { tier:4, points:2600, pay:1550 },
-  { tier:5, points:3200, pay:1850 },
+  { tier:2, points:1800, pay:900 },
+  { tier:3, points:2200, pay:1450 },
+  { tier:4, points:2600, pay:1850 },
+  { tier:5, points:3200, pay:2400 },
 ];
 
 // The table row a ticket price lands on: { price, points:[...6 freqs] }.

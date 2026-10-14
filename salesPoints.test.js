@@ -40,10 +40,10 @@ test("tiers: highest reached pays, no stacking", () => {
   assert.equal(tierFor(1399).pay, 0);
   assert.equal(tierFor(1400).pay, 400);
   assert.equal(tierFor(2199).tier, 2);
-  assert.equal(tierFor(2200).pay, 1250);
+  assert.equal(tierFor(2200).pay, 1450);
   assert.equal(tierFor(2650).toNext, 550);
   const top = tierFor(5000);
-  assert.equal(top.pay, 1850);
+  assert.equal(top.pay, 2400);
   assert.equal(top.next, null);
 });
 
