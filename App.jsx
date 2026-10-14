@@ -1,10 +1,14 @@
-import { useState, useEffect, useCallback, Fragment } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef, Fragment } from "react";
 import { TEST_QUESTIONS, TESTS, TEST_KEYS, questionsFor, shuffle } from "./trainingTest.js";
+import { scorecard, fixList, pageKind, pageLabel, offered, SEO_GOALS } from "./seoScore.js";
+import { tierFor, BONUS_TIERS, FREQ_LABEL, CHARGEBACK_SERVICES, CHARGEBACK_GRACE_DAYS, FREQ_WEEKS, buildSales, monthPoints, reviewList } from "./salesPoints.js";
 import { computeOpsMonth, monthRange, mountainDate, CALLBACK_TIERS, QUOTA_TIERS, RETENTION_TIERS, NON_ROUTE_VEHICLES, OPS_EXCLUDED_TITLES } from "./opsBonus.js";
 import { techDriverDays, weeklyDriverScore, findUnassignedDriving, DRIVER_CONFIG } from "./driverScoring.js";
 import { buildFordImport } from "./fordReports.js";
 import { techWeekCard, techScoreCard, teamSummary, scoreWindow, truckScore, isTruckExempt, TECH_SCORE_CONFIG } from "./techScores.js";
-import { formKind, scoreToteCheck, scoreTechAudit, latestPerDay, auditDays, weeklyAuditPct, auditWeekStart, toteCharges, submissionPhotoUrls } from "./auditScoring.js";
+import { AD_HEALTH, groupAds, trend, grade, metrics, sumWeeks, rolling, adAdvice, marketShift, toAdSets } from "./adTrends.js";
+import { LABOR_TARGET_PCT, payrollTaxRate, tipsPaidByMonth, qbLaborMonth } from "./laborCost.js";
+import { formKind, scoreToteCheck, scoreTechAudit, latestPerDay, auditDays, weeklyAuditPct, auditWeekStart, toteCharges, submissionPhotoUrls, hiddenFromAudits } from "./auditScoring.js";
 
 // ─── SUPABASE CONFIG ──────────────────────────────────────────────────────────
 const SUPABASE_URL = "https://mjmwxxvqcsptrocwucis.supabase.co";
@@ -67,9 +71,12 @@ const C = {
   offWhite:"#1d1d1f",
   muted:   "#6e6e73",
   green:   "#34c759",
-  gold:    "#ff9f0a",
-  orange:  "#ff9500",
-  purple:  "#af52de",
+  // Owner rule (Oct 2026): only Skylo blue and white -- green for good, red
+  // for bad. These three used to be gold/orange/purple accents; they're now
+  // shades of the brand blue so old call sites pick it up.
+  gold:    "#0077d4",
+  orange:  "#0092f9",
+  purple:  "#005fb0",
   red:     "#ff3b30",
 };
 
@@ -196,7 +203,7 @@ const SERVICE_PLANS = [
   { id:"weekly",    label:"Weekly",     freq:"52x/yr",  pts:120, ltv:5850 },
 ];
 const PLAN_MAP = Object.fromEntries(SERVICE_PLANS.map(p => [p.id, p]));
-const PLAN_COLORS = { biannual:C.green, quarterly:C.blue, bimonthly:C.purple, monthly:C.blue, biweekly:C.gold, weekly:C.orange };
+const PLAN_COLORS = { biannual:C.blue, quarterly:C.blue, bimonthly:C.blue, monthly:C.blue, biweekly:C.blue, weekly:C.blue };
 
 const JOURNEY_TIERS = [
   { id:"bronze",   name:"BRONZE",   icon:"🥉", minPts:0,    maxPts:2499,   color:"#cd7f32", bg:"#1a1000", reward:"Tier 1 — $150",   perks:["$150 Skylo Cash","Badge tracking","Weekly upsells"] },
@@ -444,8 +451,9 @@ function getDateRangeBounds(preset, customStart="", customEnd="") {
 // this is the one place to change if a preset is ever added/renamed.
 const DATE_RANGE_PRESETS = [["today","Today"],["yesterday","Yesterday"],["wtd","WTD"],["last_week","Last Week"],["mtd","MTD"],["last_month","Last Month"],["ytd","YTD"],["custom","Custom"]];
 function DateRangePicker({ label="📊 Time Period", color=C.blue, preset, setPreset, customStart, setCustomStart, customEnd, setCustomEnd, children }) {
+  color = C.blue; // one accent everywhere (owner: blue and white)
   return (
-    <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`3px solid ${color}`, borderRadius:"16px", padding:"16px 18px" }}>
+    <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"14px 16px" }}>
       <Label color={color}>{label}</Label>
       <div style={{ display:"flex", gap:"6px", flexWrap:"wrap" }}>
         {DATE_RANGE_PRESETS.map(([id,lbl])=>(
@@ -466,6 +474,73 @@ function DateRangePicker({ label="📊 Time Period", color=C.blue, preset, setPr
     </div>
   );
 }
+
+// ─── PAGE TOOLS + RANK ROWS ──────────────────────────────────────────────────
+// Top-right buttons for a tab's less-used actions (Repair from HCP, Log ...).
+// Tapping one drops its panel open under the bar; tapping again closes it.
+// tools: [{ id, label, icon, primary, render: () => JSX }]
+function PageTools({ tools, left }) {
+  const [openId, setOpenId] = useState(null);
+  const open = tools.find(t=>t.id===openId);
+  return (
+    <div style={{ display:"flex", flexDirection:"column", gap:"10px" }}>
+      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:"8px", flexWrap:"wrap" }}>
+        <div style={{ minWidth:0 }}>{left}</div>
+        <div style={{ display:"flex", gap:"8px", marginLeft:"auto", flexWrap:"wrap", justifyContent:"flex-end" }}>
+          {tools.map(t=>{
+            const on = t.id===openId;
+            return (
+              <button key={t.id} onClick={()=>setOpenId(on?null:t.id)} aria-expanded={on} style={{ display:"flex", alignItems:"center", gap:"6px", background:t.primary||on?(t.color||C.blue):C.white, color:t.primary||on?"#fff":(t.color||C.blue), border:`1px solid ${t.primary||on?(t.color||C.blue):C.border}`, padding:"8px 14px", borderRadius:"980px", cursor:"pointer", fontFamily:FONT, fontWeight:"600", fontSize:"14px", whiteSpace:"nowrap" }}>
+                {t.icon&&<span>{t.icon}</span>}{t.label}<span style={{ fontSize:"10px", transform:on?"rotate(180deg)":"none", transition:"transform .2s" }}>▾</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+      {open&&<div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"16px", boxShadow:"0 8px 30px rgba(0,0,0,0.08)" }}>{open.render(()=>setOpenId(null))}</div>}
+    </div>
+  );
+}
+
+// Leaderboard as rounded "bubble" rows (rank, initials, name, total + chip).
+// rows: [{ id, name, value, chip?, sub?, bad? }] already sorted best-first;
+// bad: true shows the chip in red (e.g. callback deductions).
+function RankRows({ rows, currentId, empty="Nothing logged in this range." }) {
+  if (!rows.length) return <div style={{ background:C.card, borderRadius:"16px", padding:"20px", textAlign:"center", color:C.muted, fontSize:"14px" }}>{empty}</div>;
+  return (
+    <div style={{ display:"flex", flexDirection:"column", gap:"8px" }}>
+      {rows.map((r,i)=>{
+        const me = r.id===currentId;
+        const initials = (r.name||"?").split(/\s+/).map(w=>w[0]).slice(0,2).join("").toUpperCase();
+        return (
+          <div key={r.id} style={{ display:"flex", alignItems:"center", gap:"12px", background:C.card, border:`1px solid ${me?C.blue:"rgba(0,0,0,0.04)"}`, borderRadius:"18px", padding:"12px 14px", boxShadow:"0 1px 3px rgba(0,0,0,0.05)" }}>
+            <div style={{ width:"26px", textAlign:"center", fontFamily:FONT, fontWeight:"700", fontSize:i<3?"18px":"14px", color:C.muted, flexShrink:0 }}>{i<3?["🥇","🥈","🥉"][i]:i+1}</div>
+            <div style={{ width:"38px", height:"38px", borderRadius:"50%", background:C.blueLt, color:C.blue, display:"flex", alignItems:"center", justifyContent:"center", fontFamily:FONT, fontWeight:"600", fontSize:"13px", flexShrink:0 }}>{initials}</div>
+            <div style={{ flex:1, minWidth:0 }}>
+              <div style={{ fontFamily:FONT, fontWeight:"600", fontSize:"16px", color:C.black, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{r.name}{me&&<span style={{ color:C.blue, fontSize:"12px", marginLeft:"6px" }}>You</span>}</div>
+              {r.sub&&<div style={{ fontSize:"12px", color:C.muted, marginTop:"1px" }}>{r.sub}</div>}
+            </div>
+            <div style={{ display:"flex", alignItems:"center", gap:"8px", flexShrink:0 }}>
+              <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"18px", color:C.black }}>{r.value}</div>
+              {r.chip!=null&&<div style={{ background:r.bad?"rgba(255,59,48,0.1)":C.blueLt, color:r.bad?C.red:C.blue, borderRadius:"980px", padding:"4px 10px", fontFamily:FONT, fontWeight:"600", fontSize:"12px", whiteSpace:"nowrap" }}>{r.chip}</div>}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// Title above a list of rows.
+function ListTitle({ children, right }) {
+  return (
+    <div style={{ display:"flex", alignItems:"baseline", justifyContent:"space-between", gap:"8px", padding:"4px 4px 0" }}>
+      <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"20px", color:C.black, letterSpacing:"-0.02em" }}>{children}</div>
+      {right&&<div style={{ fontSize:"13px", color:C.muted }}>{right}</div>}
+    </div>
+  );
+}
+
 const TEAM_LEAD_OVERRIDE_PCT_PARTIAL = 0.05; // 5% if lead + 2/3 of team hits quota
 const TEAM_LEAD_OVERRIDE_PCT_FULL    = 0.10; // 10% if lead + ALL of team hits quota
 
@@ -506,6 +581,39 @@ function calcTeamOverride(tech, allTechs, upsells, switchovers, reviews, callbac
   return { overridePts, overridePct, teamMembers, teamMemberStats, allTeamHit, partialHit:twoThirdsHit&&!allTeamHit, leadHitsQuota, teamTotalPts, hittingCount, totalMembers };
 }
 
+// ─── TECHNICIAN BOOKINGS ──────────────────────────────────────────────────────
+// Jobs a tech booked themselves (HCP "Technician Booking - " line item / lead
+// source "Tech Booking - <Name>"). Once an admin confirms the booker:
+//   booker serviced it  -> +10% of their own revenue on that job (27% → 37%)
+//   someone else did    -> booker gets 10% of the job's total revenue
+// plus 20 points. Paid in the pay period the job was completed (job_date).
+// Approved by Truxton, Oct 2026.
+const TECH_BOOKING_RATE = 0.10;
+const TECH_BOOKING_PTS = 20;
+// Loaded with everything else in loadAll; read by calcTotals so every points
+// view includes bookings without threading a new prop through each of them.
+let TECH_BOOKINGS = [];
+// HCP job ids in the jobs table (the revenue sync adds a job when it's
+// completed), so a confirmed booking only earns points once its job is done.
+let COMPLETED_JOB_IDS = new Set();
+const confirmedBookingsFor = techId => TECH_BOOKINGS.filter(b => b.status === "confirmed" && b.booker_id === techId);
+// Pay for one confirmed booking, from the jobs table. null = job not completed/synced yet.
+function techBookingPay(b, jobs) {
+  const rows = (jobs || []).filter(j => j.hcp_job_id === b.hcp_job_id);
+  if (!rows.length) return null;
+  const own = rows.filter(j => j.tech_id === b.booker_id);
+  const serviced = own.length > 0;
+  const base = (serviced ? own : rows).reduce((s, j) => s + (j.revenue || 0), 0);
+  const date = rows.map(j => j.job_date).sort()[0];
+  return { date, serviced, base, pay: Math.round(base * TECH_BOOKING_RATE * 100) / 100, servicers: [...new Set(rows.map(j => j.tech_id))] };
+}
+// Damage reports (damage a tech caused to a client's vehicle or property),
+// loaded with everything else in loadAll. They cost the same Journey points as
+// a callback of the same level, so calcTotals counts them with callbacks;
+// read here instead of threading a new prop through every points view.
+let DAMAGE_REPORTS = [];
+const damageTotalsFor = techId => { const mine = DAMAGE_REPORTS.filter(d=>d.tech_id===techId); return { count:mine.length, pts:mine.reduce((s,d)=>s+callbackPoints(d),0) }; };
+
 function calcTotals(tech, upsells, switchovers, reviews, callbacks=[], jobs=[]) {
   const badgePts = calcBadgePts(tech.badges);
   const upsellAmt = (jobs||[]).filter(j=>j.tech_id===tech.id).reduce((s,j)=>s+(j.upsell_amount||0),0);
@@ -514,11 +622,13 @@ function calcTotals(tech, upsells, switchovers, reviews, callbacks=[], jobs=[]) 
   const byMonth = {};
   reviews.filter(r=>r.tech_id===tech.id).forEach(r=>{ byMonth[r.month_key]=(byMonth[r.month_key]||0)+r.count; });
   const reviewPts = Object.values(byMonth).reduce((s,cnt)=>s+(cnt*REVIEW_PTS)+(cnt>=10?REVIEW_BONUS_PTS:0),0);
-  const techCallbacks = callbacks.filter(c=>c.tech_id===tech.id);
+  const techCallbacks = callbacks.filter(c=>c.tech_id===tech.id).concat(DAMAGE_REPORTS.filter(d=>d.tech_id===tech.id)); // damage reports cost the same points as callbacks
   const callbackCount = techCallbacks.length;
   const callbackPts = techCallbacks.reduce((s,c)=>s+callbackPoints(c),0);
-  const total = Math.max(0, badgePts+upsellPts+switchPts+reviewPts+callbackPts);
-  return { badgePts, upsellAmt, upsellPts, switchPts, reviewPts, callbackPts, callbackCount, total };
+  const bookingCount = confirmedBookingsFor(tech.id).filter(b => COMPLETED_JOB_IDS.has(b.hcp_job_id)).length;   // points once the job is done
+  const bookingPts = bookingCount * TECH_BOOKING_PTS;
+  const total = Math.max(0, badgePts+upsellPts+switchPts+reviewPts+callbackPts+bookingPts);
+  return { badgePts, upsellAmt, upsellPts, switchPts, reviewPts, callbackPts, callbackCount, bookingCount, bookingPts, total };
 }
 
 // ─── UPSELL PAY ───────────────────────────────────────────────────────────────
@@ -606,6 +716,10 @@ function HamburgerBtn({ onClick }) {
 }
 
 function SideNav({ sections, active, setActive, open, onClose, name, role }) {
+  const activeSec = sections.findIndex(sec=>sec.items.some(([id])=>id===active));
+  const [openSec, setOpenSec] = useState(activeSec);
+  // Re-open the current page's group each time the menu is opened.
+  useEffect(()=>{ if (open) setOpenSec(activeSec); }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <>
       {open&&<div onClick={onClose} style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.28)", backdropFilter:"blur(2px)", WebkitBackdropFilter:"blur(2px)", zIndex:300 }}/>}
@@ -619,19 +733,35 @@ function SideNav({ sections, active, setActive, open, onClose, name, role }) {
           <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"24px", color:C.black, lineHeight:1.1, letterSpacing:"-0.02em" }}>{name}</div>
           {role&&<div style={{ fontSize:"13px", color:C.muted, marginTop:"2px", fontFamily:FONT }}>{role}</div>}
         </div>
-        {/* Nav sections */}
-        <div style={{ flex:1, padding:"0 10px 24px" }}>
-          {sections.map((sec,si)=>(
-            <div key={si} style={{ paddingTop:"10px" }}>
-              {sec.label&&<div style={{ padding:"8px 10px 4px", fontSize:"12px", color:C.muted, fontFamily:FONT, fontWeight:"600" }}>{sec.label}</div>}
-              {sec.items.map(([id,icon,label])=>(
-                <button key={id} onClick={()=>{ setActive(id); onClose(); }} style={{ width:"100%", display:"flex", alignItems:"center", gap:"10px", padding:"8px 10px", background:active===id?C.blue:"none", border:"none", borderRadius:"8px", cursor:"pointer", fontFamily:FONT, fontWeight:"500", fontSize:"15px", color:active===id?"#fff":C.black, textAlign:"left", transition:"background 0.12s" }}>
-                  <span style={{ fontSize:"16px", width:"22px", textAlign:"center" }}>{icon}</span>
-                  {label}
-                </button>
-              ))}
-            </div>
-          ))}
+        {/* Nav sections: each group is a dropdown; one open at a time. The
+            group holding the current page opens by default. Unlabeled groups
+            and one-item groups show their items directly. */}
+        <div style={{ flex:1, padding:"4px 10px 24px" }}>
+          {sections.map((sec,si)=>{
+            const flat = !sec.label || sec.items.length===1;
+            const isOpen = flat || openSec===si;
+            const hasActive = sec.items.some(([id])=>id===active);
+            const item = ([id,icon,label])=>(
+              <button key={id} onClick={()=>{ setActive(id); onClose(); }} style={{ width:"100%", display:"flex", alignItems:"center", gap:"10px", padding:flat?"9px 10px":"8px 10px 8px 22px", background:active===id?C.blue:"none", border:"none", borderRadius:"8px", cursor:"pointer", fontFamily:FONT, fontWeight:"500", fontSize:"15px", color:active===id?"#fff":C.black, textAlign:"left", transition:"background 0.12s" }}>
+                <span style={{ fontSize:"16px", width:"22px", textAlign:"center" }}>{icon}</span>
+                {label}
+              </button>
+            );
+            return (
+              <div key={si} style={{ paddingTop:"2px" }}>
+                {!flat&&(
+                  <button onClick={()=>setOpenSec(isOpen?null:si)} aria-expanded={isOpen} style={{ width:"100%", display:"flex", alignItems:"center", justifyContent:"space-between", padding:"10px 10px", background:"none", border:"none", borderRadius:"8px", cursor:"pointer", fontFamily:FONT, fontWeight:"600", fontSize:"15px", color:C.black, textAlign:"left" }}>
+                    <span style={{ display:"flex", alignItems:"center", gap:"8px" }}>
+                      {sec.label}
+                      {hasActive&&!isOpen&&<span style={{ width:"6px", height:"6px", borderRadius:"50%", background:C.blue }}/>}
+                    </span>
+                    <span style={{ color:C.muted, fontSize:"12px", transform:isOpen?"rotate(90deg)":"none", transition:"transform .2s" }}>❯</span>
+                  </button>
+                )}
+                {isOpen&&<div style={{ paddingBottom:flat?0:"6px" }}>{sec.items.map(item)}</div>}
+              </div>
+            );
+          })}
         </div>
       </div>
     </>
@@ -755,18 +885,18 @@ function PinPad({ onSubmit }) {
 // ─── BADGE GRID ───────────────────────────────────────────────────────────────
 function BadgeGrid({ earned }) {
   const cats = ["Prestige","Revenue","Clean Streak","Performance","Character","Tenure","Trophy"];
-  const catColors = { Prestige:C.gold, Revenue:C.green, "Clean Streak":C.blue, Performance:C.purple, Character:C.orange, Tenure:C.muted, Trophy:"#ff6ef7" };
+  const catColors = { Prestige:C.gold, Revenue:C.green, "Clean Streak":C.blue, Performance:C.purple, Character:C.orange, Tenure:C.muted, Trophy:"#0092f9" };
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:"24px" }}>
       {/* Rotating Trophies info */}
       <div style={{ background:"#ff6ef718", border:"1px solid #ff6ef744", borderRadius:"16px", padding:"12px 16px" }}>
-        <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"13px", color:"#ff6ef7", letterSpacing:"-0.01em", marginBottom:"6px" }}>🏆 ROTATING MONTHLY TROPHIES</div>
+        <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"13px", color:"#0092f9", letterSpacing:"-0.01em", marginBottom:"6px" }}>🏆 ROTATING MONTHLY TROPHIES</div>
         <div style={{ fontSize:"12px", color:C.muted }}>These badges are passed to whoever is in the lead each month — no points, pure bragging rights.</div>
         <div style={{ display:"flex", gap:"8px", flexWrap:"wrap", marginTop:"10px" }}>
           {ROTATING_TROPHIES.map(t=>(
-            <div key={t.id} style={{ background:earned?.includes(t.id)?"#ff6ef722":"rgba(0,0,0,0.2)", border:`1px solid ${earned?.includes(t.id)?"#ff6ef7":"#333"}`, borderRadius:"8px", padding:"6px 12px", opacity:earned?.includes(t.id)?1:0.5 }}>
+            <div key={t.id} style={{ background:earned?.includes(t.id)?"#0092f922":"rgba(0,0,0,0.2)", border:`1px solid ${earned?.includes(t.id)?"#0092f9":"#333"}`, borderRadius:"8px", padding:"6px 12px", opacity:earned?.includes(t.id)?1:0.5 }}>
               <span style={{ fontSize:"16px" }}>{t.icon}</span>
-              <span style={{ fontFamily:FONT, fontWeight:"700", fontSize:"12px", color:earned?.includes(t.id)?"#ff6ef7":C.muted, marginLeft:"6px" }}>{t.name}</span>
+              <span style={{ fontFamily:FONT, fontWeight:"700", fontSize:"12px", color:earned?.includes(t.id)?"#0092f9":C.muted, marginLeft:"6px" }}>{t.name}</span>
             </div>
           ))}
         </div>
@@ -801,19 +931,9 @@ function BadgeGrid({ earned }) {
 
 // ─── UPSELL LEADERBOARD ───────────────────────────────────────────────────────
 function UpsellLeaderboard({ techs, upsells, jobs=[], currentId }) {
-  const wk = getWeekKey();
-  const byWeek = {};
-  upsells.forEach(u=>{ if(!byWeek[u.week_key])byWeek[u.week_key]={}; byWeek[u.week_key][u.tech_id]=(byWeek[u.week_key][u.tech_id]||0)+u.amount; });
-  const allWeeks = Object.keys(byWeek).sort((a,b)=>b.localeCompare(a));
-  const [selectedWeek, setSelectedWeek] = useState(wk);
   const allTime = {};
   upsells.forEach(u=>{ allTime[u.tech_id]=(allTime[u.tech_id]||0)+u.amount; });
 
-  // Selected week data
-  const wkData = byWeek[selectedWeek]||{};
-  const ranked = [...techs].map(t=>({...t,amt:wkData[t.id]||0,all:allTime[t.id]||0})).sort((a,b)=>b.amt-a.amt);
-  const top = ranked[0]?.amt||1;
-  const weekTotal = ranked.reduce((s,t)=>s+t.amt,0);
 
   // Date range — same WTD/Last Week/MTD/Last Month/YTD/Custom control as
   // Revenue's Time Period panel (getDateRangeBounds). Filters by each entry's
@@ -835,158 +955,33 @@ function UpsellLeaderboard({ techs, upsells, jobs=[], currentId }) {
   const noDateEntries = upsellsWithDate.filter(u => !u.resolvedDate);
   const noDateTotal = noDateEntries.reduce((s,u)=>s+(u.amount||0),0);
 
+  const rangeByTech = {};
+  rangeInRange.forEach(u => { rangeByTech[u.tech_id] = (rangeByTech[u.tech_id] || 0) + (u.amount || 0); });
+  const rangeRanked = techs.map(t => ({ ...t, amt: rangeByTech[t.id] || 0 })).filter(t => t.amt > 0).sort((a, b) => b.amt - a.amt);
+  const rangeTotal = rangeRanked.reduce((s,t)=>s+t.amt,0);
+  const upsellRow = (t, amt) => ({ id:t.id, name:t.name, value:`$${Math.round(amt).toLocaleString()}`, chip:`${Math.round(amt*UPSELL_PTS_PER_DOLLAR).toLocaleString()} pts` });
   return (
-    <div style={{ display:"flex", flexDirection:"column", gap:"20px" }}>
-
-      {/* Week selector */}
-      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"14px 18px" }}>
-        <Label color={C.green}>📅 Select Week</Label>
-        <select
-          value={selectedWeek}
-          onChange={e=>setSelectedWeek(e.target.value)}
-          style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"10px 14px", borderRadius:"16px", fontSize:"14px", fontFamily:FONT, fontWeight:"700", width:"100%", cursor:"pointer" }}
-        >
-          {allWeeks.length === 0 && <option value={wk}>{formatWeekLabel(wk)} — Current Week</option>}
-          {allWeeks.map(w=>(
-            <option key={w} value={w}>{formatWeekLabel(w)}{w===wk?" — Current":""}</option>
-          ))}
-        </select>
-      </div>
-
-      {/* Selected week breakdown */}
-      <div style={{ background:C.card, border:`1px solid ${selectedWeek===wk?C.blue:C.border}`, borderRadius:"16px", overflow:"hidden" }}>
-        <div style={{ padding:"14px 18px", borderBottom:`1px solid ${C.border}`, background:C.cardLt, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-          <div>
-            <div style={{ fontFamily:FONT, fontWeight:"600", fontSize:"16px", color:C.black }}>{formatWeekLabel(selectedWeek)}</div>
-            {selectedWeek===wk&&<div style={{ fontSize:"11px", color:C.blue, letterSpacing:"-0.01em", textTransform:"none", marginTop:"2px" }}>Current Week</div>}
-          </div>
-          <div style={{ textAlign:"right" }}>
-            <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"24px", color:C.green }}>${weekTotal.toLocaleString()}</div>
-            <div style={{ fontSize:"11px", color:C.muted, letterSpacing:"-0.01em" }}>TEAM TOTAL</div>
-          </div>
-        </div>
-        <div style={{ padding:"14px 18px", display:"flex", flexDirection:"column", gap:"8px" }}>
-          {ranked.filter(t=>t.amt>0).map((t,idx)=>{
-            const isMe=t.id===currentId; const pct=top>0?Math.round((t.amt/top)*100):0;
-            return (
-              <div key={t.id} style={{ background:idx===0?`${C.green}12`:isMe?`${C.blue}12`:"transparent", border:`1px solid ${idx===0?C.green:isMe?`${C.blue}44`:C.border}`, borderRadius:"16px", padding:"10px 12px" }}>
-                <div style={{ display:"flex", alignItems:"center", gap:"12px", marginBottom:"6px" }}>
-                  <div style={{ fontFamily:FONT, fontWeight:"700", fontStyle:"normal", fontSize:idx===0?"28px":idx<3?"22px":"16px", color:idx===0?C.green:idx===1?"#a8c0d6":idx===2?"#cd7f32":C.muted, width:"30px", textAlign:"center", lineHeight:1 }}>{medal(idx)}</div>
-                  <div style={{ width:"36px", height:"36px", borderRadius:"50%", background:`${C.blue}22`, border:`1px solid ${C.blue}44`, display:"flex", alignItems:"center", justifyContent:"center", fontFamily:FONT, fontSize:"12px", fontWeight:"600", color:C.blue, flexShrink:0 }}>{t.avatar}</div>
-                  <div style={{ flex:1 }}>
-                    <div style={{ fontFamily:FONT, fontWeight:"700", fontStyle:"normal", fontSize:"16px", color:C.black }}>{t.name}{isMe&&<span style={{ color:C.blue, fontSize:"11px", marginLeft:"6px", fontStyle:"normal" }}>YOU</span>}</div>
-                    <div style={{ fontSize:"11px", color:C.muted }}>+{Math.round(t.amt*UPSELL_PTS_PER_DOLLAR)} pts this week</div>
-                  </div>
-                  <div style={{ textAlign:"right" }}>
-                    <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"24px", color:idx===0?C.green:C.black }}>${t.amt.toLocaleString()}</div>
-                  </div>
-                </div>
-                <Bar pct={pct} color={idx===0?C.green:C.blue} h={5}/>
-              </div>
-            );
-          })}
-          {ranked.filter(t=>t.amt===0).length>0&&(
-            <div style={{ borderTop:`1px dashed ${C.border}`, paddingTop:"8px", marginTop:"4px" }}>
-              <div style={{ fontSize:"11px", color:C.muted, letterSpacing:"-0.01em", textTransform:"none", fontFamily:FONT, marginBottom:"6px" }}>No upsells logged yet this week</div>
-              {ranked.filter(t=>t.amt===0).map(t=>{
-                const isMe=t.id===currentId;
-                return (
-                  <div key={t.id} style={{ display:"flex", alignItems:"center", gap:"10px", padding:"6px 8px", opacity:0.5 }}>
-                    <div style={{ width:"36px", height:"36px", borderRadius:"50%", background:C.cardLt, border:`1px solid ${C.border}`, display:"flex", alignItems:"center", justifyContent:"center", fontFamily:FONT, fontSize:"12px", fontWeight:"600", color:C.muted }}>{t.avatar}</div>
-                    <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"14px", color:C.muted }}>{t.name}{isMe&&" — YOU"}</div>
-                    <div style={{ marginLeft:"auto", fontFamily:FONT, fontWeight:"600", fontSize:"14px", color:C.muted }}>$0</div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-          {weekTotal===0&&<div style={{ fontSize:"13px", color:C.muted, textAlign:"center", padding:"12px" }}>No upsells logged for this week yet</div>}
-        </div>
-      </div>
-
-      {/* Running totals pinned at bottom */}
-      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", overflow:"hidden" }}>
-        <div style={{ padding:"14px 18px", borderBottom:`1px solid ${C.border}`, background:C.cardLt }}>
-          <Label color={C.green}>💰 Running Totals — All Time</Label>
-        </div>
-        <div style={{ padding:"14px 18px", display:"flex", flexDirection:"column", gap:"10px" }}>
-          {[...techs].sort((a,b)=>(allTime[b.id]||0)-(allTime[a.id]||0)).map((t,i)=>{
-            const amt=allTime[t.id]||0; const topAmt=Math.max(...techs.map(x=>allTime[x.id]||0))||1; const pct=Math.round((amt/topAmt)*100);
-            return (
-              <div key={t.id}>
-                <div style={{ display:"flex", justifyContent:"space-between", marginBottom:"5px" }}>
-                  <span style={{ fontSize:"13px", fontWeight:"600", color:t.id===currentId?C.blue:C.black }}>{medal(i)} {t.name}{t.id===currentId?" — YOU":""}</span>
-                  <div style={{ textAlign:"right" }}>
-                    <span style={{ fontFamily:FONT, fontWeight:"600", fontSize:"14px", color:C.black }}>${amt.toLocaleString()}</span>
-                    <span style={{ fontSize:"11px", color:C.green, marginLeft:"8px" }}>{Math.round(amt*UPSELL_PTS_PER_DOLLAR).toLocaleString()} pts</span>
-                  </div>
-                </div>
-                <Bar pct={pct} color={C.green}/>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* Date Range */}
-      <DateRangePicker label="📅 Date Range" color={C.green} preset={rangePreset} setPreset={setRangePreset} customStart={cStart} setCustomStart={setCStart} customEnd={cEnd} setCustomEnd={setCEnd}>
-        <div style={{ fontSize:"11px", color:C.green, fontFamily:FONT, fontWeight:"700", marginTop:"8px" }}>
-          {rangeStart} → {rangeEnd} · matched by exact completion date · ${rangeInRange.reduce((s,u)=>s+(u.amount||0),0).toLocaleString()} · {rangeInRange.length} entr{rangeInRange.length!==1?"ies":"y"}
-        </div>
-        {noDateEntries.length>0&&(
-          <div style={{ fontSize:"11px", color:C.muted, marginTop:"6px" }}>
-            ⚠ {noDateEntries.length} entr{noDateEntries.length!==1?"ies":"y"} totaling ${noDateTotal.toLocaleString()} {noDateEntries.length!==1?"have":"has"} no matched completion date (manually entered, not tied to an HCP job) — excluded from every range above, not just this one.
-          </div>
-        )}
+    <div style={{ display:"flex", flexDirection:"column", gap:"14px" }}>
+      <DateRangePicker label="📅 Date Range" preset={rangePreset} setPreset={setRangePreset} customStart={cStart} setCustomStart={setCStart} customEnd={cEnd} setCustomEnd={setCEnd}>
+        <div style={{ fontSize:"12px", color:C.muted, marginTop:"8px" }}>{fmtShortDate(rangeStart)} – {fmtShortDate(rangeEnd)} · by job completion date</div>
       </DateRangePicker>
-
-      {(() => {
-        const rangeByTech = {};
-        rangeInRange.forEach(u => { rangeByTech[u.tech_id] = (rangeByTech[u.tech_id] || 0) + (u.amount || 0); });
-        const rangeRanked = techs
-          .map(t => ({ ...t, amt: rangeByTech[t.id] || 0 }))
-          .filter(t => t.amt > 0)
-          .sort((a, b) => b.amt - a.amt);
-        const rangeTop = rangeRanked[0]?.amt || 1;
-        return (
-          <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", overflow:"hidden" }}>
-            <div style={{ padding:"14px 18px", borderBottom:`1px solid ${C.border}`, background:C.cardLt }}>
-              <Label color={C.green}>💰 Upsells · {rangeStart} → {rangeEnd}</Label>
-            </div>
-            <div style={{ padding:"14px 18px", display:"flex", flexDirection:"column", gap:"8px" }}>
-              {rangeRanked.length===0 && <div style={{ fontSize:"13px", color:C.muted, textAlign:"center", padding:"12px" }}>No upsells logged in this range.</div>}
-              {rangeRanked.map((t,i)=>{
-                const pct = Math.round((t.amt/rangeTop)*100);
-                return (
-                  <div key={t.id}>
-                    <div style={{ display:"flex", justifyContent:"space-between", marginBottom:"5px" }}>
-                      <span style={{ fontSize:"13px", color:t.id===currentId?C.blue:C.black }}>{medal(i)} {t.name}{t.id===currentId?" — YOU":""}</span>
-                      <span style={{ fontFamily:FONT, fontWeight:"600", fontSize:"14px", color:C.black }}>${t.amt.toLocaleString()}</span>
-                    </div>
-                    <Bar pct={pct} color={C.green}/>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        );
-      })()}
+      <ListTitle right={`$${Math.round(rangeTotal).toLocaleString()} team total`}>Upsells</ListTitle>
+      <RankRows rows={rangeRanked.map(t=>upsellRow(t,t.amt))} currentId={currentId} empty="No upsells in this range yet."/>
+      {noDateEntries.length>0&&(
+        <div style={{ fontSize:"12px", color:C.muted, padding:"0 4px" }}>
+          {noDateEntries.length} entr{noDateEntries.length!==1?"ies":"y"} totaling ${noDateTotal.toLocaleString()} {noDateEntries.length!==1?"aren't":"isn't"} tied to an HCP job, so {noDateEntries.length!==1?"they're":"it's"} only in the all-time totals.
+        </div>
+      )}
+      <ListTitle>All Time</ListTitle>
+      <RankRows rows={[...techs].filter(t=>(allTime[t.id]||0)>0).sort((a,b)=>(allTime[b.id]||0)-(allTime[a.id]||0)).map(t=>upsellRow(t,allTime[t.id]||0))} currentId={currentId} empty="No upsells logged yet."/>
     </div>
   );
 }
 
 // ─── SWITCHOVER LEADERBOARD ───────────────────────────────────────────────────
 function SwitchoverLeaderboard({ techs, switchovers, currentId }) {
-  const [rankBy, setRankBy] = useState("count");
-  const wk = getWeekKey();
-  const byWeek = {};
-  switchovers.forEach(s=>{ if(!byWeek[s.week_key])byWeek[s.week_key]={}; if(!byWeek[s.week_key][s.tech_id])byWeek[s.week_key][s.tech_id]=[]; byWeek[s.week_key][s.tech_id].push({plan:s.plan_id}); });
-  const allWeeks = Object.keys(byWeek).sort((a,b)=>b.localeCompare(a));
-  const wkData = byWeek[wk]||{};
   const allCount={}, allPts={};
   switchovers.forEach(s=>{ allCount[s.tech_id]=(allCount[s.tech_id]||0)+1; allPts[s.tech_id]=(allPts[s.tech_id]||0)+(PLAN_MAP[s.plan_id]?.pts||0); });
-  const ranked = [...techs].map(t=>{ const e=wkData[t.id]||[]; return {...t,count:e.length,pts:e.reduce((s,x)=>s+(PLAN_MAP[x.plan]?.pts||0),0),allCount:allCount[t.id]||0,allPts:allPts[t.id]||0,entries:e}; }).sort((a,b)=>rankBy==="count"?b.count-a.count:b.pts-a.pts);
-  const top=ranked[0]?.[rankBy==="count"?"count":"pts"]||1;
 
   // Date range — same WTD/Last Week/MTD/Last Month/YTD/Custom control as
   // Revenue's Time Period panel (getDateRangeBounds). Entries are only
@@ -1017,105 +1012,27 @@ function SwitchoverLeaderboard({ techs, switchovers, currentId }) {
     .filter(t => t.total > 0)
     .sort((a, b) => b.total - a.total);
 
+  const ptsOf = byPlan => Object.entries(byPlan).reduce((s,[planId,n])=>s+n*(PLAN_MAP[planId]?.pts||0),0);
+  const planList = byPlan => Object.entries(byPlan).sort((a,b)=>b[1]-a[1]).map(([planId,count])=>`${count} ${PLAN_MAP[planId]?.label||planId}`).join(", ");
   return (
-    <div style={{ display:"flex", flexDirection:"column", gap:"24px" }}>
-      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", overflow:"hidden" }}>
-        <div style={{ padding:"14px 18px", borderBottom:`1px solid ${C.border}` }}><Label color={C.purple}>🔄 All-Time Switchovers</Label></div>
-        <div style={{ padding:"14px 18px", display:"flex", flexDirection:"column", gap:"8px" }}>
-          {[...techs].sort((a,b)=>(allPts[b.id]||0)-(allPts[a.id]||0)).map((t,i)=>(
-            <div key={t.id} style={{ display:"flex", justifyContent:"space-between" }}>
-              <span style={{ fontSize:"13px", color:t.id===currentId?C.blue:C.black }}>{medal(i)} {t.name}{t.id===currentId?" — YOU":""}</span>
-              <span style={{ fontFamily:FONT, fontWeight:"600", fontSize:"13px", color:C.black }}>{allCount[t.id]||0} switchovers · {(allPts[t.id]||0).toLocaleString()} pts</span>
-            </div>
-          ))}
-        </div>
-      </div>
-      <div>
-        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:"12px" }}>
-          <Label>This Week · {formatWeekLabel(wk)}</Label>
-          <div style={{ display:"flex", gap:"6px" }}>
-            {[["count","COUNT"],["pts","POINTS"]].map(([id,label])=>(
-              <button key={id} onClick={()=>setRankBy(id)} style={{ background:rankBy===id?C.blue:"none", border:`1px solid ${rankBy===id?C.blue:C.border}`, color:rankBy===id?C.white:C.muted, padding:"4px 10px", borderRadius:"8px", cursor:"pointer", fontSize:"11px", fontFamily:FONT, fontWeight:"700", letterSpacing:"-0.01em" }}>{label}</button>
-            ))}
-          </div>
-        </div>
-        <div style={{ display:"flex", flexDirection:"column", gap:"8px" }}>
-          {ranked.map((t,idx)=>{
-            const isMe=t.id===currentId; const val=rankBy==="count"?t.count:t.pts; const pct=top>0?Math.round((val/top)*100):0;
-            return (
-              <div key={t.id} style={{ background:isMe?`${C.blue}18`:C.card, border:`1px solid ${isMe?C.blue:C.border}`, borderRadius:"16px", padding:"14px 18px" }}>
-                <div style={{ display:"flex", alignItems:"center", gap:"12px", marginBottom:"10px" }}>
-                  <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:idx<3?"22px":"14px", color:C.muted, width:"28px", textAlign:"center" }}>{medal(idx)}</div>
-                  <div style={{ width:"38px", height:"38px", borderRadius:"50%", background:`${C.blue}22`, border:`1px solid ${C.blue}44`, display:"flex", alignItems:"center", justifyContent:"center", fontFamily:FONT, fontSize:"12px", fontWeight:"600", color:C.blue, flexShrink:0 }}>{t.avatar}</div>
-                  <div style={{ flex:1 }}>
-                    <div style={{ fontFamily:FONT, fontWeight:"600", fontSize:"16px", color:C.black }}>{t.name}{isMe&&<span style={{ color:C.blue, fontSize:"11px", marginLeft:"6px" }}>YOU</span>}</div>
-                    <div style={{ fontSize:"11px", color:C.muted }}>All-time: {t.allCount} switchovers · {t.allPts.toLocaleString()} pts</div>
-                  </div>
-                  <div style={{ textAlign:"right" }}>
-                    <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"24px", color:t.count>0?C.white:C.border }}>{t.count}</div>
-                    <div style={{ fontSize:"11px", color:C.purple }}>+{t.pts} pts</div>
-                  </div>
-                </div>
-                <Bar pct={pct} color={C.purple}/>
-                {t.entries.length>0&&(
-                  <div style={{ display:"flex", flexWrap:"wrap", gap:"5px", marginTop:"10px" }}>
-                    {t.entries.map((e,i)=>{ const plan=PLAN_MAP[e.plan]; const pc=PLAN_COLORS[e.plan]||C.muted; return plan?(<span key={i} style={{ background:`${pc}22`, border:`1px solid ${pc}55`, borderLeft:`3px solid ${pc}`, borderRadius:"3px", padding:"2px 8px", fontSize:"11px", color:C.black, fontFamily:FONT, fontWeight:"700" }}>{plan.label} +{plan.pts}pts</span>):null; })}
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* Date Range */}
-      <DateRangePicker label="📅 Date Range" color={C.purple} preset={rangePreset} setPreset={setRangePreset} customStart={cStart} setCustomStart={setCStart} customEnd={cEnd} setCustomEnd={setCEnd}>
-        <div style={{ fontSize:"11px", color:C.purple, fontFamily:FONT, fontWeight:"700", marginTop:"8px" }}>
-          {rangeStart} → {rangeEnd} · matched by week (switchovers are logged by week, not exact day)
-        </div>
+    <div style={{ display:"flex", flexDirection:"column", gap:"14px" }}>
+      <DateRangePicker label="📅 Date Range" preset={rangePreset} setPreset={setRangePreset} customStart={cStart} setCustomStart={setCStart} customEnd={cEnd} setCustomEnd={setCEnd}>
+        <div style={{ fontSize:"12px", color:C.muted, marginTop:"8px" }}>{fmtShortDate(rangeStart)} – {fmtShortDate(rangeEnd)} · switchovers are matched by week</div>
       </DateRangePicker>
-
-      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", overflow:"hidden" }}>
-        <div style={{ padding:"14px 18px", borderBottom:`1px solid ${C.border}`, background:C.cardLt }}>
-          <Label color={C.purple}>🔄 Switchovers by Plan Type · {rangeStart} → {rangeEnd}</Label>
-        </div>
-        <div style={{ overflowX:"auto" }}>
-          <table style={{ width:"100%", borderCollapse:"collapse", fontSize:"13px" }}>
-            <thead>
-              <tr>
-                <th style={{ padding:"8px 18px", textAlign:"left", color:C.muted, fontWeight:"700", letterSpacing:"-0.01em", fontFamily:FONT, fontSize:"11px", borderBottom:`1px solid ${C.border}`, whiteSpace:"nowrap" }}>TECH</th>
-                <th style={{ padding:"8px 18px", textAlign:"left", color:C.muted, fontWeight:"700", letterSpacing:"-0.01em", fontFamily:FONT, fontSize:"11px", borderBottom:`1px solid ${C.border}` }}>BREAKDOWN</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rangeRanked.length===0 && (
-                <tr><td colSpan={2} style={{ padding:"16px 18px", color:C.muted, textAlign:"center" }}>No switchovers logged in this range.</td></tr>
-              )}
-              {rangeRanked.map((t,i)=>{
-                const breakdown = Object.entries(t.byPlan).sort((a,b)=>b[1]-a[1]).map(([planId,count])=>`${count} ${PLAN_MAP[planId]?.label||planId}`).join(", ");
-                return (
-                  <tr key={t.id} style={{ borderBottom:`1px solid ${C.border}` }}>
-                    <td style={{ padding:"10px 18px", color:t.id===currentId?C.blue:C.black, fontWeight:"700", fontFamily:FONT, whiteSpace:"nowrap" }}>{medal(i)} {t.name}{t.id===currentId?" — YOU":""}</td>
-                    <td style={{ padding:"10px 18px", color:C.black }}>{breakdown} <span style={{ color:C.muted, fontSize:"11px" }}>({t.total} total)</span></td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"14px 18px" }}>
-        <Label color={C.purple}>Plan Values</Label>
+      <ListTitle right={`${rangeRanked.reduce((s,t)=>s+t.total,0)} team total`}>Switchovers</ListTitle>
+      <RankRows rows={rangeRanked.map(t=>({ id:t.id, name:t.name, value:`${t.total}`, chip:`${ptsOf(t.byPlan).toLocaleString()} pts`, sub:planList(t.byPlan) }))} currentId={currentId} empty="No switchovers in this range yet."/>
+      <ListTitle>All Time</ListTitle>
+      <RankRows rows={[...techs].filter(t=>(allCount[t.id]||0)>0).sort((a,b)=>(allPts[b.id]||0)-(allPts[a.id]||0)).map(t=>({ id:t.id, name:t.name, value:`${allCount[t.id]||0}`, chip:`${(allPts[t.id]||0).toLocaleString()} pts` }))} currentId={currentId} empty="No switchovers logged yet."/>
+      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"14px 16px" }}>
+        <Label>Plan Values</Label>
         <div style={{ display:"flex", flexWrap:"wrap", gap:"6px" }}>
-          {SERVICE_PLANS.map(p=>{ const pc=PLAN_COLORS[p.id]; return (
-            <div key={p.id} style={{ background:`${pc}15`, border:`1px solid ${pc}44`, borderLeft:`3px solid ${pc}`, borderRadius:"8px", padding:"4px 10px", fontSize:"12px" }}>
+          {SERVICE_PLANS.map(p=>(
+            <div key={p.id} style={{ background:C.cardLt, borderRadius:"980px", padding:"5px 12px", fontSize:"12px" }}>
               <span style={{ fontFamily:FONT, fontWeight:"600", color:C.black }}>{p.label} </span>
               <span style={{ color:C.muted }}>{p.freq} </span>
-              <span style={{ color:pc, fontFamily:FONT, fontWeight:"700" }}>+{p.pts}pts </span>
-              <span style={{ color:C.green, fontFamily:FONT }}>${p.ltv.toLocaleString()}/yr LTV</span>
+              <span style={{ color:C.blue, fontFamily:FONT, fontWeight:"600" }}>+{p.pts} pts</span>
             </div>
-          ); })}
+          ))}
         </div>
       </div>
     </div>
@@ -1124,99 +1041,32 @@ function SwitchoverLeaderboard({ techs, switchovers, currentId }) {
 
 // ─── REVIEW LEADERBOARD ───────────────────────────────────────────────────────
 function ReviewLeaderboard({ techs, reviews, currentId }) {
-  const mk = getMonthKey();
   const byMonth = {};
   reviews.forEach(r=>{ if(!byMonth[r.month_key])byMonth[r.month_key]={}; byMonth[r.month_key][r.tech_id]=(byMonth[r.month_key][r.tech_id]||0)+r.count; });
-  const allMonths = Object.keys(byMonth).sort((a,b)=>b.localeCompare(a));
-  const [selectedMonth, setSelectedMonth] = useState(mk);
-  const allTime = {};
-  reviews.forEach(r=>{ allTime[r.tech_id]=(allTime[r.tech_id]||0)+r.count; });
 
-  const mData = byMonth[selectedMonth]||{};
-  const ranked = [...techs].map(t=>({...t,cnt:mData[t.id]||0})).sort((a,b)=>b.cnt-a.cnt);
-  const top = ranked[0]?.cnt||1;
-  const monthTotal = ranked.reduce((s,t)=>s+t.cnt,0);
 
+  // Reviews are logged per month, so a range covers every month it touches.
+  // Points are per month (10+ in one month earns the bonus).
+  const [rangePreset, setRangePreset] = useState("mtd");
+  const [cStart, setCStart] = useState("");
+  const [cEnd, setCEnd] = useState("");
+  const { start: rangeStart, end: rangeEnd } = getDateRangeBounds(rangePreset, cStart, cEnd);
+  const monthsInRange = Object.keys(byMonth).filter(m => m >= rangeStart.slice(0,7) && m <= rangeEnd.slice(0,7));
+  const sumFor = (id, months) => months.reduce((acc,m)=>{ const n=byMonth[m]?.[id]||0; return { cnt:acc.cnt+n, pts:acc.pts+n*REVIEW_PTS+(n>=10?REVIEW_BONUS_PTS:0) }; }, { cnt:0, pts:0 });
+  const allMonthKeys = Object.keys(byMonth);
+  const rows = months => techs.map(t=>({ t, ...sumFor(t.id, months) })).filter(r=>r.cnt>0).sort((a,b)=>b.cnt-a.cnt)
+    .map(r=>({ id:r.t.id, name:r.t.name, value:`${r.cnt} ⭐`, chip:`${r.pts.toLocaleString()} pts` }));
+  const rangeRows = rows(monthsInRange);
   return (
-    <div style={{ display:"flex", flexDirection:"column", gap:"20px" }}>
-      {/* Points info */}
-      <div style={{ background:`${C.gold}18`, border:`1px solid ${C.gold}44`, borderRadius:"16px", padding:"12px 18px", display:"flex", gap:"24px", flexWrap:"wrap" }}>
-        <div><span style={{ fontFamily:FONT, fontWeight:"700", fontSize:"20px", color:C.gold }}>+{REVIEW_PTS}</span><span style={{ fontSize:"12px", color:C.muted, marginLeft:"6px" }}>pts per review</span></div>
-        <div><span style={{ fontFamily:FONT, fontWeight:"700", fontSize:"20px", color:C.gold }}>+{REVIEW_BONUS_PTS}</span><span style={{ fontSize:"12px", color:C.muted, marginLeft:"6px" }}>bonus at 10+ in a month</span></div>
-      </div>
-
-      {/* Month selector */}
-      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"14px 18px" }}>
-        <Label color={C.gold}>📅 Select Month</Label>
-        <select
-          value={selectedMonth}
-          onChange={e=>setSelectedMonth(e.target.value)}
-          style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"10px 14px", borderRadius:"16px", fontSize:"14px", fontFamily:FONT, fontWeight:"700", width:"100%", cursor:"pointer" }}
-        >
-          {allMonths.length === 0 && <option value={mk}>{formatMonthLabel(mk)} — Current Month</option>}
-          {allMonths.map(m=>(
-            <option key={m} value={m}>{formatMonthLabel(m)}{m===mk?" — Current":""}</option>
-          ))}
-        </select>
-      </div>
-
-      {/* Selected month breakdown */}
-      <div style={{ background:C.card, border:`1px solid ${selectedMonth===mk?C.gold:C.border}`, borderRadius:"16px", overflow:"hidden" }}>
-        <div style={{ padding:"14px 18px", borderBottom:`1px solid ${C.border}`, background:C.cardLt, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-          <div>
-            <div style={{ fontFamily:FONT, fontWeight:"600", fontSize:"16px", color:C.black }}>{formatMonthLabel(selectedMonth)}</div>
-            {selectedMonth===mk&&<div style={{ fontSize:"11px", color:C.gold, letterSpacing:"-0.01em", textTransform:"none", marginTop:"2px" }}>Current Month</div>}
-          </div>
-          <div style={{ textAlign:"right" }}>
-            <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"24px", color:C.gold }}>{monthTotal} ⭐</div>
-            <div style={{ fontSize:"11px", color:C.muted, letterSpacing:"-0.01em" }}>TEAM TOTAL</div>
-          </div>
-        </div>
-        <div style={{ padding:"14px 18px", display:"flex", flexDirection:"column", gap:"10px" }}>
-          {ranked.map((t,idx)=>{
-            const isMe=t.id===currentId; const pct=top>0?Math.round((t.cnt/top)*100):0; const bonus=t.cnt>=10;
-            return (
-              <div key={t.id} style={{ background:isMe?`${C.blue}18`:"transparent", border:isMe?`1px solid ${C.blue}44`:"1px solid transparent", borderRadius:"16px", padding:"10px 12px" }}>
-                <div style={{ display:"flex", alignItems:"center", gap:"12px", marginBottom:"8px" }}>
-                  <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:idx<3?"20px":"13px", color:C.muted, width:"26px", textAlign:"center" }}>{medal(idx)}</div>
-                  <div style={{ width:"36px", height:"36px", borderRadius:"50%", background:`${C.blue}22`, border:`1px solid ${C.blue}44`, display:"flex", alignItems:"center", justifyContent:"center", fontFamily:FONT, fontSize:"12px", fontWeight:"600", color:C.blue, flexShrink:0 }}>{t.avatar}</div>
-                  <div style={{ flex:1 }}>
-                    <div style={{ fontFamily:FONT, fontWeight:"600", fontSize:"15px", color:C.black }}>{t.name}{isMe&&<span style={{ color:C.blue, fontSize:"11px", marginLeft:"6px" }}>YOU</span>}</div>
-                    <div style={{ fontSize:"11px", color:C.muted }}>+{(t.cnt*REVIEW_PTS)+(bonus?REVIEW_BONUS_PTS:0)} pts{bonus?" 🔥":""}</div>
-                  </div>
-                  <div style={{ textAlign:"right" }}>
-                    <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"22px", color:t.cnt>0?C.gold:C.border }}>{t.cnt} ⭐</div>
-                  </div>
-                </div>
-                <Bar pct={pct} color={C.gold} h={4}/>
-                {bonus&&<div style={{ marginTop:"6px" }}><Pill color={C.gold}>🔥 Bonus unlocked</Pill></div>}
-              </div>
-            );
-          })}
-          {monthTotal===0&&<div style={{ fontSize:"13px", color:C.muted, textAlign:"center", padding:"12px" }}>No reviews logged for this month</div>}
-        </div>
-      </div>
-
-      {/* Running totals pinned at bottom */}
-      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", overflow:"hidden" }}>
-        <div style={{ padding:"14px 18px", borderBottom:`1px solid ${C.border}`, background:C.cardLt }}>
-          <Label color={C.gold}>⭐ Running Totals — All Time</Label>
-        </div>
-        <div style={{ padding:"14px 18px", display:"flex", flexDirection:"column", gap:"10px" }}>
-          {[...techs].sort((a,b)=>(allTime[b.id]||0)-(allTime[a.id]||0)).map((t,i)=>{
-            const cnt=allTime[t.id]||0; const topCnt=Math.max(...techs.map(x=>allTime[x.id]||0))||1; const pct=Math.round((cnt/topCnt)*100);
-            return (
-              <div key={t.id}>
-                <div style={{ display:"flex", justifyContent:"space-between", marginBottom:"5px" }}>
-                  <span style={{ fontSize:"13px", color:t.id===currentId?C.blue:C.black }}>{medal(i)} {t.name}{t.id===currentId?" — YOU":""}</span>
-                  <span style={{ fontFamily:FONT, fontWeight:"600", fontSize:"14px", color:C.black }}>{cnt} ⭐</span>
-                </div>
-                <Bar pct={pct} color={C.gold}/>
-              </div>
-            );
-          })}
-        </div>
-      </div>
+    <div style={{ display:"flex", flexDirection:"column", gap:"14px" }}>
+      <div style={{ fontSize:"13px", color:C.muted, padding:"0 4px" }}>+{REVIEW_PTS} pts per 5-star review · +{REVIEW_BONUS_PTS} bonus at 10+ in a month</div>
+      <DateRangePicker label="📅 Date Range" preset={rangePreset} setPreset={setRangePreset} customStart={cStart} setCustomStart={setCStart} customEnd={cEnd} setCustomEnd={setCEnd}>
+        <div style={{ fontSize:"12px", color:C.muted, marginTop:"8px" }}>{fmtShortDate(rangeStart)} – {fmtShortDate(rangeEnd)} · reviews are logged by month</div>
+      </DateRangePicker>
+      <ListTitle right={`${monthsInRange.reduce((s,m)=>s+Object.values(byMonth[m]).reduce((a,b)=>a+b,0),0)} team total`}>5-Star Reviews</ListTitle>
+      <RankRows rows={rangeRows} currentId={currentId} empty="No reviews in this range yet."/>
+      <ListTitle>All Time</ListTitle>
+      <RankRows rows={rows(allMonthKeys)} currentId={currentId} empty="No reviews logged yet."/>
     </div>
   );
 }
@@ -1224,48 +1074,36 @@ function ReviewLeaderboard({ techs, reviews, currentId }) {
 // ─── TOTAL LEADERBOARD ────────────────────────────────────────────────────────
 function TotalLeaderboard({ techs, upsells, switchovers, reviews, callbacks, jobs=[] }) {
   const ranked = [...techs].map(t=>{ const tt=calcTotals(t,upsells,switchovers,reviews,callbacks||[],jobs); return {...t,...tt,tier:getTier(tt.total)}; }).sort((a,b)=>b.total-a.total);
-  const top = ranked[0]?.total||1;
   return (
-    <div style={{ display:"flex", flexDirection:"column", gap:"8px" }}>
-      {ranked.map((t,idx)=>{
-        const pct=Math.round((t.total/top)*100);
-        return (
-          <div key={t.id} style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"16px 18px" }}>
-            <div style={{ display:"flex", alignItems:"center", gap:"12px", marginBottom:"12px" }}>
-              <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:idx<3?"26px":"16px", color:C.muted, width:"32px", textAlign:"center" }}>{medal(idx)}</div>
-              <div style={{ width:"42px", height:"42px", borderRadius:"50%", background:`${C.blue}22`, border:`1px solid ${C.blue}44`, display:"flex", alignItems:"center", justifyContent:"center", fontFamily:FONT, fontSize:"13px", fontWeight:"600", color:C.blue, flexShrink:0 }}>{t.avatar}</div>
-              <div style={{ flex:1 }}>
-                <div style={{ fontFamily:FONT, fontWeight:"600", fontSize:"18px", color:C.black }}>{t.name}</div>
-                <Pill color={t.tier.color}>{t.tier.icon} {t.tier.name}</Pill>
-              </div>
-              <div style={{ textAlign:"right" }}>
-                <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"28px", color:C.black }}>{t.total.toLocaleString()}</div>
-                <div style={{ fontSize:"11px", color:C.muted, letterSpacing:"-0.01em" }}>TOTAL PTS</div>
-              </div>
-            </div>
-            <Bar pct={pct} color={C.blue} h={4}/>
-            <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:"6px", marginTop:"10px" }}>
-              {[
-                {l:"Badges",    v:t.badgePts,               c:C.purple},
-                {l:"Upsells",   v:`$${Math.round(t.upsellAmt).toLocaleString()}`, c:C.green},
-                {l:"Switchovers",  v:t.switchPts,              c:C.blue},
-                {l:"Reviews",   v:t.reviewPts,              c:C.gold},
-              ].map(item=>(
-                <div key={item.l} style={{ background:C.cardLt, borderRadius:"8px", padding:"8px", textAlign:"center" }}>
-                  <div style={{ fontFamily:FONT, fontWeight:"600", fontSize:"15px", color:item.c }}>{item.v}</div>
-                  <div style={{ fontSize:"11px", color:C.muted, letterSpacing:"-0.01em", textTransform:"none" }}>{item.l}</div>
-                </div>
-              ))}
-            </div>
-          </div>
-        );
-      })}
+    <div style={{ display:"flex", flexDirection:"column", gap:"14px" }}>
+      <ListTitle right="all time">Total Score</ListTitle>
+      <RankRows rows={ranked.map(t=>({ id:t.id, name:t.name, value:`${t.total.toLocaleString()} pts`, chip:`${t.tier.icon} ${t.tier.name.charAt(0)+t.tier.name.slice(1).toLowerCase()}`,
+        sub:`Badges ${t.badgePts} · Upsells $${Math.round(t.upsellAmt).toLocaleString()} · Switchovers ${t.switchPts} · Reviews ${t.reviewPts}${t.bookingPts ? ` · Bookings ${t.bookingPts}` : ""}` }))} empty="No points yet."/>
     </div>
   );
 }
 
 // ─── REPORTS TAB ─────────────────────────────────────────────────────────────
-function ReportsTab({ techs, jobs, upsells=[], timeEntries=[], tipEntries=[], techId=null, refreshAll=async()=>{}, showToast=()=>{} }) {
+// Labor cost: owners, plus these logins (by tech id). Everyone else's Reports
+// page leaves it out.
+const LABOR_VIEWER_TECH_IDS = [
+  "7709e828-baec-41be-8e7e-055024b0a863", // Zak Lundblade
+  "9623b18e-0e3d-41e0-a1a7-bb8891a6aacc", // Will Faulkner (Field Supervisor)
+];
+
+function ReportsTab({ techs, jobs, upsells=[], switchovers=[], timeEntries=[], tipEntries=[], techId=null, refreshAll=async()=>{}, showToast=()=>{}, token=null, isOwner=false, showLabor=false }) {
+  // Monthly labor from QuickBooks (owners only) -- also gives the real
+  // payroll tax rate the live estimate uses.
+  const [qb, setQb] = useState({ months:[], error:null, loaded:false });
+  useEffect(() => {
+    if (!isOwner) return;
+    let live = true;
+    fetch("/.netlify/functions/labor-actuals", { headers:{ Authorization:`Bearer ${token||""}` } })
+      .then(async r => { const j = await r.json().catch(()=>({})); if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`); return j; })
+      .then(j => live && setQb({ months:j.months||[], error:null, loaded:true }))
+      .catch(e => live && setQb({ months:[], error:e.message, loaded:true }));
+    return () => { live = false; };
+  }, [isOwner, token]);
   const [preset, setPreset] = useState("wtd");
   const [cStart, setCStart] = useState("");
   const [cEnd,   setCEnd]   = useState("");
@@ -1367,11 +1205,13 @@ function ReportsTab({ techs, jobs, upsells=[], timeEntries=[], tipEntries=[], te
   const totalHours     = techId
     ? rangeHoursTotal(timeEntries, techId, start, end)
     : timeEntries.filter(e => e.work_date >= start && e.work_date <= end).reduce((s,e) => s+sessionHours(e), 0);
-  const commMap        = Object.fromEntries(techs.map(t => [t.id, (t.commission_rate||27)/100]));
-  const totalLabor     = inRange.reduce((s,j) => s+(j.revenue||0)*(commMap[j.tech_id]||0.27), 0);
+  const taxRate        = payrollTaxRate(qb.months);
+  const labor          = laborEstimate({ techs, jobs, switchovers, timeEntries, start, end, techId, taxRate });
+  const totalLabor     = labor.labor;
   const revPerHr       = totalHours > 0 ? totalRevenue/totalHours : 0;
   const upsellPct      = totalRevenue > 0 ? (totalUpsells/totalRevenue)*100 : 0;
-  const laborPct       = totalRevenue > 0 ? (totalLabor/totalRevenue)*100 : 0;
+  const laborPct       = labor.pct;
+  const qbMonths       = (() => { const tips = tipsPaidByMonth(tipEntries, getPayPeriods()); return qb.months.map(m => qbLaborMonth(m, tips[m.month])).reverse(); })();
 
   const allWkKeys = [...new Set(inRange.map(j=>j.week_key))].filter(Boolean).sort();
   const techRows = techId ? [] : techs.map(t => {
@@ -1393,93 +1233,10 @@ function ReportsTab({ techs, jobs, upsells=[], timeEntries=[], tipEntries=[], te
 
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:"16px" }}>
-      {/* Period selector */}
-      <DateRangePicker label="📊 Time Period" color={C.blue} preset={preset} setPreset={setPreset} customStart={cStart} setCustomStart={setCStart} customEnd={cEnd} setCustomEnd={setCEnd}>
-        <div style={{ marginTop:"8px", fontSize:"11px", color:C.blue, fontFamily:FONT, fontWeight:"700" }}>
-            {start} → {end} · {inRange.length} job{inRange.length!==1?"s":""}
-          </div>
-      </DateRangePicker>
-
-      {inRange.length===0?(
-        <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"32px", textAlign:"center", color:C.muted, fontSize:"13px" }}>
-          No jobs found for this period. The HCP sync runs every 5 minutes.
-        </div>
-      ):(
-        <>
-          {/* Metric cards */}
-          <div style={{ display:"grid", gridTemplateColumns:"repeat(2,1fr)", gap:"10px" }}>
-            {[
-              { label:"Serviced Revenue", value:`$${Math.round(totalRevenue).toLocaleString()}`, color:C.green,                                              sub:`${inRange.length} jobs` },
-              { label:"Tips",            value:`$${Math.round(totalTips).toLocaleString()}`,   color:C.gold,                                               sub:"separate from revenue" },
-              { label:"Hours",           value:totalHours>0?totalHours.toFixed(1):"—",            color:C.blue,                                               sub:totalHours>0?`${(totalHours/Math.max(inRange.length,1)).toFixed(1)}h/job avg`:"Enter hours below" },
-              { label:"Rev / Hour",   value:totalHours>0?`$${revPerHr.toFixed(2)}`:"—",        color:totalHours>0?(revPerHr>=75?C.green:C.orange):C.muted, sub:"Target: >$75/hr" },
-              { label:"Upsell $",     value:`$${Math.round(totalUpsells).toLocaleString()}`,   color:C.gold,                                               sub:`of $${Math.round(totalRevenue).toLocaleString()} revenue` },
-              { label:"Upsell Rate",  value:`${upsellPct.toFixed(1)}%`,                        color:upsellPct>=10?C.green:C.orange,                       sub:"Target: >10%" },
-              { label:"Labor Cost %", value:totalLabor>0?`${laborPct.toFixed(1)}%`:"—",        color:totalLabor>0?(laborPct<24?C.green:C.orange):C.muted,  sub:"Target: <24%" },
-            ].map(s=>(
-              <div key={s.label} style={{ ...metricStyle, borderTop:`3px solid ${s.color}` }}>
-                <div style={{ fontSize:"11px", color:C.muted, letterSpacing:"-0.01em", textTransform:"none", fontFamily:FONT, fontWeight:"700", marginBottom:"8px" }}>{s.label}</div>
-                <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"28px", color:s.color, lineHeight:1 }}>{s.value}</div>
-                {s.sub&&<div style={{ fontSize:"11px", color:C.muted, marginTop:"5px" }}>{s.sub}</div>}
-              </div>
-            ))}
-          </div>
-
-          {/* Per-tech breakdown — admin / all-techs view only */}
-          {techRows.length>0&&(
-            <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", overflow:"hidden" }}>
-              <div style={{ padding:"14px 18px", borderBottom:`1px solid ${C.border}`, background:C.cardLt }}>
-                <Label color={C.blue}>Per-Tech Breakdown</Label>
-              </div>
-              <div style={{ padding:"14px 18px", display:"flex", flexDirection:"column", gap:"10px" }}>
-                {techRows.map((t,i)=>(
-                  <div key={t.id} style={{ background:C.cardLt, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"12px 14px" }}>
-                    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:"8px" }}>
-                      <div style={{ fontFamily:FONT, fontWeight:"700", fontStyle:"normal", fontSize:"16px", color:C.black }}>{medal(i)} {t.name}{t.is_active===false&&<ArchivedTag/>}</div>
-                      <div style={{ textAlign:"right" }}>
-                        <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"22px", color:C.green, lineHeight:1 }}>${Math.round(t.rev).toLocaleString()}</div>
-                        <div style={{ fontSize:"11px", color:C.muted, letterSpacing:"-0.01em", textTransform:"none", marginBottom:"2px" }}>serviced</div>
-                        {t.tips>0&&<div style={{ fontFamily:FONT, fontWeight:"600", fontSize:"14px", color:C.gold }}>${t.tips.toFixed(0)} tips</div>}
-                      </div>
-                    </div>
-                    <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:"6px" }}>
-                      {[
-                        { l:"Hours",    v:t.hrs.toFixed(1),             c:C.blue   },
-                        { l:"Rev/hr",   v:`$${t.revPerHr.toFixed(0)}`,  c:C.purple },
-                        { l:"Upsells",  v:`$${Math.round(t.ups)}`,      c:C.gold   },
-                        { l:"Upsell %", v:`${t.upsellPct.toFixed(1)}%`, c:t.upsellPct>=10?C.green:C.orange },
-                      ].map(s=>(
-                        <div key={s.l} style={{ background:C.white, borderRadius:"8px", padding:"6px", textAlign:"center" }}>
-                          <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"14px", color:s.c }}>{s.v}</div>
-                          <div style={{ fontSize:"11px", color:C.muted, textTransform:"none", letterSpacing:"-0.01em" }}>{s.l}</div>
-                        </div>
-                      ))}
-                    </div>
-                    {t.wkBreakdown?.length>0&&(
-                      <div style={{ marginTop:"8px", borderTop:`1px solid ${C.border}`, paddingTop:"8px", display:"flex", flexDirection:"column", gap:"3px" }}>
-                        {t.wkBreakdown.map(w=>(
-                          <div key={w.wk} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"4px 8px", background:C.white, borderRadius:"8px" }}>
-                            <div style={{ fontSize:"11px", color:C.muted, fontFamily:FONT, fontWeight:"700" }}>{formatWeekLabel(w.wk)} · {w.count} job{w.count!==1?"s":""}</div>
-                            <div style={{ display:"flex", gap:"8px", alignItems:"center" }}>
-                              <span style={{ fontFamily:FONT, fontWeight:"700", fontSize:"13px", color:C.green }}>${Math.round(w.rev).toLocaleString()}</span>
-                              {w.tips>0&&<span style={{ fontFamily:FONT, fontWeight:"700", fontSize:"12px", color:C.gold }}>+${w.tips.toFixed(0)} tips</span>}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </>
-      )}
-
-      {/* Repair Revenue — admin only */}
-      {techId===null && (
-        <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"20px", display:"flex", flexDirection:"column", gap:"12px" }}>
-          <Label color={C.orange}>Repair Revenue from HCP</Label>
+      {/* Repair Revenue — admin only, tucked in the top-right Tools */}
+      {techId===null && <PageTools tools={[{ id:"repair", label:"Repair from HCP", icon:"🔧", render:()=>(
+        <div style={{ display:"flex", flexDirection:"column", gap:"12px" }}>
+          <div style={{ fontFamily:FONT, fontWeight:"600", fontSize:"16px", color:C.black }}>Repair Revenue from HCP</div>
           <div style={{ fontSize:"12px", color:C.muted }}>Re-scans completed jobs and their invoices across a custom date range and rewrites revenue to the board. Use this to fix missing or wrong revenue.</div>
           <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"8px" }}>
             {[["FROM", repairRevFrom, setRepairRevFrom], ["TO", repairRevTo, setRepairRevTo]].map(([lbl, val, set]) => (
@@ -1489,7 +1246,7 @@ function ReportsTab({ techs, jobs, upsells=[], timeEntries=[], tipEntries=[], te
               </div>
             ))}
           </div>
-          <button onClick={repairRevenueFromHCP} disabled={repairingRev} style={{ background:repairingRev?"#333":C.orange, border:"none", color:C.white, padding:"13px", borderRadius:"16px", cursor:repairingRev?"not-allowed":"pointer", fontSize:"13px", fontWeight:"700", letterSpacing:"-0.01em", fontFamily:FONT, width:"100%", textTransform:"none" }}>
+          <button onClick={repairRevenueFromHCP} disabled={repairingRev} style={{ background:repairingRev?C.border:C.orange, border:"none", color:C.white, padding:"13px", borderRadius:"16px", cursor:repairingRev?"not-allowed":"pointer", fontSize:"13px", fontWeight:"700", letterSpacing:"-0.01em", fontFamily:FONT, width:"100%", textTransform:"none" }}>
             {repairingRev ? "Scanning HCP — this may take ~20 sec..." : "Repair Revenue"}
           </button>
           {repairRevResult && (
@@ -1501,10 +1258,10 @@ function ReportsTab({ techs, jobs, upsells=[], timeEntries=[], tipEntries=[], te
                 {repairRevResult.jobs && repairRevResult.jobs.length > 0 && (
                   <div style={{ display:"flex", gap:"6px" }}>
                     <button onClick={()=>setRevExpanded(v=>!v)} style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"5px 10px", borderRadius:"8px", cursor:"pointer", fontFamily:FONT, fontWeight:"700", fontSize:"11px", letterSpacing:"-0.01em" }}>
-                      {revExpanded ? "COLLAPSE" : "VIEW FULL REPORT"}
+                      {revExpanded ? "Collapse" : "View full report"}
                     </button>
-                    <button onClick={exportRevenueCSV} style={{ background:C.green, border:"none", color:C.black, padding:"5px 10px", borderRadius:"8px", cursor:"pointer", fontFamily:FONT, fontWeight:"700", fontSize:"11px", letterSpacing:"-0.01em" }}>
-                      EXPORT CSV
+                    <button onClick={exportRevenueCSV} style={{ background:C.blue, border:"none", color:C.white, padding:"5px 10px", borderRadius:"8px", cursor:"pointer", fontFamily:FONT, fontWeight:"700", fontSize:"11px", letterSpacing:"-0.01em" }}>
+                      Export CSV
                     </button>
                   </div>
                 )}
@@ -1536,7 +1293,140 @@ function ReportsTab({ techs, jobs, upsells=[], timeEntries=[], tipEntries=[], te
             </div>
           )}
         </div>
+      )}]}/>}
+      {/* Period selector */}
+      <DateRangePicker label="📊 Time Period" color={C.blue} preset={preset} setPreset={setPreset} customStart={cStart} setCustomStart={setCStart} customEnd={cEnd} setCustomEnd={setCEnd}>
+        <div style={{ marginTop:"8px", fontSize:"11px", color:C.blue, fontFamily:FONT, fontWeight:"700" }}>
+            {start} → {end} · {inRange.length} job{inRange.length!==1?"s":""}
+          </div>
+      </DateRangePicker>
+
+      {inRange.length===0?(
+        <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"32px", textAlign:"center", color:C.muted, fontSize:"13px" }}>
+          No jobs found for this period. The HCP sync runs every 5 minutes.
+        </div>
+      ):(
+        <>
+          {/* Metric cards */}
+          <div style={{ display:"grid", gridTemplateColumns:"repeat(2,1fr)", gap:"10px" }}>
+            {[
+              { label:"Serviced Revenue", value:`$${Math.round(totalRevenue).toLocaleString()}`, color:C.green,                                              sub:`${inRange.length} jobs` },
+              { label:"Tips",            value:`$${Math.round(totalTips).toLocaleString()}`,   color:C.gold,                                               sub:"separate from revenue" },
+              { label:"Hours",           value:totalHours>0?totalHours.toFixed(1):"—",            color:C.blue,                                               sub:totalHours>0?`${(totalHours/Math.max(inRange.length,1)).toFixed(1)}h/job avg`:"Enter hours below" },
+              { label:"Rev / Hour",   value:totalHours>0?`$${revPerHr.toFixed(2)}`:"—",        color:totalHours>0?(revPerHr>=75?C.green:C.red):C.muted, sub:"Target: >$75/hr" },
+              { label:"Upsell $",     value:`$${Math.round(totalUpsells).toLocaleString()}`,   color:C.gold,                                               sub:`of $${Math.round(totalRevenue).toLocaleString()} revenue` },
+              { label:"Upsell Rate",  value:`${upsellPct.toFixed(1)}%`,                        color:upsellPct>=10?C.green:C.red,                       sub:"Target: >10%" },
+              showLabor&&{ label:"Labor Cost %", value:totalLabor>0?`${laborPct.toFixed(1)}%`:"—",        color:totalLabor>0?(laborPct<=LABOR_TARGET_PCT?C.green:C.red):C.muted,  sub:`Goal: ${LABOR_TARGET_PCT}% or lower · estimate` },
+            ].filter(Boolean).map(s=>(
+              <div key={s.label} style={{ ...metricStyle }}>
+                <div style={{ fontSize:"11px", color:C.muted, letterSpacing:"-0.01em", textTransform:"none", fontFamily:FONT, fontWeight:"700", marginBottom:"8px" }}>{s.label}</div>
+                <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"28px", color:s.color, lineHeight:1 }}>{s.value}</div>
+                {s.sub&&<div style={{ fontSize:"11px", color:C.muted, marginTop:"5px" }}>{s.sub}</div>}
+              </div>
+            ))}
+          </div>
+
+          {/* Labor cost: what's in the estimate, and the QuickBooks actual by month */}
+          {techId===null&&showLabor&&(
+            <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"16px", display:"flex", flexDirection:"column", gap:"10px" }}>
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline" }}>
+                <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"17px", color:C.black }}>Labor Cost</div>
+                <div style={{ fontSize:"13px", color:C.muted }}>goal {LABOR_TARGET_PCT}% or lower</div>
+              </div>
+              {[
+                ["Commission", labor.commission],
+                ["Upsell bonuses", labor.upsellBonus],
+                ["Switchover bonuses", labor.switchBonus],
+                ["Training pay", labor.training],
+                [`Payroll taxes (${(taxRate*100).toFixed(1)}%${qb.months.length?" from QuickBooks":" est."})`, labor.taxes],
+              ].map(([l,v])=>(
+                <div key={l} style={{ display:"flex", justifyContent:"space-between", fontSize:"14px", color:C.black }}><span style={{ color:C.muted }}>{l}</span><span>${Math.round(v).toLocaleString()}</span></div>
+              ))}
+              <div style={{ display:"flex", justifyContent:"space-between", fontSize:"15px", fontWeight:"600", color:C.black, borderTop:`1px solid ${C.border}`, paddingTop:"8px" }}>
+                <span>${Math.round(labor.labor).toLocaleString()} of ${Math.round(labor.revenue).toLocaleString()} serviced</span>
+                <span style={{ color:labor.pct<=LABOR_TARGET_PCT?C.green:C.red }}>{labor.pct.toFixed(1)}%</span>
+              </div>
+              <div style={{ fontSize:"12px", color:C.muted }}>Tips aren't counted on either side. Salary, owner pay and office sales commission aren't crew labor.</div>
+              {isOwner&&(
+                <div style={{ marginTop:"6px", display:"flex", flexDirection:"column", gap:"8px" }}>
+                  <div style={{ fontFamily:FONT, fontWeight:"600", fontSize:"15px", color:C.black }}>Actual from QuickBooks</div>
+                  {qb.error&&<div style={{ fontSize:"13px", color:C.red }}>Couldn't load: {qb.error}</div>}
+                  {qb.loaded&&!qb.error&&qbMonths.length===0&&<div style={{ fontSize:"13px", color:C.muted }}>No months pulled yet.</div>}
+                  {qbMonths.length>=2&&(()=>{ const last=qbMonths.slice(0,3); const l=last.reduce((s,m)=>s+m.labor,0), r=last.reduce((s,m)=>s+m.revenue,0), pct=r>0?l/r*100:null; return (
+                    <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:"10px", background:C.blueLt, borderRadius:"14px", padding:"10px 14px" }}>
+                      <div>
+                        <div style={{ fontFamily:FONT, fontWeight:"600", fontSize:"15px", color:C.black }}>Last {last.length} months combined</div>
+                        <div style={{ fontSize:"12px", color:C.muted }}>${Math.round(l).toLocaleString()} of ${Math.round(r).toLocaleString()} · evens out the paydays</div>
+                      </div>
+                      <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"20px", color:pct!=null&&pct<=LABOR_TARGET_PCT?C.green:C.red }}>{pct==null?"—":`${pct.toFixed(1)}%`}</div>
+                    </div>
+                  ); })()}
+                  {qbMonths.map(m=>(
+                    <div key={m.month} style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:"10px", background:C.cardLt, borderRadius:"14px", padding:"10px 14px" }}>
+                      <div>
+                        <div style={{ fontFamily:FONT, fontWeight:"600", fontSize:"15px", color:C.black }}>{formatMonthLabel(m.month)}</div>
+                        <div style={{ fontSize:"12px", color:C.muted }}>${Math.round(m.labor).toLocaleString()} of ${Math.round(m.revenue).toLocaleString()} · ${Math.round(m.tips).toLocaleString()} tips taken out</div>
+                      </div>
+                      <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"20px", color:m.pct!=null&&m.pct<=LABOR_TARGET_PCT?C.green:C.red }}>{m.pct==null?"—":`${m.pct.toFixed(1)}%`}</div>
+                    </div>
+                  ))}
+                  <div style={{ fontSize:"12px", color:C.muted }}>Wages – COGS + Payroll Taxes – COGS + Training Pay, minus tips, over income minus tips. Books by pay date, so a month with three paydays runs high.</div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Per-tech breakdown — admin / all-techs view only */}
+          {techRows.length>0&&(
+            <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", overflow:"hidden" }}>
+              <div style={{ padding:"14px 18px", borderBottom:`1px solid ${C.border}`, background:C.cardLt }}>
+                <Label color={C.blue}>Per-Tech Breakdown</Label>
+              </div>
+              <div style={{ padding:"14px 18px", display:"flex", flexDirection:"column", gap:"10px" }}>
+                {techRows.map((t,i)=>(
+                  <div key={t.id} style={{ background:C.cardLt, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"12px 14px" }}>
+                    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:"8px" }}>
+                      <div style={{ fontFamily:FONT, fontWeight:"700", fontStyle:"normal", fontSize:"16px", color:C.black }}>{medal(i)} {t.name}{t.is_active===false&&<ArchivedTag/>}</div>
+                      <div style={{ textAlign:"right" }}>
+                        <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"22px", color:C.green, lineHeight:1 }}>${Math.round(t.rev).toLocaleString()}</div>
+                        <div style={{ fontSize:"11px", color:C.muted, letterSpacing:"-0.01em", textTransform:"none", marginBottom:"2px" }}>serviced</div>
+                        {t.tips>0&&<div style={{ fontFamily:FONT, fontWeight:"600", fontSize:"14px", color:C.gold }}>${t.tips.toFixed(0)} tips</div>}
+                      </div>
+                    </div>
+                    <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:"6px" }}>
+                      {[
+                        { l:"Hours",    v:t.hrs.toFixed(1),             c:C.blue   },
+                        { l:"Rev/hr",   v:`$${t.revPerHr.toFixed(0)}`,  c:C.purple },
+                        { l:"Upsells",  v:`$${Math.round(t.ups)}`,      c:C.gold   },
+                        { l:"Upsell %", v:`${t.upsellPct.toFixed(1)}%`, c:t.upsellPct>=10?C.green:C.red },
+                      ].map(s=>(
+                        <div key={s.l} style={{ background:C.white, borderRadius:"8px", padding:"6px", textAlign:"center" }}>
+                          <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"14px", color:s.c }}>{s.v}</div>
+                          <div style={{ fontSize:"11px", color:C.muted, textTransform:"none", letterSpacing:"-0.01em" }}>{s.l}</div>
+                        </div>
+                      ))}
+                    </div>
+                    {t.wkBreakdown?.length>0&&(
+                      <div style={{ marginTop:"8px", borderTop:`1px solid ${C.border}`, paddingTop:"8px", display:"flex", flexDirection:"column", gap:"3px" }}>
+                        {t.wkBreakdown.map(w=>(
+                          <div key={w.wk} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"4px 8px", background:C.white, borderRadius:"8px" }}>
+                            <div style={{ fontSize:"11px", color:C.muted, fontFamily:FONT, fontWeight:"700" }}>{formatWeekLabel(w.wk)} · {w.count} job{w.count!==1?"s":""}</div>
+                            <div style={{ display:"flex", gap:"8px", alignItems:"center" }}>
+                              <span style={{ fontFamily:FONT, fontWeight:"700", fontSize:"13px", color:C.green }}>${Math.round(w.rev).toLocaleString()}</span>
+                              {w.tips>0&&<span style={{ fontFamily:FONT, fontWeight:"700", fontSize:"12px", color:C.gold }}>+${w.tips.toFixed(0)} tips</span>}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </>
       )}
+
 
     </div>
   );
@@ -1577,8 +1467,213 @@ function trainingInfo(tech, jobs, timeEntries, techs=[]) {
   return { firstJob, entries, day90:d.toISOString().split("T")[0], totalHours:entries.reduce((s,e)=>s+paidSessionHours(e),0) };
 }
 
+// Crew labor for a date range (see laborCost.js for what counts): commission,
+// upsell bonus (each pay period's tier rate on the upsells in range),
+// switchover bonuses, training pay ($7.50/hr when worked, the held $7.50/hr
+// on the day-90 date), times (1 + payroll tax rate). Tips are left out.
+// Bonuses follow Payroll: only from the 10th/25th schedule on.
+function laborEstimate({ techs, jobs, switchovers=[], timeEntries=[], start, end, techId=null, taxRate }) {
+  const who = techId ? techs.filter(t=>t.id===techId) : techs;
+  const commMap = Object.fromEntries(techs.map(t => [t.id, (t.commission_rate||27)/100]));
+  const inRange = jobs.filter(j => j.job_date>=start && j.job_date<=end && (!techId || j.tech_id===techId));
+  const revenue = inRange.reduce((s,j)=>s+(j.revenue||0),0);
+  const commission = inRange.reduce((s,j)=>s+(j.revenue||0)*(commMap[j.tech_id]||0.27),0);
+  let upsellBonus = 0;
+  for (const p of getPayPeriods().filter(p=>p.start>=PP_SEMI_MONTHLY_FROM && p.start<=end && p.end>=start)) {
+    const from = p.start>start?p.start:start, to = p.end<end?p.end:end;
+    for (const t of who) {
+      const amt = upsellAmountInRange(jobs, t.id, from, to);
+      if (amt>0) upsellBonus += amt*calcUpsellPay(upsellAmountInRange(jobs, t.id, p.start, p.end)).rate;
+    }
+  }
+  const switchBonus = switchovers.filter(sw=>(!techId||sw.tech_id===techId)&&switchoverDate(sw)>=PP_SEMI_MONTHLY_FROM&&switchoverDate(sw)>=start&&switchoverDate(sw)<=end).reduce((s,sw)=>s+(switchoverPay(sw)||0),0);
+  let training = 0;
+  for (const t of who) {
+    const tr = trainingInfo(t, jobs, timeEntries, techs);
+    if (!tr) continue;
+    training += tr.entries.filter(e=>e.work_date>=start&&e.work_date<=end).reduce((s,e)=>s+paidSessionHours(e),0)*TRAINING_RATE_NOW;
+    if (t.is_active!==false && tr.day90>=start && tr.day90<=end) training += tr.totalHours*TRAINING_RATE_HELD;
+  }
+  const wages = commission+upsellBonus+switchBonus+training;
+  const taxes = wages*taxRate;
+  const labor = wages+taxes;
+  return { revenue, commission, upsellBonus, switchBonus, training, wages, taxes, labor, pct: revenue>0 ? labor/revenue*100 : 0 };
+}
+
+// Owners (Truxton, Casey) don't re-enter their PIN if this device had the
+// app open in the last 10 minutes (owner rule, Oct 2026). Only the owner
+// login is remembered; the login token itself still expires after 12 hours.
+// Signing out clears it. Browser storage can be off (private mode), so every
+// read/write is wrapped -- worst case they type the PIN.
+const OWNER_SESSION_KEY = "skylo_owner_session";
+const OWNER_IDLE_MS = 10 * 60 * 1000;
+function tokenExp(token) {
+  try { return JSON.parse(atob(String(token).split(".")[0].replace(/-/g, "+").replace(/_/g, "/"))).exp || 0; } catch { return 0; }
+}
+function loadOwnerSession() {
+  try {
+    const v = JSON.parse(localStorage.getItem(OWNER_SESSION_KEY) || "null");
+    if (!v?.user || v.user.role !== "owner") return null;
+    if (Date.now() - (v.lastActive || 0) > OWNER_IDLE_MS || tokenExp(v.user.token) <= Date.now() + 60_000) { localStorage.removeItem(OWNER_SESSION_KEY); return null; }
+    return v.user;
+  } catch { return null; }
+}
+function saveOwnerSession(user) {
+  try {
+    if (user?.role === "owner") localStorage.setItem(OWNER_SESSION_KEY, JSON.stringify({ user, lastActive: Date.now() }));
+    else localStorage.removeItem(OWNER_SESSION_KEY);
+  } catch {}
+}
+
 // ─── PAYROLL TAB ──────────────────────────────────────────────────────────────
-function PayrollTab({ techs, jobs, tipEntries=[], switchovers=[], timeEntries=[], token=null, canWaive=false }) {
+// Calls the tech-bookings function (admin job lookup / add).
+async function techBookingApi(token, { invoice, add=false, booker_id=null }) {
+  const r = add
+    ? await fetch("/.netlify/functions/tech-bookings", { method:"POST", headers:{ "Content-Type":"application/json", Authorization:`Bearer ${token || ""}` }, body:JSON.stringify({ invoice, booker_id }) })
+    : await fetch(`/.netlify/functions/tech-bookings?invoice=${encodeURIComponent(invoice)}`, { headers:{ Authorization:`Bearer ${token || ""}` } });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+  return j.job;
+}
+
+function BookingJobPreview({ job }) {
+  if (!job) return null;
+  const when = job.scheduled_start ? fmtShortDate(mtDateStr(Date.parse(job.scheduled_start))) : "not scheduled yet";
+  return (
+    <div style={{ background:C.cardLt, borderRadius:"10px", padding:"10px 12px", fontSize:"13px", color:C.black, display:"flex", flexDirection:"column", gap:"3px" }}>
+      <div><b>#{job.invoice_number}</b> · {job.customer_name || "Unknown customer"} · {when}{job.completed ? " · completed" : ""}</div>
+      {job.has_booking_item
+        ? <div style={{ color:C.green }}>✓ {job.booking_items.join(" · ")}</div>
+        : <div style={{ color:C.gold }}>⚠ No "Technician Booking - " line item on this job yet</div>}
+      {job.existing_status && <div style={{ color:C.muted }}>Already in Tech Bookings ({job.existing_status === "confirmed" ? "confirmed" : job.existing_status === "rejected" ? "marked not a booking" : "needs a booker"}). Adding it again replaces the booker.</div>}
+    </div>
+  );
+}
+
+// Admin view: confirm who booked each technician booking before it pays.
+function TechBookingsAdmin({ techs, techBookings=[], jobs=[], token, reviewerName, refreshAll, showToast }) {
+  const [pick, setPick] = useState({});
+  const [busy, setBusy] = useState(null);
+  const [addNum, setAddNum] = useState("");
+  const [addTech, setAddTech] = useState("");
+  const [addJob, setAddJob] = useState(null);
+  const toast = showToast || (m => window.alert(m));
+  const active = techs.filter(t => t.is_active !== false && t.title !== "owner").sort((a,b) => a.name.localeCompare(b.name));
+  const nameOf = id => techs.find(t => t.id === id)?.name || null;
+  const pending = techBookings.filter(b => b.status === "pending");
+  const confirmed = techBookings.filter(b => b.status === "confirmed").slice(0, 40);
+  const rejected = techBookings.filter(b => b.status === "rejected").slice(0, 20);
+  const fmtWhen = b => b.scheduled_start ? fmtShortDate(mtDateStr(Date.parse(b.scheduled_start))) : "";
+
+  async function patch(b, body, msg) {
+    setBusy(b.id);
+    // Through tech-bookings (owner / manager token): the table is read-only
+    // from the browser because confirming a booking pays the booker.
+    try {
+      const r = await fetch("/.netlify/functions/tech-bookings", { method:"POST", headers:{ "Content-Type":"application/json", Authorization:`Bearer ${token||""}` },
+        body:JSON.stringify({ action:"update", id:b.id, status:body.status, ...("booker_id" in body ? { booker_id:body.booker_id } : {}) }) });
+      const j = await r.json().catch(()=>({}));
+      if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+      toast(msg); await refreshAll();
+    }
+    catch(e) { toast("Error: " + e.message, false); }
+    setBusy(null);
+  }
+  async function lookupAdd() {
+    setBusy("add"); setAddJob(null);
+    try { setAddJob(await techBookingApi(token, { invoice:addNum.trim() })); } catch(e) { toast(e.message, false); }
+    setBusy(null);
+  }
+  async function add() {
+    if (!addTech) return toast("Pick who booked it", false);
+    setBusy("add");
+    try { await techBookingApi(token, { invoice:addJob.invoice_number, add:true, booker_id:addTech }); toast(`✅ Added for ${nameOf(addTech)}`); setAddNum(""); setAddTech(""); setAddJob(null); await refreshAll(); }
+    catch(e) { toast(e.message, false); }
+    setBusy(null);
+  }
+
+  const card = { background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"14px 16px", display:"flex", flexDirection:"column", gap:"10px" };
+  const sel = { background:C.white, border:`1px solid ${C.border}`, color:C.black, padding:"8px 10px", borderRadius:"10px", fontSize:"13px", fontFamily:FONT };
+  const btn = bg => ({ background:bg, border:"none", color:C.white, padding:"8px 12px", borderRadius:"10px", cursor:"pointer", fontSize:"12px", fontWeight:"700", fontFamily:FONT });
+  return (
+    <div style={{ display:"flex", flexDirection:"column", gap:"14px" }}>
+      <div style={{ fontSize:"12px", color:C.muted }}>
+        Jobs techs booked themselves. When an HCP job has a "Technician Booking - " line item, it shows up here (checked every hour). Pick which tech booked it. Once the job is serviced, the booker gets +10% on top of their commission if they serviced it, or 10% of the ticket if someone else did, plus {TECH_BOOKING_PTS} points. Nothing pays until you pick the booker.
+      </div>
+
+      <div style={card}>
+        <Label color={C.gold}>Needs a booker · {pending.length}</Label>
+        {pending.length === 0 && <div style={{ fontSize:"12px", color:C.muted }}>Nothing to confirm.</div>}
+        {pending.map(b => {
+          const rows = jobs.filter(j => j.hcp_job_id === b.hcp_job_id);
+          const servicers = [...new Set(rows.map(j => j.tech_id))].map(nameOf).filter(Boolean);
+          const choice = pick[b.id] ?? (b.booker_id || "");
+          return (
+            <div key={b.id} style={{ borderTop:`1px solid ${C.border}40`, paddingTop:"10px", display:"flex", flexDirection:"column", gap:"6px", fontSize:"13px", color:C.black }}>
+              <div><b>#{b.invoice_number || "—"}</b> · {b.customer_name || "Unknown customer"} · {fmtWhen(b)}</div>
+              <div style={{ color:C.muted, fontSize:"12px" }}>
+                {rows.length ? `Serviced by ${servicers.join(", ") || "?"} · $${rows.reduce((s,j)=>s+(j.revenue||0),0).toFixed(2)}` : "Not serviced yet — pays once it's done"}
+              </div>
+              {b.booking_items && <div style={{ color:C.green, fontSize:"12px" }}>✓ {b.booking_items}</div>}
+              <div style={{ display:"flex", gap:"8px", flexWrap:"wrap", alignItems:"center" }}>
+                <select value={choice} onChange={e => setPick(p => ({ ...p, [b.id]:e.target.value }))} style={sel}>
+                  <option value="">Who booked it?</option>
+                  {active.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                </select>
+                <button onClick={() => choice ? patch(b, { status:"confirmed", booker_id:choice, confirmed_by:reviewerName, confirmed_at:new Date().toISOString() }, `✅ Confirmed for ${nameOf(choice)}`) : toast("Pick who booked it", false)} disabled={busy === b.id} style={btn(choice ? C.green : C.border)}>Confirm</button>
+                <button onClick={() => window.confirm("Not a technician booking? It won't pay or earn points.") && patch(b, { status:"rejected", confirmed_by:reviewerName, confirmed_at:new Date().toISOString() }, "Marked not a booking")} disabled={busy === b.id} style={{ background:"transparent", border:`1px solid ${C.border}`, color:C.muted, padding:"7px 10px", borderRadius:"10px", cursor:"pointer", fontSize:"12px" }}>Not a booking</button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div style={card}>
+        <Label color={C.blue}>Add one by job number</Label>
+        <div style={{ fontSize:"12px", color:C.muted }}>For a tech booking that's missing the "Technician Booking - " line item in HCP.</div>
+        <div style={{ display:"flex", gap:"8px", flexWrap:"wrap" }}>
+          <input value={addNum} onChange={e => { setAddNum(e.target.value); setAddJob(null); }} placeholder="HCP job #" inputMode="numeric" style={{ ...sel, flex:1, minWidth:"120px", fontSize:"14px" }}/>
+          <button onClick={lookupAdd} disabled={!addNum.trim() || busy === "add"} style={btn(addNum.trim() ? C.blue : C.border)}>Look up</button>
+        </div>
+        <BookingJobPreview job={addJob}/>
+        {addJob && (
+          <div style={{ display:"flex", gap:"8px", flexWrap:"wrap" }}>
+            <select value={addTech} onChange={e => setAddTech(e.target.value)} style={sel}>
+              <option value="">Who booked it?</option>
+              {active.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+            </select>
+            <button onClick={add} disabled={busy === "add"} style={btn(C.green)}>Add</button>
+          </div>
+        )}
+      </div>
+
+      <div style={card}>
+        <Label color={C.green}>Confirmed · {techBookings.filter(b => b.status === "confirmed").length}</Label>
+        {confirmed.length === 0 && <div style={{ fontSize:"12px", color:C.muted }}>None yet.</div>}
+        {confirmed.map(b => { const p = techBookingPay(b, jobs); return (
+          <div key={b.id} style={{ display:"flex", justifyContent:"space-between", gap:"8px", alignItems:"center", fontSize:"12px", color:C.black, borderTop:`1px solid ${C.border}40`, paddingTop:"6px" }}>
+            <span><b>{nameOf(b.booker_id)}</b> · #{b.invoice_number || "—"} {b.customer_name || ""} · {p ? `${p.serviced ? "booked & serviced" : "booked"} · $${p.pay.toFixed(2)} (${fmtShortDate(p.date)})` : "pays once completed"}</span>
+            <button onClick={() => patch(b, { status:"pending", booker_id:null, confirmed_by:null, confirmed_at:null }, "Moved back to Needs a booker")} disabled={busy === b.id} style={{ background:"transparent", border:`1px solid ${C.border}`, color:C.muted, padding:"5px 8px", borderRadius:"8px", cursor:"pointer", fontSize:"11px", whiteSpace:"nowrap" }}>Undo</button>
+          </div>
+        ); })}
+      </div>
+
+      {rejected.length > 0 && (
+        <div style={card}>
+          <Label color={C.muted}>Not bookings · {rejected.length}</Label>
+          {rejected.map(b => (
+            <div key={b.id} style={{ display:"flex", justifyContent:"space-between", gap:"8px", alignItems:"center", fontSize:"12px", color:C.muted }}>
+              <span>#{b.invoice_number || "—"} {b.customer_name || ""}</span>
+              <button onClick={() => patch(b, { status:"pending", confirmed_by:null, confirmed_at:null }, "Moved back to Needs a booker")} disabled={busy === b.id} style={{ background:"transparent", border:`1px solid ${C.border}`, color:C.muted, padding:"5px 8px", borderRadius:"8px", cursor:"pointer", fontSize:"11px" }}>Undo</button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PayrollTab({ techs, jobs, tipEntries=[], switchovers=[], timeEntries=[], techBookings=[], token=null, canWaive=false }) {
   const allPeriods = getPayPeriods();
   const activePeriods = allPeriods.filter(p=>jobs.some(j=>j.job_date>=p.start&&j.job_date<=p.end)||p.key===currentPPKey());
   const [selKey, setSelKey] = useState(currentPPKey());
@@ -1646,7 +1741,9 @@ function PayrollTab({ techs, jobs, tipEntries=[], switchovers=[], timeEntries=[]
     const trainingDays = [...new Set(trEntries.map(e=>e.work_date))].sort();
     const trainingPay = Math.round(trainingHours*TRAINING_RATE_NOW*100)/100;
     const heldDue = tr && t.is_active!==false && tr.day90>=period.start && tr.day90<=period.end ? Math.round(tr.totalHours*TRAINING_RATE_HELD*100)/100 : 0;
-    const total   = commission+tips+upsellPay+switchPay-toteDeduct+trainingPay+heldDue;
+    const bks = showBonuses ? techBookings.filter(b=>b.status==="confirmed"&&b.booker_id===t.id).map(b=>({ b, p:techBookingPay(b, jobs) })).filter(x=>x.p&&x.p.date>=period.start&&x.p.date<=period.end).sort((a,b)=>a.p.date.localeCompare(b.p.date)) : [];
+    const bookingPay = Math.round(bks.reduce((s,x)=>s+x.p.pay,0)*100)/100;
+    const total   = commission+tips+upsellPay+switchPay+bookingPay-toteDeduct+trainingPay+heldDue;
     const weeks   = wkKeys.map(wk=>{
       const wj=tj.filter(j=>j.week_key===wk);
       const wkEndDate = new Date(wk+"T12:00:00Z"); wkEndDate.setUTCDate(wkEndDate.getUTCDate()+6);
@@ -1654,13 +1751,14 @@ function PayrollTab({ techs, jobs, tipEntries=[], switchovers=[], timeEntries=[]
       const wkTips = tipsRangeTotal(tipEntries, t.id, wk, wkEndStr);
       return { wk, rev:wj.reduce((s,j)=>s+(j.revenue||0),0), tips:wkTips, count:wj.length };
     }).filter(w=>w.rev>0||w.tips>0);
-    return { ...t, revenue, tips, rate, commission, upsellAmt, upsellPay, upsellRate, sws, switchPay, switchUnpriced, toteHere, toteDeduct, tr, trainingHours, trainingDays, trainingPay, heldDue, total, weeks };
-  }).filter(r=>r.revenue>0||r.tips>0||r.upsellAmt>0||r.sws.length>0||r.toteHere.length>0||r.trainingHours>0||r.heldDue>0).sort(PAYROLL_SORTS[sortBy] || byLastName);
+    return { ...t, revenue, tips, rate, commission, upsellAmt, upsellPay, upsellRate, sws, switchPay, switchUnpriced, bks, bookingPay, toteHere, toteDeduct, tr, trainingHours, trainingDays, trainingPay, heldDue, total, weeks };
+  }).filter(r=>r.revenue>0||r.tips>0||r.upsellAmt>0||r.sws.length>0||r.bks.length>0||r.toteHere.length>0||r.trainingHours>0||r.heldDue>0).sort(PAYROLL_SORTS[sortBy] || byLastName);
 
   const teamTotal = rows.reduce((s,r)=>s+r.total,0);
+  const unconfirmedBookings = showBonuses ? techBookings.filter(b=>b.status==="pending").filter(b=>{ const d=(jobs.filter(j=>j.hcp_job_id===b.hcp_job_id).map(j=>j.job_date).sort()[0]); return d && d>=period.start && d<=period.end; }).length : 0;
 
   function exportCSV() {
-    const lines=["Tech,Revenue,Commission Rate,Commission,Tips,Upsells,Upsell Rate,Upsell Bonus,Switchovers,Switchover Bonus,Tote Deduction,Training Hours,Training Pay,90-Day Training Pay,Total Pay",...rows.map(r=>[r.name,`$${r.revenue.toFixed(2)}`,`${r.rate}%`,`$${r.commission.toFixed(2)}`,`$${r.tips.toFixed(2)}`,`$${r.upsellAmt.toFixed(2)}`,`${Math.round(r.upsellRate*100)}%`,`$${r.upsellPay.toFixed(2)}`,r.sws.length,`$${r.switchPay.toFixed(2)}`,`-$${r.toteDeduct.toFixed(2)}`,r.trainingHours.toFixed(2),`$${r.trainingPay.toFixed(2)}`,`$${r.heldDue.toFixed(2)}`,`$${r.total.toFixed(2)}`].join(","))].join("\n");
+    const lines=["Tech,Revenue,Commission Rate,Commission,Tips,Upsells,Upsell Rate,Upsell Bonus,Switchovers,Switchover Bonus,Tech Bookings,Tech Booking Pay,Tote Deduction,Training Hours,Training Pay,90-Day Training Pay,Total Pay",...rows.map(r=>[r.name,`$${r.revenue.toFixed(2)}`,`${r.rate}%`,`$${r.commission.toFixed(2)}`,`$${r.tips.toFixed(2)}`,`$${r.upsellAmt.toFixed(2)}`,`${Math.round(r.upsellRate*100)}%`,`$${r.upsellPay.toFixed(2)}`,r.sws.length,`$${r.switchPay.toFixed(2)}`,r.bks.length,`$${r.bookingPay.toFixed(2)}`,`-$${r.toteDeduct.toFixed(2)}`,r.trainingHours.toFixed(2),`$${r.trainingPay.toFixed(2)}`,`$${r.heldDue.toFixed(2)}`,`$${r.total.toFixed(2)}`].join(","))].join("\n");
     const url=URL.createObjectURL(new Blob([lines],{type:"text/csv"}));
     const a=Object.assign(document.createElement("a"),{href:url,download:`skylo-payroll-${selKey}.csv`});
     a.click(); URL.revokeObjectURL(url);
@@ -1668,6 +1766,12 @@ function PayrollTab({ techs, jobs, tipEntries=[], switchovers=[], timeEntries=[]
 
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:"16px" }}>
+
+      {unconfirmedBookings>0&&(
+        <div style={{ background:`${C.gold}14`, border:`1px solid ${C.gold}55`, borderRadius:"12px", padding:"10px 14px", fontSize:"13px", color:C.black }}>
+          ⚠ {unconfirmedBookings} technician booking{unconfirmedBookings!==1?"s":""} in this pay period still need{unconfirmedBookings===1?"s":""} a booker picked — not paid until then. Pick the booker in <b>Tech Bookings</b>.
+        </div>
+      )}
 
       {/* Period selector */}
       <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"16px 18px" }}>
@@ -1701,7 +1805,7 @@ function PayrollTab({ techs, jobs, tipEntries=[], switchovers=[], timeEntries=[]
 
       {/* Team total */}
       <div style={{ background:`${C.green}15`, border:`2px solid ${C.green}44`, borderRadius:"16px", padding:"16px 20px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-        <div style={{ fontFamily:FONT, fontWeight:"700", fontStyle:"normal", fontSize:"13px", color:C.green, letterSpacing:"-0.01em" }}>TEAM TOTAL</div>
+        <div style={{ fontFamily:FONT, fontWeight:"700", fontStyle:"normal", fontSize:"13px", color:C.green, letterSpacing:"-0.01em" }}>Team total</div>
         <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"34px", color:C.black }}>${teamTotal.toFixed(2)}</div>
       </div>
 
@@ -1720,7 +1824,7 @@ function PayrollTab({ techs, jobs, tipEntries=[], switchovers=[], timeEntries=[]
                 <div style={{ fontFamily:FONT, fontWeight:"700", fontStyle:"normal", fontSize:"20px", color:C.black }}>{r.name}{r.is_active===false&&<ArchivedTag/>}</div>
                 <div style={{ textAlign:"right" }}>
                   <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"28px", color:C.green, lineHeight:1 }}>${r.total.toFixed(2)}</div>
-                  <div style={{ fontSize:"11px", color:C.muted, letterSpacing:"-0.01em" }}>TOTAL PAY</div>
+                  <div style={{ fontSize:"11px", color:C.muted, letterSpacing:"-0.01em" }}>Total pay</div>
                 </div>
               </div>
               <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:"8px", marginBottom:r.weeks.length>1?"10px":0 }}>
@@ -1774,6 +1878,23 @@ function PayrollTab({ techs, jobs, tipEntries=[], switchovers=[], timeEntries=[]
                     })}
                     {r.switchUnpriced>0&&<div style={{ fontSize:"11px", color:C.red, marginTop:"6px" }}>⚠ {r.switchUnpriced} switchover{r.switchUnpriced!==1?"s":""} on a plan with no pay amount set — not included in the total.</div>}
                   </div>
+                  {r.bks.length>0&&(
+                    <div style={{ background:C.cardLt, borderRadius:"10px", padding:"10px 12px" }}>
+                      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:"10px" }}>
+                        <div>
+                          <div style={{ fontSize:"11px", color:C.muted, letterSpacing:"-0.01em", textTransform:"none", fontFamily:FONT, fontWeight:"700" }}>📅 Technician Bookings</div>
+                          <div style={{ fontSize:"13px", color:C.black, marginTop:"2px" }}>{r.bks.length} booking{r.bks.length!==1?"s":""} · 10% each</div>
+                        </div>
+                        <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"18px", color:C.purple }}>${r.bookingPay.toFixed(2)}</div>
+                      </div>
+                      {r.bks.map(({b,p})=>(
+                        <div key={b.id} style={{ display:"flex", justifyContent:"space-between", gap:"8px", fontSize:"12px", color:C.black, borderTop:`1px solid ${C.border}`, marginTop:"6px", paddingTop:"6px" }}>
+                          <span>{fmtShortDate(p.date)} · #{b.invoice_number||"—"} {b.customer_name||""} · {p.serviced ? "booked & serviced (+10% of own revenue)" : `serviced by ${p.servicers.map(id=>techs.find(t=>t.id===id)?.name||"?").join(", ")}`}</span>
+                          <span style={{ fontWeight:"700", whiteSpace:"nowrap" }}>10% × ${p.base.toFixed(2)} = ${p.pay.toFixed(2)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                   {r.toteHere.length>0&&(
                     <div style={{ background:`${C.red}0d`, border:`1px solid ${C.red}33`, borderRadius:"10px", padding:"10px 12px" }}>
                       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:"10px" }}>
@@ -1843,84 +1964,58 @@ function Leaderboard({ techs, jobs, upsells, reviews, callbacks, switchovers, ti
     { id:"upsells",  label:"Upsells",    icon:"📈" },
     { id:"revhr",    label:"Rev / Hr",   icon:"⚡" },
     { id:"reviews",  label:"Reviews",    icon:"⭐" },
-    { id:"pts",      label:"Pts",        icon:"🏆" },
+    { id:"pts",      label:"Points",     icon:"🏆" },
   ];
   const [metric, setMetric] = useState("revenue");
+  const [rangePreset, setRangePreset] = useState("wtd");
+  const [cStart, setCStart] = useState("");
+  const [cEnd, setCEnd] = useState("");
+  const { start, end } = getDateRangeBounds(rangePreset, cStart, cEnd);
 
-  const wk = getWeekKey();
+  // Revenue, upsells and rev/hr use the exact range; reviews are logged by
+  // month (any month the range touches); points are all-time.
   const rows = techs.map(t => {
-    const tj      = jobs.filter(j=>j.tech_id===t.id&&j.week_key===wk);
-    const revenue = tj.reduce((s,j)=>s+(j.revenue||0),0);
-    const wkEnd   = new Date(wk+"T12:00:00Z"); wkEnd.setUTCDate(wkEnd.getUTCDate()+6);
-    const hours   = rangeHoursTotal(timeEntries, t.id, wk, wkEnd.toISOString().split("T")[0]);
-    const wkUps   = upsellAmountInRange(jobs, t.id, wk, weekEndDate(wk));
-    const mk      = getMonthKey();
-    const mRevs   = reviews.filter(r=>r.tech_id===t.id&&r.month_key===mk).reduce((s,r)=>s+r.count,0);
+    const revenue = jobs.filter(j=>j.tech_id===t.id&&j.job_date>=start&&j.job_date<=end).reduce((s,j)=>s+(j.revenue||0),0);
+    const hours   = rangeHoursTotal(timeEntries, t.id, start, end);
+    const ups     = upsellAmountInRange(jobs, t.id, start, end);
+    const revs    = reviews.filter(r=>r.tech_id===t.id&&r.month_key>=start.slice(0,7)&&r.month_key<=end.slice(0,7)).reduce((s,r)=>s+r.count,0);
     const tt      = calcTotals(t,upsells,switchovers,reviews,callbacks||[],jobs);
-    return { ...t, revenue, hours, revhr:hours>0?revenue/hours:0, wkUps, mRevs, pts:tt.total };
+    return { ...t, revenue, hours, revhr:hours>0?revenue/hours:0, ups, revs, pts:tt.total };
   });
-
-  const sorted = [...rows].sort((a,b) => {
-    if (metric==="revenue") return b.revenue-a.revenue;
-    if (metric==="upsells") return b.wkUps-a.wkUps;
-    if (metric==="revhr")   return b.revhr-a.revhr;
-    if (metric==="reviews") return b.mRevs-a.mRevs;
-    return b.pts-a.pts;
-  });
-
-  const getValue = r => {
-    if (metric==="revenue") return `$${Math.round(r.revenue).toLocaleString()}`;
-    if (metric==="upsells") return `$${Math.round(r.wkUps).toLocaleString()}`;
-    if (metric==="revhr")   return `$${r.revhr.toFixed(0)}/hr`;
-    if (metric==="reviews") return r.mRevs;
-    return r.pts.toLocaleString()+" pts";
+  const key = { revenue:"revenue", upsells:"ups", revhr:"revhr", reviews:"revs", pts:"pts" }[metric];
+  const sorted = rows.filter(r=>r[key]>0).sort((a,b)=>b[key]-a[key]);
+  const fmt = r => {
+    if (metric==="revenue") return { value:`$${Math.round(r.revenue).toLocaleString()}`, sub:r.hours>0?`${r.hours.toFixed(1)} hrs`:null };
+    if (metric==="upsells") return { value:`$${Math.round(r.ups).toLocaleString()}`, chip:`${Math.round(r.ups*UPSELL_PTS_PER_DOLLAR).toLocaleString()} pts` };
+    if (metric==="revhr")   return { value:`$${r.revhr.toFixed(0)}/hr`, sub:`$${Math.round(r.revenue).toLocaleString()} over ${r.hours.toFixed(1)} hrs` };
+    if (metric==="reviews") return { value:`${r.revs} ⭐` };
+    return { value:`${r.pts.toLocaleString()} pts`, sub:"all time" };
   };
-  const getLabel = r => {
-    if (metric==="revenue") return "this week";
-    if (metric==="upsells") return "this week";
-    if (metric==="revhr")   return "this week";
-    if (metric==="reviews") return "this month";
-    return "all time";
-  };
-
-  const medals = ["🥇","🥈","🥉"];
-  const colors = [C.gold, C.muted, "#cd7f32"];
 
   return (
-    <div style={{ display:"flex", flexDirection:"column", gap:"16px" }}>
-      {/* Metric toggle */}
-      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"14px 16px" }}>
-        <Label color={C.gold}>🏆 Leaderboard</Label>
-        <div style={{ display:"flex", gap:"6px", flexWrap:"wrap" }}>
-          {METRICS.map(m=>(
-            <button key={m.id} onClick={()=>setMetric(m.id)} style={{ background:metric===m.id?C.gold:C.cardLt, border:`1px solid ${metric===m.id?C.gold:C.border}`, color:metric===m.id?C.white:C.muted, padding:"6px 14px", borderRadius:"20px", cursor:"pointer", fontFamily:FONT, fontWeight:"700", fontSize:"12px", letterSpacing:"-0.01em" }}>
-              {m.icon} {m.label}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {sorted.length===0?(
-        <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"32px", textAlign:"center", color:C.muted, fontSize:"13px" }}>
-          No data yet for this period. Check back after jobs sync from HCP.
-        </div>
-      ):(
-        <div style={{ display:"flex", flexDirection:"column", gap:"8px" }}>
-          {sorted.map((r,i)=>(
-            <div key={r.id} style={{ background:C.card, border:`1px solid ${i<3?colors[i]+"55":C.border}`, borderLeft:`4px solid ${i<3?colors[i]:C.border}`, borderRadius:"16px", padding:"14px 16px", display:"flex", alignItems:"center", gap:"14px" }}>
-              <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"22px", width:"32px", textAlign:"center", color:i<3?colors[i]:C.muted }}>
-                {i<3?medals[i]:i+1}
-              </div>
-              <div style={{ width:"40px", height:"40px", borderRadius:"50%", background:i<3?`${colors[i]}22`:`${C.blue}15`, border:`2px solid ${i<3?colors[i]:C.border}`, display:"flex", alignItems:"center", justifyContent:"center", fontFamily:FONT, fontSize:"13px", fontWeight:"700", color:i<3?colors[i]:C.blue, flexShrink:0 }}>{r.avatar}</div>
-              <div style={{ flex:1 }}>
-                <div style={{ fontFamily:FONT, fontWeight:"700", fontStyle:"normal", fontSize:"17px", color:C.black }}>{r.name}</div>
-                <div style={{ fontSize:"11px", color:C.muted, letterSpacing:"-0.01em" }}>{getLabel(r)}</div>
-              </div>
-              <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"22px", color:i<3?colors[i]:C.black }}>{getValue(r)}</div>
-            </div>
-          ))}
-        </div>
+    <div style={{ display:"flex", flexDirection:"column", gap:"14px" }}>
+      <Segmented options={METRICS.map(m=>[m.id,`${m.icon} ${m.label}`])} value={metric} onChange={setMetric}/>
+      {metric!=="pts"&&(
+        <DateRangePicker label="📅 Date Range" preset={rangePreset} setPreset={setRangePreset} customStart={cStart} setCustomStart={setCStart} customEnd={cEnd} setCustomEnd={setCEnd}>
+          <div style={{ fontSize:"12px", color:C.muted, marginTop:"8px" }}>{fmtShortDate(start)} – {fmtShortDate(end)}{metric==="reviews"?" · reviews are logged by month":""}</div>
+        </DateRangePicker>
       )}
+      <ListTitle right={metric==="pts"?"all time":null}>{METRICS.find(m=>m.id===metric).label}</ListTitle>
+      <RankRows rows={sorted.map(r=>({ id:r.id, name:r.name, ...fmt(r) }))} empty="Nothing yet for this range."/>
+    </div>
+  );
+}
+
+// Apple-style segmented control. options: [[id, label], ...]
+function Segmented({ options, value, onChange }) {
+  return (
+    <div style={{ display:"flex", background:"rgba(118,118,128,0.12)", borderRadius:"10px", padding:"2px", overflowX:"auto", scrollbarWidth:"none" }}>
+      {options.map(([id,label])=>{
+        const on = id===value;
+        return (
+          <button key={id} onClick={()=>onChange(id)} style={{ flex:"1 0 auto", background:on?C.white:"transparent", border:"none", borderRadius:"8px", padding:"7px 12px", fontFamily:FONT, fontWeight:on?"600":"500", fontSize:"13px", color:C.black, cursor:"pointer", boxShadow:on?"0 1px 3px rgba(0,0,0,0.12)":"none", whiteSpace:"nowrap" }}>{label}</button>
+        );
+      })}
     </div>
   );
 }
@@ -2050,7 +2145,7 @@ function JourneyCard({ tech, rank, total, onClick, expanded, upsells, quota, job
               </div>
               <div style={{ textAlign:"right", flexShrink:0 }}>
                 <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"22px", color:tier.color, lineHeight:1 }}>{tech.ptsToNext.toLocaleString()}</div>
-                <div style={{ fontSize:"11px", color:C.muted, letterSpacing:"-0.01em" }}>PTS TO GO</div>
+                <div style={{ fontSize:"11px", color:C.muted, letterSpacing:"-0.01em" }}>Pts to go</div>
               </div>
             </div>
             <Bar pct={tech.tierPct} color={tier.color} h={7}/>
@@ -2100,7 +2195,7 @@ function JourneyCard({ tech, rank, total, onClick, expanded, upsells, quota, job
                       <div key={b.label} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", background:isCurrent?`${C.green}22`:isPast?`${C.green}08`:"transparent", border:isCurrent?`1px solid ${C.green}55`:"1px solid transparent", borderRadius:"10px", padding:"6px 10px" }}>
                         <div style={{ display:"flex", alignItems:"center", gap:"6px" }}>
                           <span style={{ fontSize:"11px", color:isCurrent?C.green:isPast?C.black:C.muted, fontFamily:FONT, fontWeight:isCurrent?"900":"600" }}>{b.label}</span>
-                          {isCurrent && <span style={{ fontSize:"11px", background:C.green, color:C.white, borderRadius:"10px", padding:"1px 7px", fontFamily:FONT, fontWeight:"700" }}>YOUR TIER</span>}
+                          {isCurrent && <span style={{ fontSize:"11px", background:C.green, color:C.white, borderRadius:"10px", padding:"1px 7px", fontFamily:FONT, fontWeight:"700" }}>Your tier</span>}
                           {backfilled && <span style={{ fontSize:"11px", background:`${C.green}22`, color:C.green, borderRadius:"10px", padding:"1px 7px", fontFamily:FONT, fontWeight:"600" }}>↑ BACKFILLED</span>}
                         </div>
                         <div style={{ display:"flex", alignItems:"center", gap:"5px" }}>
@@ -2117,7 +2212,7 @@ function JourneyCard({ tech, rank, total, onClick, expanded, upsells, quota, job
                 <span style={{ fontFamily:FONT, fontWeight:"700", fontSize:"22px", color:C.green }}>${totalPay.toFixed(2)}</span>
               </div>
               {nextPayTier&&(
-                <div style={{ marginTop:"8px", background:nextPayTier.amt===null?`${C.green}18`:`${C.gold}18`, border:`1px solid ${nextPayTier.amt===null?C.green:C.gold}44`, borderRadius:"10px", padding:"6px 10px", fontSize:"11px", color:nextPayTier.amt===null?C.green:C.gold, fontFamily:FONT, fontWeight:"700" }}>
+                <div style={{ marginTop:"8px", background:nextPayTier.amt===null?`${C.green}18`:`${C.gold}18`, border:`1px solid ${nextPayTier.amt===null?C.green:C.red}44`, borderRadius:"10px", padding:"6px 10px", fontSize:"11px", color:nextPayTier.amt===null?C.green:C.red, fontFamily:FONT, fontWeight:"700" }}>
                   {nextPayTier.amt===null
                     ? `🔥 ${nextPayTier.label}`
                     : `💡 Upsell $${nextPayTier.amt.toFixed(0)} more to unlock ${nextPayTier.label}`}
@@ -2315,11 +2410,11 @@ const money = n => `$${Number(n||0).toLocaleString(undefined,{maximumFractionDig
 
 function OpsCard({ title, color, pay, status, statusColor, children }) {
   return (
-    <div style={{ background:C.white, border:`1px solid ${C.border}`, borderTop:`3px solid ${color}`, borderRadius:"16px", padding:"18px", boxShadow:"0 2px 8px rgba(0,0,0,0.06)" }}>
+    <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"18px", boxShadow:"0 2px 8px rgba(0,0,0,0.06)" }}>
       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:"10px", marginBottom:"10px" }}>
         <Label color={color}>{title}</Label>
         <div style={{ textAlign:"right" }}>
-          <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"24px", color:pay>0?C.green:C.muted, lineHeight:1 }}>{money(pay)}</div>
+          {pay!=null && <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"24px", color:pay>0?C.green:C.muted, lineHeight:1 }}>{money(pay)}</div>}
           {status && <div style={{ fontSize:"11px", fontWeight:"600", letterSpacing:"-0.01em", color:statusColor||C.muted, marginTop:"3px" }}>{status}</div>}
         </div>
       </div>
@@ -2344,7 +2439,7 @@ function TierTable({ tiers, activeLabel, suffix="" }) {
 const statLine = { fontSize:"12px", color:C.muted, marginTop:"4px" };
 const bigNum = { fontFamily:FONT, fontWeight:"700", fontSize:"32px", color:C.black, lineHeight:1 };
 
-function OperationsProgressTab({ techs, switchovers, reviews, quota, callbacks=[], jobs=[], isManager=false }) {
+function OperationsProgressTab({ techs, switchovers, reviews, quota, callbacks=[], damageReports=[], jobs=[], isManager=false }) {
   const today = mountainDate(new Date().toISOString());
   const months = opsMonthOptions(today);
   const [monthKey, setMonthKey] = useState(months[0]);
@@ -2405,9 +2500,9 @@ function OperationsProgressTab({ techs, switchovers, reviews, quota, callbacks=[
       <div style={{ background:r.gateOpen?C.white:"#fff5f5", border:`2px solid ${r.gateOpen?C.border:"#ff3b30"}`, borderTop:`3px solid ${r.gateOpen?C.blue:"#ff3b30"}`, borderRadius:"16px", padding:"18px" }}>
         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:"10px" }}>
           <div>
-            <div style={{ fontFamily:FONT, fontWeight:"700", fontStyle:"normal", fontSize:"13px", color:C.muted, letterSpacing:"-0.01em" }}>WILL'S OPERATIONS BONUS</div>
+            <div style={{ fontFamily:FONT, fontWeight:"700", fontStyle:"normal", fontSize:"13px", color:C.muted, letterSpacing:"-0.01em" }}>Will's operations bonus</div>
             <select value={monthKey} onChange={e=>{ setMonthKey(e.target.value); setShowLive(false); setMsg(null); }}
-              style={{ marginTop:"6px", background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"6px 10px", borderRadius:"10px", fontSize:"15px", fontFamily:FONT, fontWeight:"600" }}>
+              style={{ marginTop:"6px", maxWidth:"100%", background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"6px 10px", borderRadius:"10px", fontSize:"15px", fontFamily:FONT, fontWeight:"600" }}>
               {months.map(m=><option key={m} value={m}>{formatMonthLabel(m)}{m==="2026-09"?" (preview — plan starts Oct)":""}</option>)}
             </select>
           </div>
@@ -2460,6 +2555,28 @@ function OperationsProgressTab({ techs, switchovers, reviews, quota, callbacks=[
           </div>
         )}
       </OpsCard>
+
+      {/* Damage: tracked here next to callbacks, but NOT part of Will's bonus
+          (owner's call, Oct 2026). Dated by job like callbacks; a split job's
+          rows carry weight 1/n so it adds up to one. */}
+      {(() => {
+        const { start, end } = monthRange(monthKey);
+        const mine = (damageReports||[]).filter(d => { const day = d.job_date || (d.created_at && mountainDate(d.created_at)); return day && day>=start && day<=end; });
+        const count = Math.round(mine.reduce((t,d)=>t+(Number(d.weight)||1),0)*100)/100;
+        const cost = mine.reduce((t,d)=>t+(Number(d.repair_cost)||0)*(Number(d.weight)||1),0);
+        const rate = cb.jobCount>0 ? count/cb.jobCount*100 : 0;
+        const nameOf = id => techs.find(t=>t.id===id)?.name || "Unknown";
+        return (
+          <OpsCard title="🛠 Damage Reports" color={C.blue} pay={null} status="Tracking only — not part of the bonus">
+            <div style={{ display:"flex", alignItems:"baseline", gap:"10px" }}>
+              <div style={bigNum}>{rate.toFixed(2)}%</div>
+              <div style={{ fontSize:"13px", color:C.muted }}>{count} damage report{count!==1?"s":""} ÷ {cb.jobCount} jobs{cost>0?` · ${money(cost)} in repairs`:""}</div>
+            </div>
+            {mine.length>0 && <div style={{ ...statLine, color:C.black }}>{mine.map(d=>`${nameOf(d.tech_id)} · ${d.customer_name||"—"}${d.job_date?` (${fmtShortDate(d.job_date)})`:""}`).join(" · ")}</div>}
+            <div style={statLine}>Logged on the Customer Satisfaction page. Shown for the record; it doesn't change the operations bonus.</div>
+          </OpsCard>
+        );
+      })()}
 
       {/* 3. Quota */}
       <OpsCard title="📋 Team Quota" color={C.green} pay={r.gateOpen?qt.pay:0} status={gateNote || (qt.tier?`${qt.tier.label} tier`:"Under 60% — no bonus")} statusColor={gateNote?"#ff3b30":qt.tier?C.green:C.muted}>
@@ -2556,8 +2673,8 @@ const CREWS = [
   { id:"red",    label:"Red crew",   days:"1235", color:"#e53935" },
   { id:"blue",   label:"Blue crew",  days:"3456", color:"#1e40af" },
   { id:"green",  label:"Green crew", days:"1246", color:"#16a34a" },
-  { id:"other",  label:"Other days", days:null,   color:"#8b5cf6" },
-  { id:"bb",     label:"BB (commercial)", days:null, color:"#ff9f0a" },
+  { id:"other",  label:"Other days", days:null,   color:"#005fb0" },
+  { id:"bb",     label:"BB (commercial)", days:null, color:"#0077d4" },
   { id:"aux",    label:"AUX (backup)",    days:null, color:"#64748b" },
 ];
 const CREW_BY_ID = Object.fromEntries(CREWS.map(c=>[c.id,c]));
@@ -2677,7 +2794,7 @@ function WorkScheduleTab({ techs, showToast=()=>{} }) {
           </div>
           <button onClick={()=>{ setSwapMode(v=>!v); setSwapFirst(null); setEditing(null); }}
             style={{ background:swapMode?C.blue:C.cardLt, border:`1px solid ${swapMode?C.blue:C.border}`, color:swapMode?C.white:C.black, padding:"8px 14px", borderRadius:"20px", cursor:"pointer", fontFamily:FONT, fontWeight:"700", fontSize:"13px", letterSpacing:"-0.01em" }}>
-            🔁 {swapMode ? "SWAP MODE ON" : "SWAP"}
+            🔁 {swapMode ? "Swap mode on" : "Swap"}
           </button>
         </div>
         <div style={{ display:"flex", flexWrap:"wrap", gap:"10px", margin:"10px 0" }}>
@@ -2709,7 +2826,7 @@ function WorkScheduleTab({ techs, showToast=()=>{} }) {
                   return (
                     <tr key={t.id}>
                       <td style={{ fontSize:"13px", fontWeight:"600", color:C.black, padding:"6px 8px", whiteSpace:"nowrap", borderRadius:"10px", fontFamily:FONT, background:t.is_lead?C.blueLt:"transparent", border:t.is_lead?`1px solid ${C.blue}`:"1px solid transparent" }}>
-                        {t.is_lead&&"⭐ "}{t.name}{t.on_leave&&<span style={{ fontSize:"11px", color:C.gold, marginLeft:"4px" }}>ON LEAVE</span>}
+                        {t.is_lead&&"⭐ "}{t.name}{t.on_leave&&<span style={{ fontSize:"11px", color:C.gold, marginLeft:"4px" }}>On leave</span>}
                       </td>
                       {SCHEDULE_DAYS.map((d,i)=>{
                         const wd=i+1, v=cell(t.id,wd)?.vehicle||"";
@@ -2836,7 +2953,7 @@ function TeamLeadPanel({ tech, techs, upsells, switchovers, reviews, callbacks, 
             </div>
             <div style={{ textAlign:"right" }}>
               <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"22px", color:C.black }}>{hittingCount}/{totalMembers}</div>
-              <div style={{ fontSize:"11px", color:C.muted, letterSpacing:"-0.01em" }}>ON QUOTA</div>
+              <div style={{ fontSize:"11px", color:C.muted, letterSpacing:"-0.01em" }}>On quota</div>
             </div>
           </div>
 
@@ -2968,7 +3085,7 @@ function IncentiveBoard({ techs, upsells, switchovers, reviews, callbacks, curre
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:"16px" }}>
       <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"16px 18px" }}>
-        <div style={{ fontFamily:FONT, fontWeight:"700", fontStyle:"normal", fontSize:"28px", color:C.black, letterSpacing:"-0.01em", marginBottom:"4px" }}>SKYLO REWARDS PROGRAM</div>
+        <div style={{ fontFamily:FONT, fontWeight:"700", fontStyle:"normal", fontSize:"28px", color:C.black, letterSpacing:"-0.01em", marginBottom:"4px" }}>Skylo rewards program</div>
         <div style={{ fontSize:"13px", color:C.muted, marginBottom:"8px" }}>Stack your points from upsells, switchovers, reviews, and badges. Hit a tier, claim your Skylo Cash — then your points reset and the grind starts again.</div>
         <div style={{ background:`${C.blue}12`, border:`1px solid ${C.border}`, borderRadius:"10px", padding:"10px 14px", fontSize:"12px", color:C.muted, display:"flex", gap:"6px", alignItems:"flex-start" }}>
           <span style={{ color:C.blue, fontSize:"14px" }}>ℹ️</span>
@@ -3254,7 +3371,7 @@ function TimeSheetTab({ tech, techs=[], timeEntries, vehicles=[], truckAssignmen
             {myPick && !changingTruck ? (
               <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:"10px" }}>
                 <span style={{ fontFamily:FONT, fontWeight:"700", fontSize:"18px", color:C.black }}>{vehicles.find(v=>v.id===myPick.vehicle_id)?.name || "—"}</span>
-                <button onClick={()=>setChangingTruck(true)} style={{ background:"none", border:`1px solid ${C.border}`, color:C.blue, padding:"4px 10px", borderRadius:"8px", cursor:"pointer", fontFamily:FONT, fontWeight:"700", fontSize:"11px" }}>CHANGE</button>
+                <button onClick={()=>setChangingTruck(true)} style={{ background:"none", border:`1px solid ${C.border}`, color:C.blue, padding:"4px 10px", borderRadius:"8px", cursor:"pointer", fontFamily:FONT, fontWeight:"700", fontSize:"11px" }}>Change</button>
               </div>
             ) : (
               <select value={pickId} disabled={saving} onChange={e => myPick ? changeTruck(e.target.value) : setPickId(e.target.value)} style={{ background:C.white, border:`1px solid ${pickId?C.border:C.red}`, color:pickId?C.black:C.muted, padding:"10px 14px", borderRadius:"10px", fontSize:"14px", width:"100%", boxSizing:"border-box" }}>
@@ -3273,7 +3390,7 @@ function TimeSheetTab({ tech, techs=[], timeEntries, vehicles=[], truckAssignmen
         </div>
         <div style={{ textAlign:"center" }}>
           <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"32px", color:C.blue }}>{todayTotal.toFixed(2)}h</div>
-          <div style={{ fontSize:"11px", color:C.muted, letterSpacing:"-0.01em" }}>{isClockedInToday ? "CLOCKED IN — LIVE TOTAL FOR TODAY" : "TOTAL FOR TODAY"}</div>
+          <div style={{ fontSize:"11px", color:C.muted, letterSpacing:"-0.01em" }}>{isClockedInToday ? "Clocked in — live total for today" : "Total for today"}</div>
         </div>
       </div>
 
@@ -3288,7 +3405,7 @@ function TimeSheetTab({ tech, techs=[], timeEntries, vehicles=[], truckAssignmen
                 <span style={{ fontSize:"13px", color:C.black }}>{fmtShortDate(d)}{d===today?" (Today)":""}{isAutoClosed?" ⚠":""}</span>
                 <div style={{ display:"flex", alignItems:"center", gap:"10px" }}>
                   <span style={{ fontFamily:FONT, fontWeight:"600", fontSize:"13px", color:total>0?C.black:C.muted }}>{total.toFixed(2)}h</span>
-                  <button onClick={()=>{setEditDate(d);setEditingId(null);}} style={{ background:"none", border:`1px solid ${C.border}`, color:C.blue, padding:"3px 8px", borderRadius:"8px", cursor:"pointer", fontFamily:FONT, fontWeight:"700", fontSize:"11px" }}>EDIT</button>
+                  <button onClick={()=>{setEditDate(d);setEditingId(null);}} style={{ background:"none", border:`1px solid ${C.border}`, color:C.blue, padding:"3px 8px", borderRadius:"8px", cursor:"pointer", fontFamily:FONT, fontWeight:"700", fontSize:"11px" }}>Edit</button>
                 </div>
               </div>
             );
@@ -3339,7 +3456,7 @@ function TimeSheetTab({ tech, techs=[], timeEntries, vehicles=[], truckAssignmen
 }
 
 // ─── TECH DASHBOARD ───────────────────────────────────────────────────────────
-function TechDashboard({ tech, techs, upsells, switchovers, reviews, callbacks, quota, jobs, timeEntries=[], tipEntries=[], refreshAll=async()=>{}, rideAlongs=[], token=null, vehicles=[], truckAssignments=[], onLogout }) {
+function TechDashboard({ techBookings=[], damageReports=[], tech, techs, upsells, switchovers, reviews, callbacks, quota, jobs, timeEntries=[], tipEntries=[], refreshAll=async()=>{}, rideAlongs=[], token=null, vehicles=[], truckAssignments=[], onLogout }) {
   const q = quota || DEFAULT_QUOTA;
   const [tab, setTab] = useState("overview");
   const [menuOpen, setMenuOpen] = useState(false);
@@ -3396,7 +3513,7 @@ function TechDashboard({ tech, techs, upsells, switchovers, reviews, callbacks, 
     ]},
     ...(SALES_SELF_VIEW[tech.id]||CALLBACK_ENTRY_TECHS.has(tech.id)?[{ label:"Sales", items:[
       ...(SALES_SELF_VIEW[tech.id]?[["mysales","🤝","My Sales"],["rvcrew","🚤","RV & Boat Techs"]]:[]),
-      ...(CALLBACK_ENTRY_TECHS.has(tech.id)?[["callbacks","📞","Callbacks"]]:[]),
+      ...(CALLBACK_ENTRY_TECHS.has(tech.id)?[["callbacks","🤝","Customer Satisfaction"]]:[]),
     ] }]:[]),
     ...(!isApprenticeTech(tech)?[{ label:"Forms", items:[["forms","📝","Forms"]] }]:[]),
     { label:"Training", items:[
@@ -3428,7 +3545,7 @@ function TechDashboard({ tech, techs, upsells, switchovers, reviews, callbacks, 
           </div>
           <div style={{ textAlign:"right" }}>
             <div style={{ fontFamily:FONT, fontWeight:"700", fontStyle:"normal", fontSize:"34px", color:C.blue, lineHeight:1 }}>{tt.total.toLocaleString()}</div>
-            <div style={{ fontSize:"11px", color:C.muted, letterSpacing:"-0.01em" }}>TOTAL PTS</div>
+            <div style={{ fontSize:"11px", color:C.muted, letterSpacing:"-0.01em" }}>Total pts</div>
           </div>
         </div>
         {nextTier&&(
@@ -3562,7 +3679,7 @@ function TechDashboard({ tech, techs, upsells, switchovers, reviews, callbacks, 
                     ))}
                   </div>
                   <div style={{ background:`${C.green}15`, border:`1px solid ${C.green}44`, borderRadius:"10px", padding:"10px 14px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-                    <div style={{ fontSize:"11px", color:C.green, fontFamily:FONT, fontWeight:"700", letterSpacing:"-0.01em" }}>TOTAL THIS WEEK</div>
+                    <div style={{ fontSize:"11px", color:C.green, fontFamily:FONT, fontWeight:"700", letterSpacing:"-0.01em" }}>Total this week</div>
                     <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"26px", color:C.black }}>${total.toFixed(2)}</div>
                   </div>
                 </div>
@@ -3596,7 +3713,7 @@ function TechDashboard({ tech, techs, upsells, switchovers, reviews, callbacks, 
                           <div style={{ width:"32px", height:"32px", borderRadius:"50%", background:`${C.gold}22`, border:`1px solid ${C.gold}`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:"11px", fontFamily:FONT, fontWeight:"600", color:C.gold }}>{myLead.avatar}</div>
                           <div>
                             <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"14px", color:C.black }}>{myLead.name}</div>
-                            <div style={{ fontSize:"11px", color:C.gold, fontFamily:FONT, fontWeight:"700", letterSpacing:"-0.01em" }}>TEAM LEAD</div>
+                            <div style={{ fontSize:"11px", color:C.gold, fontFamily:FONT, fontWeight:"700", letterSpacing:"-0.01em" }}>Team lead</div>
                           </div>
                         </div>
                       )}
@@ -3624,7 +3741,10 @@ function TechDashboard({ tech, techs, upsells, switchovers, reviews, callbacks, 
                   {l:"💰 Upsells",   v:tt.upsellPts,  c:C.green},
                   {l:"🔄 Switchovers",  v:tt.switchPts,  c:C.blue},
                   {l:"⭐ Reviews",   v:tt.reviewPts,  c:C.gold},
-                  ...(tt.callbackCount>0?[{l:`📞 Callbacks (${tt.callbackCount})`, v:tt.callbackPts, c:"#ff3b30"}]:[]),
+                  ...(()=>{ const dm=damageTotalsFor(tech.id), cbN=tt.callbackCount-dm.count, cbP=tt.callbackPts-dm.pts; return [
+                    ...(cbN>0?[{l:`📞 Callbacks (${cbN})`, v:cbP, c:"#ff3b30"}]:[]),
+                    ...(dm.count>0?[{l:`💥 Damage (${dm.count})`, v:dm.pts, c:DAMAGE_COLOR}]:[]),
+                  ]; })(),
                   ...(tech.is_lead?(()=>{ const {overridePts,overridePct,allTeamHit,partialHit}=calcTeamOverride(tech,techs,upsells,switchovers,reviews,callbacks||[],q,jobs); const active=allTeamHit||partialHit; return [{l:`👥 Team Override (${active?Math.round(overridePct*100)+"% unlocked":"locked"})`,v:active?`+${overridePts}`:"—",c:active?C.gold:C.muted}]; })():[]),
                 ].map(item=>(
                   <div key={item.l} style={{ background:C.cardLt, borderRadius:"8px", padding:"10px 12px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
@@ -3653,7 +3773,7 @@ function TechDashboard({ tech, techs, upsells, switchovers, reviews, callbacks, 
           </div>
         )}
         {tab==="timesheet"&&<TimeSheetTab tech={tech} techs={techs} timeEntries={timeEntries} vehicles={vehicles} truckAssignments={truckAssignments} refreshAll={refreshAll} showToast={showToast} nowTick={nowTick}/>}
-        {tab==="reports"&&<ReportsTab techs={techs} jobs={jobs||[]} upsells={upsells||[]} timeEntries={timeEntries} tipEntries={tipEntries} techId={tech.id}/>}
+        {tab==="reports"&&<ReportsTab techs={techs} jobs={jobs||[]} upsells={upsells||[]} switchovers={switchovers||[]} timeEntries={timeEntries} tipEntries={tipEntries} techId={tech.id} showLabor={LABOR_VIEWER_TECH_IDS.includes(tech.id)}/>}
         {tab==="leaderboard"&&<Leaderboard techs={techs} jobs={jobs||[]} upsells={upsells} reviews={reviews} callbacks={callbacks||[]} switchovers={switchovers} timeEntries={timeEntries}/>}
         {tab==="badges"&&<BadgeGrid earned={tech.badges}/>}
         {tab==="upsells"&&<UpsellLeaderboard techs={techs} upsells={upsells} jobs={jobs||[]} currentId={tech.id}/>}
@@ -3681,9 +3801,9 @@ function TechDashboard({ tech, techs, upsells, switchovers, reviews, callbacks, 
         {tab==="rvcrew"&&SALES_SELF_VIEW[tech.id]&&<RvBoatCrew techs={techs}/>}
         {tab==="seniorcert"&&canAssignTests(tech)&&<SeniorCertPanel techs={techs} reviewerName={tech.name} refreshAll={refreshAll} showToast={showToast}/>}
         {tab==="forms"&&<FormsTab me={tech} role="tech"/>}
-        {tab==="auditscores"&&<AuditScoresTab techs={techs} token={token} techId={tech.id} jobs={jobs||[]} callbacks={callbacks||[]} reviews={reviews||[]} switchovers={switchovers||[]} quota={q}/>}
+        {tab==="auditscores"&&<AuditScoresTab techs={techs} token={token} techId={tech.id} jobs={jobs||[]} callbacks={callbacks||[]} damage={damageReports||[]} reviews={reviews||[]} switchovers={switchovers||[]} quota={q}/>}
         {tab==="mysales"&&SALES_SELF_VIEW[tech.id]&&<SalesTab token={token} onlyRep={SALES_SELF_VIEW[tech.id]}/>}
-        {tab==="callbacks"&&CALLBACK_ENTRY_TECHS.has(tech.id)&&<CallbacksPanel techs={techs} jobs={jobs||[]} callbacks={callbacks||[]} refreshAll={refreshAll} showToast={showToast}/>}
+        {tab==="callbacks"&&CALLBACK_ENTRY_TECHS.has(tech.id)&&<CallbacksPanel techs={techs} jobs={jobs||[]} callbacks={callbacks||[]} damage={damageReports||[]} refreshAll={refreshAll} showToast={showToast}/>}
       </div>
       {toast&&(
         <div style={{ position:"fixed", bottom:"24px", left:"50%", transform:"translateX(-50%)", background:toast.ok?C.green:"#ff3b30", color:C.white, padding:"12px 28px", borderRadius:"24px", fontSize:"14px", fontWeight:"700", zIndex:999, whiteSpace:"nowrap", fontFamily:FONT, letterSpacing:"-0.01em", fontStyle:"normal", boxShadow:"0 4px 20px rgba(0,0,0,0.15)" }}>
@@ -3761,7 +3881,7 @@ function DeleteTab({ techs, upsells, switchovers, reviews, saving, setSaving, re
                   <div style={{ fontFamily:FONT, fontWeight:"600", fontSize:"15px", color:C.black }}>{tech?.name}</div>
                   <div style={{ fontSize:"12px", color:C.muted }}>{formatWeekLabel(u.week_key)} · <span style={{ color:C.green, fontWeight:"700" }}>${u.amount?.toLocaleString()}</span></div>
                 </div>
-                <button onClick={()=>deleteUpsell(u.id)} disabled={saving} style={{ background:"none", border:`1px solid ${C.red}`, color:C.red, padding:"6px 12px", borderRadius:"8px", cursor:"pointer", fontFamily:FONT, fontWeight:"700", fontSize:"12px", letterSpacing:"-0.01em", flexShrink:0 }}>DELETE</button>
+                <button onClick={()=>deleteUpsell(u.id)} disabled={saving} style={{ background:"none", border:`1px solid ${C.red}`, color:C.red, padding:"6px 12px", borderRadius:"8px", cursor:"pointer", fontFamily:FONT, fontWeight:"700", fontSize:"12px", letterSpacing:"-0.01em", flexShrink:0 }}>Delete</button>
               </div>
             );
           })}
@@ -3782,7 +3902,7 @@ function DeleteTab({ techs, upsells, switchovers, reviews, saving, setSaving, re
                   <div style={{ fontFamily:FONT, fontWeight:"600", fontSize:"15px", color:C.black }}>{tech?.name}</div>
                   <div style={{ fontSize:"12px", color:C.muted }}>{formatWeekLabel(s.week_key)} · <span style={{ color:pc, fontWeight:"700" }}>{plan?.label||s.plan_id} · +{plan?.pts||0}pts</span></div>
                 </div>
-                <button onClick={()=>deleteSwitchover(s.id)} disabled={saving} style={{ background:"none", border:`1px solid ${C.red}`, color:C.red, padding:"6px 12px", borderRadius:"8px", cursor:"pointer", fontFamily:FONT, fontWeight:"700", fontSize:"12px", letterSpacing:"-0.01em", flexShrink:0 }}>DELETE</button>
+                <button onClick={()=>deleteSwitchover(s.id)} disabled={saving} style={{ background:"none", border:`1px solid ${C.red}`, color:C.red, padding:"6px 12px", borderRadius:"8px", cursor:"pointer", fontFamily:FONT, fontWeight:"700", fontSize:"12px", letterSpacing:"-0.01em", flexShrink:0 }}>Delete</button>
               </div>
             );
           })}
@@ -3801,7 +3921,7 @@ function DeleteTab({ techs, upsells, switchovers, reviews, saving, setSaving, re
                   <div style={{ fontFamily:FONT, fontWeight:"600", fontSize:"15px", color:C.black }}>{tech?.name}</div>
                   <div style={{ fontSize:"12px", color:C.muted }}>{formatMonthLabel(r.month_key)} · <span style={{ color:C.gold, fontWeight:"700" }}>{r.count} ⭐</span></div>
                 </div>
-                <button onClick={()=>deleteReview(r.id)} disabled={saving} style={{ background:"none", border:`1px solid ${C.red}`, color:C.red, padding:"6px 12px", borderRadius:"8px", cursor:"pointer", fontFamily:FONT, fontWeight:"700", fontSize:"12px", letterSpacing:"-0.01em", flexShrink:0 }}>DELETE</button>
+                <button onClick={()=>deleteReview(r.id)} disabled={saving} style={{ background:"none", border:`1px solid ${C.red}`, color:C.red, padding:"6px 12px", borderRadius:"8px", cursor:"pointer", fontFamily:FONT, fontWeight:"700", fontSize:"12px", letterSpacing:"-0.01em", flexShrink:0 }}>Delete</button>
               </div>
             );
           })}
@@ -4003,6 +4123,27 @@ function AdminTimeSheetTab({ techs, timeEntries, refreshAll, showToast, lockedTe
 
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:"16px" }}>
+      <PageTools tools={[{ id:"import", label:"Bulk Import", icon:"📥", render:()=>(
+        <div style={{ display:"flex", flexDirection:"column", gap:"12px" }}>
+          <div style={{ fontFamily:FONT, fontWeight:"600", fontSize:"16px", color:C.black }}>Bulk Import — One-Time Backfill</div>
+        <div style={{ fontSize:"12px", color:C.muted, display:"flex", flexDirection:"column", gap:"4px" }}>
+          <div>Two line formats, mix freely — one entry per line:</div>
+          <div>• Per-session: <code>Tech Name, YYYY-MM-DD, HH:MM, HH:MM</code> (24-hour, Mountain Time). Same tech + date twice = two sessions that day (e.g. a lunch break).</div>
+          <div>• Weekly total (historical, no daily breakdown available): <code>Tech Name: Month Day TotalHours</code> — day must be a <strong>Sunday</strong> (weeks run Sun–Sat). Spread evenly across 4 synthetic Mon–Thu sessions so daily numbers stay plausible while the weekly total still rolls up correctly.</div>
+        </div>
+        <textarea value={bulkText} onChange={e=>setBulkText(e.target.value)} rows={8} placeholder={"Riley Lyon, 2026-06-02, 08:15, 16:30\nTom Lorenc, 2026-06-02, 07:30, 15:00\nJaMuar Hill: July 4 37.18"} style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"10px", borderRadius:"10px", fontSize:"12px", fontFamily:"monospace", width:"100%", boxSizing:"border-box", resize:"vertical" }}/>
+        <button onClick={runImport} disabled={importing||!bulkText.trim()} style={{ background:importing?C.border:C.orange, border:"none", color:C.white, padding:"13px", borderRadius:"16px", cursor:(importing||!bulkText.trim())?"not-allowed":"pointer", fontSize:"13px", fontWeight:"700", letterSpacing:"-0.01em", fontFamily:FONT, width:"100%", textTransform:"none" }}>
+          {importing ? "Importing..." : "Import Sessions"}
+        </button>
+        {importResult && (
+          importResult.ok
+            ? <div style={{ fontSize:"12px", color:C.green }}>✅ Imported {importResult.count} session{importResult.count===1?"":"s"}.</div>
+            : <div style={{ background:"#ef444418", border:"1px solid #ef4444", borderRadius:"10px", padding:"10px", fontSize:"11px", color:"#ff3b30", maxHeight:"200px", overflowY:"auto", display:"flex", flexDirection:"column", gap:"4px" }}>
+                {importResult.errors.map((e,i)=><div key={i}>{e}</div>)}
+              </div>
+        )}
+        </div>
+      )}]}/>
       <DateRangePicker label="🕒 Time Sheet" color={C.blue} preset={rangePreset} setPreset={setRangePreset} customStart={cStart} setCustomStart={setCStart} customEnd={cEnd} setCustomEnd={setCEnd}>
         <div style={{ fontSize:"11px", color:C.blue, fontFamily:FONT, fontWeight:"700", marginTop:"8px" }}>
           {start} → {end} · {rankedTechs.length} tech{rankedTechs.length!==1?"s":""} with hours
@@ -4026,25 +4167,6 @@ function AdminTimeSheetTab({ techs, timeEntries, refreshAll, showToast, lockedTe
 
       <AdminTimeEditor techs={techs} timeEntries={timeEntries} start={start} end={end} refreshAll={refreshAll} showToast={showToast} lockedTechId={lockedTechId}/>
 
-      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"20px", display:"flex", flexDirection:"column", gap:"12px" }}>
-        <Label color={C.orange}>Bulk Import — One-Time Backfill</Label>
-        <div style={{ fontSize:"12px", color:C.muted, display:"flex", flexDirection:"column", gap:"4px" }}>
-          <div>Two line formats, mix freely — one entry per line:</div>
-          <div>• Per-session: <code>Tech Name, YYYY-MM-DD, HH:MM, HH:MM</code> (24-hour, Mountain Time). Same tech + date twice = two sessions that day (e.g. a lunch break).</div>
-          <div>• Weekly total (historical, no daily breakdown available): <code>Tech Name: Month Day TotalHours</code> — day must be a <strong>Sunday</strong> (weeks run Sun–Sat). Spread evenly across 4 synthetic Mon–Thu sessions so daily numbers stay plausible while the weekly total still rolls up correctly.</div>
-        </div>
-        <textarea value={bulkText} onChange={e=>setBulkText(e.target.value)} rows={8} placeholder={"Riley Lyon, 2026-06-02, 08:15, 16:30\nTom Lorenc, 2026-06-02, 07:30, 15:00\nJaMuar Hill: July 4 37.18"} style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"10px", borderRadius:"10px", fontSize:"12px", fontFamily:"monospace", width:"100%", boxSizing:"border-box", resize:"vertical" }}/>
-        <button onClick={runImport} disabled={importing||!bulkText.trim()} style={{ background:importing?"#333":C.orange, border:"none", color:C.white, padding:"13px", borderRadius:"16px", cursor:(importing||!bulkText.trim())?"not-allowed":"pointer", fontSize:"13px", fontWeight:"700", letterSpacing:"-0.01em", fontFamily:FONT, width:"100%", textTransform:"none" }}>
-          {importing ? "Importing..." : "Import Sessions"}
-        </button>
-        {importResult && (
-          importResult.ok
-            ? <div style={{ fontSize:"12px", color:C.green }}>✅ Imported {importResult.count} session{importResult.count===1?"":"s"}.</div>
-            : <div style={{ background:"#ef444418", border:"1px solid #ef4444", borderRadius:"10px", padding:"10px", fontSize:"11px", color:"#ff3b30", maxHeight:"200px", overflowY:"auto", display:"flex", flexDirection:"column", gap:"4px" }}>
-                {importResult.errors.map((e,i)=><div key={i}>{e}</div>)}
-              </div>
-        )}
-      </div>
     </div>
   );
 }
@@ -4119,18 +4241,39 @@ function AdminUpsellEntry({ techs, refreshAll, showToast, upsells, jobs=[] }) {
     setRepairing(false);
   }
 
+  // What the board shows: its own range (default this month), separate from
+  // the repair range inside Tools.
+  const [viewPreset, setViewPreset] = useState("mtd");
+  const [viewCStart, setViewCStart] = useState("");
+  const [viewCEnd, setViewCEnd] = useState("");
+  const { start: viewFrom, end: viewTo } = getDateRangeBounds(viewPreset, viewCStart, viewCEnd);
+
+  // Filters by each entry's real completion date (jobs.job_date, joined via
+  // hcp_job_id). Manually-entered rows with no hcp_job_id have no date to
+  // match and are excluded, surfaced in the note below rather than dropped.
+  const jobDateByHcpId = {};
+  jobs.forEach(j => { if (j.hcp_job_id && !jobDateByHcpId[j.hcp_job_id]) jobDateByHcpId[j.hcp_job_id] = j.job_date; });
+  const upsellsWithDate = (upsells||[]).map(u => ({ ...u, resolvedDate: u.hcp_job_id ? (jobDateByHcpId[u.hcp_job_id] || null) : null }));
+  const rangeInRange = upsellsWithDate.filter(u => u.resolvedDate && u.resolvedDate >= viewFrom && u.resolvedDate <= viewTo);
+  const noDateEntries = upsellsWithDate.filter(u => !u.resolvedDate);
+  const noDateTotal = noDateEntries.reduce((s,u)=>s+(u.amount||0),0);
+  const rangeByTech = {};
+  rangeInRange.forEach(u => { rangeByTech[u.tech_id] = (rangeByTech[u.tech_id]||0) + (u.amount||0); });
+  const rangeRanked = techs.map(t=>({...t, amt: rangeByTech[t.id]||0})).filter(t=>t.amt>0).sort((a,b)=>b.amt-a.amt);
+  const teamTotal = rangeRanked.reduce((s,t)=>s+t.amt,0);
+
   return (
-    <div style={{ display:"flex", flexDirection:"column", gap:"16px" }}>
-      {/* ── Repair / Backfill ── */}
-      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"20px", display:"flex", flexDirection:"column", gap:"12px" }}>
-        <Label color={C.orange}>Repair Upsells from HCP</Label>
+    <div style={{ display:"flex", flexDirection:"column", gap:"14px" }}>
+      <PageTools tools={[{ id:"repair", label:"Repair from HCP", icon:"🔧", render:()=>(
+        <div style={{ display:"flex", flexDirection:"column", gap:"12px" }}>
+          <div style={{ fontFamily:FONT, fontWeight:"600", fontSize:"16px", color:C.black }}>Repair Upsells from HCP</div>
         <div style={{ fontSize:"12px", color:C.muted }}>Scans every "Additional Upgrades" line item across a custom date range and writes the real amounts to the board. Use this to fix missing or wrong upsells.</div>
         <DateRangePicker label="📅 Date Range" color={C.orange} preset={repairPreset} setPreset={setRepairPreset} customStart={repairCStart} setCustomStart={setRepairCStart} customEnd={repairCEnd} setCustomEnd={setRepairCEnd}>
           <div style={{ fontSize:"11px", color:C.orange, fontFamily:FONT, fontWeight:"700", marginTop:"8px" }}>
             {repairFrom} → {repairTo}
           </div>
         </DateRangePicker>
-        <button onClick={repairFromHCP} disabled={repairing} style={{ background:repairing?"#333":C.orange, border:"none", color:C.white, padding:"13px", borderRadius:"16px", cursor:repairing?"not-allowed":"pointer", fontSize:"13px", fontWeight:"700", letterSpacing:"-0.01em", fontFamily:FONT, width:"100%", textTransform:"none" }}>
+        <button onClick={repairFromHCP} disabled={repairing} style={{ background:repairing?C.border:C.orange, border:"none", color:C.white, padding:"13px", borderRadius:"16px", cursor:repairing?"not-allowed":"pointer", fontSize:"13px", fontWeight:"700", letterSpacing:"-0.01em", fontFamily:FONT, width:"100%", textTransform:"none" }}>
           {repairing ? "Scanning HCP — this may take ~20 sec..." : "Repair Upsells"}
         </button>
         {repairResult && (
@@ -4142,10 +4285,10 @@ function AdminUpsellEntry({ techs, refreshAll, showToast, upsells, jobs=[] }) {
               {repairResult.jobs && repairResult.jobs.length > 0 && (
                 <div style={{ display:"flex", gap:"6px" }}>
                   <button onClick={()=>setUpsExpanded(v=>!v)} style={{ background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"5px 10px", borderRadius:"8px", cursor:"pointer", fontFamily:FONT, fontWeight:"700", fontSize:"11px", letterSpacing:"-0.01em" }}>
-                    {upsExpanded ? "COLLAPSE" : "VIEW FULL REPORT"}
+                    {upsExpanded ? "Collapse" : "View full report"}
                   </button>
-                  <button onClick={exportUpsellsCSV} style={{ background:C.green, border:"none", color:C.black, padding:"5px 10px", borderRadius:"8px", cursor:"pointer", fontFamily:FONT, fontWeight:"700", fontSize:"11px", letterSpacing:"-0.01em" }}>
-                    EXPORT CSV
+                  <button onClick={exportUpsellsCSV} style={{ background:C.blue, border:"none", color:C.white, padding:"5px 10px", borderRadius:"8px", cursor:"pointer", fontFamily:FONT, fontWeight:"700", fontSize:"11px", letterSpacing:"-0.01em" }}>
+                    Export CSV
                   </button>
                 </div>
               )}
@@ -4178,42 +4321,20 @@ function AdminUpsellEntry({ techs, refreshAll, showToast, upsells, jobs=[] }) {
             )}
           </div>
         )}
-      </div>
+        </div>
+      )}]}/>
 
-      {(() => {
-        // Same range the Repair Upsells button above uses — changing FROM/TO
-        // updates this board too, instead of a separate hardcoded all-time sum.
-        // Filters by each entry's real completion date (jobs.job_date, joined
-        // via hcp_job_id), same exact-date approach as the tech-facing Upsells
-        // tab. Manually-entered rows with no hcp_job_id have no date to match
-        // against and are excluded, surfaced via the warning below rather than
-        // silently dropped.
-        const jobDateByHcpId = {};
-        jobs.forEach(j => { if (j.hcp_job_id && !jobDateByHcpId[j.hcp_job_id]) jobDateByHcpId[j.hcp_job_id] = j.job_date; });
-        const upsellsWithDate = (upsells||[]).map(u => ({ ...u, resolvedDate: u.hcp_job_id ? (jobDateByHcpId[u.hcp_job_id] || null) : null }));
-        const rangeInRange = upsellsWithDate.filter(u => u.resolvedDate && u.resolvedDate >= repairFrom && u.resolvedDate <= repairTo);
-        const noDateEntries = upsellsWithDate.filter(u => !u.resolvedDate);
-        const noDateTotal = noDateEntries.reduce((s,u)=>s+(u.amount||0),0);
-        const rangeByTech = {};
-        rangeInRange.forEach(u => { rangeByTech[u.tech_id] = (rangeByTech[u.tech_id]||0) + (u.amount||0); });
-        const rangeRanked = [...techs].map(t=>({...t, amt: rangeByTech[t.id]||0})).sort((a,b)=>b.amt-a.amt);
-        return (
-          <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"16px 18px" }}>
-            <Label color={C.green}>Upsell Totals · {repairFrom} → {repairTo}</Label>
-            {noDateEntries.length>0&&(
-              <div style={{ background:C.cardLt, borderRadius:"10px", padding:"8px 12px", fontSize:"11px", color:C.muted, marginBottom:"10px" }}>
-                ⚠ {noDateEntries.length} entr{noDateEntries.length!==1?"ies":"y"} totaling ${noDateTotal.toLocaleString()} {noDateEntries.length!==1?"have":"has"} no matched completion date (manually entered, not tied to an HCP job) — excluded from this range.
-              </div>
-            )}
-            {rangeRanked.map((t,i)=>(
-              <div key={t.id} style={{ display:"flex", justifyContent:"space-between", marginBottom:"8px" }}>
-                <span style={{ fontSize:"13px", color:C.black }}>{medal(i)} {t.name}</span>
-                <span style={{ fontFamily:FONT, fontWeight:"600", color:C.green }}>${t.amt.toLocaleString()} · {Math.round(t.amt*UPSELL_PTS_PER_DOLLAR)} pts</span>
-              </div>
-            ))}
-          </div>
-        );
-      })()}
+      <DateRangePicker label="📅 Date Range" preset={viewPreset} setPreset={setViewPreset} customStart={viewCStart} setCustomStart={setViewCStart} customEnd={viewCEnd} setCustomEnd={setViewCEnd}>
+        <div style={{ fontSize:"12px", color:C.muted, marginTop:"8px" }}>{fmtShortDate(viewFrom)} – {fmtShortDate(viewTo)} · by job completion date</div>
+      </DateRangePicker>
+
+      <ListTitle right={`$${Math.round(teamTotal).toLocaleString()} team total`}>Upsells</ListTitle>
+      <RankRows rows={rangeRanked.map(t=>({ id:t.id, name:t.name, value:`$${Math.round(t.amt).toLocaleString()}`, chip:`${Math.round(t.amt*UPSELL_PTS_PER_DOLLAR).toLocaleString()} pts` }))} empty="No upsells in this range."/>
+      {noDateEntries.length>0&&(
+        <div style={{ fontSize:"12px", color:C.muted, padding:"0 4px" }}>
+          {noDateEntries.length} entr{noDateEntries.length!==1?"ies":"y"} totaling ${noDateTotal.toLocaleString()} {noDateEntries.length!==1?"aren't":"isn't"} tied to an HCP job, so {noDateEntries.length!==1?"they're":"it's"} not in any date range.
+        </div>
+      )}
     </div>
   );
 }
@@ -4266,9 +4387,10 @@ function AdminReviewEntry({ techs, reviews, saving, setSaving, refreshAll, showT
     .sort((a, b) => b.count - a.count);
 
   return (
-    <div style={{ display:"flex", flexDirection:"column", gap:"16px" }}>
-    <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"20px", display:"flex", flexDirection:"column", gap:"14px" }}>
-      <Label color={C.gold}>Log 5-Star Reviews</Label>
+    <div style={{ display:"flex", flexDirection:"column", gap:"14px" }}>
+      <PageTools tools={[{ id:"log", label:"Log Reviews", icon:"＋", primary:true, render:()=>(
+        <div style={{ display:"flex", flexDirection:"column", gap:"14px" }}>
+          <div style={{ fontFamily:FONT, fontWeight:"600", fontSize:"16px", color:C.black }}>Log 5-Star Reviews</div>
       <div style={{ fontSize:"12px", color:C.muted }}>+{REVIEW_PTS} pts each · +{REVIEW_BONUS_PTS} bonus at 10+ · Log current or any past month</div>
 
       <div style={{ background:C.cardLt, borderRadius:"10px", padding:"8px 12px", fontSize:"12px", color:C.muted }}>
@@ -4307,29 +4429,16 @@ function AdminReviewEntry({ techs, reviews, saving, setSaving, refreshAll, showT
           </div>
         </div>
       ))}
-      <button onClick={handleSave} disabled={saving} style={{ background:saving?"#333":C.gold, border:"none", color:saving?"#666":C.black, padding:"13px", borderRadius:"16px", cursor:saving?"not-allowed":"pointer", fontSize:"13px", fontWeight:"700", letterSpacing:"-0.01em", fontFamily:FONT, width:"100%", textTransform:"none" }}>{saving?"Saving...":"Save Reviews"}</button>
-    </div>
+      <button onClick={handleSave} disabled={saving} style={{ background:saving?C.border:C.gold, border:"none", color:C.white, padding:"13px", borderRadius:"16px", cursor:saving?"not-allowed":"pointer", fontSize:"13px", fontWeight:"700", letterSpacing:"-0.01em", fontFamily:FONT, width:"100%", textTransform:"none" }}>{saving?"Saving...":"Save Reviews"}</button>
+        </div>
+      )}]}/>
 
-    <DateRangePicker label="📅 Date Range" color={C.gold} preset={rangePreset} setPreset={setRangePreset} customStart={cStart} setCustomStart={setCStart} customEnd={cEnd} setCustomEnd={setCEnd}>
-      <div style={{ fontSize:"11px", color:C.gold, fontFamily:FONT, fontWeight:"700", marginTop:"8px" }}>
-        {rangeStart} → {rangeEnd} · matched by month (reviews are logged by month, not exact day)
-      </div>
-    </DateRangePicker>
+      <DateRangePicker label="📅 Date Range" preset={rangePreset} setPreset={setRangePreset} customStart={cStart} setCustomStart={setCStart} customEnd={cEnd} setCustomEnd={setCEnd}>
+        <div style={{ fontSize:"12px", color:C.muted, marginTop:"8px" }}>{fmtShortDate(rangeStart)} – {fmtShortDate(rangeEnd)} · reviews are logged by month</div>
+      </DateRangePicker>
 
-    <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", overflow:"hidden" }}>
-      <div style={{ padding:"14px 18px", borderBottom:`1px solid ${C.border}`, background:C.cardLt }}>
-        <Label color={C.gold}>⭐ Review Totals · {rangeStart} → {rangeEnd}</Label>
-      </div>
-      <div style={{ padding:"14px 18px", display:"flex", flexDirection:"column", gap:"8px" }}>
-        {rangeRanked.length===0 && <div style={{ fontSize:"13px", color:C.muted, textAlign:"center", padding:"12px" }}>No reviews logged in this range.</div>}
-        {rangeRanked.map((t,i)=>(
-          <div key={t.id} style={{ display:"flex", justifyContent:"space-between" }}>
-            <span style={{ fontSize:"13px", color:C.black }}>{medal(i)} {t.name}</span>
-            <span style={{ fontFamily:FONT, fontWeight:"600", fontSize:"13px", color:C.black }}>{t.count} ⭐</span>
-          </div>
-        ))}
-      </div>
-    </div>
+      <ListTitle right={`${rangeRanked.reduce((s,t)=>s+t.count,0)} team total`}>5-Star Reviews</ListTitle>
+      <RankRows rows={rangeRanked.map(t=>({ id:t.id, name:t.name, value:`${t.count} ⭐` }))} empty="No reviews logged in this range."/>
     </div>
   );
 }
@@ -4372,14 +4481,24 @@ function AdminTipEntry({ techs, tipEntries, refreshAll, showToast }) {
     setSaving(false);
   }
 
-  const recent = [...tipEntries].sort((a,b)=>(b.created_at||"").localeCompare(a.created_at||"")).slice(0,25);
   const techById = Object.fromEntries(techs.map(t=>[t.id,t]));
   const selStyle = (val) => ({ background:C.cardLt, border:`1px solid ${C.border}`, color:val?C.black:C.muted, padding:"10px 14px", borderRadius:"16px", fontSize:"14px", fontFamily:FONT, fontWeight:"700", width:"100%", boxSizing:"border-box", cursor:"pointer" });
 
+  const [rangePreset, setRangePreset] = useState("mtd");
+  const [cStart, setCStart] = useState("");
+  const [cEnd, setCEnd] = useState("");
+  const { start: rangeStart, end: rangeEnd } = getDateRangeBounds(rangePreset, cStart, cEnd);
+  const inRange = tipEntries.filter(t => t.work_date >= rangeStart && t.work_date <= rangeEnd);
+  const byTech = {};
+  inRange.forEach(t => { byTech[t.tech_id] = (byTech[t.tech_id]||0) + (t.amount||0); });
+  const ranked = techs.filter(t=>byTech[t.id]>0).sort((a,b)=>byTech[b.id]-byTech[a.id]);
+  const recent = [...inRange].sort((a,b)=>(b.work_date||"").localeCompare(a.work_date||"")||(b.created_at||"").localeCompare(a.created_at||""));
+
   return (
-    <div style={{ display:"flex", flexDirection:"column", gap:"16px" }}>
-      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"20px", display:"flex", flexDirection:"column", gap:"12px" }}>
-        <Label color={C.gold}>Log a Tip</Label>
+    <div style={{ display:"flex", flexDirection:"column", gap:"14px" }}>
+      <PageTools tools={[{ id:"log", label:"Log Tip", icon:"＋", primary:true, render:()=>(
+        <div style={{ display:"flex", flexDirection:"column", gap:"12px" }}>
+          <div style={{ fontFamily:FONT, fontWeight:"600", fontSize:"16px", color:C.black }}>Log a Tip</div>
         <div style={{ fontSize:"12px", color:C.muted }}>Manual entry only — this is the source of truth for tip totals everywhere in the app (Reports, Payroll, etc.).</div>
         <select value={form.techId} onChange={e=>setForm(f=>({...f,techId:e.target.value}))} style={selStyle(form.techId)}>
           <option value="">— Select Tech —</option>
@@ -4396,19 +4515,27 @@ function AdminTipEntry({ techs, tipEntries, refreshAll, showToast }) {
             <input type="number" min="0" step="0.01" placeholder="e.g. 20.00" value={form.amount} onChange={e=>setForm(f=>({...f,amount:e.target.value}))} style={{ flex:1, background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"10px 14px", borderRadius:"16px", fontSize:"16px", fontFamily:FONT, fontWeight:"600", boxSizing:"border-box" }}/>
           </div>
         </div>
-        <button onClick={logTip} disabled={saving} style={{ background:saving?"#333":C.gold, border:"none", color:C.black, padding:"13px", borderRadius:"16px", cursor:saving?"not-allowed":"pointer", fontFamily:FONT, fontWeight:"700", fontSize:"13px", letterSpacing:"-0.01em", textTransform:"none" }}>{saving?"Saving...":"Log Tip"}</button>
-      </div>
+        <button onClick={logTip} disabled={saving} style={{ background:saving?C.border:C.blue, border:"none", color:C.white, padding:"13px", borderRadius:"16px", cursor:saving?"not-allowed":"pointer", fontFamily:FONT, fontWeight:"700", fontSize:"13px", letterSpacing:"-0.01em", textTransform:"none" }}>{saving?"Saving...":"Log Tip"}</button>
+        </div>
+      )}]}/>
+
+      <DateRangePicker label="📅 Date Range" preset={rangePreset} setPreset={setRangePreset} customStart={cStart} setCustomStart={setCStart} customEnd={cEnd} setCustomEnd={setCEnd}>
+        <div style={{ fontSize:"12px", color:C.muted, marginTop:"8px" }}>{fmtShortDate(rangeStart)} – {fmtShortDate(rangeEnd)}</div>
+      </DateRangePicker>
+
+      <ListTitle right={`$${inRange.reduce((s,t)=>s+(t.amount||0),0).toFixed(2)} team total`}>Tips</ListTitle>
+      <RankRows rows={ranked.map(t=>({ id:t.id, name:t.name, value:`$${byTech[t.id].toFixed(2)}` }))} empty="No tips in this range."/>
 
       <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", overflow:"hidden" }}>
-        <div style={{ padding:"14px 18px", borderBottom:`1px solid ${C.border}` }}><Label color={C.gold}>Recent Tips</Label></div>
+        <div style={{ padding:"14px 18px", borderBottom:`1px solid ${C.border}` }}><Label>Tips in this range</Label></div>
         <div style={{ padding:"14px 18px", display:"flex", flexDirection:"column", gap:"8px" }}>
-          {recent.length===0 && <div style={{ fontSize:"13px", color:C.muted, textAlign:"center", padding:"12px" }}>No tips logged yet.</div>}
+          {recent.length===0 && <div style={{ fontSize:"13px", color:C.muted, textAlign:"center", padding:"12px" }}>No tips in this range.</div>}
           {recent.map(t=>(
             <div key={t.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"6px 0", borderBottom:`1px solid ${C.border}` }}>
               <span style={{ fontSize:"13px", color:C.black }}>{techById[t.tech_id]?.name||"Unknown"} · {fmtShortDate(t.work_date)}</span>
               <div style={{ display:"flex", alignItems:"center", gap:"10px" }}>
                 <span style={{ fontFamily:FONT, fontWeight:"600", fontSize:"13px", color:C.gold }}>${t.amount.toFixed(2)}</span>
-                <button onClick={()=>deleteTip(t.id)} style={{ background:"none", border:"1px solid #ef4444", color:"#ff3b30", padding:"3px 8px", borderRadius:"8px", cursor:"pointer", fontFamily:FONT, fontWeight:"700", fontSize:"11px" }}>DELETE</button>
+                <button onClick={()=>deleteTip(t.id)} style={{ background:"none", border:"1px solid #ef4444", color:"#ff3b30", padding:"3px 8px", borderRadius:"8px", cursor:"pointer", fontFamily:FONT, fontWeight:"700", fontSize:"11px" }}>Delete</button>
               </div>
             </div>
           ))}
@@ -4559,11 +4686,7 @@ function RideAlongTab({ techs, rideAlongs, schedules, onSave, onSaveSchedule, sa
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:"16px" }}>
       {/* View switcher */}
-      <div style={{ display:"flex", gap:"8px", flexWrap:"wrap" }}>
-        {[["schedule","📅 Schedule"],["new","✏️ New Ride-Along"],["history","📋 History"]].map(([id,label])=>(
-          <button key={id} onClick={()=>{ setView(id); setViewDetail(null); }} style={{ background:view===id?C.blue:C.card, border:`1px solid ${view===id?C.blue:C.border}`, color:view===id?C.white:C.muted, padding:"8px 16px", borderRadius:"8px", cursor:"pointer", fontFamily:FONT, fontWeight:"700", fontSize:"12px", letterSpacing:"-0.01em", textTransform:"none" }}>{label}</button>
-        ))}
-      </div>
+      <Segmented options={[["schedule","📅 Schedule"],["new","✏️ New Ride-Along"],["history","📋 History"]]} value={view} onChange={id=>{ setView(id); setViewDetail(null); }}/>
 
       {/* SCHEDULE VIEW */}
       {view==="schedule"&&(
@@ -4609,7 +4732,7 @@ function RideAlongTab({ techs, rideAlongs, schedules, onSave, onSaveSchedule, sa
                   <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"22px", color:C.black }}>{tech?.name}</div>
                   <div style={{ fontSize:"13px", color:C.muted }}>{formatDate(next)}</div>
                 </div>
-                <button onClick={()=>{ setSelectedTech(scheduleMap[next]); setSelectedDate(next); setView("new"); }} style={{ background:C.blue, border:"none", color:C.black, padding:"10px 18px", borderRadius:"8px", cursor:"pointer", fontFamily:FONT, fontWeight:"700", fontSize:"13px", letterSpacing:"-0.01em" }}>START SESSION →</button>
+                <button onClick={()=>{ setSelectedTech(scheduleMap[next]); setSelectedDate(next); setView("new"); }} style={{ background:C.blue, border:"none", color:C.white, padding:"10px 18px", borderRadius:"8px", cursor:"pointer", fontFamily:FONT, fontWeight:"700", fontSize:"13px", letterSpacing:"-0.01em" }}>START SESSION →</button>
               </div>
             );
           })()}
@@ -4697,8 +4820,8 @@ function RideAlongTab({ techs, rideAlongs, schedules, onSave, onSaveSchedule, sa
             <textarea value={generalNotes} onChange={e=>setGeneralNotes(e.target.value)} placeholder="Overall session notes, things to work on, wins, action items for next ride-along..." style={{...inp, minHeight:"100px"}}/>
           </div>
 
-          <button onClick={handleSaveRideAlong} disabled={saving||!selectedTech||!selectedDate} style={{ background:saving||!selectedTech||!selectedDate?"#333":C.green, border:"none", color:saving||!selectedTech||!selectedDate?"#666":C.black, padding:"14px", borderRadius:"16px", cursor:saving||!selectedTech||!selectedDate?"not-allowed":"pointer", fontFamily:FONT, fontWeight:"700", fontSize:"14px", letterSpacing:"-0.01em", textTransform:"none" }}>
-            {saving?"SAVING...":"SAVE RIDE-ALONG SESSION"}
+          <button onClick={handleSaveRideAlong} disabled={saving||!selectedTech||!selectedDate} style={{ background:saving||!selectedTech||!selectedDate?C.border:C.blue, border:"none", color:C.white, padding:"14px", borderRadius:"16px", cursor:saving||!selectedTech||!selectedDate?"not-allowed":"pointer", fontFamily:FONT, fontWeight:"700", fontSize:"14px", letterSpacing:"-0.01em", textTransform:"none" }}>
+            {saving?"Saving...":"Save ride-along session"}
           </button>
         </div>
       )}
@@ -4957,8 +5080,8 @@ const PHASE_LABELS = {
 
 const STAGE_CONFIG = {
   classroom:      { label:"Classroom",      color:"#2b9cf0", icon:"📚" },
-  field_training: { label:"Field Training", color:"#7c3aed", icon:"🔧" },
-  cert_pending:   { label:"Cert Pending",   color:"#ff9f0a", icon:"⏳" },
+  field_training: { label:"Field Training", color:"#005fb0", icon:"🔧" },
+  cert_pending:   { label:"Cert Pending",   color:"#0077d4", icon:"⏳" },
   cert_passed:    { label:"Certified",      color:"#34c759", icon:"✅" },
   active:         { label:"Active",         color:"#34c759", icon:"⭐" },
   hard_fail:      { label:"Hard Fail",      color:"#ff3b30", icon:"🚫" },
@@ -5207,7 +5330,7 @@ function PerfectDayTrainingPanel({ tech=null, techs=[], admin=false, fixedSubjec
 
       {/* Progress */}
       <div style={{ background:training?`${C.purple}10`:C.card, border:`1px solid ${training?C.purple:C.border}`, borderRadius:"16px", padding:"16px" }}>
-        {training && <div style={{ fontSize:"11px", color:C.purple, letterSpacing:"-0.01em", ...heading, marginBottom:"4px" }}>TRAINING</div>}
+        {training && <div style={{ fontSize:"11px", color:C.purple, letterSpacing:"-0.01em", ...heading, marginBottom:"4px" }}>Training</div>}
         <div style={{ display:"flex", alignItems:"baseline", justifyContent:"space-between", gap:"10px", marginBottom:"8px" }}>
           <div style={{ ...heading, fontSize:"22px", color:C.black, letterSpacing:0 }}>{training ? subject.name : "Perfect Day Training"}</div>
           <div style={{ ...heading, fontSize:"28px", color:prog.complete ? C.green : accent, letterSpacing:0 }}>{prog.pct}%</div>
@@ -5243,7 +5366,7 @@ function PerfectDayTrainingPanel({ tech=null, techs=[], admin=false, fixedSubjec
         {/* Day picker */}
         {(training || dayList.length > 0) && (
           <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"12px 14px" }}>
-            <div style={{ ...small, marginBottom:"8px" }}>TRAINING DAY</div>
+            <div style={{ ...small, marginBottom:"8px" }}>Training day</div>
             <div style={{ display:"flex", gap:"6px", overflowX:"auto", paddingBottom:"4px" }}>
               {dayList.map(d => {
                 const n = prog.perDay[d] || 0, full = prog.daily.length && n >= prog.neededOn(d), on = d === day;
@@ -5348,17 +5471,17 @@ function PerfectDayTrainingPanel({ tech=null, techs=[], admin=false, fixedSubjec
             <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"16px", display:"flex", flexDirection:"column", gap:"14px" }}>
               <div style={{ ...heading, fontSize:"16px", color:C.black }}>Day {dayNumber(day)} notes · {day===today ? "Today" : fmtDay(day)}</div>
               <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"12px" }}>
-                <div><div style={{ ...small, marginBottom:"4px" }}>OVERALL DAY</div><Stars k="overall_rating"/></div>
-                <div><div style={{ ...small, marginBottom:"4px" }}>WITH CUSTOMERS</div><Stars k="customer_rating"/></div>
+                <div><div style={{ ...small, marginBottom:"4px" }}>Overall day</div><Stars k="overall_rating"/></div>
+                <div><div style={{ ...small, marginBottom:"4px" }}>With customers</div><Stars k="customer_rating"/></div>
                 <div>
-                  <div style={{ ...small, marginBottom:"4px" }}>PACE</div>
+                  <div style={{ ...small, marginBottom:"4px" }}>Pace</div>
                   <select value={noteForm.pace || ""} onChange={e => setNote("pace", e.target.value)} style={inp}>
                     <option value="">—</option>
                     {Object.entries(TRAINING_PACE).map(([k,v]) => <option key={k} value={k}>{v}</option>)}
                   </select>
                 </div>
                 <div>
-                  <div style={{ ...small, marginBottom:"4px" }}>JOBS TODAY</div>
+                  <div style={{ ...small, marginBottom:"4px" }}>Jobs today</div>
                   <input type="number" min="0" inputMode="numeric" value={noteForm.jobs_count ?? ""} onChange={e => setNote("jobs_count", e.target.value)} style={inp}/>
                 </div>
               </div>
@@ -5382,7 +5505,7 @@ function PerfectDayTrainingPanel({ tech=null, techs=[], admin=false, fixedSubjec
 
             {notes.filter(n => n.day_date !== day).length > 0 && (
               <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"14px 16px" }}>
-                <div style={{ ...small, marginBottom:"8px" }}>EARLIER DAYS</div>
+                <div style={{ ...small, marginBottom:"8px" }}>Earlier days</div>
                 {notes.filter(n => n.day_date !== day).map(n => (
                   <div key={n.day_date} onClick={() => setDay(n.day_date)} style={{ padding:"10px 0", borderTop:`1px solid ${C.border}40`, cursor:"pointer" }}>
                     <div style={{ display:"flex", justifyContent:"space-between", gap:"8px", fontSize:"12px" }}>
@@ -5613,7 +5736,7 @@ function FinalEvalRunner({ trainee, adminUser, rubricItems, priorAttempts, onExi
         <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"20px", color:C.black }}>🏁 Practical Test — {trainee.name}</div>
         <div style={{ fontSize:"12px", color:C.muted }}>Attempt {priorAttempts + 1}{priorAttempts >= 2 ? " (last chance — a third fail is a Hard Fail)" : ""}. Watch them run the full Perfect Day and mark every item. Every item must pass.</div>
         <div style={{ display:"flex", alignItems:"center", gap:"8px" }}>
-          <span style={{ fontSize:"11px", color:C.muted, fontWeight:"600" }}>DATE</span>
+          <span style={{ fontSize:"11px", color:C.muted, fontWeight:"600" }}>Date</span>
           <input type="date" value={date} onChange={e => setDate(e.target.value)} style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:"10px", padding:"6px 10px", fontSize:"14px" }}/>
         </div>
         <Bar pct={(scored / items.length) * 100} color={fails.length ? C.red : C.green} h={6}/>
@@ -5929,16 +6052,16 @@ function DailyBars({ title, days, value, color = C.blue, fmt = v => v }) {
   );
 }
 
-function ConnectionCard({ title, connected, lastSync, steps, note, connectUrl, connectLabel, syncFn, token, onSynced }) {
+function ConnectionCard({ title, connected, lastSync, steps, note, connectUrl, connectLabel, syncFn, token, onSynced, syncDays=90 }) {
   const [open, setOpen] = useState(!connected);
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState(null);
   async function syncNow() {
     setSyncing(true); setSyncMsg(null);
     try {
-      const r = await fetch(`/.netlify/functions/${syncFn}?days=90`, { headers:{ Authorization:`Bearer ${token || ""}` } });
+      const r = await fetch(`/.netlify/functions/${syncFn}?days=${syncDays}`, { headers:{ Authorization:`Bearer ${token || ""}` } });
       const j = await r.json().catch(() => ({}));
-      setSyncMsg(j.ok ? `✅ Pulled ${j.rows} rows · ${j.sessions != null ? `${Number(j.sessions).toLocaleString()} visits` : `$${Math.round(j.spend || 0).toLocaleString()} spend`}${j.lsa?.ok ? ` · ${j.lsa.leads} LSA leads` : ""} (${j.since} → ${j.until})` : `⚠️ ${j.error || j.skipped || `HTTP ${r.status}`}`);
+      setSyncMsg(j.ok ? `✅ Pulled ${j.rows} rows · ${j.sessions != null ? `${Number(j.sessions).toLocaleString()} visits` : j.clicks != null ? `${Number(j.clicks).toLocaleString()} search clicks` : `$${Math.round(j.spend || 0).toLocaleString()} spend`}${j.lsa?.ok ? ` · ${j.lsa.leads} LSA leads` : ""} (${j.since} → ${j.until})` : `⚠️ ${j.error || j.skipped || `HTTP ${r.status}`}`);
       if (j.ok && onSynced) onSynced();
     } catch(e) { setSyncMsg(`⚠️ ${e.message}`); }
     setSyncing(false);
@@ -5951,7 +6074,7 @@ function ConnectionCard({ title, connected, lastSync, steps, note, connectUrl, c
       </div>
       {note && <div style={{ fontSize:"12px", color:C.muted, marginTop:"4px" }}>{note}</div>}
       {open && steps && <ol style={{ margin:"8px 0 0", paddingLeft:"20px", fontSize:"12px", color:C.black, lineHeight:1.6 }}>{steps.map((s, i) => <li key={i}>{s}</li>)}</ol>}
-      {connected && syncFn && <button onClick={syncNow} disabled={syncing} style={{ marginTop:"10px", marginRight:"8px", background:C.green, color:C.white, border:"none", padding:"8px 16px", borderRadius:"18px", fontSize:"12px", fontWeight:"700", cursor:"pointer", fontFamily:FONT, letterSpacing:"-0.01em", textTransform:"none" }}>{syncing ? "Syncing..." : "Sync now"}</button>}
+      {connected && syncFn && <button onClick={syncNow} disabled={syncing} style={{ marginTop:"10px", marginRight:"8px", background:C.blue, color:C.white, border:"none", padding:"8px 16px", borderRadius:"18px", fontSize:"12px", fontWeight:"700", cursor:"pointer", fontFamily:FONT, letterSpacing:"-0.01em", textTransform:"none" }}>{syncing ? "Syncing..." : "Sync now"}</button>}
       {syncMsg && <div style={{ fontSize:"12px", color:C.black, marginTop:"6px" }}>{syncMsg}</div>}
       {connectUrl && <a href={connectUrl} style={{ display:"inline-block", marginTop:"10px", background:C.blue, color:C.white, padding:"8px 16px", borderRadius:"18px", fontSize:"12px", fontWeight:"700", textDecoration:"none", fontFamily:FONT, letterSpacing:"-0.01em", textTransform:"none" }}>{connectLabel || "Connect"}</a>}
     </div>
@@ -6080,7 +6203,7 @@ function AttributionSettings({ att, token, onSaved }) {
             <label style={{ display:"flex", flexDirection:"column", gap:"2px" }}>Target margin %<input type="number" step="0.1" value={f.tm} onChange={e => setF({ ...f, tm:e.target.value })} style={inp}/></label>
           </div>
           <div style={{ display:"flex", gap:"8px", alignItems:"center" }}>
-            <button onClick={save} style={{ background:C.green, color:C.white, border:"none", borderRadius:"14px", padding:"6px 14px", fontWeight:"700", cursor:"pointer" }}>Save</button>
+            <button onClick={save} style={{ background:C.blue, color:C.white, border:"none", borderRadius:"14px", padding:"6px 14px", fontWeight:"700", cursor:"pointer" }}>Save</button>
             <button onClick={() => setOpen(false)} style={{ background:"none", border:`1px solid ${C.border}`, borderRadius:"14px", padding:"6px 14px", cursor:"pointer" }}>Cancel</button>
             <span style={{ color:C.muted }}>{msg}</span>
           </div>
@@ -6090,8 +6213,30 @@ function AttributionSettings({ att, token, onSaved }) {
   );
 }
 
-function MetaCampaigns({ campaigns }) {
+// Meta ads by ad set for the picked dates (marketing_report_core), with each
+// ad set's and ad's health from the last 4 full weeks (useAdHealth). Tap an
+// ad set to see its ads; hover or tap a health chip for the why and what to do.
+function MetaAdSets({ campaigns, token, margin }) {
   const [open, setOpen] = useState(null);
+  const h = useAdHealth(token, margin);
+  const sets = useMemo(() => {
+    const out = {}, F = ["spend","leads","booked","revenue_upfront","revenue_sold","revenue_serviced"];
+    const add = (t, x) => { for (const f of F) t[f] = (t[f] || 0) + Number(x[f] || 0); };
+    const loose = { id:"_none", name:"Leads with a campaign tag but no ad tag", ads:[], loose:true };
+    for (const c of campaigns) {
+      const left = Object.fromEntries(F.map(f => [f, Number(c[f] || 0)]));
+      for (const ad of c.ads || []) {
+        const m = h.adsetOf[ad.id];
+        const id = m?.adset_id || `${c.id}:${ad.adset || ""}`;
+        const set = out[id] ||= { id, name:m?.adset_name || ad.adset || "Unknown ad set", campaign:c.name || c.id, ads:[] };
+        add(set, ad); set.ads.push(ad);
+        for (const f of F) left[f] -= Number(ad[f] || 0);
+      }
+      if (left.leads > 0 || left.revenue_upfront > 0.5) add(loose, { ...left, spend:Math.max(0, left.spend) });
+    }
+    const list = Object.values(out).sort((x, y) => y.spend - x.spend || y.leads - x.leads);
+    return loose.leads > 0 ? [...list, loose] : list;
+  }, [campaigns, h.adsetOf]);
   if (!campaigns.length) return <div style={{ fontSize:"13px", color:C.muted }}>No Meta campaigns in this range.</div>;
   // Compact: headers wrap, cost columns rounded to whole dollars, so all
   // columns fit on a laptop screen without sideways scrolling.
@@ -6103,26 +6248,35 @@ function MetaCampaigns({ campaigns }) {
     Number(x.spend) > 0 ? `${(Number(x.revenue_upfront || 0) / Number(x.spend)).toFixed(2)}x / ${(Number(x.revenue_sold || 0) / Number(x.spend)).toFixed(2)}x` : "—",
   ];
   return (
-    <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", overflowX:"auto" }}>
-      <table style={{ width:"100%", borderCollapse:"collapse", minWidth:"700px" }}>
-        <thead><tr style={{ background:C.cardLt }}>
-          <th style={{ ...th, textAlign:"left" }}>CAMPAIGN / AD</th><th style={th}>SPEND</th><th style={th}>LEADS</th><th style={th}>CPL</th><th style={th}>BOOKED</th><th style={th}>$/BOOKING</th><th style={th}>UPFRONT</th><th style={th}>COMMITTED</th><th style={th}>COMPLETED</th><th style={th}>ROAS UP / COMM.</th>
-        </tr></thead>
-        <tbody>
-          {campaigns.map(c => (<Fragment key={c.id}>
-            <tr onClick={() => setOpen(open === c.id ? null : c.id)} style={{ borderTop:`1px solid ${C.border}`, cursor:"pointer" }}>
-              <td style={{ ...td, textAlign:"left", whiteSpace:"normal", fontWeight:"700" }}>{open === c.id ? "▾" : "▸"} {c.name || c.id}</td>
-              {row(c).map((v, i) => <td key={i} style={td}>{v}</td>)}
-            </tr>
-            {open === c.id && (c.ads || []).map(a => (
-              <tr key={a.id} style={{ background:C.blueXlt }}>
-                <td style={{ ...td, textAlign:"left", whiteSpace:"normal", paddingLeft:"24px" }}>{a.name || a.id}<div style={{ fontSize:"11px", color:C.muted }}>{a.adset}</div></td>
-                {row(a).map((v, i) => <td key={i} style={td}>{v}</td>)}
+    <div style={{ display:"flex", flexDirection:"column", gap:"6px" }}>
+      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", overflowX:"auto" }}>
+        <table style={{ width:"100%", borderCollapse:"collapse", minWidth:"820px" }}>
+          <thead><tr style={{ background:C.cardLt }}>
+            <th style={{ ...th, textAlign:"left" }}>Ad set / ad</th><th style={{ ...th, textAlign:"left" }}>Health (last 4 wk)</th><th style={th}>Spend</th><th style={th}>Leads</th><th style={th}>CPL</th><th style={th}>Booked</th><th style={th}>$/BOOKING</th><th style={th}>Upfront</th><th style={th}>Committed</th><th style={th}>Completed</th><th style={th}>ROAS up / comm.</th>
+          </tr></thead>
+          <tbody>
+            {sets.map(c => (<Fragment key={c.id}>
+              <tr onClick={c.loose ? undefined : () => setOpen(open === c.id ? null : c.id)} style={{ borderTop:`1px solid ${C.border}`, cursor:c.loose ? "default" : "pointer" }}>
+                <td style={{ ...td, textAlign:"left", whiteSpace:"normal", fontWeight:c.loose ? "400" : "700", color:c.loose ? C.muted : C.black }}>
+                  {!c.loose && (open === c.id ? "▾ " : "▸ ")}{c.name}
+                  {!c.loose && <div style={{ fontSize:"11px", color:C.muted, fontWeight:"400" }}>{c.campaign} · {c.ads.length} ad{c.ads.length === 1 ? "" : "s"}</div>}
+                </td>
+                <td style={{ ...td, textAlign:"left" }}>{!c.loose && <HealthChip x={h.sets[c.id]} loading={h.s.loading}/>}</td>
+                {row(c).map((v, i) => <td key={i} style={td}>{v}</td>)}
               </tr>
-            ))}
-          </Fragment>))}
-        </tbody>
-      </table>
+              {open === c.id && c.ads.map(a => (
+                <tr key={a.id} style={{ background:C.blueXlt }}>
+                  <td style={{ ...td, textAlign:"left", whiteSpace:"normal", paddingLeft:"24px" }}>{a.name || a.id}</td>
+                  <td style={{ ...td, textAlign:"left" }}><HealthChip x={h.ads[a.id]} loading={h.s.loading}/></td>
+                  {row(a).map((v, i) => <td key={i} style={td}>{v}</td>)}
+                </tr>
+              ))}
+            </Fragment>))}
+          </tbody>
+        </table>
+      </div>
+      {h.s.error && <div style={{ fontSize:"12px", color:C.red }}>Couldn't load ad health: {h.s.error}</div>}
+      <div style={{ fontSize:"12px", color:C.muted }}>Tap an ad set to see its ads. Numbers are for the dates picked above; health is always the last 4 full weeks: red under break-even ({h.breakeven.toFixed(2)}x upfront ROAS at your margin), yellow up to {AD_HEALTH.greenRoas}x, green above (under ${AD_HEALTH.minSpend} spent or {AD_HEALTH.minLeads} leads isn't graded). 📉 means it's slipping from its own best 4 weeks, usually weeks before it turns red. Hover or tap a health chip for why and what to do.</div>
     </div>
   );
 }
@@ -6134,7 +6288,7 @@ function SpendCampaigns({ rows }) {
   return (
     <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", overflowX:"auto" }}>
       <table style={{ width:"100%", borderCollapse:"collapse", minWidth:"520px" }}>
-        <thead><tr style={{ background:C.cardLt }}><th style={{ ...th, textAlign:"left" }}>CAMPAIGN</th><th style={th}>SPEND</th><th style={th}>CLICKS</th><th style={th}>CPC</th><th style={th}>CONV.</th><th style={th}>$/CONV.</th></tr></thead>
+        <thead><tr style={{ background:C.cardLt }}><th style={{ ...th, textAlign:"left" }}>Campaign</th><th style={th}>Spend</th><th style={th}>Clicks</th><th style={th}>CPC</th><th style={th}>Conv.</th><th style={th}>$/CONV.</th></tr></thead>
         <tbody>{rows.map(r => (
           <tr key={r.id} style={{ borderTop:`1px solid ${C.border}` }}>
             <td style={{ ...td, textAlign:"left", whiteSpace:"normal", fontWeight:"700" }}>{/^LocalServicesCampaign/.test(r.name) ? "Local Services Ads" : r.name}</td>
@@ -6173,6 +6327,281 @@ const GA4_STEPS = [
   "Tap Sync now — it finds the GA4 property and pulls 90 days of visitors.",
 ];
 
+// Meta ad health (adTrends.js): each ad's start date, a 4-week grade, and an
+// early warning when it starts sliding from its own best 4 weeks, with the
+// likely reason. Owners only (reports.js ad_trends).
+function Sparkline({ values, color=C.blue, w=120, h=32 }) {
+  const pts = values.map((v, i) => [i, v]).filter(([, v]) => v != null && isFinite(v));
+  if (pts.length < 2) return null;
+  const max = Math.max(...pts.map(p => p[1])), min = Math.min(...pts.map(p => p[1])), span = max - min || 1, n = values.length - 1 || 1;
+  const d = pts.map(([i, v], k) => `${k ? "L" : "M"}${(i / n * (w - 4) + 2).toFixed(1)},${(h - 3 - (v - min) / span * (h - 6)).toFixed(1)}`).join(" ");
+  const last = pts[pts.length - 1];
+  return (
+    <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} role="img" aria-label="cost per lead, last weeks">
+      <path d={d} fill="none" stroke={color} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round"/>
+      <circle cx={(last[0] / n * (w - 4) + 2).toFixed(1)} cy={(h - 3 - (last[1] - min) / span * (h - 6)).toFixed(1)} r="3" fill={color}/>
+    </svg>
+  );
+}
+
+// Health for every Meta ad and ad set over the last 4 full weeks (adTrends.js):
+// grade, trend vs its own best 4 weeks, start date, and a why / do note.
+// -> { s, breakeven, adsetOf, ads:{ad_id: x}, sets:{adset_id: x} }
+function useAdHealth(token, margin) {
+  const today = mountainDate(new Date().toISOString());
+  const s = useGrowthReport({ type:"ad_trends" }, token);
+  const breakeven = margin > 0 ? 1 / margin : 2;
+  const out = useMemo(() => {
+    if (!s.data) return { adsetOf:{}, ads:{}, sets:{} };
+    const meta = Object.fromEntries((s.data.ads || []).map(a => [a.ad_id, a]));
+    const adsetOf = Object.fromEntries((s.data.adsets || []).map(a => [a.ad_id, a]));
+    const grouped = groupAds(s.data.rows || [], today);
+    const market = marketShift(grouped.map(ad => trend(ad)));
+    const all = metrics(sumWeeks(grouped.flatMap(ad => ad.weeks.slice(-AD_HEALTH.windowWeeks))));
+    const typical = { cpl: all.cpl, bookRate: all.bookRate };
+    const score = (ad, m) => {
+      const started = m.created_time ? mountainDate(m.created_time) : ad.firstWeek;
+      const weeksRunning = started ? Math.max(1, Math.round((new Date(today) - new Date(started)) / (7 * 864e5))) : null;
+      const t = trend(ad, AD_HEALTH, market);
+      const m4 = metrics(sumWeeks(ad.weeks.slice(-AD_HEALTH.windowWeeks)));
+      const g = grade(m4, breakeven);
+      const advice = adAdvice(m4, g, t, breakeven, typical, { frequency28d: m.frequency_28d != null ? Number(m.frequency_28d) : null, weeksRunning, market });
+      return { meta:m, started, weeksRunning, t, g, advice, spark: rolling(ad).slice(-12).map(r => r.cpl) };
+    };
+    const ads = Object.fromEntries(grouped.map(ad => [ad.ad_id, score(ad, meta[ad.ad_id] || {})]));
+    // An ad set started with its first ad, is active if any ad is, and its
+    // 28-day frequency is its ads', weighted by their last-4-week spend.
+    const sets = Object.fromEntries(groupAds(toAdSets(s.data.rows || [], adsetOf), today).map(set => {
+      const kids = grouped.filter(ad => adsetOf[ad.ad_id]?.adset_id === set.ad_id);
+      const sp = Object.fromEntries(kids.map(k => [k.ad_id, sumWeeks(k.weeks.slice(-AD_HEALTH.windowWeeks)).spend]));
+      const km = kids.map(k => meta[k.ad_id] || {});
+      const fq = km.filter(m => m.frequency_28d != null && sp[m.ad_id] > 0), fqSpend = fq.reduce((t, m) => t + sp[m.ad_id], 0);
+      return [set.ad_id, score(set, {
+        created_time: km.map(m => m.created_time).filter(Boolean).sort()[0] || null,
+        status: km.some(m => m.status === "ACTIVE") ? "ACTIVE" : km[0]?.status,
+        frequency_28d: fqSpend > 0 ? fq.reduce((t, m) => t + Number(m.frequency_28d) * sp[m.ad_id], 0) / fqSpend : null,
+      })];
+    }));
+    return { adsetOf, ads, sets };
+  }, [s.data, today, breakeven]);
+  return { s, breakeven, ...out };
+}
+
+// Health chip for a table row: color = 4-week grade, 📉/📈 = trend. Hover
+// (or tap) shows the why / do note. The note is position:fixed so the
+// table's sideways scroll doesn't clip it.
+function HealthChip({ x, loading }) {
+  const [pos, setPos] = useState(null);
+  const ref = useRef(null);
+  useEffect(() => {
+    if (!pos) return;
+    const close = () => setPos(null);
+    window.addEventListener("scroll", close, true);
+    return () => window.removeEventListener("scroll", close, true);
+  }, [pos]);
+  if (!x) return <span style={{ fontSize:"12px", color:C.muted }}>{loading ? "…" : "—"}</span>;
+  const tone = { green:[C.green, "rgba(52,199,89,0.12)"], yellow:["#b8860b", "rgba(255,204,0,0.18)"], red:[C.red, "rgba(255,59,48,0.1)"], none:[C.muted, C.cardLt] }[x.g.grade];
+  const word = { green:"Great", yellow:x.g.note === "Making money" ? "Making money" : "Plans pay back", red:"Losing money", none:"Not graded" }[x.g.grade];
+  const arrow = { dropping:" 📉", slipping:" 📉", improving:" 📈" }[x.t.status] || "";
+  const r = x.t.recent;
+  const show = () => {
+    const b = ref.current.getBoundingClientRect(), w = Math.min(340, window.innerWidth - 16);
+    setPos({ left:Math.max(8, Math.min(b.left, window.innerWidth - w - 8)), w, ...(b.bottom + 220 > window.innerHeight ? { bottom:window.innerHeight - b.top + 6 } : { top:b.bottom + 6 }) });
+  };
+  return (
+    <span ref={ref} onMouseEnter={show} onMouseLeave={() => setPos(null)} onClick={ev => { ev.stopPropagation(); pos ? setPos(null) : show(); }}
+      style={{ display:"inline-block", background:tone[1], color:tone[0], borderRadius:"980px", padding:"3px 9px", fontSize:"12px", fontWeight:"600", cursor:"pointer", whiteSpace:"nowrap" }}>
+      {x.g.grade !== "none" && r.roasUp != null ? `${r.roasUp.toFixed(1)}x · ` : ""}{word}{arrow}
+      {pos && (
+        <span role="tooltip" onClick={ev => ev.stopPropagation()} style={{ position:"fixed", zIndex:60, left:pos.left, top:pos.top, bottom:pos.bottom, width:pos.w, background:C.white, border:`1px solid ${C.border}`, borderRadius:"16px", boxShadow:"0 12px 32px rgba(0,0,0,0.16)", padding:"12px 14px", display:"flex", flexDirection:"column", gap:"6px", whiteSpace:"normal", cursor:"default", textAlign:"left" }}>
+          <span style={{ display:"flex", justifyContent:"space-between", gap:"8px", alignItems:"center" }}>
+            <span style={{ fontFamily:FONT, fontWeight:"700", fontSize:"14px", color:tone[0] === C.muted ? C.black : tone[0] }}>{x.advice.label}{arrow ? ` ·${arrow} ${x.t.status}` : ""}</span>
+            <Sparkline values={x.spark} w={80} h={26} color={x.t.status === "dropping" ? C.red : x.t.status === "slipping" ? "#b8860b" : C.blue}/>
+          </span>
+          <span style={{ fontSize:"14px", color:C.black, fontWeight:"400" }}>{x.advice.why}</span>
+          <span style={{ fontSize:"14px", color:C.black, fontWeight:"400" }}><b>Do:</b> {x.advice.todo}</span>
+          <span style={{ fontSize:"12px", color:C.muted, fontWeight:"400" }}>
+            Started {x.started ? fmtShortDate(x.started) : "—"}{x.weeksRunning ? ` (${x.weeksRunning} wk)` : ""}{x.meta.status && x.meta.status !== "ACTIVE" ? ` · ${x.meta.status.toLowerCase().replace(/_/g, " ")}` : ""}
+            {" · "}last 4 wk {r.cpl != null ? `${money2(r.cpl)}/lead` : "no leads"}{x.t.peakWeek && x.t.base.cpl != null ? `, best ${money2(x.t.base.cpl)}/lead (from ${fmtShortDate(x.t.peakWeek)})` : ""}
+            {x.t.slideSince ? ` · slipping since ${fmtShortDate(x.t.slideSince)}` : ""}{x.meta.frequency_28d != null ? ` · seen ${Number(x.meta.frequency_28d).toFixed(1)}× each` : ""}
+          </span>
+        </span>
+      )}
+    </span>
+  );
+}
+
+const GSC_STEPS = [
+  "Google Cloud (project Skylo Tip Sync) → APIs & Services → Library → enable \"Google Search Console API\".",
+  "Make sure team@skylod.com is a user on skylod.com in Search Console (Settings → Users and permissions → Full or Owner).",
+  "Tap Reconnect Google below, sign in as team@skylod.com, and allow Search Console access.",
+  "Tap Sync now — it pulls the last 16 months of searches, then updates every morning.",
+];
+
+// A ranked list of searches or pages: name, clicks, impressions, CTR, position.
+function SearchTable({ rows, keyName, empty, limit = 15 }) {
+  const th = { textAlign:"right", padding:"6px 8px", fontSize:"11px", color:C.muted, fontWeight:"600", whiteSpace:"nowrap" };
+  const td = { textAlign:"right", padding:"6px 8px", fontSize:"13px", color:C.black, borderTop:`1px solid ${C.border}`, whiteSpace:"nowrap" };
+  const label = v => keyName === "page" ? pageLabel(v) : v;
+  return (
+    <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"6px", overflowX:"auto" }}>
+      {rows.length === 0 ? <div style={{ padding:"10px", fontSize:"13px", color:C.muted }}>{empty}</div> : (
+        <table style={{ width:"100%", borderCollapse:"collapse", fontFamily:FONT }}>
+          <thead><tr><th style={{ ...th, textAlign:"left" }}>{keyName === "page" ? "Page" : "Search"}</th><th style={th}>Clicks</th><th style={th}>Shown</th><th style={th}>Click rate</th><th style={th}>Avg rank</th></tr></thead>
+          <tbody>{rows.slice(0, limit).map(r => (
+            <tr key={r[keyName]}>
+              <td style={{ ...td, textAlign:"left", whiteSpace:"normal", wordBreak:"break-word" }}>{label(r[keyName])}</td>
+              <td style={td}>{r.clicks}</td><td style={td}>{r.impressions}</td><td style={td}>{pctOf(r.clicks, r.impressions)}</td>
+              <td style={td}>{r.position ?? "—"}</td>
+            </tr>
+          ))}</tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
+// SEO: free traffic from Google search (Search Console) for skylod.com, in
+// plain English. Scores and the fix list come from seoScore.js. Brand =
+// searches for Skylo by name; non-brand = new people who didn't know Skylo.
+const SEO_STATUS = { good:{ c:C.green, t:"On track" }, ok:{ c:"#ff9f0a", t:"Getting there" }, bad:{ c:C.red, t:"Needs work" }, none:{ c:C.muted, t:"Not enough data" } };
+const SEO_GLOSSARY = [
+  ["Times shown (impressions)", "Your site was on the results page someone loaded. They didn't have to scroll to it, so at #8–10 many people never actually saw you. Results further down (past what loads at first) only count once someone scrolls to them."],
+  ["Clicks", "Someone clicked through to skylod.com from a free Google result. Ads aren't counted here."],
+  ["Click rate", "Clicks ÷ times shown. It's low when you're far down the page, or when your Google headline doesn't match what they searched."],
+  ["Average rank", "Where you usually appear: 1 is the top, 1–10 is page one. Most clicks go to the top 3."],
+  ["Brand vs. non-brand", "Brand = they searched Skylo (or Squeegee Boys) by name — they already knew you. Non-brand = they searched for a service, like \"car detailing near me\" — new customers."],
+  ["Headline and description", "The blue title and the grey line under it in Google. They come from each page's title and meta description on skylod.com, and your web person can change them."],
+];
+
+function SeoScoreTile({ x }) {
+  const [open, setOpen] = useState(false);
+  const st = SEO_STATUS[x.status];
+  return (
+    <div style={{ background:C.card, border:`1px solid ${C.border}`, borderTop:`4px solid ${st.c}`, borderRadius:"16px", padding:"12px 14px", minWidth:0 }}>
+      <div style={{ display:"flex", justifyContent:"space-between", gap:"6px", alignItems:"flex-start" }}>
+        <div style={{ fontSize:"11px", color:C.muted, fontWeight:"600", fontFamily:FONT }}>{x.label}</div>
+        <button onClick={() => setOpen(o => !o)} aria-label={`What is ${x.label}?`} style={{ flexShrink:0, width:"20px", height:"20px", borderRadius:"10px", border:`1px solid ${C.border}`, background:open ? C.blue : C.white, color:open ? C.white : C.muted, fontSize:"11px", fontWeight:"700", cursor:"pointer", padding:0, fontFamily:FONT }}>?</button>
+      </div>
+      <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"24px", color:C.black, marginTop:"2px", lineHeight:1.15 }}>{x.value}</div>
+      <div style={{ fontSize:"11px", color:C.muted, marginTop:"2px" }}>{x.sub}</div>
+      <div style={{ height:"6px", background:C.cardLt, borderRadius:"3px", marginTop:"8px", overflow:"hidden" }}><div style={{ width:`${Math.round(x.meter * 100)}%`, height:"100%", background:st.c }}/></div>
+      <div style={{ display:"flex", justifyContent:"space-between", gap:"6px", marginTop:"4px", fontSize:"11px" }}><span style={{ color:st.c, fontWeight:"700" }}>{st.t}</span><span style={{ color:C.muted }}>{x.goal}</span></div>
+      {open && <div style={{ fontSize:"12px", color:C.black, marginTop:"8px", lineHeight:1.45 }}>{x.help}</div>}
+    </div>
+  );
+}
+
+function SearchConsolePanel({ range, token }) {
+  const [bump, setBump] = useState(0);
+  const [glossary, setGlossary] = useState(false);
+  const s = useGrowthReport({ type:"search", ...range, r:bump }, token);
+  const d = s.data, conn = d?.connection || {};
+  const days = d?.daily?.length || 0;
+  const change = (a, b) => b ? `${a >= b ? "▲" : "▼"} ${Math.abs(Math.round(((a - b) / b) * 100))}% vs the ${days} days before` : "no earlier data yet";
+  const nb = (d?.queries || []).filter(q => !q.brand);
+  const almost = nb.filter(offered).filter(q => q.position >= 4 && q.position <= 20).sort((a, b) => b.impressions - a.impressions);
+  const unclicked = nb.filter(offered).filter(q => q.position <= 10 && q.impressions >= 10 && q.clicks / q.impressions < 0.02).sort((a, b) => b.impressions - a.impressions);
+  const cities = (d?.pages || []).filter(p => pageKind(p.page) === "city");
+  const others = (d?.pages || []).filter(p => pageKind(p.page) === "page" || pageKind(p.page) === "maps");
+  const sm = conn.last_result?.sitemaps || [];
+  const notIndexed = (d?.page_status || []).filter(p => p.verdict && p.verdict !== "PASS");
+  const ready = d && d.from === range.from && days > 0;
+  const scores = ready ? scorecard(d, days) : [];
+  const fixes = ready ? fixList(d) : [];
+  const note = { fontSize:"12px", color:C.muted };
+  return (
+    <div style={{ display:"flex", flexDirection:"column", gap:"12px" }}>
+      <div>
+        <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"20px", color:C.black }}>SEO</div>
+        <div style={note}>Free traffic from Google — no ad spend. How easily new customers find skylod.com when they search, and what to fix next.</div>
+      </div>
+      <ConnectionCard title="Google Search Console" connected={conn.connected} lastSync={conn.last_sync} steps={conn.connected ? null : GSC_STEPS}
+        connectUrl={`/.netlify/functions/google-ads-auth?t=${encodeURIComponent(token || "")}`} connectLabel={conn.connected ? "Reconnect Google" : "Reconnect Google (adds Search Console)"}
+        syncFn={conn.connected ? "gsc-sync" : null} syncDays={480} token={token} onSynced={() => setBump(b => b + 1)}
+        note={conn.last_result?.ok === false ? `Last sync failed: ${conn.last_result.error}`
+          : conn.connected ? `Reading ${conn.last_result?.site || "skylod.com"}. Google's search data runs 2–3 days behind, so the last few days fill in later.`
+          : "Shows what people searched on Google to find skylod.com. Reconnecting Google adds it (same sign-in as Google Ads and Analytics)."}/>
+      <ReportState s={s}/>
+      {ready && (<>
+        <SectionTitle>Scorecard</SectionTitle>
+        <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(170px, 1fr))", gap:"8px" }}>
+          {scores.map(x => <SeoScoreTile key={x.key} x={x}/>)}
+        </div>
+        <div style={note}>Green = on track, yellow = getting there, red = needs work. Tap ? on any score for what it means. Goals: {SEO_GOALS.nonBrandPerMonth}+ new-people clicks a month, every city page in the top {SEO_GOALS.cityTopRank}, {SEO_GOALS.pageOneClickRate}%+ click rate on page one.</div>
+
+        {d.free_jobs && !d.free_jobs.error && (() => {
+          const o = d.free_jobs.organic, m = d.free_jobs.maps, t = k => o[k] + m[k];
+          const split = k => `${k === "upfront" || k === "committed" ? usd(o[k]) : o[k]} search · ${k === "upfront" || k === "committed" ? usd(m[k]) : m[k]} Maps listing`;
+          return (<>
+            <SectionTitle>Free jobs from Google</SectionTitle>
+            <TileGrid>
+              <StatTile label="Leads" value={t("leads")} sub={split("leads")}/>
+              <StatTile label="Booked" value={`${t("booked")} · ${pctOf(t("booked"), t("leads"))}`} sub={split("booked")}/>
+              <StatTile label="Upfront revenue" value={usd(t("upfront"))} sub={split("upfront")}/>
+              <StatTile label="Committed revenue" value={usd(t("committed"))} sub="incl. plan minimums"/>
+            </TileGrid>
+            <div style={note}>Website quote requests that came from a free Google result or the Website button on your Maps listing, followed to HCP jobs the same way as the ad channels — no ad spend behind any of it. Calls straight from the Maps listing aren't counted (they never touch the website).</div>
+          </>);
+        })()}
+
+        <SectionTitle>What to fix next</SectionTitle>
+        <div style={{ display:"flex", flexDirection:"column", gap:"8px" }}>
+          {fixes.length === 0 && <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"12px 14px", fontSize:"13px", color:C.muted }}>Nothing urgent in this range. 🎉</div>}
+          {fixes.map((f, i) => (
+            <div key={i} style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"12px 14px" }}>
+              <div style={{ fontSize:"14px", fontWeight:"700", color:C.black, fontFamily:FONT }}>🔧 {f.title}</div>
+              <div style={{ fontSize:"12px", color:C.black, marginTop:"4px", lineHeight:1.45 }}>{f.body}</div>
+            </div>
+          ))}
+        </div>
+
+        <SectionTitle>The numbers</SectionTitle>
+        <TileGrid>
+          <StatTile label="Clicks from Google search" value={d.totals.clicks.toLocaleString()} sub={change(d.totals.clicks, d.prev.clicks)}/>
+          <StatTile label="Times shown" value={d.totals.impressions.toLocaleString()} sub={change(d.totals.impressions, d.prev.impressions)}/>
+          <StatTile label="Click rate" value={pctOf(d.totals.clicks, d.totals.impressions)} sub={`was ${pctOf(d.prev.clicks, d.prev.impressions)}`}/>
+          <StatTile label="Average rank" value={d.totals.position ?? "—"} sub={d.prev.position ? `was ${d.prev.position} · lower is better` : "lower is better"}/>
+          <StatTile label="Brand clicks" value={d.brand.clicks} sub="searched Skylo by name"/>
+          <StatTile label="Non-brand clicks" value={d.non_brand.clicks} sub={`${d.non_brand.impressions.toLocaleString()} times shown · new people`}/>
+        </TileGrid>
+        <DailyBars title="Clicks from Google search per day" days={d.daily} value={x => x.clicks}/>
+
+        <SectionTitle>City pages</SectionTitle>
+        <div style={note}>One page per city you serve. Top 3 is where the clicks are.</div>
+        <SearchTable rows={cities} keyName="page" empty="No city pages showed up in this range."/>
+        <SectionTitle>Top searches from new people</SectionTitle>
+        <SearchTable rows={nb} keyName="query" empty="No non-brand searches in this range yet."/>
+        <SectionTitle>Almost in the top 3</SectionTitle>
+        <div style={note}>Non-brand searches where you rank #4–20. Improving the page Google shows for each is the cheapest way to get more free clicks.</div>
+        <SearchTable rows={almost} keyName="query" empty="None in this range."/>
+        <SectionTitle>Shown but not clicked</SectionTitle>
+        <div style={note}>On page one, shown 10+ times, under 2% click rate. Usually fixed with a better headline and description, or a page about that exact service.</div>
+        <SearchTable rows={unclicked} keyName="query" empty="None in this range."/>
+        <SectionTitle>Other pages</SectionTitle>
+        <SearchTable rows={others} keyName="page" empty="No pages in this range."/>
+
+        <SectionTitle>Site health</SectionTitle>
+        <div style={{ background:notIndexed.length || sm.some(x => x.errors) ? `${C.red}10` : C.card, border:`1px solid ${notIndexed.length || sm.some(x => x.errors) ? C.red : C.border}`, borderRadius:"16px", padding:"12px 14px", fontSize:"13px", color:C.black, display:"flex", flexDirection:"column", gap:"6px" }}>
+          <div>{d.page_status.length ? (notIndexed.length ? `⚠️ ${notIndexed.length} of the ${d.page_status.length} most-seen pages aren't fully indexed by Google:` : `✅ All ${d.page_status.length} most-seen pages are indexed by Google.`) : "Page indexing is checked on the next sync."}</div>
+          {notIndexed.map(p => <div key={p.page} style={{ fontSize:"12px" }}>{pageLabel(p.page)} — {p.coverage || p.verdict}</div>)}
+          <div>{sm.length ? sm.map(x => `Sitemap ${x.path.replace(/^https?:\/\/[^/]+/, "")}: ${x.errors ? `⚠️ ${x.errors} errors` : "✅ no errors"}${x.warnings ? `, ${x.warnings} warnings` : ""}${x.last_downloaded ? ` · read by Google ${fmtDay(x.last_downloaded.slice(0, 10))}` : ""}`).join(" · ") : "⚠️ No sitemap submitted — add one in Search Console → Sitemaps so Google finds every page."}</div>
+        </div>
+
+        <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"12px 14px" }}>
+          <div onClick={() => setGlossary(g => !g)} style={{ display:"flex", justifyContent:"space-between", cursor:"pointer", fontSize:"13px", fontWeight:"700", color:C.black, fontFamily:FONT }}><span>How to read this page</span><span style={{ color:C.muted, fontWeight:"500" }}>{glossary ? "▲" : "▼"}</span></div>
+          {glossary && <div style={{ display:"flex", flexDirection:"column", gap:"8px", marginTop:"8px" }}>
+            {SEO_GLOSSARY.map(([t, b]) => <div key={t} style={{ fontSize:"12px", color:C.black, lineHeight:1.45 }}><b>{t}:</b> {b}</div>)}
+          </div>}
+        </div>
+        <div style={{ fontSize:"11px", color:C.muted }}>From Google Search Console, regular web search only. Google keeps rare searches private, so brand + non-brand add up to less than total clicks. Average rank is weighted by how often each search showed the site.</div>
+        {s.loading && <div style={{ fontSize:"11px", color:C.muted }}>Refreshing...</div>}
+      </>)}
+      {d && d.from === range.from && days === 0 && conn.connected && <div style={{ fontSize:"13px", color:C.muted }}>No search data for this range yet — tap Sync now, or pick an earlier range (Google runs 2–3 days behind).</div>}
+    </div>
+  );
+}
+
 function MarketingTab({ token }) {
   const [range, setRange] = useState(() => rangeFor("month"));
   const [sub, setSub] = useState("meta");
@@ -6203,7 +6632,9 @@ function MarketingTab({ token }) {
         </div>
         <AttributionSettings att={att} token={token} onSaved={() => setBump(b => b + 1)}/>
         <div style={{ fontSize:"11px", color:C.muted }}>{REVENUE_NOTE}</div>
-        <SubTabs tabs={[["meta","Meta Ads"],["google","Google Ads"],["lsa","Local Services"],["website","Website"]]} active={sub} setActive={setSub}/>
+        <SubTabs tabs={[["meta","Meta Ads"],["google","Google Ads"],["lsa","Local Services"],["website","Website"],["search","SEO"]]} active={sub} setActive={setSub}/>
+
+        {sub === "search" && <SearchConsolePanel range={range} token={token}/>}
 
         {sub === "meta" && (<>
           <ConnectionCard title="Meta Ads spend" connected={conn.meta?.connected} lastSync={conn.meta?.last_sync} steps={conn.meta?.connected ? null : META_STEPS} syncFn="meta-ads-sync" token={token} onSynced={() => setBump(b => b + 1)}
@@ -6211,8 +6642,8 @@ function MarketingTab({ token }) {
           <ChannelTiles ch={ch.meta} paid att={att}/>
           <DailyBars title="Meta leads per day" days={days} value={x => x.leads?.meta || 0}/>
           {Number(ch.meta.spend) > 0 && <DailyBars title="Meta spend per day" days={days} value={x => Number(x.spend?.meta || 0)} fmt={usd}/>}
-          <SectionTitle>Campaigns & ads</SectionTitle>
-          <MetaCampaigns campaigns={d.meta_campaigns || []}/>
+          <SectionTitle>Ad sets & ads</SectionTitle>
+          <MetaAdSets campaigns={d.meta_campaigns || []} token={token} margin={Number(att?.gross_margin) || 0}/>
           <div style={{ fontSize:"11px", color:C.muted }}>Leads and bookings come from GHL, matched to the exact ad by its tracking tag. {REVENUE_NOTE}</div>
         </>)}
 
@@ -6340,6 +6771,247 @@ function FunnelBlock({ k, label, revenue }) {
 // rep key). reports.js enforces the same list (REPS[...].selfTechId).
 const SALES_SELF_VIEW = { "4641f4da-a16f-411b-8688-8b81ac06eda7": "trevor" };
 
+// Trevor's monthly points bonus (math in salesPoints.js). A sale is a
+// completed HCP job tagged "sold by trevor", counted in the month it was
+// completed; points from ticket price x frequency; plans that stop inside the
+// chargeback window come back off in the month the first visit was missed.
+// The month's net points pick one tier.
+// Trevor's month at a glance: net points, bonus, and a 5-step track -- one
+// equal-width step per tier, each filling with the points between the tier
+// before it and that tier, so he can see how close he is to every one.
+function TierTrack({ m, t, isNow, today, monthName }) {
+  const net = Math.max(0, m.net);
+  const steps = BONUS_TIERS.map((b, i) => {
+    const from = i ? BONUS_TIERS[i - 1].points : 0;
+    return { ...b, from, fill:Math.min(1, Math.max(0, (net - from) / (b.points - from))) };
+  });
+  const cur = steps.findIndex(x => x.fill < 1);
+  const pos = cur < 0 ? 100 : (cur + steps[cur].fill) / steps.length * 100;
+  // Pace: this month's net so far, stretched to the whole month.
+  const [y, mo, d] = today.split("-").map(Number);
+  const dim = new Date(Date.UTC(y, mo, 0)).getUTCDate();
+  const pace = isNow && d >= 3 && net > 0 ? Math.round(net / d * dim) : null;
+  const paceTier = pace != null ? tierFor(pace) : null;
+  // The month's sales: how many, how many recurring (by plan), revenue.
+  const plans = m.earned.filter(x => x.freq !== "one_time");
+  const byPlan = {};
+  for (const x of plans) byPlan[x.freq] = (byPlan[x.freq] || 0) + 1;
+  const planText = Object.keys(FREQ_WEEKS).filter(f => byPlan[f]).map(f => `${byPlan[f]} ${FREQ_LABEL[f].toLowerCase()}`).join(" · ");
+  const revenue = m.earned.reduce((a, x) => a + (x.price || 0), 0);
+  const done = "#34c759", doneInk = "#248a3d";
+  const label = { fontSize:"12px", color:C.muted, fontWeight:"600", fontFamily:FONT };
+  const rule = { borderTop:`1px solid ${C.border}`, margin:"16px 0" };
+  const stat = (name, value, sub) => (
+    <div style={{ minWidth:0 }}>
+      <div style={label}>{name}</div>
+      <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"24px", color:C.black, lineHeight:1.15, marginTop:"2px" }}>{value}</div>
+      <div style={{ fontSize:"12px", color:C.muted, marginTop:"2px" }}>{sub}</div>
+    </div>
+  );
+  return (
+    <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"20px", padding:"18px 18px 16px", boxShadow:"0 1px 3px rgba(0,0,0,0.05)" }}>
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-end", gap:"12px", flexWrap:"wrap" }}>
+        <div>
+          <div style={label}>{monthName} net points</div>
+          <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"48px", color:C.black, lineHeight:1, letterSpacing:"-0.03em", marginTop:"4px" }}>{m.net.toLocaleString()}</div>
+          <div style={{ fontSize:"12px", color:C.muted, marginTop:"4px" }}>{m.gross.toLocaleString()} earned{m.back ? <> − <span style={{ color:C.red }}>{m.back.toLocaleString()} clawed back</span></> : null}</div>
+        </div>
+        <div style={{ textAlign:"right" }}>
+          <div style={{ display:"inline-block", background:t.tier ? `${done}1a` : C.blueLt, color:t.tier ? doneInk : C.blue, borderRadius:"980px", padding:"4px 12px", fontFamily:FONT, fontWeight:"700", fontSize:"12px" }}>{t.tier ? `Tier ${t.tier} unlocked` : "No tier yet"}</div>
+          <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"32px", color:C.black, marginTop:"6px", lineHeight:1 }}>{usd(t.pay)}</div>
+          <div style={{ fontSize:"12px", color:C.muted, marginTop:"4px" }}>bonus {isNow ? "so far" : "for the month"}</div>
+        </div>
+      </div>
+
+      <div style={rule}/>
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(130px, 1fr))", gap:"14px" }}>
+        {stat("Jobs sold", m.earned.length, "completed this month")}
+        {stat("Recurring plans", plans.length, planText || "none yet")}
+        {stat("One-time", m.earned.length - plans.length, "single visits")}
+        {stat("Sales revenue", usd(revenue), "first visits, no tips")}
+      </div>
+
+      <div style={rule}/>
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", gap:"8px", flexWrap:"wrap", fontFamily:FONT }}>
+        <div style={{ fontSize:"15px", color:C.black }}>
+          {t.next
+            ? <><b style={{ color:C.blue }}>{t.toNext.toLocaleString()} pts</b> to Tier {t.next.tier} → <b>{usd(t.next.pay)}</b>{t.pay ? <span style={{ color:C.muted }}> (+{usd(t.next.pay - t.pay)})</span> : null}</>
+            : <b style={{ color:doneInk }}>Top tier reached. Max bonus locked in.</b>}
+        </div>
+        {pace != null && <div style={{ fontSize:"12px", color:C.muted }}>On pace for ~<b style={{ color:C.black }}>{pace.toLocaleString()} pts</b>{paceTier.tier ? ` · Tier ${paceTier.tier} (${usd(paceTier.pay)})` : " · short of Tier 1"}</div>}
+      </div>
+
+      <div style={{ position:"relative", marginTop:"32px" }}>
+        <div style={{ position:"absolute", left:`${pos}%`, top:"-26px", transform:`translateX(${pos > 92 ? "-100%" : pos < 8 ? "0" : "-50%"})`, transition:"left .6s ease", background:C.black, color:"#fff", borderRadius:"6px", padding:"2px 8px", fontSize:"11px", fontWeight:"700", fontFamily:FONT, whiteSpace:"nowrap" }}>{m.net.toLocaleString()} pts</div>
+        <div style={{ display:"grid", gridTemplateColumns:`repeat(${steps.length}, 1fr)`, gap:"4px" }}>
+          {steps.map((x, i) => (
+            <div key={x.tier} style={{ height:"12px", background:C.blueLt, borderRadius:i === 0 ? "6px 3px 3px 6px" : i === steps.length - 1 ? "3px 6px 6px 3px" : "3px", overflow:"hidden" }}>
+              <div style={{ width:`${x.fill * 100}%`, height:"100%", background:x.fill >= 1 ? done : `linear-gradient(90deg, ${C.blue}, #4db3ff)`, boxShadow:x.fill > 0 && x.fill < 1 ? `0 0 10px ${C.blue}80` : "none", transition:"width .6s ease" }}/>
+            </div>
+          ))}
+        </div>
+        <div style={{ display:"grid", gridTemplateColumns:`repeat(${steps.length}, 1fr)`, gap:"4px", marginTop:"10px" }}>
+          {steps.map((x, i) => {
+            const hit = x.fill >= 1, next = i === cur;
+            return (
+              <div key={x.tier} style={{ textAlign:"right", fontFamily:FONT, minWidth:0 }}>
+                <div style={{ fontSize:"11px", fontWeight:"700", color:hit ? doneInk : next ? C.blue : C.muted, textTransform:"uppercase", letterSpacing:"0.02em" }}>{hit ? "✓ " : ""}Tier {x.tier}</div>
+                <div style={{ fontSize:"15px", fontWeight:"700", color:hit || next ? C.black : C.muted, marginTop:"1px" }}>{usd(x.pay)}</div>
+                <div style={{ fontSize:"11px", color:C.muted, whiteSpace:"nowrap" }}>{hit ? `${x.points.toLocaleString()} pts` : `${(x.points - net).toLocaleString()} to go`}</div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Tap-to-open header for the long customer lists on the bonus.
+function SalesDrop({ open, toggle, title, right }) {
+  return (
+    <button onClick={toggle} style={{ width:"100%", display:"flex", justifyContent:"space-between", alignItems:"center", gap:"8px", background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"12px 14px", cursor:"pointer", fontFamily:FONT, textAlign:"left" }}>
+      <span style={{ fontWeight:"600", fontSize:"15px", color:C.black }}>{title}</span>
+      <span style={{ fontWeight:"600", fontSize:"14px", color:C.muted, whiteSpace:"nowrap" }}>{right} {open ? "▲" : "▼"}</span>
+    </button>
+  );
+}
+
+function SalesPointsBonus({ token, canReview=false }) {
+  const thisMonth = mountainDate(new Date().toISOString()).slice(0, 7);
+  const [month, setMonth] = useState(thisMonth);
+  const today = mountainDate(new Date().toISOString());
+  const [bump, setBump] = useState(0);
+  const [saving, setSaving] = useState(null);
+  const [showUntagged, setShowUntagged] = useState(false);
+  const [showClawbacks, setShowClawbacks] = useState(false);
+  const [showSales, setShowSales] = useState(false);
+  const [salesSort, setSalesSort] = useState("recent");
+  const [showHow, setShowHow] = useState(false);
+  const [showReview, setShowReview] = useState(false);
+  const s = useGrowthReport({ type:"sales_deals", rep:"trevor", from:"2026-06-01", to:today, v:bump }, token);
+  const overrides = useMemo(() => Object.fromEntries((s.data?.overrides || []).map(o => [o.hcp_job_id, o.rep])), [s.data]);
+  const sales = useMemo(() => s.data ? buildSales(s.data.jobs || [], { tag:s.data.tag, revenueByJob:s.data.revenue || {}, overrides, repKey:"trevor" }) : [], [s.data, overrides]);
+  const review = useMemo(() => canReview && s.data?.evidence ? reviewList(s.data.evidence, overrides, "trevor") : null, [s.data, overrides, canReview]);
+  async function credit(jobId, rep) {
+    setSaving(jobId);
+    try {
+      const r = await fetch("/.netlify/functions/reports?type=sales_credit", { method:"POST", headers:{ Authorization:`Bearer ${token || ""}`, "Content-Type":"application/json" }, body:JSON.stringify({ hcp_job_id:jobId, rep }) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+      setBump(b => b + 1);
+    } catch(e) { window.alert("Couldn't save: " + e.message); }
+    setSaving(null);
+  }
+  const pick = (jobId, current) => (
+    <div style={{ display:"flex", gap:"6px", flexWrap:"wrap", marginTop:"6px" }}>
+      {[["trevor","Trevor"],["ethan","Ethan"],["none","Not a sale"]].map(([k,l]) => (
+        <button key={k} disabled={saving===jobId} onClick={() => credit(jobId, k)} style={{ background:current===k?C.blue:C.white, color:current===k?"#fff":C.blue, border:`1px solid ${current===k?C.blue:C.border}`, borderRadius:"980px", padding:"5px 12px", fontSize:"13px", fontWeight:"600", fontFamily:FONT, cursor:"pointer" }}>{l}</button>
+      ))}
+      {current && <button disabled={saving===jobId} onClick={() => credit(jobId, null)} style={{ background:"none", border:"none", color:C.muted, fontSize:"12px", cursor:"pointer", fontFamily:FONT }}>Undo (use the tag)</button>}
+    </div>
+  );
+  const reviewRow = (e, why) => (
+    <div key={e.hcp_job_id} style={{ background:C.card, border:"1px solid rgba(0,0,0,0.04)", borderRadius:"16px", padding:"12px 14px", boxShadow:"0 1px 3px rgba(0,0,0,0.05)" }}>
+      <div style={{ display:"flex", justifyContent:"space-between", gap:"8px" }}>
+        <div style={{ fontFamily:FONT, fontWeight:"600", fontSize:"15px", color:C.black }}>{e.customer || "Unknown client"}</div>
+        <div style={{ fontFamily:FONT, fontWeight:"600", fontSize:"14px", color:C.black }}>{money2(Number(e.price))}</div>
+      </div>
+      <div style={{ fontSize:"12px", color:C.muted, marginTop:"2px" }}>Completed {fmtShortDate(e.done_on)} · {why}</div>
+      {pick(e.hcp_job_id, overrides[e.hcp_job_id])}
+    </div>
+  );
+  const m = monthPoints(sales, month);
+  const atRisk = month === thisMonth ? sales.filter(d => d.status === "at_risk") : [];
+  const riskPts = atRisk.reduce((a, d) => a + d.points, 0);
+  const t = tierFor(Math.max(0, m.net));
+  const shift = n => { const [y, mo] = month.split("-").map(Number); const d = new Date(Date.UTC(y, mo - 1 + n, 1)); setMonth(d.toISOString().slice(0, 7)); };
+  const label = new Date(month + "-15T12:00:00Z").toLocaleDateString("en-US", { month:"long", year:"numeric", timeZone:"UTC" });
+  const arrow = { background:C.white, border:`1px solid ${C.border}`, borderRadius:"50%", width:"34px", height:"34px", display:"flex", alignItems:"center", justifyContent:"center", fontSize:"13px", cursor:"pointer", fontFamily:FONT, color:C.blue };
+  const statusText = d => d.status === "cleared" ? <span style={{ color:C.green }}>Cleared</span>
+    : d.status === "pending" ? <span style={{ color:C.muted }}>{d.completed} of {d.needed} services</span>
+    : d.status === "at_risk" ? <span style={{ color:C.blue }}>At risk · nothing booked since {fmtShortDate(d.missed_on)}</span>
+    : d.status === "charged_back" ? <span style={{ color:C.red }}>Clawed back {fmtShortDate(d.chargeback_on)}</span>
+    : <span style={{ color:C.muted }}>—</span>;
+  const freqText = d => `${FREQ_LABEL[d.freq] || d.freq}${d.freq_source === "visits" ? " (from schedule)" : ""}`;
+  return (
+    <div style={{ display:"flex", flexDirection:"column", gap:"10px" }}>
+      <SectionTitle>Bonus points</SectionTitle>
+      <div style={{ display:"flex", gap:"10px", alignItems:"center" }}>
+        <button onClick={() => shift(-1)} style={arrow}>◀</button>
+        <div style={{ fontFamily:FONT, fontWeight:"600", fontSize:"16px", color:C.black, minWidth:"130px", textAlign:"center" }}>{label}</div>
+        <button onClick={() => shift(1)} disabled={month >= thisMonth} style={{ ...arrow, opacity:month >= thisMonth ? 0.4 : 1, cursor:month >= thisMonth ? "default" : "pointer" }}>▶</button>
+      </div>
+      <ReportState s={s}/>
+      {s.data && (<>
+        <TierTrack m={m} t={t} isNow={month === thisMonth} today={today} monthName={label.split(" ")[0]}/>
+        {(m.chargebacks.length > 0 || atRisk.length > 0) && (
+          <div style={{ background:C.card, border:`1px solid ${m.back ? `${C.red}30` : C.border}`, borderRadius:"16px", overflow:"hidden" }}>
+            <button onClick={() => setShowClawbacks(v => !v)} style={{ width:"100%", display:"flex", justifyContent:"space-between", alignItems:"center", gap:"8px", background:m.back ? `${C.red}08` : C.card, border:"none", padding:"12px 14px", cursor:"pointer", fontFamily:FONT, textAlign:"left" }}>
+              <span style={{ fontWeight:"600", fontSize:"15px", color:C.black }}>{[m.chargebacks.length && `Clawbacks · ${m.chargebacks.length} plan${m.chargebacks.length === 1 ? "" : "s"} cancelled`, atRisk.length && `${atRisk.length} plan${atRisk.length === 1 ? "" : "s"} at risk`].filter(Boolean).join(" · ")}</span>
+              <span style={{ fontWeight:"700", fontSize:"14px", color:m.back ? C.red : C.blue, whiteSpace:"nowrap" }}>{m.back ? `−${m.back.toLocaleString()} pts` : `${riskPts.toLocaleString()} pts at risk`} {showClawbacks ? "▲" : "▼"}</span>
+            </button>
+            {showClawbacks && (
+              <div style={{ padding:"4px 14px 10px" }}>
+                {m.chargebacks.map(d => (
+                  <div key={"cb" + d.hcp_job_id} style={{ display:"flex", justifyContent:"space-between", gap:"8px", padding:"10px 0", borderBottom:`1px solid ${C.border}40` }}>
+                    <div style={{ minWidth:0 }}>
+                      <div style={{ fontFamily:FONT, fontWeight:"600", fontSize:"14px", color:C.black }}>{d.name}</div>
+                      <div style={{ fontSize:"12px", color:C.muted, marginTop:"2px" }}>{FREQ_LABEL[d.freq]} · {money2(d.price)} · sold {fmtShortDate(d.done_on)} · stopped after {d.completed} of {d.needed} services · missed visit {fmtShortDate(d.missed_on)}</div>
+                    </div>
+                    <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"14px", color:C.red, whiteSpace:"nowrap" }}>−{d.points.toLocaleString()} pts</div>
+                  </div>
+                ))}
+                {atRisk.length > 0 && (<>
+                  <div style={{ fontFamily:FONT, fontWeight:"600", fontSize:"13px", color:C.blue, paddingTop:"10px" }}>At risk · {riskPts.toLocaleString()} pts not taken off yet</div>
+                  {atRisk.map(d => (
+                    <div key={"ar" + d.hcp_job_id} style={{ display:"flex", justifyContent:"space-between", gap:"8px", padding:"10px 0", borderBottom:`1px solid ${C.border}40` }}>
+                      <div style={{ minWidth:0 }}>
+                        <div style={{ fontFamily:FONT, fontWeight:"600", fontSize:"14px", color:C.black }}>{d.name}</div>
+                        <div style={{ fontSize:"12px", color:C.muted, marginTop:"2px" }}>{FREQ_LABEL[d.freq]} · {money2(d.price)} · sold {fmtShortDate(d.done_on)} · {d.completed} of {d.needed} services · no visit booked since {fmtShortDate(d.missed_on)} · get them rebooked by {fmtShortDate(new Date(new Date(d.missed_on + "T12:00:00Z").getTime() + CHARGEBACK_GRACE_DAYS * 864e5).toISOString().slice(0, 10))}</div>
+                      </div>
+                      <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"14px", color:C.blue, whiteSpace:"nowrap" }}>{d.points.toLocaleString()} pts</div>
+                    </div>
+                  ))}
+                </>)}
+                <div style={{ fontSize:"12px", color:C.muted, paddingTop:"8px" }}>{m.gross.toLocaleString()} earned − {m.back.toLocaleString()} clawed back = <b style={{ color:C.black }}>{m.net.toLocaleString()} net points</b>. A plan that stops before its minimum services is at risk for {CHARGEBACK_GRACE_DAYS} days after the missed visit. If a visit gets booked in that time, nothing comes off; if not, the points come off in the month the {CHARGEBACK_GRACE_DAYS} days end.</div>
+              </div>
+            )}
+          </div>
+        )}
+        {canReview && s.data.evidence_failed && <div style={{ fontSize:"12px", color:C.muted }}>The "Needs a look" list didn't load this time (the database was slow). The bonus numbers above aren't affected.</div>}
+        {review && (review.mismatch.length + review.missed.length + review.untagged.length > 0) && (<>
+          <SalesDrop open={showReview} toggle={() => setShowReview(v => !v)} title={`Needs a look · ${review.mismatch.length + review.missed.length} to check${review.untagged.length ? ` · ${review.untagged.length} untagged` : ""}`} right="last 100 days"/>
+          {showReview && (<>
+          <div style={{ fontSize:"12px", color:C.muted }}>HCP can't tell us who booked a job, so credit comes from the "sold by" tag. These don't line up with who was on the calls and texts with the customer in GHL, or have no tag. Pick who sold it; your pick wins over the tag.</div>
+          {review.mismatch.map(e => reviewRow(e, <span style={{ color:C.red }}>Tagged Trevor, but {e.ghl_rep} was talking to them</span>))}
+          {review.missed.map(e => reviewRow(e, <span style={{ color:C.red }}>No "sold by" tag, but Trevor was talking to them</span>))}
+          {review.untagged.length > 0 && (
+            <button onClick={() => setShowUntagged(v => !v)} style={{ alignSelf:"flex-start", background:C.white, color:C.blue, border:`1px solid ${C.border}`, borderRadius:"980px", padding:"8px 14px", fontSize:"14px", fontWeight:"600", fontFamily:FONT, cursor:"pointer" }}>
+              {showUntagged ? "Hide" : "Show"} {review.untagged.length} new customer{review.untagged.length === 1 ? "" : "s"} with no "sold by" tag
+            </button>
+          )}
+          {showUntagged && review.untagged.map(e => reviewRow(e, e.ghl_rep ? `No "sold by" tag · ${e.ghl_rep} was talking to them` : `No "sold by" tag · ${(e.tags||[]).join(", ") || "no tags at all"}`))}
+          </>)}
+        </>)}
+        <SalesDrop open={showSales} toggle={() => setShowSales(v => !v)} title={`Sales completed in ${label.split(" ")[0]} · ${m.earned.length} sale${m.earned.length === 1 ? "" : "s"}`} right={`${m.gross.toLocaleString()} pts`}/>
+        {showSales && m.earned.length > 1 && (
+          <div style={{ display:"inline-flex", alignSelf:"flex-start", background:C.cardLt, borderRadius:"980px", padding:"3px" }}>
+            {[["recent","Most recent"],["points","Highest points"]].map(([k, l]) => (
+              <button key={k} onClick={() => setSalesSort(k)} style={{ background:salesSort === k ? C.white : "transparent", color:salesSort === k ? C.black : C.muted, border:"none", borderRadius:"980px", padding:"6px 14px", fontSize:"13px", fontWeight:"600", fontFamily:FONT, cursor:"pointer", boxShadow:salesSort === k ? "0 1px 3px rgba(0,0,0,0.12)" : "none" }}>{l}</button>
+            ))}
+          </div>
+        )}
+        {showSales && <RankRows rows={(salesSort === "points" ? [...m.earned].sort((a, b) => b.points - a.points) : m.earned).map(d => ({ id:d.hcp_job_id, name:d.name, value:`${d.points.toLocaleString()} pts`,
+          sub:<>{fmtShortDate(d.done_on)} · {money2(d.price)} · {freqText(d)}{d.returning ? " · returning" : ""} · {statusText(d)}{overrides[d.hcp_job_id] ? " · credited by an owner" : ""}</> }))} empty={`No sales completed in ${label} yet.`}/>}
+        <button onClick={() => setShowHow(v => !v)} style={{ alignSelf:"flex-start", background:"none", border:"none", padding:"2px 4px", color:C.blue, fontSize:"13px", fontWeight:"600", fontFamily:FONT, cursor:"pointer" }}>How points work {showHow ? "▲" : "▼"}</button>
+        {showHow && <div style={{ fontSize:"12px", color:C.muted, padding:"0 4px" }}>A sale is a completed HCP job tagged "sold by trevor", counted in the month it was completed. Points = first-visit price (no tips) × frequency from the points table; frequency comes from the job's plan tag, or else the client's scheduled visits over the next 6 months. A plan has to finish its first {Object.entries(CHARGEBACK_SERVICES).filter(([f,n])=>n>1).map(([f,n])=>`${n} ${FREQ_LABEL[f].toLowerCase()}`).join(", ")} services; if it stops sooner, it's at risk for {CHARGEBACK_GRACE_DAYS} days after the missed visit, then the points come off in the month those days end.</div>}
+        {s.loading && <div style={{ fontSize:"11px", color:C.muted }}>Refreshing...</div>}
+      </>)}
+    </div>
+  );
+}
+
 function SalesTab({ token, onlyRep=null }) {
   const [range, setRange] = useState(() => rangeFor("month"));
   const [rep, setRep] = useState(onlyRep || "trevor");
@@ -6348,6 +7020,8 @@ function SalesTab({ token, onlyRep=null }) {
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:"12px" }}>
       {!onlyRep && <SubTabs tabs={[["trevor","Trevor · Inbound"],["ethan","Ethan · Commercial"]]} active={rep} setActive={setRep}/>}
+      {rep === "trevor" && <SalesPointsBonus token={token} canReview={!onlyRep}/>}
+      {rep === "trevor" && <SectionTitle>Sales activity</SectionTitle>}
       <GrowthRange range={range} setRange={setRange}/>
       <ReportState s={s}/>
       {d && d.rep?.toLowerCase() === rep && (<>
@@ -6456,7 +7130,7 @@ function TrainingOverviewTab({ techs, currentUser, refreshAll }) {
       <div style={{ display:"flex", flexDirection:"column", gap:"12px" }}>
         <button onClick={() => { setOpenId(null); setTrainerSel(""); load(); }} style={{ alignSelf:"flex-start", background:"none", border:`1px solid ${C.border}`, color:C.blue, padding:"6px 14px", borderRadius:"16px", cursor:"pointer", fontFamily:FONT, fontWeight:"600", fontSize:"13px" }}>← All apprentices</button>
         <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"10px 14px", display:"flex", alignItems:"center", gap:"10px" }}>
-          <span style={{ ...small, whiteSpace:"nowrap" }}>CHECKING OFF AS</span>
+          <span style={{ ...small, whiteSpace:"nowrap" }}>Checking off as</span>
           <select value={trainerSel || trainerOf(open.t) || ""} onChange={e => setTrainerSel(e.target.value)} style={{ flex:1, background:C.cardLt, border:`1px solid ${C.border}`, color:C.black, padding:"8px 10px", borderRadius:"10px", fontSize:"14px" }}>
             <option value="">— No trainer —</option>
             {trainers.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
@@ -7182,7 +7856,7 @@ function DevelopmentTab({ techs, rideAlongs, refreshAll, showToast, currentUser 
           )}
           {certTechSel && certs.filter(c=>c.tech_id===certTechSel).length > 0 && (
             <div style={{ display:"flex", flexDirection:"column", gap:"8px" }}>
-              <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"13px", color:C.muted, letterSpacing:"-0.01em" }}>PAST ATTEMPTS</div>
+              <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"13px", color:C.muted, letterSpacing:"-0.01em" }}>Past attempts</div>
               {certs.filter(c=>c.tech_id===certTechSel).map(cert => (
                 <div key={cert.id} style={{ background:C.card, border:`1px solid ${cert.overall_result==="pass" ? C.green : C.red}60`, borderRadius:"12px", padding:"10px 14px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
                   <div>
@@ -7377,7 +8051,7 @@ function SplitJobsAdmin({ techs, pendingSplits, refreshAll, showToast }) {
     <div style={{ display:"flex", flexDirection:"column", gap:"16px" }}>
       <div style={{ background:C.cardLt, borderRadius:"10px", padding:"12px 16px", fontSize:"12px", color:C.muted, lineHeight:"1.6" }}>
         These jobs have <strong style={{color:C.black}}>multiple techs</strong> with no confirmed revenue split on record — they are currently
-        using <strong style={{color:"#ff9f0a"}}>equal split</strong> as a placeholder. Enter the correct percentages below,
+        using <strong style={{color:"#0077d4"}}>equal split</strong> as a placeholder. Enter the correct percentages below,
         hit <strong style={{color:C.black}}>Save Split</strong>, then re-run <strong style={{color:C.black}}>Repair Upsells</strong> for that date to apply.
       </div>
       {splitJobs.filter(sj => !dismissedJobIds.has(sj.jobId)).length === 0 ? (
@@ -7423,7 +8097,7 @@ function SplitJobsAdmin({ techs, pendingSplits, refreshAll, showToast }) {
             })}
             {sj.totalUpsells > 0 && (
               <div style={{ borderTop:`1px solid ${C.border}`, paddingTop:"12px", display:"flex", flexDirection:"column", gap:"8px" }}>
-                <div style={{ fontSize:"11px", color:"#ff9f0a", fontWeight:"700", letterSpacing:"-0.01em", fontFamily:FONT, textTransform:"none" }}>
+                <div style={{ fontSize:"11px", color:"#0077d4", fontWeight:"700", letterSpacing:"-0.01em", fontFamily:FONT, textTransform:"none" }}>
                   Upsell Credit — ${(+sj.totalUpsells).toFixed(2)} total
                 </div>
                 <select
@@ -7438,7 +8112,7 @@ function SplitJobsAdmin({ techs, pendingSplits, refreshAll, showToast }) {
                   })}
                 </select>
                 {!upsellAttrib[sj.jobId] && (
-                  <div style={{ fontSize:"11px", color:"#ff9f0a" }}>⚠ Not set — will split by revenue % until confirmed</div>
+                  <div style={{ fontSize:"11px", color:"#0077d4" }}>⚠ Not set — will split by revenue % until confirmed</div>
                 )}
               </div>
             )}
@@ -7453,7 +8127,7 @@ function SplitJobsAdmin({ techs, pendingSplits, refreshAll, showToast }) {
                   <button
                     onClick={() => saveSplit(sj)}
                     disabled={rowDisabled}
-                    style={{ background: rowDisabled ? "#333" : "#ff9f0a", border:"none", color: rowDisabled ? "#666" : C.black, padding:"8px 20px", borderRadius:"12px", cursor: rowDisabled ? "not-allowed" : "pointer", fontFamily:FONT, fontWeight:"700", fontSize:"12px", letterSpacing:"-0.01em", textTransform:"none" }}
+                    style={{ background: rowDisabled ? "#333" : "#0077d4", border:"none", color: rowDisabled ? "#666" : C.black, padding:"8px 20px", borderRadius:"12px", cursor: rowDisabled ? "not-allowed" : "pointer", fontFamily:FONT, fontWeight:"700", fontSize:"12px", letterSpacing:"-0.01em", textTransform:"none" }}
                   >{rowSaving ? "Applying..." : "Save & Apply"}</button>
                 );
               })()}
@@ -7675,7 +8349,7 @@ function DriverDetail({ driver, bare=false }) {
         <div key={d.date} style={box}>
           <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:"8px" }}>
             <div style={{ fontSize:"13px", color:C.black, fontWeight:"700" }}>{fmtShortDate(d.date)} · {d.vehicles.join(" + ") || "—"} · {Math.round(d.miles)} mi</div>
-            {d.score==null ? <span style={{ fontSize:"12px", color:C.muted }}>no score</span> : <Pill color={d.pass?C.green:C.red}>{fmtScore(d.score)} {d.pass?"PASS":"FAIL"}</Pill>}
+            {d.score==null ? <span style={{ fontSize:"12px", color:C.muted }}>no score</span> : <Pill color={d.pass?C.green:C.red}>{fmtScore(d.score)} {d.pass?"Pass":"Fail"}</Pill>}
           </div>
           {d.reason && <div style={{ fontSize:"12px", color:C.muted, marginTop:"3px" }}>{d.reason}</div>}
           {d.score!=null && d.penalties.length===0 && <div style={{ fontSize:"12px", color:C.green, marginTop:"3px" }}>Clean day — no driving events</div>}
@@ -7706,7 +8380,7 @@ function AuditTechDetail({ week, only="both", bare=false }) {
         <div key={t.id} style={box}>
           <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:"8px" }}>
             <div style={{ fontSize:"13px", color:C.black, fontWeight:"700" }}>{fmtShortDate(t.work_date)}{t.checkedBy ? ` · checked by ${t.checkedBy}` : ""}</div>
-            <Pill color={t.pass?C.green:C.red}>{fmtPct(t.score)} {t.pass?"PASS":"FAIL"}</Pill>
+            <Pill color={t.pass?C.green:C.red}>{fmtPct(t.score)} {t.pass?"Pass":"Fail"}</Pill>
           </div>
           {t.missing.length===0
             ? <div style={{ fontSize:"12px", color:C.green, marginTop:"4px" }}>Nothing missing</div>
@@ -7728,7 +8402,7 @@ function AuditTechDetail({ week, only="both", bare=false }) {
       {week.days.map(d => (
         <div key={d.date} style={box}>
           <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-            <div style={{ fontSize:"13px", color:C.black, fontWeight:"700" }}>{fmtShortDate(d.date)} {d.audit.test && <Pill color={C.purple}>TEST</Pill>}</div>
+            <div style={{ fontSize:"13px", color:C.black, fontWeight:"700" }}>{fmtShortDate(d.date)} {d.audit.test && <Pill color={C.purple}>Test</Pill>}</div>
             <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"16px", color:scoreColor(d.pct??0) }}>Day {fmtPct(d.pct)}</div>
           </div>
           <div style={{ fontSize:"12px", color:C.muted, marginTop:"2px" }}>{d.audit.lead ? `Tech lead: ${d.audit.lead}` : ""}{d.replaced ? `${d.audit.lead ? " · " : ""}latest of ${d.replaced+1} submissions for this day` : ""}</div>
@@ -7753,6 +8427,10 @@ function AuditTechDetail({ week, only="both", bare=false }) {
 
 // ─── Overall Tech Score (techScores.js) ──────────────────────────────────────
 const SCORE_SECTIONS = TECH_SCORE_CONFIG.sections;
+// What the cards show: Callbacks and Damage as separate pills (both count in
+// the one 25% Callbacks & Damage section).
+const SCORE_PILLS = TECH_SCORE_CONFIG.pills;
+const DAMAGE_COLOR = "#ff9500";
 const fmtMoney0 = n => `$${Math.round(n||0).toLocaleString()}`;
 const scoreWindowLabel = (from, to) => `Last ${TECH_SCORE_CONFIG.windowWeeks} weeks · ${fmtShortDate(from)} – ${fmtShortDate(to)}`;
 const sectionColor = v => v==null ? C.muted : v>=TECH_SCORE_CONFIG.passLine ? C.green : C.red;
@@ -7764,11 +8442,11 @@ const TRUCK_STATUS = {
   pending:    { label:"Today — not in yet",                  color:C.muted },
 };
 
-// The five section scores, labeled.
+// The section scores, labeled (Callbacks and Damage as their own pills).
 function SectionChips({ sections, align="flex-end" }) {
   return (
     <div style={{ display:"flex", flexWrap:"wrap", gap:"4px", justifyContent:align }}>
-      {SCORE_SECTIONS.map(s => { const v = sections[s.key]; return (
+      {SCORE_PILLS.map(s => { const v = sections[s.key]; return (
         <span key={s.key} style={{ fontSize:"12px", color:C.black, background:C.cardLt, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"2px 8px", whiteSpace:"nowrap" }}>
           {s.label} <strong style={{ color:sectionColor(v) }}>{fmtScore(v)}</strong>
         </span>
@@ -7806,13 +8484,13 @@ function ScoreBreakdown({ card }) {
         ))}
       </div>
       <div style={box}>
-        {head("quality", `Starts at 100. Each callback takes off Level 1 −${ded[1]}, Level 2 −${ded[2]}, Level 3 −${ded[3]} (times the tech's share of a split job).`)}
-        {quality.score==null ? <div style={muted}>No jobs or callbacks — left out.</div>
-          : quality.items.length===0 ? <div style={{ ...muted, color:C.green }}>No callbacks</div>
+        {head("quality", `Starts at 100. Each callback or damage report takes off Level 1 −${ded[1]}, Level 2 −${ded[2]}, Level 3 −${ded[3]} (times the tech's share of a split job). Damage counts exactly like a callback.`)}
+        {quality.score==null ? <div style={muted}>No jobs, callbacks or damage — left out.</div>
+          : quality.items.length===0 ? <div style={{ ...muted, color:C.green }}>No callbacks or damage</div>
           : quality.items.map((c,i) => (
             <div key={c.id || i} style={line}>
-              <span>{c.date ? fmtShortDate(c.date) : "—"}{c.customer ? ` · ${c.customer}` : ""} · Level {c.level}{c.legacy ? " (no level logged)" : ""}{c.share!==1 ? ` · ${Math.round(c.share*100)}% share` : ""}</span>
-              <span style={{ color:C.red, fontWeight:"700", whiteSpace:"nowrap" }}>−{Math.round(c.deduction*10)/10}</span>
+              <span><strong style={{ color:c.kind==="damage" ? DAMAGE_COLOR : C.red }}>{c.kind==="damage" ? "💥 Damage" : "📞 Callback"}</strong> · {c.date ? fmtShortDate(c.date) : "—"}{c.customer ? ` · ${c.customer}` : ""} · Level {c.level}{c.legacy ? " (no level logged)" : ""}{c.share!==1 ? ` · ${Math.round(c.share*100)}% share` : ""}</span>
+              <span style={{ color:c.kind==="damage" ? DAMAGE_COLOR : C.red, fontWeight:"700", whiteSpace:"nowrap" }}>−{Math.round(c.deduction*10)/10}</span>
             </div>
           ))}
       </div>
@@ -7869,7 +8547,7 @@ const passColor = (score, pass) => score==null ? C.muted : pass ? C.green : C.re
 
 // hideTabs: the admin menu opens each section as its own page (Tech Scores >
 // Overview / Tote Checks / Audit Scores / Driving Scores), so no section bar.
-function AuditScoresTab({ techs, token, techId=null, canSync=false, view="overview", hideTabs=false, jobs=[], callbacks=[], reviews=[], switchovers=[], quota=null }) {
+function AuditScoresTab({ techs, token, techId=null, canSync=false, view="overview", hideTabs=false, jobs=[], callbacks=[], damage=[], reviews=[], switchovers=[], quota=null }) {
   const [section, setSection] = useState(view==="both" ? "overview" : view);
   const [wk, setWk] = useState(auditDefaultWeek());
   const [state, setState] = useState({ loading:true, error:null, data:null });
@@ -7944,7 +8622,7 @@ function AuditScoresTab({ techs, token, techId=null, canSync=false, view="overvi
   const driveWeek = d0 ? { ...d0, assignments:d0.assignments.filter(r=>inWeek(r.work_date)), daily:d0.daily.filter(r=>inWeek(r.work_date)), events:d0.events.filter(r=>inWeek(r.work_date)), unassigned:d0.unassigned.filter(r=>inWeek(r.work_date)) } : null;
   const today = mtDateStr(Date.now());
   const cardFor = id => techWeekCard(byTechWeek[id] || [], driveWeek, id);
-  const fullCardFor = t => techScoreCard({ techId:t.id, tech:t, subs:byTech[t.id] || [], driverData:d0, jobs, callbacks, reviews, switchovers, quota,
+  const fullCardFor = t => techScoreCard({ techId:t.id, tech:t, subs:byTech[t.id] || [], driverData:d0, jobs, callbacks, damage, reviews, switchovers, quota,
     truckGrades:state.data?.truck_grades || [], from:win.from, to:end, today });
   const unmatched = [...new Set((section==="overview" ? subs : weekSubs).filter(s => !s.tech_id && (section==="overview" ? !!formKind(s.form_id) : formKind(s.form_id)===section)).map(s => s.tech_name || "(no Tech answer)"))].sort();
   // Answers and question ids on the Tech Audit form that AUDIT_CONFIG can't map.
@@ -7952,7 +8630,7 @@ function AuditScoresTab({ techs, token, techId=null, canSync=false, view="overvi
   const unmappedAnswers = [...new Set(auditScored.flatMap(a => a.unmapped))].sort();
   const unmappedIds = [...new Set(auditScored.flatMap(a => a.unmappedFieldIds))].sort();
   const last = state.data?.last_run;
-  const arrow = { background:C.white, border:`1px solid ${C.border}`, borderRadius:"10px", padding:"6px 12px", cursor:"pointer", fontSize:"14px", color:C.black };
+  const arrow = { background:C.white, border:`1px solid ${C.border}`, borderRadius:"50%", width:"36px", height:"36px", padding:0, display:"flex", alignItems:"center", justifyContent:"center", cursor:"pointer", fontSize:"13px", color:C.blue };
   const thisWeek = auditThisWeek();
   const driveNote = drive.error ? `Driving scores unavailable: ${drive.error}` : section==="overview" ? (d0 && !d0.daily.length ? "No Ford Pro data for these weeks yet, so Driving is left out of the overall score." : null) : driveWeek && !driveWeek.daily.length ? "No Ford Pro data for this week yet — an admin uploads Ford's daily reports on the Trucks tab." : null;
   const big = (text, color, size=20) => <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:`${size}px`, color, lineHeight:1, textAlign:"right" }}>{text}</div>;
@@ -7989,7 +8667,7 @@ function AuditScoresTab({ techs, token, techId=null, canSync=false, view="overvi
           <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"16px", color:C.black }}>{title} {onToggle && <span style={{ fontSize:"12px", color:C.muted }}>{isOpen?"▲":"▼"}</span>}</div>
           <div style={{ marginTop:"4px" }}>{sectionLine(t)}</div>
         </div>
-        <div>{big(t.score==null ? "—" : `${fmtScore(t.score)}`, passColor(t.score, t.pass), 24)}{small(t.score==null ? "no scores yet" : `${t.pass?"PASS":"FAIL"} · ${t.scored} of ${t.members} scored`)}</div>
+        <div>{big(t.score==null ? "—" : `${fmtScore(t.score)}`, passColor(t.score, t.pass), 24)}{small(t.score==null ? "no scores yet" : `${t.pass?"Pass":"Fail"} · ${t.scored} of ${t.members} scored`)}</div>
       </div>
       {isOpen && children && <div style={{ marginTop:"10px" }}>{children}</div>}
     </div>
@@ -7999,6 +8677,9 @@ function AuditScoresTab({ techs, token, techId=null, canSync=false, view="overvi
   if (techId) {
     const me = cardFor(techId);
     const meTech = techs.find(t => t.id===techId) || { id:techId };
+    // Team leads also see each of their members' days (audit-scores sends
+    // a lead their team's forms too).
+    const myTeam = meTech.is_lead ? techs.filter(t => t.team_lead_id===techId && t.is_active!==false && !hiddenFromAudits(t)).sort((a,b) => a.name.localeCompare(b.name)) : [];
     const full = section==="overview" ? fullCardFor(meTech) : null;
     const team = teamState.data;
     return (
@@ -8008,10 +8689,12 @@ function AuditScoresTab({ techs, token, techId=null, canSync=false, view="overvi
           {section==="overview" && (<>
             <div style={{ fontSize:"13px", color:C.muted, marginBottom:"12px", lineHeight:"1.5" }}>{SCORE_INTRO} Display only — not tied to pay.</div>
             <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(140px, 1fr))", gap:"8px", marginBottom:"12px" }}>
-              <StatBlock label="My Overall Score" value={fmtScore(full.overall.score)} color={passColor(full.overall.score, full.overall.pass)} sub={full.overall.score==null ? "no scores yet" : `${full.overall.pass?"PASS":"FAIL"} · pass ${TECH_SCORE_CONFIG.passLine}`}/>
-              {SCORE_SECTIONS.map(s => {
+              <StatBlock label="My Overall Score" value={fmtScore(full.overall.score)} color={passColor(full.overall.score, full.overall.pass)} sub={full.overall.score==null ? "no scores yet" : `${full.overall.pass?"Pass":"Fail"} · pass ${TECH_SCORE_CONFIG.passLine}`}/>
+              {SCORE_PILLS.map(s => {
                 const v = full.sections[s.key];
-                return <StatBlock key={s.key} label={`${s.icon} ${s.label}`} value={fmtScore(v)} color={sectionColor(v)} sub={v==null ? "no data — left out" : `${s.weight}% of overall`}/>;
+                const shared = s.key==="callbacks" || s.key==="damage";
+                const w = SCORE_SECTIONS.find(x => x.key===(shared ? "quality" : s.key))?.weight;
+                return <StatBlock key={s.key} label={`${s.icon} ${s.label}`} value={fmtScore(v)} color={sectionColor(v)} sub={v==null ? "no data — left out" : shared ? `${w}% of overall, shared` : `${w}% of overall`}/>;
               })}
             </div>
             <SectionTitle>🔍 What my score is made of</SectionTitle>
@@ -8030,6 +8713,27 @@ function AuditScoresTab({ techs, token, techId=null, canSync=false, view="overvi
           </>)}
           {section==="tote" && <AuditTechDetail week={me.week} only="tote"/>}
           {section==="audit" && <AuditTechDetail week={me.week} only="audit"/>}
+          {(section==="audit" || section==="tote") && myTeam.length>0 && (<>
+            <div style={{ marginTop:"18px" }}><SectionTitle>👥 My Team</SectionTitle></div>
+            <div style={{ fontSize:"12px", color:C.muted, marginTop:"2px", marginBottom:"8px" }}>Tap a teammate to see each day and what they missed — go over it together this week.</div>
+            {myTeam.map(t => {
+              const w = cardFor(t.id).week, key = `team:${t.id}`, isOpen = open===key;
+              const has = section==="audit" ? w.days.length>0 : !!(w.latestTote || w.excluded.length);
+              const lt = w.latestTote;
+              const summary = section==="audit"
+                ? (has ? <>{big(fmtPct(w.auditPct), scoreColor(w.auditPct??0))}{small(`${w.days.length} day${w.days.length!==1?"s":""} audited`)}</> : big("No audits", C.muted))
+                : (lt ? <>{big(`${fmtPct(lt.score)} ${lt.pass?"Pass":"Fail"}`, lt.pass?C.green:C.red)}{small(lt.missingCents ? `${fmtCents(lt.missingCents)} missing` : "Nothing missing")}</> : big("No check", C.muted));
+              return (
+                <div key={key} style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"12px 14px", marginBottom:"8px", opacity:has?1:0.6 }}>
+                  <div onClick={() => has && setOpen(isOpen?null:key)} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:"10px", cursor:has?"pointer":"default" }}>
+                    <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"17px", color:C.black }}>{t.name} {has && <span style={{ fontSize:"12px", color:C.muted }}>{isOpen?"▲":"▼"}</span>}</div>
+                    <div>{summary}</div>
+                  </div>
+                  {isOpen && <div style={{ marginTop:"8px" }}><AuditTechDetail week={w} only={section}/></div>}
+                </div>
+              );
+            })}
+          </>)}
           {section==="driver" && (<>
             {driveNote && <div style={{ fontSize:"12px", color:C.muted, marginBottom:"8px" }}>{driveNote}</div>}
             {me.driver && <DriverDetail driver={me.driver}/>}
@@ -8044,8 +8748,8 @@ function AuditScoresTab({ techs, token, techId=null, canSync=false, view="overvi
   // Overview: every active non-owner tech's overall score for the window.
   // Section pages: the picked week (plus archived techs who had a check).
   const cards = overview
-    ? techs.filter(t => t.is_active!==false && t.title!=="owner").map(t => ({ tech:t, ...fullCardFor(t) }))
-    : techs.filter(t => (t.is_active!==false && t.title!=="owner") || byTechWeek[t.id]).map(t => ({ tech:t, ...cardFor(t.id) }));
+    ? techs.filter(t => t.is_active!==false && t.title!=="owner" && !hiddenFromAudits(t)).map(t => ({ tech:t, ...fullCardFor(t) }))
+    : techs.filter(t => ((t.is_active!==false && t.title!=="owner") || byTechWeek[t.id]) && !hiddenFromAudits(t)).map(t => ({ tech:t, ...cardFor(t.id) }));
   const teams = overview ? teamSummary(cards, techs) : null;
   const dd = overview ? d0 : driveWeek;
   const unassignedCount = dd ? findUnassignedDriving(dd).filter(f => !dd.unassigned.some(u => u.vin===f.vin && u.work_date===f.work_date && (u.assigned_tech_id || u.dismissed))).length : 0;
@@ -8064,15 +8768,15 @@ function AuditScoresTab({ techs, token, techId=null, canSync=false, view="overvi
         let summary;
         if (section==="overview") summary = overall.score==null
           ? big("No scores", C.muted)
-          : <>{big(fmtScore(overall.score), passColor(overall.score, overall.pass), 28)}{small(`${overall.pass?"PASS":"FAIL"} · ${overall.sectionsScored} of ${SCORE_SECTIONS.length} sections`)}</>;
+          : <>{big(fmtScore(overall.score), passColor(overall.score, overall.pass), 28)}{small(`${overall.pass?"Pass":"Fail"} · ${overall.sectionsScored} of ${SCORE_SECTIONS.length} sections`)}</>;
         else if (section==="tote") summary = t
-          ? <>{big(`${fmtPct(t.score)} ${t.pass?"PASS":"FAIL"}`, t.pass?C.green:C.red)}{small(t.missingCents ? `${fmtCents(t.missingCents)} missing · ${fmtShortDate(t.work_date)}` : `Nothing missing · ${fmtShortDate(t.work_date)}`)}</>
+          ? <>{big(`${fmtPct(t.score)} ${t.pass?"Pass":"Fail"}`, t.pass?C.green:C.red)}{small(t.missingCents ? `${fmtCents(t.missingCents)} missing · ${fmtShortDate(t.work_date)}` : `Nothing missing · ${fmtShortDate(t.work_date)}`)}</>
           : <>{big("No check", C.muted)}{week.excluded.length>0 && small(`${week.excluded.length} not counted (wrong checker)`)}</>;
         else if (section==="audit") summary = week.days.length
           ? <>{big(fmtPct(week.auditPct), scoreColor(week.auditPct??0))}{small(`${week.days.length} day${week.days.length!==1?"s":""} audited`)}</>
           : big("No audits", C.muted);
         else summary = driver?.score!=null
-          ? <>{big(`${fmtScore(driver.score)} ${driver.pass?"PASS":"FAIL"}`, passColor(driver.score, driver.pass))}{small(`${driver.scoredDays} day${driver.scoredDays!==1?"s":""} · ${Math.round(driver.days.reduce((s,d)=>s+d.miles,0))} mi`)}</>
+          ? <>{big(`${fmtScore(driver.score)} ${driver.pass?"Pass":"Fail"}`, passColor(driver.score, driver.pass))}{small(`${driver.scoredDays} day${driver.scoredDays!==1?"s":""} · ${Math.round(driver.days.reduce((s,d)=>s+d.miles,0))} mi`)}</>
           : big(driver?.days.length ? "No score" : "No driving", C.muted);
         return (
           <div key={key} style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"12px 14px", marginBottom:"8px", opacity:canOpen?1:0.6 }}>
@@ -8094,7 +8798,7 @@ function AuditScoresTab({ techs, token, techId=null, canSync=false, view="overvi
     for (const c of cards) {
       if (section==="tote") {
         for (const t of c.week.totes) out.push({ key:`t:${t.id}`, tech:c.tech, date:t.work_date, sub:t.checkedBy ? `checked by ${t.checkedBy}` : "",
-          summary:<>{big(`${fmtPct(t.score)} ${t.pass?"PASS":"FAIL"}`, t.pass?C.green:C.red, 18)}{small(t.missingCents ? `${fmtCents(t.missingCents)} missing` : "Nothing missing")}</>,
+          summary:<>{big(`${fmtPct(t.score)} ${t.pass?"Pass":"Fail"}`, t.pass?C.green:C.red, 18)}{small(t.missingCents ? `${fmtCents(t.missingCents)} missing` : "Nothing missing")}</>,
           detail:<AuditTechDetail bare only="tote" week={{ totes:[t], excluded:[], days:[] }}/> });
         for (const t of c.week.excluded) out.push({ key:`x:${t.id}`, tech:c.tech, date:t.work_date, sub:"not counted",
           summary:big("Not counted", C.gold, 16), detail:<AuditTechDetail bare only="tote" week={{ totes:[], excluded:[t], days:[] }}/> });
@@ -8104,7 +8808,7 @@ function AuditScoresTab({ techs, token, techId=null, canSync=false, view="overvi
           detail:<AuditTechDetail bare only="audit" week={{ totes:[], excluded:[], days:[d] }}/> });
       } else if (c.driver) {
         for (const d of c.driver.days) out.push({ key:`d:${c.tech.id}:${d.date}`, tech:c.tech, date:d.date, sub:`${d.vehicles.join(" + ") || "—"} · ${Math.round(d.miles)} mi`,
-          summary:d.score==null ? big("No score", C.muted, 16) : big(`${fmtScore(d.score)} ${d.pass?"PASS":"FAIL"}`, passColor(d.score, d.pass), 18),
+          summary:d.score==null ? big("No score", C.muted, 16) : big(`${fmtScore(d.score)} ${d.pass?"Pass":"Fail"}`, passColor(d.score, d.pass), 18),
           detail:<DriverDetail bare driver={{ days:[d] }}/> });
       }
     }
@@ -8119,7 +8823,7 @@ function AuditScoresTab({ techs, token, techId=null, canSync=false, view="overvi
       {(section==="tote" || section==="audit") && (
         <div style={{ background:C.cardLt, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"10px 12px", marginBottom:"12px", fontSize:"12px", color:C.black }}>
           {last ? <>Last GHL form sync: {new Date(last.finished_at || last.updated_at).toLocaleString("en-US", { month:"short", day:"numeric", hour:"numeric", minute:"2-digit", timeZone:"America/Denver" })}{last.errors?.length ? <span style={{ color:C.red }}> · {last.errors.join("; ")}</span> : ""}{last.labels?.source==="raw_keys" ? <div style={{ color:C.gold, marginTop:"4px" }}>⚠ Couldn't read the form's question labels from GHL ({last.labels.error}). The token may need the locations/customFields.readonly scope.</div> : null}</> : "Not synced yet."}
-          {canSync && <div><button onClick={syncNow} disabled={syncing} style={{ marginTop:"8px", background:C.green, color:C.white, border:"none", padding:"6px 14px", borderRadius:"18px", fontSize:"12px", fontWeight:"700", cursor:"pointer", fontFamily:FONT, letterSpacing:"-0.01em", textTransform:"none" }}>{syncing ? "Syncing..." : "Sync now"}</button></div>}
+          {canSync && <div><button onClick={syncNow} disabled={syncing} style={{ marginTop:"8px", background:C.blue, color:C.white, border:"none", padding:"6px 14px", borderRadius:"18px", fontSize:"12px", fontWeight:"700", cursor:"pointer", fontFamily:FONT, letterSpacing:"-0.01em", textTransform:"none" }}>{syncing ? "Syncing..." : "Sync now"}</button></div>}
           {syncMsg && <div style={{ marginTop:"6px" }}>{syncMsg}</div>}
         </div>
       )}
@@ -8245,7 +8949,7 @@ function TruckInspectionsTab({ techs, jobs=[], token, canGrade=false, showToast=
   const unmatched = [...new Set(subs.filter(s => !s.tech_id).map(s => s.tech_name || "(no name)"))].sort();
   const rows = techs.filter(t => t.is_active!==false && t.title!=="owner" && !isTruckExempt(t)).sort(byFirstName)
     .map(t => ({ tech:t, ...truckScore({ techId:t.id, tech:t, jobs, truckSubs:subs.filter(s => s.tech_id===t.id), grades, from:wk, to:end, today }) }));
-  const arrow = { background:C.white, border:`1px solid ${C.border}`, borderRadius:"10px", padding:"6px 12px", cursor:"pointer", fontSize:"14px", color:C.black };
+  const arrow = { background:C.white, border:`1px solid ${C.border}`, borderRadius:"50%", width:"36px", height:"36px", padding:0, display:"flex", alignItems:"center", justifyContent:"center", cursor:"pointer", fontSize:"13px", color:C.blue };
   const inp = { background:C.white, border:`1px solid ${C.border}`, color:C.black, padding:"8px 10px", borderRadius:"10px", fontSize:"15px", boxSizing:"border-box" };
 
   async function saveGrade(sub) {
@@ -8302,7 +9006,7 @@ function TruckInspectionsTab({ techs, jobs=[], token, canGrade=false, showToast=
         <button style={{ ...arrow, opacity:wk>=thisWeek?0.4:1 }} disabled={wk>=thisWeek} onClick={() => { setWk(shiftWeek(wk,1)); setOpen(null); }}>▶</button>
       </div>
       <div style={{ fontSize:"13px", color:C.muted, marginBottom:"12px", lineHeight:"1.5" }}>
-        Nightly Truck Checks (GHL form) for every night a tech worked (a job with revenue). Graded = the grade; submitted but not graded yet counts {TECH_SCORE_CONFIG.truck.notGradedScore} for now; worked with no Truck Check counts 0. Apprentices in training aren't listed. Part of the Equipment &amp; Truck section of the Tech Score. Weeks run Wednesday–Tuesday. Display only — not tied to pay.
+        Nightly Truck Checks (GHL form) for every night a tech worked (a job with revenue). Graded = the grade; submitted but not graded yet counts {TECH_SCORE_CONFIG.truck.notGradedScore} for now; worked with no Truck Check counts 0. Nights before {fmtShortDate(TECH_SCORE_CONFIG.truck.startDate)} (when Truck Checks started) don't count. Apprentices in training aren't listed. Part of the Equipment &amp; Truck section of the Tech Score. Weeks run Wednesday–Tuesday. Display only — not tied to pay.
       </div>
       {state.error && <div style={{ background:`${C.red}10`, border:`1px solid ${C.red}`, borderRadius:"12px", padding:"12px", fontSize:"13px", color:C.red, marginBottom:"10px" }}>Couldn't load: {state.error}</div>}
       {state.loading && !state.data && <div style={{ color:C.muted, padding:"16px" }}>Loading...</div>}
@@ -8578,7 +9282,7 @@ function TrucksAdminTab({ techs, vehicles, timeEntries=[], token, refreshAll, sh
         ))}
         {assignedRows.length>0 && (
           <div style={{ marginTop:"10px" }}>
-            <div style={{ fontSize:"11px", color:C.muted, fontWeight:"700", letterSpacing:"-0.01em" }}>ASSIGNED</div>
+            <div style={{ fontSize:"11px", color:C.muted, fontWeight:"700", letterSpacing:"-0.01em" }}>Assigned</div>
             {assignedRows.map(r => (
               <div key={r.vin+r.work_date} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:"8px", fontSize:"12px", color:C.black, padding:"4px 0" }}>
                 <span>{vehicles.find(v=>v.vin===r.vin)?.name || r.vin} · {fmtShortDate(r.work_date)} → {techName(r.assigned_tech_id)}{r.assigned_by ? ` (by ${r.assigned_by})` : ""}</span>
@@ -8624,7 +9328,290 @@ function TrucksAdminTab({ techs, vehicles, timeEntries=[], token, refreshAll, sh
 // Used by the admin panel and by Trevor's login (CALLBACK_ENTRY_TECHS) --
 // he's the one who enters callbacks as they come in.
 const CALLBACK_ENTRY_TECHS = new Set(["4641f4da-a16f-411b-8688-8b81ac06eda7"]);   // Trevor Prince
-function CallbacksPanel({ techs, jobs, callbacks, refreshAll, showToast }) {
+// Callbacks page: two tabs Trevor flips between -- Callbacks (red, unchanged)
+// and Damage (orange). Damage scores exactly like a callback of the same
+// level, but is logged and reported separately.
+function CallbacksPanel({ techs, jobs, callbacks, damage=[], refreshAll, showToast }) {
+  const [view, setView] = useState("callbacks");
+  const tabBtn = (id, label, color) => (
+    <button onClick={() => setView(id)} style={{ flex:1, background:view===id ? color : C.white, color:view===id ? C.white : C.black, border:`1px solid ${view===id ? color : C.border}`, padding:"10px 14px", borderRadius:"12px", cursor:"pointer", fontFamily:FONT, fontWeight:"700", fontSize:"14px" }}>{label}</button>
+  );
+  return (
+    <div style={{ display:"flex", flexDirection:"column", gap:"14px" }}>
+      <div style={{ display:"flex", gap:"8px" }}>
+        {tabBtn("callbacks", "📞 Callbacks", "#ff3b30")}
+        {tabBtn("damage", "💥 Damage", DAMAGE_COLOR)}
+      </div>
+      {view==="callbacks"
+        ? <CallbackLogPanel techs={techs} jobs={jobs} callbacks={callbacks} refreshAll={refreshAll} showToast={showToast}/>
+        : <DamagePanel techs={techs} jobs={jobs} damage={damage} refreshAll={refreshAll} showToast={showToast}/>}
+    </div>
+  );
+}
+
+// Damage levels: same points as callback levels.
+const DAMAGE_SEVERITY = {
+  1: { pts:100, label:"Level 1", desc:"Minor — cosmetic, fixed on the spot, no cost (a scuff buffed out)" },
+  2: { pts:200, label:"Level 2", desc:"Moderate — needs a repair or a reimbursement" },
+  3: { pts:300, label:"Level 3", desc:"Major — expensive repair, insurance claim, or broken property" },
+};
+const DAMAGE_AREAS = [
+  { area:"Vehicle", items:[
+    { id:"veh_paint",    label:"Paint / clear coat", hint:"scratches, swirls, burns, chemical etching" },
+    { id:"veh_interior", label:"Interior surfaces", hint:"leather, plastic, screens, headliner, carpet" },
+    { id:"veh_glass",    label:"Glass, mirrors & lights", hint:"" },
+    { id:"veh_trim",     label:"Trim, emblems & badges", hint:"" },
+    { id:"veh_wheels",   label:"Wheels & tires", hint:"" },
+    { id:"veh_electric", label:"Electronics & buttons", hint:"water in electronics, broken controls" },
+  ]},
+  { area:"Property", items:[
+    { id:"prop_garage",  label:"Garage, driveway & floors", hint:"stains, chemical spills, scratches" },
+    { id:"prop_home",    label:"Home exterior", hint:"siding, doors, landscaping" },
+    { id:"prop_items",   label:"Personal belongings", hint:"items in or around the vehicle" },
+    { id:"prop_other",   label:"Other", hint:"" },
+  ]},
+];
+const DAMAGE_ITEM_LABEL = Object.fromEntries(DAMAGE_AREAS.flatMap(a=>a.items.map(i=>[i.id, `${a.area}: ${i.label}`])));
+
+function DamagePanel({ techs, jobs, damage, refreshAll, showToast }) {
+  const EMPTY = { techId:"", jobId:"", lookback:14, jobDate:"", customer:"", jobNumber:"", splitTechId:"", items:[], severity:0, cost:"", reason:"" };
+  const [form, setForm] = useState(EMPTY);
+  const [preset, setPreset] = useState("mtd");
+  const [cStart, setCStart] = useState("");
+  const [cEnd, setCEnd] = useState("");
+  const [saving, setSaving] = useState(false);
+  const OR = DAMAGE_COLOR;
+  const inp={ background:C.white, border:`1px solid ${C.border}`, color:C.black, padding:"10px 14px", borderRadius:"10px", fontSize:"14px", fontFamily:FONT, width:"100%", boxSizing:"border-box" };
+  const sel=(val)=>({...inp, color:val?C.black:C.muted});
+  const btn={ background:saving?C.border:OR, border:"none", color:C.white, padding:"13px", borderRadius:"24px", cursor:saving?"not-allowed":"pointer", fontSize:"13px", fontWeight:"700", fontFamily:FONT, width:"100%" };
+  const dmgPoints = d => callbackPoints(d);
+  function recentJobsFor(techId, days) {
+    if (!techId) return [];
+    const since = new Date(); since.setDate(since.getDate()-days);
+    const sinceStr = since.toLocaleDateString("en-CA",{timeZone:"America/Denver"});
+    const seen = new Set();
+    return (jobs||[]).filter(j=>j.tech_id===techId && j.job_date>=sinceStr && (j.revenue||0)>0 && !seen.has(j.hcp_job_id) && seen.add(j.hcp_job_id))
+      .sort((x,y)=>y.job_date.localeCompare(x.job_date));
+  }
+  const techsOnJob = id => [...new Set((jobs||[]).filter(j=>j.hcp_job_id===id).map(j=>j.tech_id))];
+  async function logDamage() {
+    const f = form;
+    if (!f.techId) return showToast("Select a tech",false);
+    const picked = f.jobId && f.jobId!=="manual" ? (jobs||[]).find(j=>j.hcp_job_id===f.jobId && j.tech_id===f.techId) : null;
+    if (!picked && f.jobId!=="manual") return showToast("Pick the job (or choose 'Job not listed')",false);
+    const jobDate = picked ? picked.job_date : f.jobDate;
+    if (!jobDate) return showToast("Enter the date of the job",false);
+    if (!f.items.length) return showToast("Pick what was damaged",false);
+    if (!f.severity) return showToast("Pick the level",false);
+    const techIds = picked ? techsOnJob(picked.hcp_job_id) : [f.techId, ...(f.splitTechId && f.splitTechId!==f.techId ? [f.splitTechId] : [])];
+    const weight = Math.round(1/techIds.length*10000)/10000;
+    const group_id = crypto.randomUUID();
+    const cost = f.cost==="" ? null : Number(String(f.cost).replace(/[$,]/g,""));
+    if (cost!=null && !Number.isFinite(cost)) return showToast("Repair cost should be a number",false);
+    setSaving(true);
+    try {
+      const rows = techIds.map(id=>({
+        tech_id:id, weight, group_id, job_date:jobDate,
+        customer_name:(picked?.customer_name || f.customer || "").trim() || null,
+        job_number:f.jobNumber.trim() || null,
+        hcp_job_id:picked ? picked.hcp_job_id : null,
+        damaged_items:f.items, severity:f.severity, repair_cost:cost, reason:f.reason || "",
+      }));
+      await sb("damage_reports",{method:"POST",body:JSON.stringify(rows)});
+      await refreshAll();
+      const names = techIds.map(id=>techs.find(t=>t.id===id)?.name||"?").join(" & ");
+      showToast(`💥 Damage logged for ${names} — ${Math.round(DAMAGE_SEVERITY[f.severity].pts*weight)} pts deducted${techIds.length>1?" each (split)":""}`);
+      setForm(EMPTY);
+    } catch(e){ showToast("Error: "+e.message,false); }
+    setSaving(false);
+  }
+  async function remove(d) {
+    const both = d.group_id && damage.filter(x=>x.group_id===d.group_id).length>1;
+    if (!window.confirm(both ? "Delete this damage report for everyone on the job?" : "Delete this damage report?")) return;
+    setSaving(true);
+    try { await sb(d.group_id ? `damage_reports?group_id=eq.${d.group_id}` : `damage_reports?id=eq.${d.id}`,{method:"DELETE",prefer:"return=minimal"}); await refreshAll(); showToast("Damage report removed"); }
+    catch(e){ showToast("Error: "+e.message,false); }
+    setSaving(false);
+  }
+
+  const f = form;
+  const recent = recentJobsFor(f.techId, f.lookback);
+  const picked = f.jobId && f.jobId!=="manual" ? recent.find(j=>j.hcp_job_id===f.jobId) : null;
+  const crew = picked ? techsOnJob(picked.hcp_job_id) : [];
+  const toggle = id => setForm(v=>({...v, items: v.items.includes(id) ? v.items.filter(x=>x!==id) : [...v.items, id]}));
+  const { start, end } = getDateRangeBounds(preset, cStart, cEnd);
+  const inRange = damage.filter(d=>{ const x=callbackDate(d); return x && x>=start && x<=end; });
+  const groups = Object.values(inRange.reduce((acc,d)=>{ const k=d.group_id||d.id; (acc[k]=acc[k]||[]).push(d); return acc; },{}))
+    .sort((x,y)=>(callbackDate(y[0])||"").localeCompare(callbackDate(x[0])||""));
+  const count = inRange.reduce((s,d)=>s+(d.weight==null?1:Number(d.weight)),0);
+  const cost = groups.reduce((s,g)=>s+(Number(g[0].repair_cost)||0),0);
+  const jobCount = new Set((jobs||[]).filter(j=>j.job_date>=start && j.job_date<=end && (j.revenue||0)>0).map(j=>j.hcp_job_id)).size;
+  const itemCounts = {};
+  groups.forEach(g=>(g[0].damaged_items||[]).forEach(id=>{ itemCounts[id]=(itemCounts[id]||0)+1; }));
+  const topItems = Object.entries(itemCounts).sort((x,y)=>y[1]-x[1]);
+  const sevCounts = [1,2,3].map(l=>groups.filter(g=>g[0].severity===l).length);
+  const techSummary = techs.map(t=>{
+    const mine = inRange.filter(d=>d.tech_id===t.id);
+    return { t, count: mine.reduce((s,d)=>s+(d.weight==null?1:Number(d.weight)),0), pts: mine.reduce((s,d)=>s+dmgPoints(d),0) };
+  }).filter(x=>x.count>0).sort((x,y)=>y.count-x.count);
+  const fmtCount = n => Number.isInteger(n) ? String(n) : n.toFixed(1);
+  const chip = on => ({ display:"flex", alignItems:"flex-start", gap:"8px", padding:"6px 8px", borderRadius:"10px", border:`1px solid ${on?OR:C.border}`, background:on?`${OR}14`:C.white, cursor:"pointer", fontSize:"13px", color:C.black });
+
+  return (
+    <div style={{ display:"flex", flexDirection:"column", gap:"14px" }}>
+      <PageTools tools={[{ id:"log", label:"Log Damage", icon:"💥", primary:true, color:OR, render:()=>(
+        <div style={{ display:"flex", flexDirection:"column", gap:"12px" }}>
+          <div style={{ fontFamily:FONT, fontWeight:"600", fontSize:"16px", color:C.black }}>Log Damage</div>
+          <select value={f.techId} onChange={e=>setForm({...EMPTY, techId:e.target.value, lookback:f.lookback})} style={sel(f.techId)}>
+            <option value="">— Select Tech —</option>
+            {techs.filter(t=>t.title!=="owner").map(t=><option key={t.id} value={t.id}>{t.name}{t.is_active===false?" (archived)":""}</option>)}
+          </select>
+          {f.techId&&(<>
+            <div style={{ display:"flex", gap:"8px", alignItems:"center" }}>
+              <select value={f.jobId} onChange={e=>setForm(v=>({...v, jobId:e.target.value}))} style={{ ...sel(f.jobId), flex:1 }}>
+                <option value="">— Pick the job —</option>
+                {recent.map(j=><option key={j.hcp_job_id} value={j.hcp_job_id}>{fmtShortDate(j.job_date)} · {j.customer_name||"(no client name)"} · ${Math.round(j.revenue)}{techsOnJob(j.hcp_job_id).length>1?" · split":""}</option>)}
+                <option value="manual">Job not listed — enter it by hand</option>
+              </select>
+              <select value={f.lookback} onChange={e=>setForm(v=>({...v, lookback:Number(e.target.value), jobId:""}))} style={{ ...sel(true), width:"auto" }}>
+                {[14,30,60,90].map(d=><option key={d} value={d}>Last {d} days</option>)}
+              </select>
+            </div>
+            {picked&&(
+              <div style={{ fontSize:"12px", color:C.black, background:C.cardLt, borderRadius:"10px", padding:"8px 10px" }}>
+                Job <strong>{fmtShortDate(picked.job_date)}</strong> · {picked.customer_name||"no client name"}
+                {crew.length>1 && <> · <strong style={{ color:OR }}>Split job:</strong> {crew.map(id=>techs.find(t=>t.id===id)?.name||"?").join(" & ")} — each gets 1/{crew.length} of the damage and points</>}
+              </div>
+            )}
+            {f.jobId==="manual"&&(
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"8px" }}>
+                <div>
+                  <div style={{ fontSize:"11px", color:C.muted, marginBottom:"4px" }}>Date of the job</div>
+                  <input type="date" value={f.jobDate} onChange={e=>setForm(v=>({...v, jobDate:e.target.value}))} style={inp}/>
+                </div>
+                <div>
+                  <div style={{ fontSize:"11px", color:C.muted, marginBottom:"4px" }}>Client name</div>
+                  <input value={f.customer} onChange={e=>setForm(v=>({...v, customer:e.target.value}))} style={inp}/>
+                </div>
+                <select value={f.splitTechId} onChange={e=>setForm(v=>({...v, splitTechId:e.target.value}))} style={{ ...sel(f.splitTechId), gridColumn:"1 / -1" }}>
+                  <option value="">Split job? Pick the other tech (optional)</option>
+                  {techs.filter(t=>t.id!==f.techId && t.title!=="owner").map(t=><option key={t.id} value={t.id}>{t.name}</option>)}
+                </select>
+              </div>
+            )}
+            <input placeholder="HCP job # (optional)" value={f.jobNumber} onChange={e=>setForm(v=>({...v, jobNumber:e.target.value}))} style={inp}/>
+            <div>
+              <div style={{ fontSize:"12px", color:C.muted, marginBottom:"6px" }}>What was damaged? (pick all that apply)</div>
+              {DAMAGE_AREAS.map(a=>(
+                <div key={a.area} style={{ marginBottom:"8px" }}>
+                  <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"13px", color:C.black, marginBottom:"4px" }}>{a.area}</div>
+                  <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(220px,1fr))", gap:"6px" }}>
+                    {a.items.map(i=>{ const on=f.items.includes(i.id); return (
+                      <label key={i.id} style={chip(on)}>
+                        <input type="checkbox" checked={on} onChange={()=>toggle(i.id)} style={{ marginTop:"2px" }}/>
+                        <span><strong>{i.label}</strong>{i.hint&&<span style={{ display:"block", fontSize:"11px", color:C.muted }}>{i.hint}</span>}</span>
+                      </label>
+                    ); })}
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div>
+              <div style={{ fontSize:"12px", color:C.muted, marginBottom:"6px" }}>How bad was it?</div>
+              <div style={{ display:"flex", flexDirection:"column", gap:"6px" }}>
+                {[1,2,3].map(l=>{ const on=f.severity===l, sv=DAMAGE_SEVERITY[l]; return (
+                  <label key={l} style={chip(on)}>
+                    <input type="radio" name="dmg-severity" checked={on} onChange={()=>setForm(v=>({...v, severity:l}))} style={{ marginTop:"2px" }}/>
+                    <span><strong>{sv.label}</strong> — {sv.desc} <strong style={{ color:OR }}>(−{sv.pts} pts)</strong></span>
+                  </label>
+                ); })}
+              </div>
+            </div>
+            <input placeholder="Repair cost $ (optional)" inputMode="decimal" value={f.cost} onChange={e=>setForm(v=>({...v, cost:e.target.value}))} style={inp}/>
+            <input placeholder="What happened? (optional)" value={f.reason} onChange={e=>setForm(v=>({...v, reason:e.target.value}))} style={inp}/>
+            <button onClick={logDamage} disabled={saving} style={btn}>{saving?"Saving...":"Log Damage — Deduct Points"}</button>
+          </>)}
+        </div>
+      )}]}/>
+
+      <DateRangePicker label="📅 Damage by job date" color={OR} preset={preset} setPreset={setPreset} customStart={cStart} setCustomStart={setCStart} customEnd={cEnd} setCustomEnd={setCEnd}>
+        <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:"8px", marginTop:"14px" }}>
+          {[
+            { l:"Damage reports", v:fmtCount(count), c:count>0?OR:C.green },
+            { l:"Repair cost", v:`$${Math.round(cost).toLocaleString()}`, c:C.black },
+            { l:"Completed jobs", v:jobCount, c:C.black },
+          ].map(x=>(
+            <div key={x.l} style={{ background:C.cardLt, borderRadius:"10px", padding:"10px", textAlign:"center" }}>
+              <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"24px", color:x.c }}>{x.v}</div>
+              <div style={{ fontSize:"11px", color:C.muted, textTransform:"none", letterSpacing:"-0.01em" }}>{x.l}</div>
+            </div>
+          ))}
+        </div>
+        <div style={{ fontSize:"11px", color:C.muted, marginTop:"6px" }}>{start} → {end} · Standard is zero · counts exactly like a callback of the same level · split jobs count ½ per tech</div>
+      </DateRangePicker>
+
+      <ListTitle right={`${fmtCount(count)} total`}>Damage by Tech</ListTitle>
+      <RankRows rows={techSummary.map(x=>({ id:x.t.id, name:x.t.name, value:`${fmtCount(x.count)}`, chip:`${x.pts} pts`, bad:true }))} empty="No damage in this range. Keep it that way! 💪"/>
+
+      {groups.length>0&&(
+        <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"16px 18px", boxShadow:"0 2px 8px rgba(0,0,0,0.06)", display:"flex", flexDirection:"column", gap:"12px" }}>
+          <Label color={OR}>📊 Breakdown</Label>
+          <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:"8px" }}>
+            {[1,2,3].map((l,i)=>(
+              <div key={l} style={{ background:C.cardLt, borderRadius:"10px", padding:"8px", textAlign:"center" }}>
+                <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"20px", color:C.black }}>{sevCounts[i]}</div>
+                <div style={{ fontSize:"11px", color:C.muted, textTransform:"none", letterSpacing:"-0.01em" }}>{DAMAGE_SEVERITY[l].label}</div>
+              </div>
+            ))}
+          </div>
+          {topItems.length>0&&(
+            <div>
+              <div style={{ fontSize:"12px", color:C.muted, marginBottom:"4px" }}>Most damaged</div>
+              {topItems.map(([id,n])=>(
+                <div key={id} style={{ display:"flex", justifyContent:"space-between", fontSize:"13px", color:C.black, padding:"2px 0" }}><span>{DAMAGE_ITEM_LABEL[id]||id}</span><strong>{n}</strong></div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:"16px", overflow:"hidden", boxShadow:"0 2px 8px rgba(0,0,0,0.06)" }}>
+        <div style={{ padding:"14px 18px", borderBottom:`1px solid ${C.border}`, background:C.cardLt }}>
+          <Label color={OR}>📋 Damage History</Label>
+        </div>
+        <div style={{ padding:"14px 18px", display:"flex", flexDirection:"column", gap:"8px" }}>
+          {groups.length===0&&<div style={{ fontSize:"13px", color:C.muted }}>No damage for jobs in this date range. Keep it that way! 💪</div>}
+          {groups.map(g=>{
+            const d = g[0];
+            const names = g.map(r=>techs.find(t=>t.id===r.tech_id)?.name||"Unknown").join(" & ");
+            return (
+              <div key={d.group_id||d.id} style={{ background:`${OR}10`, border:`1px solid ${OR}33`, borderLeft:`3px solid ${OR}`, borderRadius:"10px", padding:"12px 14px", display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:"12px" }}>
+                <div>
+                  <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"15px", color:C.black }}>
+                    {names}{g.length>1&&<span style={{ fontSize:"11px", color:OR, marginLeft:"6px" }}>Split</span>}
+                    {d.severity&&<span style={{ fontSize:"11px", color:C.white, background:OR, borderRadius:"10px", padding:"1px 7px", marginLeft:"6px" }}>{DAMAGE_SEVERITY[d.severity]?.label}</span>}
+                  </div>
+                  <div style={{ fontSize:"12px", color:C.black, marginTop:"3px" }}>
+                    Job {callbackDate(d)?fmtShortDate(callbackDate(d)):"?"}{d.customer_name?` · ${d.customer_name}`:""}{d.job_number?` · #${d.job_number}`:""}{d.repair_cost!=null?` · $${Number(d.repair_cost).toLocaleString()} repair`:""}
+                  </div>
+                  {(d.damaged_items||[]).length>0&&<div style={{ fontSize:"11px", color:C.muted, marginTop:"2px" }}>Damaged: {d.damaged_items.map(id=>DAMAGE_ITEM_LABEL[id]||id).join(", ")}</div>}
+                  {d.reason&&<div style={{ fontSize:"11px", color:C.muted, marginTop:"2px" }}>{d.reason}</div>}
+                  <div style={{ fontSize:"11px", color:C.muted, marginTop:"2px" }}>Logged {fmtShortDate(mtDateStr(Date.parse(d.created_at)))}</div>
+                </div>
+                <div style={{ display:"flex", alignItems:"center", gap:"10px", flexShrink:0 }}>
+                  <span style={{ fontFamily:FONT, fontWeight:"700", fontSize:"15px", color:OR }}>{dmgPoints(d)} pts{g.length>1?" each":""}</span>
+                  <button onClick={()=>remove(d)} disabled={saving} style={{ background:"none", border:`1px solid ${OR}`, color:OR, padding:"4px 10px", borderRadius:"10px", cursor:"pointer", fontFamily:FONT, fontWeight:"700", fontSize:"11px" }}>Delete</button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CallbackLogPanel({ techs, jobs, callbacks, refreshAll, showToast }) {
   const CB_EMPTY = { techId:"", jobId:"", lookback:14, jobDate:"", customer:"", jobNumber:"", splitTechId:"", missed:[], severity:0, reason:"" };
   const [cbForm, setCbForm] = useState(CB_EMPTY);
   const [cbPreset, setCbPreset] = useState("mtd");
@@ -8633,7 +9620,7 @@ function CallbacksPanel({ techs, jobs, callbacks, refreshAll, showToast }) {
   const [saving, setSaving] = useState(false);
   const inp={ background:C.white, border:`1px solid ${C.border}`, color:C.black, padding:"10px 14px", borderRadius:"10px", fontSize:"14px", fontFamily:FONT, width:"100%", boxSizing:"border-box" };
   const sel=(val)=>({...inp, color:val?C.black:C.muted});
-  const btn=(color)=>({ background:saving?C.border:color||C.blue, border:"none", color:C.black, padding:"13px", borderRadius:"24px", cursor:saving?"not-allowed":"pointer", fontSize:"13px", fontWeight:"700", fontStyle:"normal", letterSpacing:"-0.01em", fontFamily:FONT, width:"100%", textTransform:"none" });
+  const btn=(color)=>({ background:saving?C.border:color||C.blue, border:"none", color:C.white, padding:"13px", borderRadius:"24px", cursor:saving?"not-allowed":"pointer", fontSize:"13px", fontWeight:"700", fontStyle:"normal", letterSpacing:"-0.01em", fontFamily:FONT, width:"100%", textTransform:"none" });
   // The jobs a tech did recently, newest first -- picking one fills in the
   // date and client, and tells us who else was on it (split job).
   function recentJobsFor(techId, days) {
@@ -8714,27 +9701,10 @@ function CallbacksPanel({ techs, jobs, callbacks, refreshAll, showToast }) {
           const fmtCount = n => Number.isInteger(n) ? String(n) : n.toFixed(1);
           const chip = on => ({ display:"flex", alignItems:"flex-start", gap:"8px", padding:"6px 8px", borderRadius:"10px", border:`1px solid ${on?"#ff3b30":C.border}`, background:on?"#ef444410":C.white, cursor:"pointer", fontSize:"13px", color:C.black });
           return (
-          <div style={{ display:"flex", flexDirection:"column", gap:"16px" }}>
-            {/* Date range + rate */}
-            <DateRangePicker label="📅 Callbacks by job date" color="#ff3b30" preset={cbPreset} setPreset={setCbPreset} customStart={cbCStart} setCustomStart={setCbCStart} customEnd={cbCEnd} setCustomEnd={setCbCEnd}>
-              <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:"8px", marginTop:"14px" }}>
-                {[
-                  { l:"Callback rate", v:`${rate.toFixed(2)}%`, c: rate>=2?"#ff3b30":C.green },
-                  { l:"Callbacks", v:fmtCount(cbCount), c:C.black },
-                  { l:"Completed jobs", v:jobCount, c:C.black },
-                ].map(x=>(
-                  <div key={x.l} style={{ background:C.cardLt, borderRadius:"10px", padding:"10px", textAlign:"center" }}>
-                    <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"24px", color:x.c }}>{x.v}</div>
-                    <div style={{ fontSize:"11px", color:C.muted, textTransform:"none", letterSpacing:"-0.01em" }}>{x.l}</div>
-                  </div>
-                ))}
-              </div>
-              <div style={{ fontSize:"11px", color:C.muted, marginTop:"6px" }}>{cbStart} → {cbEnd} · Standard is under 2% · split-job callbacks count ½ per tech</div>
-            </DateRangePicker>
-
-            {/* Log a callback */}
-            <div style={{ background:C.white, border:`2px solid #ef444444`, borderTop:`3px solid #ef4444`, borderRadius:"16px", padding:"20px", display:"flex", flexDirection:"column", gap:"12px", boxShadow:"0 2px 8px rgba(0,0,0,0.06)" }}>
-              <Label color="#ff3b30">📞 Log a Callback</Label>
+          <div style={{ display:"flex", flexDirection:"column", gap:"14px" }}>
+            <PageTools tools={[{ id:"log", label:"Log Callback", icon:"📞", primary:true, render:()=>(
+              <div style={{ display:"flex", flexDirection:"column", gap:"12px" }}>
+                <div style={{ fontFamily:FONT, fontWeight:"600", fontSize:"16px", color:C.black }}>Log a Callback</div>
               <select value={f.techId} onChange={e=>setCbForm({...CB_EMPTY, techId:e.target.value, lookback:f.lookback})} style={sel(f.techId)}>
                 <option value="">— Select Tech —</option>
                 {techs.filter(t=>t.title!=="owner").map(t=><option key={t.id} value={t.id}>{t.name}{t.is_active===false?" (archived)":""}</option>)}
@@ -8803,7 +9773,27 @@ function CallbacksPanel({ techs, jobs, callbacks, refreshAll, showToast }) {
                 <input placeholder="Notes (optional)" value={f.reason} onChange={e=>setCbForm(v=>({...v, reason:e.target.value}))} style={inp}/>
                 <button onClick={logCallback} disabled={saving} style={{ ...btn("#ff3b30"), color:C.white }}>{saving?"Saving...":"Log Callback — Deduct Points"}</button>
               </>)}
-            </div>
+              </div>
+            )}]}/>
+            {/* Date range + rate */}
+            <DateRangePicker label="📅 Callbacks by job date" color="#ff3b30" preset={cbPreset} setPreset={setCbPreset} customStart={cbCStart} setCustomStart={setCbCStart} customEnd={cbCEnd} setCustomEnd={setCbCEnd}>
+              <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:"8px", marginTop:"14px" }}>
+                {[
+                  { l:"Callback rate", v:`${rate.toFixed(2)}%`, c: rate>=2?"#ff3b30":C.green },
+                  { l:"Callbacks", v:fmtCount(cbCount), c:C.black },
+                  { l:"Completed jobs", v:jobCount, c:C.black },
+                ].map(x=>(
+                  <div key={x.l} style={{ background:C.cardLt, borderRadius:"10px", padding:"10px", textAlign:"center" }}>
+                    <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"24px", color:x.c }}>{x.v}</div>
+                    <div style={{ fontSize:"11px", color:C.muted, textTransform:"none", letterSpacing:"-0.01em" }}>{x.l}</div>
+                  </div>
+                ))}
+              </div>
+              <div style={{ fontSize:"11px", color:C.muted, marginTop:"6px" }}>{cbStart} → {cbEnd} · Standard is under 2% · split-job callbacks count ½ per tech</div>
+            </DateRangePicker>
+
+            <ListTitle right={`${fmtCount(cbCount)} total`}>Callbacks by Tech</ListTitle>
+            <RankRows rows={techSummary.map(x=>({ id:x.t.id, name:x.t.name, value:`${fmtCount(x.count)}`, chip:`${x.pts} pts`, bad:true }))} empty="No callbacks in this range. Keep it that way! 💪"/>
 
             {/* Breakdown for the range */}
             {groups.length>0&&(
@@ -8825,15 +9815,6 @@ function CallbacksPanel({ techs, jobs, callbacks, refreshAll, showToast }) {
                     ))}
                   </div>
                 )}
-                <div>
-                  <div style={{ fontSize:"12px", color:C.muted, marginBottom:"4px" }}>By tech</div>
-                  {techSummary.map(x=>(
-                    <div key={x.t.id} style={{ display:"flex", justifyContent:"space-between", fontSize:"13px", color:C.black, padding:"2px 0" }}>
-                      <span style={{ fontFamily:FONT, fontWeight:"700" }}>{x.t.name}</span>
-                      <span style={{ fontFamily:FONT, fontWeight:"700", color:"#ff3b30" }}>{fmtCount(x.count)} callback{x.count!==1?"s":""} · {x.pts} pts</span>
-                    </div>
-                  ))}
-                </div>
               </div>
             )}
 
@@ -8851,7 +9832,7 @@ function CallbacksPanel({ techs, jobs, callbacks, refreshAll, showToast }) {
                     <div key={c.group_id||c.id} style={{ background:`#ef444410`, border:`1px solid #ef444433`, borderLeft:`3px solid #ef4444`, borderRadius:"10px", padding:"12px 14px", display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:"12px" }}>
                       <div>
                         <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"15px", color:C.black }}>
-                          {names}{g.length>1&&<span style={{ fontSize:"11px", color:"#ff3b30", marginLeft:"6px" }}>SPLIT</span>}
+                          {names}{g.length>1&&<span style={{ fontSize:"11px", color:"#ff3b30", marginLeft:"6px" }}>Split</span>}
                           {c.severity&&<span style={{ fontSize:"11px", color:C.white, background:"#ff3b30", borderRadius:"10px", padding:"1px 7px", marginLeft:"6px" }}>{CALLBACK_SEVERITY[c.severity].label}</span>}
                         </div>
                         <div style={{ fontSize:"12px", color:C.black, marginTop:"3px" }}>
@@ -8863,7 +9844,7 @@ function CallbacksPanel({ techs, jobs, callbacks, refreshAll, showToast }) {
                       </div>
                       <div style={{ display:"flex", alignItems:"center", gap:"10px", flexShrink:0 }}>
                         <span style={{ fontFamily:FONT, fontWeight:"700", fontSize:"15px", color:"#ff3b30" }}>{callbackPoints(c)} pts{g.length>1?" each":""}</span>
-                        <button onClick={()=>deleteCallback(c)} disabled={saving} style={{ background:"none", border:`1px solid #ef4444`, color:"#ff3b30", padding:"4px 10px", borderRadius:"10px", cursor:"pointer", fontFamily:FONT, fontWeight:"700", fontSize:"11px" }}>DELETE</button>
+                        <button onClick={()=>deleteCallback(c)} disabled={saving} style={{ background:"none", border:`1px solid #ef4444`, color:"#ff3b30", padding:"4px 10px", borderRadius:"10px", cursor:"pointer", fontFamily:FONT, fontWeight:"700", fontSize:"11px" }}>Delete</button>
                       </div>
                     </div>
                   );
@@ -8878,7 +9859,7 @@ function CallbacksPanel({ techs, jobs, callbacks, refreshAll, showToast }) {
 // isManager: logged in as the Field Supervisor. Same panel as the owners, but
 // read-only on anything that decides his own bonus (quota targets, trucks and
 // holidays, firing approvals, calibration) so he can't move his own numbers.
-function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlongs, schedules, quota, setQuota, jobs, timeEntries=[], tipEntries=[], pendingSplits=[], unmatchedTechs=[], vehicles=[], truckAssignments=[], onLogout, refreshAll, isManager=false, currentUser=null }) {
+function AdminPanel({ techBookings=[], damageReports=[], techs, upsells, switchovers, reviews, callbacks, rideAlongs, schedules, quota, setQuota, jobs, timeEntries=[], tipEntries=[], pendingSplits=[], unmatchedTechs=[], vehicles=[], truckAssignments=[], onLogout, refreshAll, isManager=false, currentUser=null }) {
   // Live-standings views (Leaderboard, Journey Map) should only show active
   // techs, matching what the tech-facing app already does — archived techs
   // stay fully visible in Reports/Payroll/Upsell Audit where historical
@@ -8888,6 +9869,7 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
   // the raw `techs` prop, unaffected by this filter) but shouldn't appear in
   // gamified rankings.
   const activeTechs = techs.filter(t => t.is_active !== false && t.title !== "owner");
+  const pendingBookings = techBookings.filter(b => b.status === "pending").length;
   const [tab, setTab] = useState("upsells");
   const [menuOpen, setMenuOpen] = useState(false);
   const [awardForm, setAwardForm] = useState({techId:"",badgeId:""});
@@ -9078,24 +10060,26 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
 
   const inp={ background:C.white, border:`1px solid ${C.border}`, color:C.black, padding:"10px 14px", borderRadius:"10px", fontSize:"14px", fontFamily:FONT, width:"100%", boxSizing:"border-box" };
   const sel=(val)=>({...inp, color:val?C.black:C.muted});
-  const btn=(color)=>({ background:saving?C.border:color||C.blue, border:"none", color:C.black, padding:"13px", borderRadius:"24px", cursor:saving?"not-allowed":"pointer", fontSize:"13px", fontWeight:"700", fontStyle:"normal", letterSpacing:"-0.01em", fontFamily:FONT, width:"100%", textTransform:"none" });
+  const btn=(color)=>({ background:saving?C.border:color||C.blue, border:"none", color:C.white, padding:"13px", borderRadius:"24px", cursor:saving?"not-allowed":"pointer", fontSize:"13px", fontWeight:"700", fontStyle:"normal", letterSpacing:"-0.01em", fontFamily:FONT, width:"100%", textTransform:"none" });
 
   const adminNavSections = [
     { label:"Analytics", items:[
       ["reports","📊","Reports"],
       ["leaderboard","🏆","Leaderboard"],
-      ["payroll","💵","Payroll"],
       ["operations","📈","Operations Progress"],
+    ]},
+    { label:"Payroll & Time", items:[
+      ["payroll","💵","Payroll"],
+      ["timesheet","🕒","Time Sheet"],
+      ["tips","💵","Log Tips"],
       ["schedule","🗓","Work Schedule"],
+      ["trucks","🚚","Trucks"],
     ]},
     { label:"Team Activity", items:[
       ["upsells","💰","Upsells"],
       ["reviews","⭐","Reviews"],
       ["switchovers","🔄","Switchovers"],
-      ["timesheet","🕒","Time Sheet"],
-      ["trucks","🚚","Trucks"],
-      ["tips","💵","Log Tips"],
-      ["callbacks","📞","Callbacks"],
+      ["callbacks","🤝","Customer Satisfaction"],
       ["ridealong","🚗","Ride-Alongs"],
       ["forms","📝","Forms"],
     ]},
@@ -9113,6 +10097,7 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
     ]},
     { label:"HCP Sync", items:[
       ["splits","✂️", pendingSplits.length > 0 ? `Split Jobs (${new Set(pendingSplits.map(r=>r.hcp_job_id)).size})` : "Split Jobs"],
+      ["techbookings","📅", pendingBookings > 0 ? `Tech Bookings (${pendingBookings})` : "Tech Bookings"],
       ["upsellaudit","🔍","Upsell Audit"],
       ["techmatch","🔗", unmatchedTechs.length > 0 ? `Tech Matching (${unmatchedTechs.length})` : "Tech Matching"],
     ]},
@@ -9143,12 +10128,21 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
       <Header left={<HamburgerBtn onClick={()=>setMenuOpen(true)}/>} title={adminTabLabel} right={<LogoutBtn onLogout={onLogout}/>}/>
       <div style={{ padding:"20px", maxWidth:(tab==="marketing"||tab==="sales") ? "1280px" : "700px", margin:"0 auto" }}>
 
+        {pendingBookings > 0 && tab !== "techbookings" && (
+          <div style={{ background:C.blueLt, border:"1px solid rgba(0,146,249,0.25)", borderRadius:"16px", padding:"12px 16px", marginBottom:"16px", display:"flex", justifyContent:"space-between", alignItems:"center", gap:"12px" }}>
+            <div>
+              <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"14px", color:"#0077d4", letterSpacing:"-0.01em" }}>📅 {pendingBookings} technician booking{pendingBookings !== 1 ? "s" : ""} need{pendingBookings === 1 ? "s" : ""} a booker</div>
+              <div style={{ fontSize:"12px", color:C.muted, marginTop:"2px" }}>Pick which tech booked {pendingBookings === 1 ? "it" : "each one"} so they get paid.</div>
+            </div>
+            <button onClick={() => setTab("techbookings")} style={{ background:"#0077d4", border:"none", color:C.white, padding:"8px 18px", borderRadius:"10px", cursor:"pointer", fontFamily:FONT, fontWeight:"700", fontSize:"12px", whiteSpace:"nowrap", flexShrink:0 }}>Review Now</button>
+          </div>
+        )}
         {pendingSplits.length > 0 && tab !== "splits" && (()=>{
           const count = new Set(pendingSplits.map(r => r.hcp_job_id)).size;
           return (
-            <div style={{ background:"rgba(245,158,11,0.1)", border:"1px solid #f59e0b", borderRadius:"12px", padding:"12px 16px", marginBottom:"16px", display:"flex", justifyContent:"space-between", alignItems:"center", gap:"12px" }}>
+            <div style={{ background:C.blueLt, border:"1px solid rgba(0,146,249,0.25)", borderRadius:"16px", padding:"12px 16px", marginBottom:"16px", display:"flex", justifyContent:"space-between", alignItems:"center", gap:"12px" }}>
               <div>
-                <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"14px", color:"#ff9f0a", letterSpacing:"-0.01em" }}>
+                <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"14px", color:"#0077d4", letterSpacing:"-0.01em" }}>
                   ⚠ {count} job{count !== 1 ? "s" : ""} need split confirmation
                 </div>
                 <div style={{ fontSize:"12px", color:C.muted, marginTop:"2px" }}>
@@ -9157,7 +10151,7 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
               </div>
               <button
                 onClick={() => setTab("splits")}
-                style={{ background:"#ff9f0a", border:"none", color:C.black, padding:"8px 18px", borderRadius:"10px", cursor:"pointer", fontFamily:FONT, fontWeight:"700", fontSize:"12px", letterSpacing:"-0.01em", textTransform:"none", whiteSpace:"nowrap", flexShrink:0 }}
+                style={{ background:"#0077d4", border:"none", color:C.white, padding:"8px 18px", borderRadius:"10px", cursor:"pointer", fontFamily:FONT, fontWeight:"700", fontSize:"12px", letterSpacing:"-0.01em", textTransform:"none", whiteSpace:"nowrap", flexShrink:0 }}
               >Review Now</button>
             </div>
           );
@@ -9193,7 +10187,7 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
         )}
 
         {[["scoresoverview","overview"],["totechecks","tote"],["auditscores","audit"],["driving","driver"]].map(([id, view]) => tab===id && (
-          <AuditScoresTab key={id} view={view} hideTabs techs={techs} token={currentUser?.token} canSync={!isManager} jobs={jobs||[]} callbacks={callbacks||[]} reviews={reviews||[]} switchovers={switchovers||[]} quota={quota}/>
+          <AuditScoresTab key={id} view={view} hideTabs techs={techs} token={currentUser?.token} canSync={!isManager} jobs={jobs||[]} callbacks={callbacks||[]} damage={damageReports||[]} reviews={reviews||[]} switchovers={switchovers||[]} quota={quota}/>
         ))}
         {tab==="truckinspections"&&(
           <TruckInspectionsTab techs={techs} jobs={jobs||[]} token={currentUser?.token} canGrade showToast={showToast}/>
@@ -9223,9 +10217,27 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
         {tab==="reviews"&&(
           <AdminReviewEntry techs={techs} reviews={reviews} saving={saving} setSaving={setSaving} refreshAll={refreshAll} showToast={showToast}/>
         )}
-        {tab==="switchovers"&&(
-          <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"20px", display:"flex", flexDirection:"column", gap:"12px" }}>
-            <Label color={C.purple}>Log a Switchover</Label>
+        {tab==="techbookings"&&<TechBookingsAdmin techs={techs} techBookings={techBookings} jobs={jobs||[]} token={currentUser?.token} reviewerName={currentUser?.name || "Admin"} refreshAll={refreshAll} showToast={showToast}/>}
+        {tab==="switchovers"&&(() => {
+          const { start: swStart, end: swEnd } = getDateRangeBounds(swRangePreset, swCStart, swCEnd);
+          const swFromWk = dateToWeekKey(swStart);
+          const swInRange = switchovers.filter(s => s.week_key >= swFromWk && s.week_key <= swEnd);
+          const swByTech = {};
+          swInRange.forEach(s => {
+            if (!swByTech[s.tech_id]) swByTech[s.tech_id] = { total: 0, byPlan: {} };
+            swByTech[s.tech_id].total++;
+            swByTech[s.tech_id].byPlan[s.plan_id] = (swByTech[s.tech_id].byPlan[s.plan_id] || 0) + 1;
+          });
+          const swRanked = techs
+            .map(t => ({ ...t, total: swByTech[t.id]?.total || 0, byPlan: swByTech[t.id]?.byPlan || {} }))
+            .filter(t => t.total > 0)
+            .sort((a, b) => b.total - a.total);
+          return (
+            <>
+              <div style={{ display:"flex", flexDirection:"column", gap:"14px" }}>
+              <PageTools tools={[{ id:"log", label:"Log Switchover", icon:"＋", primary:true, render:()=>(
+                <div style={{ display:"flex", flexDirection:"column", gap:"12px" }}>
+                  <div style={{ fontFamily:FONT, fontWeight:"600", fontSize:"16px", color:C.black }}>Log a Switchover</div>
             <div style={{ background:C.cardLt, borderRadius:"10px", padding:"8px 12px", fontSize:"12px", color:C.muted }}>
               {formatLastEntered(mostRecentTimestamp(switchovers)) ? (
                 <>Last entered: <strong style={{ color:C.black }}>{formatLastEntered(mostRecentTimestamp(switchovers))}</strong> — everything before that is already logged.</>
@@ -9249,65 +10261,18 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
               <div style={{ fontSize:"12px", color:C.muted }}>Pays ${switchoverPay({plan_id:swForm.planId,with_exterior:swForm.exterior})} · counts today ({fmtShortDate(mtDateStr(Date.now()))}) on payroll</div>
             )}
             <button onClick={logSwitchover} disabled={saving} style={btn(C.purple)}>{saving?"Saving...":"Log Switchover"}</button>
-          </div>
-        )}
-        {tab==="switchovers"&&(() => {
-          const { start: swStart, end: swEnd } = getDateRangeBounds(swRangePreset, swCStart, swCEnd);
-          const swFromWk = dateToWeekKey(swStart);
-          const swInRange = switchovers.filter(s => s.week_key >= swFromWk && s.week_key <= swEnd);
-          const swByTech = {};
-          swInRange.forEach(s => {
-            if (!swByTech[s.tech_id]) swByTech[s.tech_id] = { total: 0, byPlan: {} };
-            swByTech[s.tech_id].total++;
-            swByTech[s.tech_id].byPlan[s.plan_id] = (swByTech[s.tech_id].byPlan[s.plan_id] || 0) + 1;
-          });
-          const swRanked = techs
-            .map(t => ({ ...t, total: swByTech[t.id]?.total || 0, byPlan: swByTech[t.id]?.byPlan || {} }))
-            .filter(t => t.total > 0)
-            .sort((a, b) => b.total - a.total);
-          return (
-            <>
-              <div style={{ marginTop:"16px" }}>
-                <DateRangePicker label="📅 Date Range" color={C.purple} preset={swRangePreset} setPreset={setSwRangePreset} customStart={swCStart} setCustomStart={setSwCStart} customEnd={swCEnd} setCustomEnd={setSwCEnd}>
-                  <div style={{ fontSize:"11px", color:C.purple, fontFamily:FONT, fontWeight:"700", marginTop:"8px" }}>
-                    {swStart} → {swEnd} · matched by week (switchovers are logged by week, not exact day)
-                  </div>
-                </DateRangePicker>
+                </div>
+              )}]}/>
+              <DateRangePicker label="📅 Date Range" preset={swRangePreset} setPreset={setSwRangePreset} customStart={swCStart} setCustomStart={setSwCStart} customEnd={swCEnd} setCustomEnd={setSwCEnd}>
+                <div style={{ fontSize:"12px", color:C.muted, marginTop:"8px" }}>{fmtShortDate(swStart)} – {fmtShortDate(swEnd)} · switchovers are matched by week</div>
+              </DateRangePicker>
+              <ListTitle right={`${swRanked.reduce((s,t)=>s+t.total,0)} team total`}>Switchovers</ListTitle>
+              <RankRows rows={swRanked.map(t=>({ id:t.id, name:t.name, value:`${t.total}`, sub:Object.entries(t.byPlan).sort((a,b)=>b[1]-a[1]).map(([planId,count])=>`${count} ${PLAN_MAP[planId]?.label||planId}`).join(", ") }))} empty="No switchovers logged in this range."/>
               </div>
 
               <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", overflow:"hidden", marginTop:"16px" }}>
                 <div style={{ padding:"14px 18px", borderBottom:`1px solid ${C.border}`, background:C.cardLt }}>
-                  <Label color={C.purple}>🔄 Switchovers by Plan Type · {swStart} → {swEnd}</Label>
-                </div>
-                <div style={{ overflowX:"auto" }}>
-                  <table style={{ width:"100%", borderCollapse:"collapse", fontSize:"13px" }}>
-                    <thead>
-                      <tr>
-                        <th style={{ padding:"8px 18px", textAlign:"left", color:C.muted, fontWeight:"700", letterSpacing:"-0.01em", fontFamily:FONT, fontSize:"11px", borderBottom:`1px solid ${C.border}`, whiteSpace:"nowrap" }}>TECH</th>
-                        <th style={{ padding:"8px 18px", textAlign:"left", color:C.muted, fontWeight:"700", letterSpacing:"-0.01em", fontFamily:FONT, fontSize:"11px", borderBottom:`1px solid ${C.border}` }}>BREAKDOWN</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {swRanked.length===0 && (
-                        <tr><td colSpan={2} style={{ padding:"16px 18px", color:C.muted, textAlign:"center" }}>No switchovers logged in this range.</td></tr>
-                      )}
-                      {swRanked.map((t,i)=>{
-                        const breakdown = Object.entries(t.byPlan).sort((a,b)=>b[1]-a[1]).map(([planId,count])=>`${count} ${PLAN_MAP[planId]?.label||planId}`).join(", ");
-                        return (
-                          <tr key={t.id} style={{ borderBottom:`1px solid ${C.border}` }}>
-                            <td style={{ padding:"10px 18px", color:C.black, fontWeight:"700", fontFamily:FONT, whiteSpace:"nowrap" }}>{medal(i)} {t.name}</td>
-                            <td style={{ padding:"10px 18px", color:C.black }}>{breakdown} <span style={{ color:C.muted, fontSize:"11px" }}>({t.total} total)</span></td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-
-              <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", overflow:"hidden", marginTop:"16px" }}>
-                <div style={{ padding:"14px 18px", borderBottom:`1px solid ${C.border}`, background:C.cardLt }}>
-                  <Label color={C.purple}>Individual Entries · {swStart} → {swEnd}</Label>
+                  <Label>Individual Entries · {fmtShortDate(swStart)} – {fmtShortDate(swEnd)}</Label>
                 </div>
                 <div style={{ padding:"14px 18px", display:"flex", flexDirection:"column", gap:"6px" }}>
                   {swInRange.length===0 && <div style={{ fontSize:"13px", color:C.muted }}>No switchover entries in this range.</div>}
@@ -9369,7 +10334,7 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
           <AdminTipEntry techs={techs} tipEntries={tipEntries} refreshAll={refreshAll} showToast={showToast}/>
         )}
 
-        {tab==="callbacks"&&<CallbacksPanel techs={techs} jobs={jobs} callbacks={callbacks} refreshAll={refreshAll} showToast={showToast}/>}
+        {tab==="callbacks"&&<CallbacksPanel techs={techs} jobs={jobs} callbacks={callbacks} damage={damageReports||[]} refreshAll={refreshAll} showToast={showToast}/>}
 
         {tab==="award"&&(
           <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"20px", display:"flex", flexDirection:"column", gap:"12px" }}>
@@ -9479,7 +10444,7 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
                 </label>
                 <div style={{ marginTop:"12px", paddingTop:"12px", borderTop:`1px solid ${C.border}` }}>
                   {archivingId!==t.id ? (
-                    <button onClick={()=>startArchive(t)} disabled={saving} style={{ background:"none", border:"1px solid #f59e0b", color:"#ff9f0a", padding:"7px 16px", borderRadius:"10px", cursor:saving?"not-allowed":"pointer", fontFamily:FONT, fontWeight:"600", fontSize:"12px", letterSpacing:"-0.01em", textTransform:"none" }}>
+                    <button onClick={()=>startArchive(t)} disabled={saving} style={{ background:"none", border:"1px solid #0077d4", color:"#0077d4", padding:"7px 16px", borderRadius:"10px", cursor:saving?"not-allowed":"pointer", fontFamily:FONT, fontWeight:"600", fontSize:"12px", letterSpacing:"-0.01em", textTransform:"none" }}>
                       📦 Archive {t.name}
                     </button>
                   ) : (
@@ -9509,7 +10474,7 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
                         </div>
                       )}
                       <div style={{ display:"flex", gap:"8px" }}>
-                        <button onClick={()=>archiveTech(t)} disabled={saving} style={{ background:"#ff9f0a", border:"none", color:C.white, padding:"7px 16px", borderRadius:"10px", cursor:saving?"not-allowed":"pointer", fontFamily:FONT, fontWeight:"600", fontSize:"12px", letterSpacing:"-0.01em", textTransform:"none" }}>
+                        <button onClick={()=>archiveTech(t)} disabled={saving} style={{ background:"#0077d4", border:"none", color:C.white, padding:"7px 16px", borderRadius:"10px", cursor:saving?"not-allowed":"pointer", fontFamily:FONT, fontWeight:"600", fontSize:"12px", letterSpacing:"-0.01em", textTransform:"none" }}>
                           {saving?"Saving...":`Archive ${t.name}`}
                         </button>
                         <button onClick={()=>setArchivingId(null)} disabled={saving} style={{ background:"none", border:`1px solid ${C.border}`, color:C.muted, padding:"7px 16px", borderRadius:"10px", cursor:"pointer", fontFamily:FONT, fontWeight:"600", fontSize:"12px", letterSpacing:"-0.01em", textTransform:"none" }}>
@@ -9524,7 +10489,7 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
             {/* Archived techs */}
             {techs.filter(t=>t.is_active===false).length>0&&(
               <div style={{ background:"#fff8e6", border:"1px solid #f59e0b44", borderTop:"3px solid #f59e0b", borderRadius:"16px", padding:"16px 18px" }}>
-                <div style={{ fontSize:"11px", color:"#ff9f0a", letterSpacing:"-0.01em", textTransform:"none", fontFamily:FONT, fontWeight:"600", marginBottom:"12px" }}>📦 Archived Techs — Revenue still counted in totals</div>
+                <div style={{ fontSize:"11px", color:"#0077d4", letterSpacing:"-0.01em", textTransform:"none", fontFamily:FONT, fontWeight:"600", marginBottom:"12px" }}>📦 Archived Techs — Revenue still counted in totals</div>
                 <div style={{ display:"flex", flexDirection:"column", gap:"8px" }}>
                   {techs.filter(t=>t.is_active===false).map(t=>(
                     <div key={t.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", background:"#fff", border:"1px solid #f59e0b33", borderRadius:"10px", padding:"10px 14px" }}>
@@ -9538,20 +10503,20 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
                         {t.leave_reason==="fired"&&(
                           <div style={{ fontSize:"11px", color:C.black, marginTop:"4px" }}>
                             <strong>{FIRE_CATEGORIES.find(c=>c.value===t.fire_category)?.label||"No reason given"}</strong>{t.fire_notes&&` — ${t.fire_notes}`}
-                            <div style={{ fontSize:"11px", fontWeight:"700", marginTop:"2px", color:t.fire_approval==="approved"?C.green:t.fire_approval==="denied"?"#ff3b30":"#ff9f0a" }}>
+                            <div style={{ fontSize:"11px", fontWeight:"700", marginTop:"2px", color:t.fire_approval==="approved"?C.green:t.fire_approval==="denied"?"#ff3b30":"#0077d4" }}>
                               {t.fire_approval==="approved"?"✅ FIRING APPROVED — doesn't count against the ops bonus":t.fire_approval==="denied"?"❌ FIRING DENIED — counts as a loss":"⏳ WAITING FOR ADMIN APPROVAL"}
                             </div>
                             {t.fire_approval==="pending"&&!isManager&&(
                               <div style={{ display:"flex", gap:"6px", marginTop:"6px" }}>
-                                <button onClick={()=>reviewFiring(t,"approved")} disabled={saving} style={{ background:C.green, border:"none", color:C.white, padding:"4px 10px", borderRadius:"10px", cursor:"pointer", fontSize:"11px", fontWeight:"600" }}>APPROVE</button>
-                                <button onClick={()=>reviewFiring(t,"denied")} disabled={saving} style={{ background:"#ff3b30", border:"none", color:C.white, padding:"4px 10px", borderRadius:"10px", cursor:"pointer", fontSize:"11px", fontWeight:"600" }}>DENY</button>
+                                <button onClick={()=>reviewFiring(t,"approved")} disabled={saving} style={{ background:C.green, border:"none", color:C.white, padding:"4px 10px", borderRadius:"10px", cursor:"pointer", fontSize:"11px", fontWeight:"600" }}>Approve</button>
+                                <button onClick={()=>reviewFiring(t,"denied")} disabled={saving} style={{ background:"#ff3b30", border:"none", color:C.white, padding:"4px 10px", borderRadius:"10px", cursor:"pointer", fontSize:"11px", fontWeight:"600" }}>Deny</button>
                               </div>
                             )}
                           </div>
                         )}
                       </div>
                       <button onClick={()=>reactivateTech(t)} disabled={saving} style={{ background:"none", border:"1px solid #00c853", color:"#34c759", padding:"6px 14px", borderRadius:"10px", cursor:"pointer", fontFamily:FONT, fontWeight:"600", fontSize:"11px", letterSpacing:"-0.01em" }}>
-                        REACTIVATE
+                        Reactivate
                       </button>
                     </div>
                   ))}
@@ -9573,7 +10538,7 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
                     <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:"8px" }}>
                       <div style={{ fontFamily:FONT, fontWeight:"700", fontStyle:"normal", fontSize:"16px", color:C.black }}>
                         {t.name}
-                        {t.is_lead&&<span style={{ marginLeft:"8px", background:C.gold, color:C.white, fontSize:"11px", padding:"2px 8px", borderRadius:"10px", fontFamily:FONT, fontWeight:"700", verticalAlign:"middle" }}>TEAM LEAD</span>}
+                        {t.is_lead&&<span style={{ marginLeft:"8px", background:C.gold, color:C.white, fontSize:"11px", padding:"2px 8px", borderRadius:"10px", fontFamily:FONT, fontWeight:"700", verticalAlign:"middle" }}>Team lead</span>}
                       </div>
                       <button onClick={()=>toggleTeamLead(t)} disabled={saving}
                         style={{ background:t.is_lead?"#ef444422":"transparent", border:`1px solid ${t.is_lead?"#ff3b30":C.gold}`, color:t.is_lead?"#ff3b30":C.gold, padding:"5px 14px", borderRadius:"20px", cursor:"pointer", fontFamily:FONT, fontWeight:"600", fontSize:"11px", letterSpacing:"-0.01em" }}>
@@ -9582,7 +10547,7 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
                     </div>
                     {t.is_lead&&(
                       <div>
-                        <div style={{ fontSize:"11px", color:C.muted, marginBottom:"6px", fontFamily:FONT, fontWeight:"700" }}>TEAM NAME</div>
+                        <div style={{ fontSize:"11px", color:C.muted, marginBottom:"6px", fontFamily:FONT, fontWeight:"700" }}>Team name</div>
                         <div style={{ display:"flex", gap:"8px", marginBottom:"10px" }}>
                           <input
                             placeholder="e.g. Team Maverick"
@@ -9597,7 +10562,7 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
                             style={{ flex:1, background:C.white, border:`1px solid ${C.border}`, color:C.black, padding:"8px 12px", borderRadius:"10px", fontSize:"14px", fontFamily:FONT, fontWeight:"700" }}
                           />
                         </div>
-                        <div style={{ fontSize:"11px", color:C.muted, marginBottom:"6px", fontFamily:FONT, fontWeight:"700" }}>TEAM MEMBERS</div>
+                        <div style={{ fontSize:"11px", color:C.muted, marginBottom:"6px", fontFamily:FONT, fontWeight:"700" }}>Team members</div>
                         <div style={{ display:"flex", flexWrap:"wrap", gap:"6px" }}>
                           {techs.filter(m=>m.id!==t.id).map(m=>{
                             const onTeam = m.team_lead_id===t.id;
@@ -9636,7 +10601,7 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
           </div>
         )}
         {tab==="operations"&&(
-          <OperationsProgressTab techs={techs} switchovers={switchovers} reviews={reviews} quota={quota} callbacks={callbacks||[]} jobs={jobs||[]} isManager={isManager}/>
+          <OperationsProgressTab techs={techs} switchovers={switchovers} reviews={reviews} quota={quota} callbacks={callbacks||[]} damageReports={damageReports||[]} jobs={jobs||[]} isManager={isManager}/>
         )}
         {tab==="schedule"&&(
           <WorkScheduleTab techs={techs} showToast={showToast}/>
@@ -9655,13 +10620,13 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
         )}
 
         {tab==="reports"&&(
-          <ReportsTab techs={techs} jobs={jobs||[]} upsells={upsells||[]} timeEntries={timeEntries} tipEntries={tipEntries} techId={null} refreshAll={refreshAll} showToast={showToast}/>
+          <ReportsTab techs={techs} jobs={jobs||[]} upsells={upsells||[]} switchovers={switchovers||[]} timeEntries={timeEntries} tipEntries={tipEntries} techId={null} refreshAll={refreshAll} showToast={showToast} token={currentUser?.token} isOwner={!isManager} showLabor={!isManager || LABOR_VIEWER_TECH_IDS.includes(currentUser?.techId)}/>
         )}
         {tab==="leaderboard"&&(
           <Leaderboard techs={activeTechs} jobs={jobs||[]} upsells={upsells} reviews={reviews} callbacks={callbacks||[]} switchovers={switchovers} timeEntries={timeEntries}/>
         )}
         {tab==="payroll"&&(
-          <PayrollTab techs={techs} jobs={jobs||[]} upsells={upsells} tipEntries={tipEntries} switchovers={switchovers||[]} timeEntries={timeEntries||[]} token={currentUser?.token} canWaive={!isManager}/>
+          <PayrollTab techs={techs} jobs={jobs||[]} upsells={upsells} tipEntries={tipEntries} switchovers={switchovers||[]} timeEntries={timeEntries||[]} techBookings={techBookings||[]} token={currentUser?.token} canWaive={!isManager}/>
         )}
 
         {tab==="ridealong"&&(
@@ -9707,14 +10672,29 @@ export default function App() {
   const [rideAlongs, setRideAlongs] = useState([]);
   const [schedules, setSchedules] = useState([]);
   const [jobs, setJobs] = useState([]);
+  const [techBookings, setTechBookings] = useState([]);
+  const [damageReports, setDamageReports] = useState([]);
   const [timeEntries, setTimeEntries] = useState([]);
   const [tipEntries, setTipEntries] = useState([]);
   const [pendingSplits, setPendingSplits] = useState([]);
   const [unmatchedTechs, setUnmatchedTechs] = useState([]);
   const [vehicles, setVehicles] = useState([]);
   const [truckAssignments, setTruckAssignments] = useState([]);
-  const [user, setUser] = useState(null);
+  const [user, setUser] = useState(loadOwnerSession);
   const [loading, setLoading] = useState(true);
+  // Keep the owner's "last on the app" fresh while the app is open and
+  // visible (every 30s and on any tap/key); forget it on sign out.
+  useEffect(() => {
+    saveOwnerSession(user);
+    if (user?.role !== "owner") return;
+    let last = 0;
+    const touch = () => { if (document.visibilityState === "visible" && Date.now() - last > 15_000) { last = Date.now(); saveOwnerSession(user); } };
+    const iv = setInterval(touch, 30_000);
+    const evs = ["pointerdown", "keydown"];
+    evs.forEach(e => window.addEventListener(e, touch, { passive:true }));
+    document.addEventListener("visibilitychange", touch);
+    return () => { clearInterval(iv); evs.forEach(e => window.removeEventListener(e, touch)); document.removeEventListener("visibilitychange", touch); };
+  }, [user]);
   const [dbError, setDbError] = useState(null);
 
   const [quota, setQuota] = useState(DEFAULT_QUOTA);
@@ -9723,7 +10703,7 @@ export default function App() {
     try {
       // Truck picks: the last ~4 months (the Trucks tab looks older days up itself).
       const truckSince = mtDateStr(Date.now() - 120*864e5);
-      const [t,u,s,r,ra,sch,settings,cb,jb,te,tp,ps,ut,vh,ta] = await Promise.all([
+      const [t,u,s,r,ra,sch,settings,cb,jb,te,tp,ps,ut,vh,ta,tb,dmg] = await Promise.all([
         sb(`techs?select=${TECH_COLUMNS}&order=name`),
         sb("upsells?select=*"),
         sb("switchovers?select=*"),
@@ -9739,10 +10719,15 @@ export default function App() {
         sb("unmatched_hcp_employees?select=*&order=hcp_name").catch(()=>[]),
         sb("vehicles?select=*&order=name").catch(()=>[]),
         sbAll(`truck_assignments?select=*&work_date=gte.${truckSince}&order=work_date.desc,id.asc`).catch(()=>[]),
+        sb("tech_bookings?select=*&order=created_at.desc").catch(()=>[]),
+        sb("damage_reports?select=*&order=created_at.desc").catch(()=>[]),
       ]);
+      TECH_BOOKINGS = tb || [];
+      COMPLETED_JOB_IDS = new Set((jb||[]).map(j=>j.hcp_job_id).filter(Boolean));
+      DAMAGE_REPORTS = dmg || [];
       setTechs(t||[]); setUpsells(u||[]); setSwitchovers(s||[]); setReviews(r||[]);
       setRideAlongs(ra||[]); setSchedules(sch||[]); setCallbacks(cb||[]); setJobs(jb||[]); setTimeEntries(te||[]); setTipEntries(tp||[]);
-      setPendingSplits(ps||[]); setUnmatchedTechs(ut||[]); setVehicles(vh||[]); setTruckAssignments(ta||[]);
+      setPendingSplits(ps||[]); setUnmatchedTechs(ut||[]); setVehicles(vh||[]); setTruckAssignments(ta||[]); setTechBookings(tb||[]); setDamageReports(dmg||[]);
       if (settings&&settings.length>0) {
         try { setQuota(JSON.parse(settings[0].value)); } catch {}
       }
@@ -9848,7 +10833,7 @@ create policy "public access" on jobs for all using (true) with check (true);
 create unique index if not exists jobs_hcp_job_id_key on jobs(hcp_job_id);
 alter table jobs add column if not exists tips numeric default 0;`}
         </code><br/>
-        <button onClick={()=>{setDbError(null);setLoading(true);loadAll().then(()=>setLoading(false));}} style={{ background:C.blue, border:"none", color:C.black, padding:"12px 28px", borderRadius:"24px", cursor:"pointer", fontFamily:FONT, fontSize:"14px", fontWeight:"700", fontStyle:"normal", letterSpacing:"-0.01em" }}>RETRY</button>
+        <button onClick={()=>{setDbError(null);setLoading(true);loadAll().then(()=>setLoading(false));}} style={{ background:C.blue, border:"none", color:C.white, padding:"12px 28px", borderRadius:"24px", cursor:"pointer", fontFamily:FONT, fontSize:"14px", fontWeight:"700", fontStyle:"normal", letterSpacing:"-0.01em" }}>Retry</button>
       </div>
     </div>
   );
@@ -9866,14 +10851,14 @@ alter table jobs add column if not exists tips numeric default 0;`}
   );
 
   if (user.type==="admin") return (
-    <AdminPanel techs={techs} setTechs={setTechs} upsells={upsells} setUpsells={setUpsells}
+    <AdminPanel techBookings={techBookings} damageReports={damageReports} techs={techs} setTechs={setTechs} upsells={upsells} setUpsells={setUpsells}
       switchovers={switchovers} setSwitchovers={setSwitchovers} reviews={reviews} setReviews={setReviews}
       callbacks={callbacks} rideAlongs={rideAlongs} schedules={schedules} quota={quota} setQuota={setQuota}
       jobs={jobs} timeEntries={timeEntries} tipEntries={tipEntries} pendingSplits={pendingSplits} unmatchedTechs={unmatchedTechs} vehicles={vehicles} truckAssignments={truckAssignments} onLogout={()=>setUser(null)} refreshAll={loadAll}
       isManager={user.role==="manager"} currentUser={user}/>
   );
   if (user.type==="tech"&&currentTech) return (
-    <TechDashboard tech={currentTech} techs={activeTechs} upsells={upsells} switchovers={switchovers}
+    <TechDashboard techBookings={techBookings} damageReports={damageReports} tech={currentTech} techs={activeTechs} upsells={upsells} switchovers={switchovers}
       reviews={reviews} callbacks={callbacks} quota={quota} jobs={jobs} timeEntries={timeEntries} tipEntries={tipEntries} refreshAll={loadAll} rideAlongs={rideAlongs} token={user.token} vehicles={vehicles} truckAssignments={truckAssignments} onLogout={()=>setUser(null)}/>
   );
   return null;

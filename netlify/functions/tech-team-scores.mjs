@@ -55,7 +55,7 @@ export default async (req) => {
   const monthKey = asOf.slice(0, 7), monthStart = `${monthKey}-01`;
   const jobsFrom = monthStart < from ? monthStart : from;
   try {
-    const [techs, subs, vehicles, assignments, daily, events, unassigned, jobs, callbacks, reviews, switchovers, settings] = await Promise.all([
+    const [techs, subs, vehicles, assignments, daily, events, unassigned, jobs, callbacks, reviews, switchovers, settings, damage] = await Promise.all([
       sbGetAll("techs?select=id,name,is_lead,team_lead_id,team_name,is_active,title"),
       sbGetAll(`ghl_form_submissions?select=id,form_id,submitted_at,work_date,tech_name,tech_id,answers,fields:raw->others&${range}`),
       sbGetAll("vehicles?select=id,name,vin", { optional: true }),
@@ -68,6 +68,7 @@ export default async (req) => {
       sbGetAll(`reviews?select=tech_id,month_key,count&month_key=eq.${monthKey}`, { optional: true }),
       sbGetAll("switchovers?select=tech_id,sold_date,created_at", { optional: true }),
       sbGetAll("settings?key=eq.quota&select=value", { optional: true }),
+      sbGetAll("damage_reports?select=tech_id,weight,severity,job_date,created_at", { optional: true }),
     ]);
     let quota = null;
     try { quota = settings && settings[0] ? (typeof settings[0].value === "string" ? JSON.parse(settings[0].value) : settings[0].value) : null; } catch { quota = null; }
@@ -83,12 +84,12 @@ export default async (req) => {
     const active = techs.filter(t => t.is_active !== false && t.title !== "owner");
     const cards = active.map(t => techScoreCard({
       techId: t.id, tech: t, subs: subs.filter(s => s.tech_id === t.id), driverData,
-      jobs, callbacks: callbacks || [], reviews: reviews || [], switchovers: switchovers || [], quota, truckGrades, from, to, today,
+      jobs, callbacks: callbacks || [], damage: damage || [], reviews: reviews || [], switchovers: switchovers || [], quota, truckGrades, from, to, today,
     }));
     const { company, teams } = teamSummary(cards, techs);
     const strip = t => {
       const out = { name: t.name, lead: t.lead, score: t.score, pass: t.pass, scored: t.scored, members: t.members };
-      for (const s of TECH_SCORE_CONFIG.sections) out[s.key] = t[s.key];
+      for (const s of [...TECH_SCORE_CONFIG.sections, ...TECH_SCORE_CONFIG.pills]) out[s.key] = t[s.key];
       return out;
     };
     const shown = teams.filter(t => t.scored >= MIN_TEAM_SCORED);
