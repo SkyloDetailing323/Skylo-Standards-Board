@@ -1049,7 +1049,13 @@ function TotalLeaderboard({ techs, upsells, switchovers, reviews, callbacks, job
 }
 
 // ─── REPORTS TAB ─────────────────────────────────────────────────────────────
-function ReportsTab({ techs, jobs, upsells=[], switchovers=[], timeEntries=[], tipEntries=[], techId=null, refreshAll=async()=>{}, showToast=()=>{}, token=null, isOwner=false }) {
+// Labor cost is owners-only. Tech logins that may also see it on their own
+// Reports page (everyone else, including the Field Supervisor, doesn't).
+const LABOR_VIEWER_TECH_IDS = [
+  "7709e828-baec-41be-8e7e-055024b0a863", // Zak Lundblade
+];
+
+function ReportsTab({ techs, jobs, upsells=[], switchovers=[], timeEntries=[], tipEntries=[], techId=null, refreshAll=async()=>{}, showToast=()=>{}, token=null, isOwner=false, showLabor=false }) {
   // Monthly labor from QuickBooks (owners only) -- also gives the real
   // payroll tax rate the live estimate uses.
   const [qb, setQb] = useState({ months:[], error:null, loaded:false });
@@ -1274,8 +1280,8 @@ function ReportsTab({ techs, jobs, upsells=[], switchovers=[], timeEntries=[], t
               { label:"Rev / Hour",   value:totalHours>0?`$${revPerHr.toFixed(2)}`:"—",        color:totalHours>0?(revPerHr>=75?C.green:C.red):C.muted, sub:"Target: >$75/hr" },
               { label:"Upsell $",     value:`$${Math.round(totalUpsells).toLocaleString()}`,   color:C.gold,                                               sub:`of $${Math.round(totalRevenue).toLocaleString()} revenue` },
               { label:"Upsell Rate",  value:`${upsellPct.toFixed(1)}%`,                        color:upsellPct>=10?C.green:C.red,                       sub:"Target: >10%" },
-              { label:"Labor Cost %", value:totalLabor>0?`${laborPct.toFixed(1)}%`:"—",        color:totalLabor>0?(laborPct<=LABOR_TARGET_PCT?C.green:C.red):C.muted,  sub:`Goal: ${LABOR_TARGET_PCT}% or lower · estimate` },
-            ].map(s=>(
+              showLabor&&{ label:"Labor Cost %", value:totalLabor>0?`${laborPct.toFixed(1)}%`:"—",        color:totalLabor>0?(laborPct<=LABOR_TARGET_PCT?C.green:C.red):C.muted,  sub:`Goal: ${LABOR_TARGET_PCT}% or lower · estimate` },
+            ].filter(Boolean).map(s=>(
               <div key={s.label} style={{ ...metricStyle }}>
                 <div style={{ fontSize:"11px", color:C.muted, letterSpacing:"-0.01em", textTransform:"none", fontFamily:FONT, fontWeight:"700", marginBottom:"8px" }}>{s.label}</div>
                 <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"28px", color:s.color, lineHeight:1 }}>{s.value}</div>
@@ -1285,7 +1291,7 @@ function ReportsTab({ techs, jobs, upsells=[], switchovers=[], timeEntries=[], t
           </div>
 
           {/* Labor cost: what's in the estimate, and the QuickBooks actual by month */}
-          {techId===null&&(
+          {techId===null&&showLabor&&(
             <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"16px", display:"flex", flexDirection:"column", gap:"10px" }}>
               <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline" }}>
                 <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"17px", color:C.black }}>Labor Cost</div>
@@ -3530,7 +3536,7 @@ function TechDashboard({ tech, techs, upsells, switchovers, reviews, callbacks, 
           </div>
         )}
         {tab==="timesheet"&&<TimeSheetTab tech={tech} techs={techs} timeEntries={timeEntries} vehicles={vehicles} truckAssignments={truckAssignments} refreshAll={refreshAll} showToast={showToast} nowTick={nowTick}/>}
-        {tab==="reports"&&<ReportsTab techs={techs} jobs={jobs||[]} upsells={upsells||[]} switchovers={switchovers||[]} timeEntries={timeEntries} tipEntries={tipEntries} techId={tech.id}/>}
+        {tab==="reports"&&<ReportsTab techs={techs} jobs={jobs||[]} upsells={upsells||[]} switchovers={switchovers||[]} timeEntries={timeEntries} tipEntries={tipEntries} techId={tech.id} showLabor={LABOR_VIEWER_TECH_IDS.includes(tech.id)}/>}
         {tab==="leaderboard"&&<Leaderboard techs={techs} jobs={jobs||[]} upsells={upsells} reviews={reviews} callbacks={callbacks||[]} switchovers={switchovers} timeEntries={timeEntries}/>}
         {tab==="badges"&&<BadgeGrid earned={tech.badges}/>}
         {tab==="upsells"&&<UpsellLeaderboard techs={techs} upsells={upsells} jobs={jobs||[]} currentId={tech.id}/>}
@@ -9716,7 +9722,7 @@ function AdminPanel({ techs, upsells, switchovers, reviews, callbacks, rideAlong
         )}
 
         {tab==="reports"&&(
-          <ReportsTab techs={techs} jobs={jobs||[]} upsells={upsells||[]} switchovers={switchovers||[]} timeEntries={timeEntries} tipEntries={tipEntries} techId={null} refreshAll={refreshAll} showToast={showToast} token={currentUser?.token} isOwner={!isManager}/>
+          <ReportsTab techs={techs} jobs={jobs||[]} upsells={upsells||[]} switchovers={switchovers||[]} timeEntries={timeEntries} tipEntries={tipEntries} techId={null} refreshAll={refreshAll} showToast={showToast} token={currentUser?.token} isOwner={!isManager} showLabor={!isManager}/>
         )}
         {tab==="leaderboard"&&(
           <Leaderboard techs={activeTechs} jobs={jobs||[]} upsells={upsells} reviews={reviews} callbacks={callbacks||[]} switchovers={switchovers} timeEntries={timeEntries}/>
