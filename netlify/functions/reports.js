@@ -31,14 +31,23 @@ function json(statusCode, body) {
   return { statusCode, headers: { "Content-Type": "application/json", "Cache-Control": "no-store" }, body: JSON.stringify(body) };
 }
 
-async function rpc(fn, args) {
+// A report that hits the database's 8-second limit (or a 502/503/504) while
+// the database is briefly busy -- e.g. during the hourly HCP sync -- is tried
+// once more before the page shows an error. They normally run in ~3s.
+async function rpc(fn, args, attempt = 1) {
   const res = await fetch(`${process.env.SUPABASE_URL}/rest/v1/rpc/${fn}`, {
     method: "POST",
     headers: { "Content-Type": "application/json", apikey: process.env.SUPABASE_KEY, Authorization: `Bearer ${process.env.SUPABASE_KEY}` },
     body: JSON.stringify(args),
   });
   const text = await res.text();
-  if (!res.ok) throw new Error(`${fn} failed (HTTP ${res.status}): ${text.slice(0, 300)}`);
+  if (!res.ok) {
+    if (attempt === 1 && (/"57014"/.test(text) || [502, 503, 504].includes(res.status))) {
+      await new Promise(r => setTimeout(r, 1000));
+      return rpc(fn, args, 2);
+    }
+    throw new Error(`${fn} failed (HTTP ${res.status}): ${text.slice(0, 300)}`);
+  }
   return JSON.parse(text);
 }
 
