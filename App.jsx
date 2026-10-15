@@ -6860,7 +6860,8 @@ function TierTrack({ m, t, isNow, today, monthName, pending = 0 }) {
               <div key={x.tier} style={{ textAlign:"right", fontFamily:FONT, minWidth:0 }}>
                 <div style={{ fontSize:"11px", fontWeight:"700", color:hit ? doneInk : next ? C.blue : C.muted, textTransform:"uppercase", letterSpacing:"0.02em" }}>{hit ? "✓ " : ""}Tier {x.tier}</div>
                 <div style={{ fontSize:"15px", fontWeight:"700", color:hit || next ? C.black : C.muted, marginTop:"1px" }}>{usd(x.pay)}</div>
-                <div style={{ fontSize:"11px", color:C.muted, whiteSpace:"nowrap" }}>{hit ? `${x.points.toLocaleString()} pts` : `${(x.points - net).toLocaleString()} to go`}</div>
+                <div style={{ fontSize:"11px", color:hit || next ? C.black : C.muted, fontWeight:"600", marginTop:"1px" }}>Goal <span style={{ whiteSpace:"nowrap" }}>{x.points.toLocaleString()} pts</span></div>
+                <div style={{ fontSize:"11px", color:hit ? doneInk : C.muted, whiteSpace:"nowrap" }}>{hit ? "Reached" : `${(x.points - net).toLocaleString()} to go`}</div>
               </div>
             );
           })}
