@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef, Fragment } from "react";
 import { TEST_QUESTIONS, TESTS, TEST_KEYS, questionsFor, shuffle } from "./trainingTest.js";
 import { scorecard, fixList, pageKind, pageLabel, offered, SEO_GOALS } from "./seoScore.js";
-import { tierFor, BONUS_TIERS, FREQ_LABEL, CHARGEBACK_SERVICES, CHARGEBACK_GRACE_DAYS, FREQ_WEEKS, buildSales, buildBookings, monthPoints, reviewList } from "./salesPoints.js";
+import { tierFor, pointsFor, BONUS_TIERS, FREQ_LABEL, CHARGEBACK_SERVICES, CHARGEBACK_GRACE_DAYS, FREQ_WEEKS, buildSales, buildBookings, monthPoints, reviewList } from "./salesPoints.js";
 import { computeOpsMonth, monthRange, mountainDate, CALLBACK_TIERS, QUOTA_TIERS, RETENTION_TIERS, NON_ROUTE_VEHICLES, OPS_EXCLUDED_TITLES } from "./opsBonus.js";
 import { techDriverDays, weeklyDriverScore, findUnassignedDriving, DRIVER_CONFIG } from "./driverScoring.js";
 import { buildFordImport } from "./fordReports.js";
@@ -6860,12 +6860,36 @@ function TierTrack({ m, t, isNow, today, monthName, pending = 0 }) {
               <div key={x.tier} style={{ textAlign:"right", fontFamily:FONT, minWidth:0 }}>
                 <div style={{ fontSize:"11px", fontWeight:"700", color:hit ? doneInk : next ? C.blue : C.muted, textTransform:"uppercase", letterSpacing:"0.02em" }}>{hit ? "✓ " : ""}Tier {x.tier}</div>
                 <div style={{ fontSize:"15px", fontWeight:"700", color:hit || next ? C.black : C.muted, marginTop:"1px" }}>{usd(x.pay)}</div>
-                <div style={{ fontSize:"11px", color:C.muted, whiteSpace:"nowrap" }}>{hit ? `${x.points.toLocaleString()} pts` : `${(x.points - net).toLocaleString()} to go`}</div>
+                <div style={{ fontSize:"11px", color:hit || next ? C.black : C.muted, fontWeight:"600", marginTop:"1px" }}>Goal <span style={{ whiteSpace:"nowrap" }}>{x.points.toLocaleString()} pts</span></div>
+                <div style={{ fontSize:"11px", color:hit ? doneInk : C.muted, whiteSpace:"nowrap" }}>{hit ? "Reached" : `${(x.points - net).toLocaleString()} to go`}</div>
               </div>
             );
           })}
         </div>
       </div>
+    </div>
+  );
+}
+
+// Quick "what's this worth?" for Trevor while he's on a call: ticket price
+// and frequency -> points from the same table the bonus uses.
+function PointsCalc() {
+  const [price, setPrice] = useState("300");
+  const [freq, setFreq] = useState("monthly");
+  const n = Number(price);
+  const pts = n > 0 ? pointsFor(n, freq) : 0;
+  const field = { background:C.white, border:`1px solid ${C.border}`, borderRadius:"10px", padding:"6px 8px", fontSize:"14px", color:C.black, fontFamily:FONT, minWidth:0 };
+  return (
+    <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"14px", padding:"8px 10px", display:"flex", alignItems:"center", gap:"8px", flexWrap:"wrap" }}>
+      <span style={{ fontSize:"12px", color:C.muted, fontWeight:"600", fontFamily:FONT }}>Points calculator</span>
+      <div style={{ display:"flex", alignItems:"center", ...field, padding:"0 8px" }}>
+        <span style={{ color:C.muted }}>$</span>
+        <input type="number" inputMode="decimal" min="0" step="5" value={price} onChange={e => setPrice(e.target.value)} aria-label="Ticket price" style={{ width:"64px", border:"none", outline:"none", padding:"6px 2px", fontSize:"14px", fontFamily:FONT, background:"transparent", color:C.black }}/>
+      </div>
+      <select value={freq} onChange={e => setFreq(e.target.value)} aria-label="Frequency" style={field}>
+        {["weekly","biweekly","monthly","bimonthly","quarterly","biannual","one_time"].map(f => <option key={f} value={f}>{FREQ_LABEL[f]}</option>)}
+      </select>
+      <span style={{ fontFamily:FONT, fontWeight:"700", fontSize:"16px", color:C.blue, whiteSpace:"nowrap" }}>= {pts.toLocaleString()} pts</span>
     </div>
   );
 }
@@ -6898,10 +6922,13 @@ function BookedBoard({ bookings, today }) {
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:"10px" }}>
       <SectionTitle>Booked</SectionTitle>
-      <div style={{ display:"flex", gap:"10px", alignItems:"center" }}>
-        <button onClick={() => shift(-1)} style={arrow}>◀</button>
-        <div style={{ fontFamily:FONT, fontWeight:"600", fontSize:"16px", color:C.black, minWidth:"130px", textAlign:"center" }}>{dayLabel}</div>
-        <button onClick={() => shift(1)} disabled={day >= today} style={{ ...arrow, opacity:day >= today ? 0.4 : 1, cursor:day >= today ? "default" : "pointer" }}>▶</button>
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:"10px", flexWrap:"wrap" }}>
+        <div style={{ display:"flex", gap:"10px", alignItems:"center" }}>
+          <button onClick={() => shift(-1)} style={arrow}>◀</button>
+          <div style={{ fontFamily:FONT, fontWeight:"600", fontSize:"16px", color:C.black, minWidth:"130px", textAlign:"center" }}>{dayLabel}</div>
+          <button onClick={() => shift(1)} disabled={day >= today} style={{ ...arrow, opacity:day >= today ? 0.4 : 1, cursor:day >= today ? "default" : "pointer" }}>▶</button>
+        </div>
+        <PointsCalc/>
       </div>
       <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"20px", padding:"18px 18px 16px", boxShadow:"0 1px 3px rgba(0,0,0,0.05)" }}>
         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-end", gap:"12px", flexWrap:"wrap" }}>
