@@ -3515,6 +3515,7 @@ function TechDashboard({ techBookings=[], damageReports=[], tech, techs, upsells
       ...(SALES_SELF_VIEW[tech.id]?[["mysales","🤝","My Sales"],["rvcrew","🚤","RV & Boat Techs"]]:[]),
       ...(CALLBACK_ENTRY_TECHS.has(tech.id)?[["callbacks","🤝","Customer Satisfaction"]]:[]),
     ] }]:[]),
+    ...(DAMAGE_VIEWER_TECH_IDS.has(tech.id)?[{ label:"Damage", items:[["damage","💥","Damage Reports"]] }]:[]),
     ...(!isApprenticeTech(tech)?[{ label:"Forms", items:[["forms","📝","Forms"]] }]:[]),
     { label:"Training", items:[
       ["training","📋","Perfect Day Training"],
@@ -3803,7 +3804,8 @@ function TechDashboard({ techBookings=[], damageReports=[], tech, techs, upsells
         {tab==="forms"&&<FormsTab me={tech} role="tech"/>}
         {tab==="auditscores"&&<AuditScoresTab techs={techs} token={token} techId={tech.id} jobs={jobs||[]} callbacks={callbacks||[]} damage={damageReports||[]} reviews={reviews||[]} switchovers={switchovers||[]} quota={q}/>}
         {tab==="mysales"&&SALES_SELF_VIEW[tech.id]&&<SalesTab token={token} onlyRep={SALES_SELF_VIEW[tech.id]}/>}
-        {tab==="callbacks"&&CALLBACK_ENTRY_TECHS.has(tech.id)&&<CallbacksPanel techs={techs} jobs={jobs||[]} callbacks={callbacks||[]} damage={damageReports||[]} refreshAll={refreshAll} showToast={showToast}/>}
+        {tab==="callbacks"&&CALLBACK_ENTRY_TECHS.has(tech.id)&&<CallbacksPanel techs={techs} jobs={jobs||[]} callbacks={callbacks||[]} damage={damageReports||[]} refreshAll={refreshAll} showToast={showToast} showDamage={DAMAGE_VIEWER_TECH_IDS.has(tech.id)}/>}
+        {tab==="damage"&&DAMAGE_VIEWER_TECH_IDS.has(tech.id)&&<DamagePanel techs={techs} jobs={jobs||[]} damage={damageReports||[]} refreshAll={refreshAll} showToast={showToast}/>}
       </div>
       {toast&&(
         <div style={{ position:"fixed", bottom:"24px", left:"50%", transform:"translateX(-50%)", background:toast.ok?C.green:"#ff3b30", color:C.white, padding:"12px 28px", borderRadius:"24px", fontSize:"14px", fontWeight:"700", zIndex:999, whiteSpace:"nowrap", fontFamily:FONT, letterSpacing:"-0.01em", fontStyle:"normal", boxShadow:"0 4px 20px rgba(0,0,0,0.15)" }}>
@@ -9422,11 +9424,23 @@ function TrucksAdminTab({ techs, vehicles, timeEntries=[], token, refreshAll, sh
 // Used by the admin panel and by Trevor's login (CALLBACK_ENTRY_TECHS) --
 // he's the one who enters callbacks as they come in.
 const CALLBACK_ENTRY_TECHS = new Set(["4641f4da-a16f-411b-8688-8b81ac06eda7"]);   // Trevor Prince
+// Damage reports are owners, Will (manager login) and Zak only. Everyone
+// else's app gets just the scoring fields from netlify/functions/damage-reports
+// (no customer, items, cost or reason) so points still add up the same.
+const DAMAGE_VIEWER_TECH_IDS = new Set(["7709e828-baec-41be-8e7e-055024b0a863"]);   // Zak Lundblade
+let AUTH_TOKEN = null;   // the logged-in user's token, set by App on every render
+async function damageApi(method="GET", query="", body=null) {
+  const r = await fetch(`/.netlify/functions/damage-reports${query}`, { method, headers:{ Authorization:`Bearer ${AUTH_TOKEN||""}`, ...(body?{ "Content-Type":"application/json" }:{}) }, body: body ? JSON.stringify(body) : undefined });
+  const j = await r.json().catch(()=>({}));
+  if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+  return j;
+}
 // Callbacks page: two tabs Trevor flips between -- Callbacks (red, unchanged)
 // and Damage (orange). Damage scores exactly like a callback of the same
 // level, but is logged and reported separately.
-function CallbacksPanel({ techs, jobs, callbacks, damage=[], refreshAll, showToast }) {
+function CallbacksPanel({ techs, jobs, callbacks, damage=[], refreshAll, showToast, showDamage=true }) {
   const [view, setView] = useState("callbacks");
+  if (!showDamage) return <CallbackLogPanel techs={techs} jobs={jobs} callbacks={callbacks} refreshAll={refreshAll} showToast={showToast}/>;
   const tabBtn = (id, label, color) => (
     <button onClick={() => setView(id)} style={{ flex:1, background:view===id ? color : C.white, color:view===id ? C.white : C.black, border:`1px solid ${view===id ? color : C.border}`, padding:"10px 14px", borderRadius:"12px", cursor:"pointer", fontFamily:FONT, fontWeight:"700", fontSize:"14px" }}>{label}</button>
   );
@@ -9511,7 +9525,7 @@ function DamagePanel({ techs, jobs, damage, refreshAll, showToast }) {
         hcp_job_id:picked ? picked.hcp_job_id : null,
         damaged_items:f.items, severity:f.severity, repair_cost:cost, reason:f.reason || "",
       }));
-      await sb("damage_reports",{method:"POST",body:JSON.stringify(rows)});
+      await damageApi("POST", "", { rows });
       await refreshAll();
       const names = techIds.map(id=>techs.find(t=>t.id===id)?.name||"?").join(" & ");
       showToast(`💥 Damage logged for ${names} — ${Math.round(DAMAGE_SEVERITY[f.severity].pts*weight)} pts deducted${techIds.length>1?" each (split)":""}`);
@@ -9523,7 +9537,7 @@ function DamagePanel({ techs, jobs, damage, refreshAll, showToast }) {
     const both = d.group_id && damage.filter(x=>x.group_id===d.group_id).length>1;
     if (!window.confirm(both ? "Delete this damage report for everyone on the job?" : "Delete this damage report?")) return;
     setSaving(true);
-    try { await sb(d.group_id ? `damage_reports?group_id=eq.${d.group_id}` : `damage_reports?id=eq.${d.id}`,{method:"DELETE",prefer:"return=minimal"}); await refreshAll(); showToast("Damage report removed"); }
+    try { await damageApi("DELETE", d.group_id ? `?group_id=${d.group_id}` : `?id=${d.id}`); await refreshAll(); showToast("Damage report removed"); }
     catch(e){ showToast("Error: "+e.message,false); }
     setSaving(false);
   }
@@ -10775,6 +10789,7 @@ export default function App() {
   const [vehicles, setVehicles] = useState([]);
   const [truckAssignments, setTruckAssignments] = useState([]);
   const [user, setUser] = useState(loadOwnerSession);
+  AUTH_TOKEN = user?.token || null;
   const [loading, setLoading] = useState(true);
   // Keep the owner's "last on the app" fresh while the app is open and
   // visible (every 30s and on any tap/key); forget it on sign out.
@@ -10814,7 +10829,7 @@ export default function App() {
         sb("vehicles?select=*&order=name").catch(()=>[]),
         sbAll(`truck_assignments?select=*&work_date=gte.${truckSince}&order=work_date.desc,id.asc`).catch(()=>[]),
         sb("tech_bookings?select=*&order=created_at.desc").catch(()=>[]),
-        sb("damage_reports?select=*&order=created_at.desc").catch(()=>[]),
+        (AUTH_TOKEN ? damageApi().then(j=>j.rows) : Promise.resolve([])).catch(()=>[]),
       ]);
       TECH_BOOKINGS = tb || [];
       COMPLETED_JOB_IDS = new Set((jb||[]).map(j=>j.hcp_job_id).filter(Boolean));
@@ -10834,6 +10849,9 @@ export default function App() {
     const interval = setInterval(() => { loadAll(); }, 60_000);
     return () => clearInterval(interval);
   }, [loadAll]);
+  // Damage reports load with the login token, so reload once someone logs in.
+  const tokenNow = user?.token || null;
+  useEffect(() => { if (tokenNow) loadAll(); }, [tokenNow, loadAll]);
 
   // PINs are checked on the server so they never ship to the browser. Owners
   // (OWNER_PINS env var) and the Field Supervisor get the admin panel; the
