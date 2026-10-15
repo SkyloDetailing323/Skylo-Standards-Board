@@ -7,6 +7,12 @@
 // Hourly (via hcp-sales-sync-cron): jobs scheduled from 60 days ago to a year
 // out, plus anything still waiting to be scheduled.
 // ?mode=full : every job HCP has (one-time backfill).
+// ?mode=quick : every 5 min (hcp-sales-sync-quick-cron) -- only jobs
+//   scheduled from yesterday to 45 days out (~13 API calls), so new bookings
+//   show on Trevor's Sales board within minutes. Skips the lead re-match and
+//   canceled-job cleanup; the hourly run does those.
+// Every run then saves the plan price of sales whose first visit was just
+// serviced (capture_sales_plan_snapshots, for Trevor's downsize clawback).
 
 const PAGE_SIZE = 100;
 const TIME_BUDGET_MS = 13.5 * 60 * 1000;
@@ -71,18 +77,35 @@ async function pull(filters, deadline, stats) {
   return false;
 }
 
-async function saveState(value) {
-  await sb("ghl_sync_state?on_conflict=key", { method: "POST", prefer: "resolution=merge-duplicates,return=minimal", body: JSON.stringify({ key: "hcp_sales_last_run", value, updated_at: new Date().toISOString() }) }).catch(() => {});
+async function saveState(value, key = "hcp_sales_last_run") {
+  await sb("ghl_sync_state?on_conflict=key", { method: "POST", prefer: "resolution=merge-duplicates,return=minimal", body: JSON.stringify({ key, value, updated_at: new Date().toISOString() }) }).catch(() => {});
+}
+
+// A database function; its failure is reported in the stats, not thrown.
+async function rpcPost(fn) {
+  const res = await fetch(`${process.env.SUPABASE_URL}/rest/v1/rpc/${fn}`, {
+    method: "POST", headers: { "Content-Type": "application/json", apikey: process.env.SUPABASE_KEY, Authorization: `Bearer ${process.env.SUPABASE_KEY}` }, body: "{}",
+  }).catch(e => ({ ok: false, status: 0, text: async () => e.message }));
+  return res.ok ? res.json() : `failed (HTTP ${res.status}): ${(await res.text()).slice(0, 200)}`;
 }
 
 exports.handler = async (event) => {
   const started = Date.now(), deadline = started + TIME_BUDGET_MS;
-  const full = (event?.queryStringParameters?.mode || "") === "full";
-  const stats = { mode: full ? "full" : "incremental", jobs: 0, api_calls: 0, complete: true, started_at: new Date(started).toISOString() };
+  const mode = event?.queryStringParameters?.mode || "";
+  const full = mode === "full", quick = mode === "quick";
+  const stats = { mode: full ? "full" : quick ? "quick" : "incremental", jobs: 0, api_calls: 0, complete: true, started_at: new Date(started).toISOString() };
   try {
     if (!process.env.HCP_API_KEY) throw new Error("HCP_API_KEY not set");
     if (full) {
       stats.complete = await pull([], deadline, stats);
+    } else if (quick) {
+      const day = n => new Date(Date.now() + n * 864e5).toISOString().slice(0, 10);
+      stats.complete = await pull([`scheduled_start_min=${encodeURIComponent(day(-1) + "T00:00:00-07:00")}`, `scheduled_start_max=${encodeURIComponent(day(45) + "T23:59:59-07:00")}`], deadline, stats);
+      stats.snapshots = await rpcPost("capture_sales_plan_snapshots");
+      stats.seconds = Math.round((Date.now() - started) / 1000);
+      await saveState({ ok: true, ...stats }, "hcp_sales_quick_last_run");
+      console.log("hcp-sales-sync:", JSON.stringify(stats));
+      return { statusCode: 202 };
     } else {
       const day = n => new Date(Date.now() + n * 864e5).toISOString().slice(0, 10);
       const scheduled = await pull([`scheduled_start_min=${encodeURIComponent(day(-60) + "T00:00:00-07:00")}`, `scheduled_start_max=${encodeURIComponent(day(365) + "T23:59:59-07:00")}`], deadline, stats);
@@ -100,12 +123,13 @@ exports.handler = async (event) => {
       method: "POST", headers: { "Content-Type": "application/json", apikey: process.env.SUPABASE_KEY, Authorization: `Bearer ${process.env.SUPABASE_KEY}` }, body: "{}",
     });
     stats.canceled_removed = cres.ok ? await cres.json() : `failed (HTTP ${cres.status}): ${(await cres.text()).slice(0, 200)}`;
+    stats.snapshots = await rpcPost("capture_sales_plan_snapshots");
     stats.seconds = Math.round((Date.now() - started) / 1000);
     await saveState({ ok: true, ...stats });
     console.log("hcp-sales-sync:", JSON.stringify(stats));
   } catch (e) {
     console.error("hcp-sales-sync:", e.message);
-    await saveState({ ok: false, error: e.message, ...stats });
+    await saveState({ ok: false, error: e.message, ...stats }, quick ? "hcp_sales_quick_last_run" : undefined);
   }
   return { statusCode: 202 };
 };

@@ -53,6 +53,11 @@
   # Hourly HCP jobs + customer contact sync for the Sales/Marketing revenue.
   schedule = "7 * * * *"
 
+[functions."hcp-sales-sync-quick-cron"]
+  # Every 5 min: HCP jobs scheduled yesterday to 45 days out, for Trevor's
+  # live "Booked" board. The hourly run above does everything else.
+  schedule = "*/5 * * * *"
+
 [functions."google-ads-sync"]
   timeout = 26
 

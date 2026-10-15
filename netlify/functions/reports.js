@@ -11,7 +11,8 @@
 //   Trevor's sales for his points bonus: every HCP job of every customer who
 //   has a job tagged "sold by trevor", plus each tagged job's revenue without
 //   tips; owner overrides (sales_credit_overrides) and, for owners, the
-//   review evidence (sales_credit_review_rows). salesPoints.js does the rest.
+//   review evidence (sales_credit_review_rows), saved plan prices
+//   (sales_plan_snapshots) and plan minimums. salesPoints.js does the rest.
 // POST ?type=sales_credit  owners: who sold a job, overriding the tag.
 // GET ?type=ad_trends  owners: Meta ads week by week (adTrends.js).
 //   A rep with selfTechId can also open their own sales report from their
@@ -191,10 +192,19 @@ async function salesJobs(repKey, rep) {
   const all = {};
   for (const j of [...sales, ...others]) all[j.hcp_job_id] = j;
   const jobs = Object.values(all).map(({ raw, ...j }) => ({ ...j, tags: raw?.tags || [] }));
-  const revRows = sales.length ? await restIn("jobs?select=hcp_job_id,revenue", "hcp_job_id", sales.map(j => j.hcp_job_id)) : [];
+  const ids = sales.map(j => j.hcp_job_id);
+  // Saved plan prices (sales_plan_snapshots) and the plan minimums -- both
+  // optional, so the bonus still loads if either is missing.
+  const [revRows, snapRows, settings] = await Promise.all([
+    ids.length ? restIn("jobs?select=hcp_job_id,revenue", "hcp_job_id", ids) : [],
+    ids.length ? restIn("sales_plan_snapshots?select=hcp_job_id,plan_price", "hcp_job_id", ids).catch(e => { console.error("sales_plan_snapshots:", e.message); return []; }) : [],
+    rest("report_settings?select=value&key=eq.attribution").catch(() => []),
+  ]);
   const revenue = {};
   for (const r of revRows) revenue[r.hcp_job_id] = (revenue[r.hcp_job_id] || 0) + (Number(r.revenue) || 0);
-  return { jobs, revenue, overrides, evidence: evidence || [], evidence_failed: evidence == null };
+  const snapshots = {};
+  for (const r of snapRows) snapshots[r.hcp_job_id] = r.plan_price == null ? null : Number(r.plan_price);
+  return { jobs, revenue, overrides, snapshots, plan_minimums: settings[0]?.value?.plan_minimums || {}, evidence: evidence || [], evidence_failed: evidence == null };
 }
 
 const isDate = s => /^\d{4}-\d{2}-\d{2}$/.test(s || "");
