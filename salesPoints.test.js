@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { rowFor, pointsFor, tierFor, POINTS_TABLE, freqFromTags, freqFromVisits, buildSales, monthPoints, reviewList } from "./salesPoints.js";
+import { rowFor, pointsFor, tierFor, POINTS_TABLE, freqFromTags, freqFromVisits, buildSales, monthPoints, reviewList, salePoints, buildBookings } from "./salesPoints.js";
 
 test("exact table rows", () => {
   assert.equal(pointsFor(145, "weekly"), 116);
@@ -179,4 +179,65 @@ test("a plan's later visit that kept the tag isn't a second sale", () => {
     job("k3", "kim", "2026-10-20", { done: true, created: "2026-10-15", tags: ["sold by trevor", "RETURNING"] }),  // a new booking later: a sale
   ];
   assert.deepEqual(buildSales(jobs, { tag: "sold by trevor", now: NOW }).map(s => s.hcp_job_id).sort(), ["k1", "k3"]);
+});
+
+test("a first visit more than $50 over the plan = one-time for the difference + the plan at the lower price", () => {
+  assert.deepEqual(salePoints(400, 200, "monthly"), { points: pointsFor(200, "monthly") + pointsFor(200, "one_time"), plan_price: 200, extra: 200 });
+  assert.equal(salePoints(250, 200, "monthly").points, pointsFor(250, "monthly"));   // $50 off = weather swap
+  assert.equal(salePoints(300, null, "monthly").points, pointsFor(300, "monthly"));
+  const [s] = buildSales([
+    job("k1", "kim", "2026-10-02", { done: true, tags: ["sold by trevor", "Monthly"], cents: 40000 }),
+    job("k2", "kim", "2026-10-30", { cents: 20000 }), job("k3", "kim", "2026-11-27", { cents: 20000 }),
+  ], { tag: "sold by trevor", now: NOW });
+  assert.equal(s.plan_price, 200);
+  assert.equal(s.extra, 200);
+  assert.equal(s.points, pointsFor(200, "monthly") + pointsFor(200, "one_time"));
+});
+
+test("downsize: a window visit done more than $50 under the plan comes off in the month it was done", () => {
+  const jobs = [
+    job("m1", "max", "2026-08-05", { done: true, tags: ["sold by trevor", "Monthly"], cents: 40000 }),
+    job("m2", "max", "2026-09-02", { done: true, cents: 20000 }),
+    job("m3", "max", "2026-09-30", { done: true, cents: 20000 }),
+  ];
+  const snap = { m1: 400 };   // sold as a 2-car $400 monthly
+  const [s] = buildSales(jobs, { tag: "sold by trevor", now: NOW, snapshots: snap });
+  assert.equal(s.points, pointsFor(400, "monthly"));
+  assert.equal(s.downsize_month, "2026-09");
+  assert.equal(s.downsize_price, 200);
+  assert.equal(s.downsize_points, pointsFor(400, "monthly") - (pointsFor(200, "monthly") + pointsFor(200, "one_time")));
+  assert.equal(monthPoints([s], "2026-08").net, s.points);
+  assert.equal(monthPoints([s], "2026-09").net, -s.downsize_points);
+  // $50 or less under (int/ext only because of rain) isn't a downsize.
+  const [ok] = buildSales([jobs[0], { ...jobs[1], total_cents: 35000 }, { ...jobs[2], total_cents: 40000 }], { tag: "sold by trevor", now: NOW, snapshots: snap });
+  assert.equal(ok.downsize_points, 0);
+});
+
+test("a plan that downsizes and then stops only loses what's left", () => {
+  const [s] = buildSales([
+    job("n1", "ned", "2026-07-06", { done: true, tags: ["sold by trevor", "Monthly"], cents: 40000 }),
+    job("n2", "ned", "2026-08-03", { done: true, cents: 20000 }),
+    job("n3", "ned", "2026-08-31", { status: "pro canceled", cents: 20000 }),
+  ], { tag: "sold by trevor", now: NOW, snapshots: { n1: 400 } });
+  assert.equal(s.status, "charged_back");
+  assert.equal(s.downsize_points + s.chargeback_points, s.points);
+});
+
+test("bookings: by the day created, first visit + the plan's booked visits up to the minimum", () => {
+  const b = buildBookings([
+    job("p1", "pam", "2026-10-20", { created: "2026-10-14", tags: ["sold by trevor", "Monthly"], cents: 40000 }),
+    job("p2", "pam", "2026-11-17", { created: "2026-10-14", cents: 20000 }),
+    job("p3", "pam", "2026-12-15", { created: "2026-10-14", cents: 20000 }),
+    job("q1", "quinn", "2026-10-16", { created: "2026-10-15", tags: ["sold by trevor"], cents: 25000 }),
+  ], { tag: "sold by trevor" });
+  const pam = b.find(x => x.hcp_job_id === "p1"), quinn = b.find(x => x.hcp_job_id === "q1");
+  assert.equal(pam.booked_on, "2026-10-14");
+  assert.equal(pam.visits, 6);
+  assert.equal(pam.visits_booked, 3);
+  assert.equal(pam.backend, 200 * 5);            // 2 booked at $200 + 3 not booked yet at the plan price
+  assert.equal(pam.committed, 1400);
+  assert.equal(pam.points, pointsFor(200, "monthly") + pointsFor(200, "one_time"));
+  assert.equal(pam.serviced, false);
+  assert.equal(quinn.freq, "one_time");
+  assert.equal(quinn.committed, 250);
 });

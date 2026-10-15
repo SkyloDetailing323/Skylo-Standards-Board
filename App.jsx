@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef, Fragment } from "react";
 import { TEST_QUESTIONS, TESTS, TEST_KEYS, questionsFor, shuffle } from "./trainingTest.js";
 import { scorecard, fixList, pageKind, pageLabel, offered, SEO_GOALS } from "./seoScore.js";
-import { tierFor, BONUS_TIERS, FREQ_LABEL, CHARGEBACK_SERVICES, CHARGEBACK_GRACE_DAYS, FREQ_WEEKS, buildSales, monthPoints, reviewList } from "./salesPoints.js";
+import { tierFor, BONUS_TIERS, FREQ_LABEL, CHARGEBACK_SERVICES, CHARGEBACK_GRACE_DAYS, FREQ_WEEKS, buildSales, buildBookings, monthPoints, reviewList } from "./salesPoints.js";
 import { computeOpsMonth, monthRange, mountainDate, CALLBACK_TIERS, QUOTA_TIERS, RETENTION_TIERS, NON_ROUTE_VEHICLES, OPS_EXCLUDED_TITLES } from "./opsBonus.js";
 import { techDriverDays, weeklyDriverScore, findUnassignedDriving, DRIVER_CONFIG } from "./driverScoring.js";
 import { buildFordImport } from "./fordReports.js";
@@ -6779,7 +6779,7 @@ const SALES_SELF_VIEW = { "4641f4da-a16f-411b-8688-8b81ac06eda7": "trevor" };
 // Trevor's month at a glance: net points, bonus, and a 5-step track -- one
 // equal-width step per tier, each filling with the points between the tier
 // before it and that tier, so he can see how close he is to every one.
-function TierTrack({ m, t, isNow, today, monthName }) {
+function TierTrack({ m, t, isNow, today, monthName, pending = 0 }) {
   const net = Math.max(0, m.net);
   const steps = BONUS_TIERS.map((b, i) => {
     const from = i ? BONUS_TIERS[i - 1].points : 0;
@@ -6840,6 +6840,7 @@ function TierTrack({ m, t, isNow, today, monthName }) {
         </div>
         {pace != null && <div style={{ fontSize:"12px", color:C.muted }}>On pace for ~<b style={{ color:C.black }}>{pace.toLocaleString()} pts</b>{paceTier.tier ? ` · Tier ${paceTier.tier} (${usd(paceTier.pay)})` : " · short of Tier 1"}</div>}
       </div>
+      {pending > 0 && <div style={{ fontSize:"12px", color:C.muted, marginTop:"4px", fontFamily:FONT }}><b style={{ color:C.blue }}>+{pending.toLocaleString()} pts</b> booked and waiting on service{tierFor(net + pending).tier > (t.tier || 0) ? ` · that's Tier ${tierFor(net + pending).tier} (${usd(tierFor(net + pending).pay)}) once they're done` : ""}</div>}
 
       <div style={{ position:"relative", marginTop:"32px" }}>
         <div style={{ position:"absolute", left:`${pos}%`, top:"-26px", transform:`translateX(${pos > 92 ? "-100%" : pos < 8 ? "0" : "-50%"})`, transition:"left .6s ease", background:C.black, color:"#fff", borderRadius:"6px", padding:"2px 8px", fontSize:"11px", fontWeight:"700", fontFamily:FONT, whiteSpace:"nowrap" }}>{m.net.toLocaleString()} pts</div>
@@ -6863,6 +6864,84 @@ function TierTrack({ m, t, isNow, today, monthName }) {
           })}
         </div>
       </div>
+    </div>
+  );
+}
+
+// Trevor's live "Booked" board: jobs he booked (created in HCP with his
+// "sold by" tag) on a day -- first-visit revenue, the committed back end from
+// the plan's booked visits (HCP prices, up to the plan minimum), recurring
+// plans, and the points they'll earn once the first visit is serviced.
+// Booking alone doesn't earn points. HCP syncs every 5 minutes.
+function BookedBoard({ bookings, today }) {
+  const [day, setDay] = useState(today);
+  const [open, setOpen] = useState(false);
+  const rows = bookings.filter(b => b.booked_on === day).sort((a, b) => b.committed - a.committed);
+  const plans = rows.filter(b => b.freq !== "one_time");
+  const byPlan = {};
+  for (const b of plans) byPlan[b.freq] = (byPlan[b.freq] || 0) + 1;
+  const planText = Object.keys(FREQ_WEEKS).filter(f => byPlan[f]).map(f => `${byPlan[f]} ${FREQ_LABEL[f].toLowerCase()}`).join(" · ");
+  const sum = k => rows.reduce((a, b) => a + (b[k] || 0), 0);
+  const shift = n => { const d = new Date(day + "T12:00:00Z"); d.setUTCDate(d.getUTCDate() + n); setDay(d.toISOString().slice(0, 10)); };
+  const dayLabel = day === today ? "Today" : new Date(day + "T12:00:00Z").toLocaleDateString("en-US", { weekday:"short", month:"short", day:"numeric", timeZone:"UTC" });
+  const arrow = { background:C.white, border:`1px solid ${C.border}`, borderRadius:"50%", width:"34px", height:"34px", display:"flex", alignItems:"center", justifyContent:"center", fontSize:"13px", cursor:"pointer", fontFamily:FONT, color:C.blue };
+  const label = { fontSize:"12px", color:C.muted, fontWeight:"600", fontFamily:FONT };
+  const stat = (name, value, sub) => (
+    <div style={{ minWidth:0 }}>
+      <div style={label}>{name}</div>
+      <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"24px", color:C.black, lineHeight:1.15, marginTop:"2px" }}>{value}</div>
+      <div style={{ fontSize:"12px", color:C.muted, marginTop:"2px" }}>{sub}</div>
+    </div>
+  );
+  return (
+    <div style={{ display:"flex", flexDirection:"column", gap:"10px" }}>
+      <SectionTitle>Booked</SectionTitle>
+      <div style={{ display:"flex", gap:"10px", alignItems:"center" }}>
+        <button onClick={() => shift(-1)} style={arrow}>◀</button>
+        <div style={{ fontFamily:FONT, fontWeight:"600", fontSize:"16px", color:C.black, minWidth:"130px", textAlign:"center" }}>{dayLabel}</div>
+        <button onClick={() => shift(1)} disabled={day >= today} style={{ ...arrow, opacity:day >= today ? 0.4 : 1, cursor:day >= today ? "default" : "pointer" }}>▶</button>
+      </div>
+      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"20px", padding:"18px 18px 16px", boxShadow:"0 1px 3px rgba(0,0,0,0.05)" }}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-end", gap:"12px", flexWrap:"wrap" }}>
+          <div>
+            <div style={label}>Jobs booked</div>
+            <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"48px", color:C.black, lineHeight:1, letterSpacing:"-0.03em", marginTop:"4px" }}>{rows.length}</div>
+          </div>
+          <div style={{ textAlign:"right" }}>
+            <div style={label}>Points when serviced</div>
+            <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"32px", color:C.blue, marginTop:"4px", lineHeight:1 }}>+{sum("points").toLocaleString()}</div>
+          </div>
+        </div>
+        <div style={{ borderTop:`1px solid ${C.border}`, margin:"16px 0" }}/>
+        <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(130px, 1fr))", gap:"14px" }}>
+          {stat("First-visit revenue", usd(sum("price")), "no tips")}
+          {stat("Committed revenue", usd(sum("committed")), "first visit + plan minimum")}
+          {stat("Recurring booked", plans.length, planText || "none")}
+          {stat("One-time", rows.length - plans.length, "single visits")}
+        </div>
+      </div>
+      {rows.length > 0 && (<>
+        <SalesDrop open={open} toggle={() => setOpen(v => !v)} title={`${rows.length} customer${rows.length === 1 ? "" : "s"} booked`} right={usd(sum("committed"))}/>
+        {open && rows.map(b => (
+          <div key={b.hcp_job_id} style={{ background:C.card, border:"1px solid rgba(0,0,0,0.04)", borderRadius:"16px", padding:"12px 14px", boxShadow:"0 1px 3px rgba(0,0,0,0.05)" }}>
+            <div style={{ display:"flex", justifyContent:"space-between", gap:"8px" }}>
+              <div style={{ fontFamily:FONT, fontWeight:"600", fontSize:"15px", color:C.black, minWidth:0 }}>{b.name}</div>
+              <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"14px", color:C.blue, whiteSpace:"nowrap" }}>+{b.points.toLocaleString()} pts</div>
+            </div>
+            <div style={{ fontSize:"12px", color:C.muted, marginTop:"2px" }}>
+              {b.freq === "one_time" ? "One-time" : `${FREQ_LABEL[b.freq]}${b.freq_source === "visits" ? " (from schedule)" : ""}`}
+              {b.extra ? ` · ${usd(b.plan_price)} plan + ${usd(b.extra)} one-time first visit` : ""}
+              {b.scheduled_on ? ` · first visit ${fmtShortDate(b.scheduled_on)}` : ""}{b.serviced ? " · ✓ serviced" : ""}
+            </div>
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(3, 1fr)", gap:"8px", marginTop:"8px", fontFamily:FONT }}>
+              <div><div style={{ fontSize:"11px", color:C.muted }}>First visit</div><div style={{ fontSize:"14px", fontWeight:"700", color:C.black }}>{usd(b.price)}</div></div>
+              <div><div style={{ fontSize:"11px", color:C.muted }}>Back end</div><div style={{ fontSize:"14px", fontWeight:"700", color:C.black }}>{b.freq === "one_time" ? "—" : usd(b.backend)}</div>{b.freq !== "one_time" && <div style={{ fontSize:"11px", color:C.muted }}>{b.visits - 1} visits · {b.visits_booked - 1} booked</div>}</div>
+              <div><div style={{ fontSize:"11px", color:C.muted }}>Committed</div><div style={{ fontSize:"14px", fontWeight:"700", color:C.black }}>{usd(b.committed)}</div></div>
+            </div>
+          </div>
+        ))}
+      </>)}
+      <div style={{ fontSize:"12px", color:C.muted }}>A booking is a job created in HCP that day with the "sold by trevor" tag. Back end = the plan's visits booked in HCP at their prices, up to the plan minimum; any not booked yet count at the plan price. Points come in when the first visit is serviced. Updates from HCP every 5 minutes.</div>
     </div>
   );
 }
@@ -6891,7 +6970,12 @@ function SalesPointsBonus({ token, canReview=false }) {
   const [showReview, setShowReview] = useState(false);
   const s = useGrowthReport({ type:"sales_deals", rep:"trevor", from:"2026-06-01", to:today, v:bump }, token);
   const overrides = useMemo(() => Object.fromEntries((s.data?.overrides || []).map(o => [o.hcp_job_id, o.rep])), [s.data]);
-  const sales = useMemo(() => s.data ? buildSales(s.data.jobs || [], { tag:s.data.tag, revenueByJob:s.data.revenue || {}, overrides, repKey:"trevor" }) : [], [s.data, overrides]);
+  const sales = useMemo(() => s.data ? buildSales(s.data.jobs || [], { tag:s.data.tag, revenueByJob:s.data.revenue || {}, overrides, repKey:"trevor", snapshots:s.data.snapshots || {} }) : [], [s.data, overrides]);
+  const bookings = useMemo(() => s.data ? buildBookings(s.data.jobs || [], { tag:s.data.tag, revenueByJob:s.data.revenue || {}, overrides, repKey:"trevor", minimums:s.data.plan_minimums || {} }) : [], [s.data, overrides]);
+  // Booked in the last 60 days and not serviced yet (an old job nobody closed
+  // out shouldn't count).
+  const recentFrom = new Date(Date.now() - 60 * 864e5).toISOString().slice(0, 10);
+  const pendingPts = bookings.filter(b => !b.serviced && b.booked_on >= recentFrom).reduce((a, b) => a + b.points, 0);
   const review = useMemo(() => canReview && s.data?.evidence ? reviewList(s.data.evidence, overrides, "trevor") : null, [s.data, overrides, canReview]);
   async function credit(jobId, rep) {
     setSaving(jobId);
@@ -6936,6 +7020,7 @@ function SalesPointsBonus({ token, canReview=false }) {
   const freqText = d => `${FREQ_LABEL[d.freq] || d.freq}${d.freq_source === "visits" ? " (from schedule)" : ""}`;
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:"10px" }}>
+      {s.data && <BookedBoard bookings={bookings} today={today}/>}
       <SectionTitle>Bonus points</SectionTitle>
       <div style={{ display:"flex", gap:"10px", alignItems:"center" }}>
         <button onClick={() => shift(-1)} style={arrow}>◀</button>
@@ -6944,22 +7029,31 @@ function SalesPointsBonus({ token, canReview=false }) {
       </div>
       <ReportState s={s}/>
       {s.data && (<>
-        <TierTrack m={m} t={t} isNow={month === thisMonth} today={today} monthName={label.split(" ")[0]}/>
-        {(m.chargebacks.length > 0 || atRisk.length > 0) && (
+        <TierTrack m={m} t={t} isNow={month === thisMonth} today={today} monthName={label.split(" ")[0]} pending={month === thisMonth ? pendingPts : 0}/>
+        {(m.chargebacks.length > 0 || m.downsizes.length > 0 || atRisk.length > 0) && (
           <div style={{ background:C.card, border:`1px solid ${m.back ? `${C.red}30` : C.border}`, borderRadius:"16px", overflow:"hidden" }}>
             <button onClick={() => setShowClawbacks(v => !v)} style={{ width:"100%", display:"flex", justifyContent:"space-between", alignItems:"center", gap:"8px", background:m.back ? `${C.red}08` : C.card, border:"none", padding:"12px 14px", cursor:"pointer", fontFamily:FONT, textAlign:"left" }}>
-              <span style={{ fontWeight:"600", fontSize:"15px", color:C.black }}>{[m.chargebacks.length && `Clawbacks · ${m.chargebacks.length} plan${m.chargebacks.length === 1 ? "" : "s"} cancelled`, atRisk.length && `${atRisk.length} plan${atRisk.length === 1 ? "" : "s"} at risk`].filter(Boolean).join(" · ")}</span>
+              <span style={{ fontWeight:"600", fontSize:"15px", color:C.black }}>{[(m.chargebacks.length || m.downsizes.length) && "Clawbacks", m.chargebacks.length && `${m.chargebacks.length} cancelled`, m.downsizes.length && `${m.downsizes.length} downsized`, atRisk.length && `${atRisk.length} plan${atRisk.length === 1 ? "" : "s"} at risk`].filter(Boolean).join(" · ")}</span>
               <span style={{ fontWeight:"700", fontSize:"14px", color:m.back ? C.red : C.blue, whiteSpace:"nowrap" }}>{m.back ? `−${m.back.toLocaleString()} pts` : `${riskPts.toLocaleString()} pts at risk`} {showClawbacks ? "▲" : "▼"}</span>
             </button>
             {showClawbacks && (
               <div style={{ padding:"4px 14px 10px" }}>
+                {m.downsizes.map(d => (
+                  <div key={"ds" + d.hcp_job_id} style={{ display:"flex", justifyContent:"space-between", gap:"8px", padding:"10px 0", borderBottom:`1px solid ${C.border}40` }}>
+                    <div style={{ minWidth:0 }}>
+                      <div style={{ fontFamily:FONT, fontWeight:"600", fontSize:"14px", color:C.black }}>{d.name} · downsized</div>
+                      <div style={{ fontSize:"12px", color:C.muted, marginTop:"2px" }}>{FREQ_LABEL[d.freq]} sold {fmtShortDate(d.done_on)} at {money2(d.plan_price)} a visit · {money2(d.downsize_price)} visit on {fmtShortDate(d.downsize_on)} · re-scored at the lower price</div>
+                    </div>
+                    <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"14px", color:C.red, whiteSpace:"nowrap" }}>−{d.downsize_points.toLocaleString()} pts</div>
+                  </div>
+                ))}
                 {m.chargebacks.map(d => (
                   <div key={"cb" + d.hcp_job_id} style={{ display:"flex", justifyContent:"space-between", gap:"8px", padding:"10px 0", borderBottom:`1px solid ${C.border}40` }}>
                     <div style={{ minWidth:0 }}>
                       <div style={{ fontFamily:FONT, fontWeight:"600", fontSize:"14px", color:C.black }}>{d.name}</div>
                       <div style={{ fontSize:"12px", color:C.muted, marginTop:"2px" }}>{FREQ_LABEL[d.freq]} · {money2(d.price)} · sold {fmtShortDate(d.done_on)} · stopped after {d.completed} of {d.needed} services · missed visit {fmtShortDate(d.missed_on)}</div>
                     </div>
-                    <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"14px", color:C.red, whiteSpace:"nowrap" }}>−{d.points.toLocaleString()} pts</div>
+                    <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"14px", color:C.red, whiteSpace:"nowrap" }}>−{d.chargeback_points.toLocaleString()} pts</div>
                   </div>
                 ))}
                 {atRisk.length > 0 && (<>
@@ -7003,9 +7097,9 @@ function SalesPointsBonus({ token, canReview=false }) {
           </div>
         )}
         {showSales && <RankRows rows={(salesSort === "points" ? [...m.earned].sort((a, b) => b.points - a.points) : m.earned).map(d => ({ id:d.hcp_job_id, name:d.name, value:`${d.points.toLocaleString()} pts`,
-          sub:<>{fmtShortDate(d.done_on)} · {money2(d.price)} · {freqText(d)}{d.returning ? " · returning" : ""} · {statusText(d)}{overrides[d.hcp_job_id] ? " · credited by an owner" : ""}</> }))} empty={`No sales completed in ${label} yet.`}/>}
+          sub:<>{fmtShortDate(d.done_on)} · {money2(d.price)} · {freqText(d)}{d.extra ? ` (${money2(d.plan_price)} plan + ${money2(d.extra)} one-time)` : ""}{d.returning ? " · returning" : ""} · {statusText(d)}{overrides[d.hcp_job_id] ? " · credited by an owner" : ""}</> }))} empty={`No sales completed in ${label} yet.`}/>}
         <button onClick={() => setShowHow(v => !v)} style={{ alignSelf:"flex-start", background:"none", border:"none", padding:"2px 4px", color:C.blue, fontSize:"13px", fontWeight:"600", fontFamily:FONT, cursor:"pointer" }}>How points work {showHow ? "▲" : "▼"}</button>
-        {showHow && <div style={{ fontSize:"12px", color:C.muted, padding:"0 4px" }}>A sale is a completed HCP job tagged "sold by trevor", counted in the month it was completed. Points = first-visit price (no tips) × frequency from the points table; frequency comes from the job's plan tag, or else the client's scheduled visits over the next 6 months. A plan has to finish its first {Object.entries(CHARGEBACK_SERVICES).filter(([f,n])=>n>1).map(([f,n])=>`${n} ${FREQ_LABEL[f].toLowerCase()}`).join(", ")} services; if it stops sooner, it's at risk for {CHARGEBACK_GRACE_DAYS} days after the missed visit, then the points come off in the month those days end.</div>}
+        {showHow && <div style={{ fontSize:"12px", color:C.muted, padding:"0 4px" }}>A sale is a completed HCP job tagged "sold by trevor", counted in the month it was completed. Points = first-visit price (no tips) × frequency from the points table; frequency comes from the job's plan tag, or else the client's scheduled visits over the next 6 months. A plan has to finish its first {Object.entries(CHARGEBACK_SERVICES).filter(([f,n])=>n>1).map(([f,n])=>`${n} ${FREQ_LABEL[f].toLowerCase()}`).join(", ")} services; if it stops sooner, it's at risk for {CHARGEBACK_GRACE_DAYS} days after the missed visit, then the points come off in the month those days end. A first visit more than $50 over the plan's visits (like 2 cars the first time, 1 car after) counts as a one-time for the difference plus the plan at the lower price. If a visit inside that window comes in more than $50 under the plan price, it's a downsize: the sale is re-scored at the lower price and the difference comes off in the month that visit was done. $50 or less (like interior or exterior only because of rain) doesn't count.</div>}
         {s.loading && <div style={{ fontSize:"11px", color:C.muted }}>Refreshing...</div>}
       </>)}
     </div>

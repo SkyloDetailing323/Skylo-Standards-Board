@@ -130,22 +130,43 @@ export function freqFromVisits(times) {
   return best;
 }
 
-// jobs: every HCP job (any status) for the customers who have a rep-tagged
-// job -- { hcp_job_id, hcp_customer_id, first_name, last_name, work_status,
-// scheduled_start, completed_at, job_created_at, total_cents, tip_cents, tags }.
-// revenueByJob: { hcp_job_id: revenue without tips } from the app's jobs table
-// (falls back to total - tip). now: ms.
-// overrides: { hcp_job_id: "trevor"|"ethan"|"none" } -- an owner's call, which
-// wins over the tag; repKey is this rep's key ("trevor").
-export function buildSales(jobs, { tag, revenueByJob = {}, now = Date.now(), overrides = {}, repKey = null }) {
+// ─── Bigger first visit, downsizes, bookings (owner rules, Oct 15 2026) ─────
+// - A first visit that's more than $50 over the plan's visits (e.g. 2 cars
+//   the first time, 1 car after: $400 then $200, $200...) is a one-time for
+//   the difference plus the plan at the lower price: one-time $200 + $200
+//   monthly. $50 or less is a weather swap (int/ext only), not a change.
+// - Downsize: if a visit inside the chargeback window is completed more than
+//   $50 under the plan price the sale was scored at, the sale is re-scored at
+//   that lower price and the difference comes off in the month that visit
+//   was completed. The plan price is saved (sales_plan_snapshots) when the
+//   first visit is serviced, so editing a later visit's price can't quietly
+//   re-score a month that's already been paid.
+// - Booked = the day the job was created in HCP. Points still only come in
+//   when the first visit is serviced; the board shows what's waiting.
+export const PRICE_CHANGE_OVER = 50;
+export const PLAN_MINIMUMS = { weekly:8, biweekly:7, monthly:6, bimonthly:5, quarterly:4, biannual:2 };
+const round2 = n => Math.round(n * 100) / 100;
+const money = x => round2(Math.max(0, (x.total_cents || 0) - (x.tip_cents || 0)) / 100);
+
+// Points for a sale: first-visit price, the plan's per-visit price, frequency.
+export function salePoints(price, planPrice, freq) {
+  if (freq === "one_time" || planPrice == null || price - planPrice <= PRICE_CHANGE_OVER)
+    return { points:pointsFor(price, freq), plan_price:freq === "one_time" ? null : price, extra:0 };
+  const extra = round2(price - planPrice);
+  return { points:pointsFor(planPrice, freq) + pointsFor(extra, "one_time"), plan_price:planPrice, extra };
+}
+
+// Every credited first visit of a booking (any status but canceled), with the
+// customer's other jobs, the visits booked with it, frequency and price.
+function saleStarts(jobs, { tag, revenueByJob = {}, overrides = {}, repKey = null }) {
   const want = String(tag).toLowerCase();
   const credited = j => overrides[j.hcp_job_id] ? overrides[j.hcp_job_id] === repKey
     : (j.tags || []).some(t => String(t).trim().toLowerCase() === want);
   const byCustomer = {};
   for (const j of jobs) (byCustomer[j.hcp_customer_id || j.hcp_job_id] ||= []).push(j);
-  const sales = [];
+  const out = [];
   for (const j of jobs) {
-    if (!isDone(j) || !credited(j)) continue;
+    if (isCanceled(j) || !credited(j) || !(j.scheduled_start || j.completed_at)) continue;
     const mine = byCustomer[j.hcp_customer_id || j.hcp_job_id];
     const first = new Date(j.scheduled_start || j.completed_at).getTime();
     // Only the first visit of a booking is the sale. Sometimes the plan's
@@ -157,24 +178,64 @@ export function buildSales(jobs, { tag, revenueByJob = {}, now = Date.now(), ove
     // visits of a plan the customer already had before Trevor rebooked them.
     const created = new Date(j.job_created_at || j.scheduled_start).getTime();
     const soon = mine.filter(x => !isCanceled(x) && x !== j && x.scheduled_start && new Date(x.scheduled_start).getTime() > first + DAY && new Date(x.scheduled_start).getTime() <= first + 183 * DAY
-      && (!x.job_created_at || !j.job_created_at || Math.abs(new Date(x.job_created_at).getTime() - created) <= DAY));
+      && (!x.job_created_at || !j.job_created_at || Math.abs(new Date(x.job_created_at).getTime() - created) <= DAY))
+      .sort((a, b) => new Date(a.scheduled_start) - new Date(b.scheduled_start));
     const tagFreq = freqFromTags(j.tags);
     const visitFreq = soon.length ? freqFromVisits([first, ...soon.map(x => new Date(x.scheduled_start).getTime())]) : null;
     const freq = tagFreq || visitFreq || "one_time";
     const rev = revenueByJob[j.hcp_job_id];
-    const price = Math.round((rev != null ? Number(rev) : Math.max(0, (j.total_cents || 0) - (j.tip_cents || 0)) / 100) * 100) / 100;
+    const price = rev != null ? round2(Number(rev)) : money(j);
+    out.push({ j, mine, first, soon, freq, freq_source:tagFreq ? "tag" : visitFreq ? "visits" : "none", price,
+      name:`${j.first_name || ""} ${j.last_name || ""}`.trim() || "Unknown client" });
+  }
+  return out;
+}
+
+// jobs: every HCP job (any status) for the customers who have a rep-tagged
+// job -- { hcp_job_id, hcp_customer_id, first_name, last_name, work_status,
+// scheduled_start, completed_at, job_created_at, total_cents, tip_cents, tags }.
+// revenueByJob: { hcp_job_id: revenue without tips } from the app's jobs table
+// (falls back to total - tip). now: ms.
+// overrides: { hcp_job_id: "trevor"|"ethan"|"none" } -- an owner's call, which
+// wins over the tag; repKey is this rep's key ("trevor").
+// snapshots: { hcp_job_id: plan price saved when the first visit was serviced
+// (null = no later visit was booked) } -- missing means use today's schedule.
+export function buildSales(jobs, { tag, revenueByJob = {}, now = Date.now(), overrides = {}, repKey = null, snapshots = {} }) {
+  const sales = [];
+  for (const st of saleStarts(jobs, { tag, revenueByJob, overrides, repKey })) {
+    const { j, mine, first, soon, freq, price } = st;
+    if (!isDone(j)) continue;
+    const planPrice = freq === "one_time" ? null
+      : Object.prototype.hasOwnProperty.call(snapshots, j.hcp_job_id) ? (snapshots[j.hcp_job_id] == null ? null : Number(snapshots[j.hcp_job_id]))
+      : soon.length ? money(soon[0]) : null;
+    const scored = salePoints(price, planPrice, freq);
     const sale = {
-      hcp_job_id: j.hcp_job_id, customer_id: j.hcp_customer_id,
-      name: `${j.first_name || ""} ${j.last_name || ""}`.trim() || "Unknown client",
+      hcp_job_id: j.hcp_job_id, customer_id: j.hcp_customer_id, name: st.name,
       done_on: mtDay(j.completed_at), month: mtDay(j.completed_at).slice(0, 7),
-      price, freq, freq_source: tagFreq ? "tag" : visitFreq ? "visits" : "none",
+      price, freq, freq_source: st.freq_source, plan_price: scored.plan_price, extra: scored.extra,
       returning: (j.tags || []).some(t => /^returning$/i.test(String(t).trim())),
-      points: pointsFor(price, freq),
+      points: scored.points,
       needed: CHARGEBACK_SERVICES[freq] || 0, completed: 1, status: "counted", chargeback_on: null, chargeback_month: null, missed_on: null,
+      chargeback_points: 0, downsize_on: null, downsize_month: null, downsize_price: null, downsize_points: 0,
     };
     if (sale.needed > 1) {
       const after = mine.filter(x => x.scheduled_start && new Date(x.scheduled_start).getTime() >= first - DAY);
       sale.completed = after.filter(isDone).length;
+      // Downsize: a completed visit inside the window, more than $50 under
+      // the plan price the sale was scored at.
+      const windowDone = after.filter(x => x !== j && isDone(x)).sort((a, b) => new Date(a.scheduled_start) - new Date(b.scheduled_start)).slice(0, sale.needed - 1);
+      const low = windowDone.filter(x => money(x) < scored.plan_price - PRICE_CHANGE_OVER);
+      if (low.length) {
+        const lowest = Math.min(...low.map(money));
+        const firstLow = low.map(x => new Date(x.completed_at).getTime()).sort((a, b) => a - b)[0];
+        const rescored = salePoints(price, lowest, freq);
+        sale.downsize_points = Math.max(0, scored.points - rescored.points);
+        if (sale.downsize_points) {
+          sale.downsize_price = lowest;
+          sale.downsize_on = mtDay(firstLow);
+          sale.downsize_month = sale.downsize_on.slice(0, 7);
+        }
+      }
       const upcoming = mine.some(x => !isCanceled(x) && !x.completed_at && x.scheduled_start && new Date(x.scheduled_start).getTime() > now - DAY);
       if (sale.completed >= sale.needed) sale.status = "cleared";
       else if (upcoming) sale.status = "pending";
@@ -190,6 +251,8 @@ export function buildSales(jobs, { tag, revenueByJob = {}, now = Date.now(), ove
           sale.status = "charged_back";
           sale.chargeback_on = mtDay(final);
           sale.chargeback_month = sale.chargeback_on.slice(0, 7);
+          // Whatever a downsize didn't already take back.
+          sale.chargeback_points = sale.points - sale.downsize_points;
         }
       }
     }
@@ -199,13 +262,38 @@ export function buildSales(jobs, { tag, revenueByJob = {}, now = Date.now(), ove
 }
 
 // One month: points earned from first visits completed that month, minus
-// chargebacks that land in it.
+// chargebacks and downsizes that land in it.
 export function monthPoints(sales, month) {
   const earned = sales.filter(s => s.month === month);
   const chargebacks = sales.filter(s => s.chargeback_month === month);
+  const downsizes = sales.filter(s => s.downsize_month === month);
   const gross = earned.reduce((a, s) => a + s.points, 0);
-  const back = chargebacks.reduce((a, s) => a + s.points, 0);
-  return { earned, chargebacks, gross, back, net: gross - back };
+  const back = chargebacks.reduce((a, s) => a + s.chargeback_points, 0) + downsizes.reduce((a, s) => a + s.downsize_points, 0);
+  return { earned, chargebacks, downsizes, gross, back, net: gross - back };
+}
+
+// Bookings: every credited first visit by the day it was created in HCP --
+// first-visit price, the plan's booked visits up to its minimum (their HCP
+// prices; any not booked yet count at the plan price), committed total, and
+// the points it'll earn once serviced. minimums: visits per plan, first
+// visit included (report_settings attribution; PLAN_MINIMUMS by default).
+export function buildBookings(jobs, { tag, revenueByJob = {}, overrides = {}, repKey = null, minimums = {} }) {
+  const mins = { ...PLAN_MINIMUMS, ...minimums };
+  return saleStarts(jobs, { tag, revenueByJob, overrides, repKey }).map(st => {
+    const { j, soon, freq, price } = st;
+    const planPrice = freq === "one_time" ? null : soon.length ? money(soon[0]) : price;
+    const scored = salePoints(price, planPrice, freq);
+    const more = freq === "one_time" ? 0 : Math.max(0, (mins[freq] || 1) - 1);
+    const booked = soon.slice(0, more);
+    const backend = round2(booked.reduce((a, x) => a + money(x), 0) + (more - booked.length) * (scored.plan_price || 0));
+    return {
+      hcp_job_id: j.hcp_job_id, name: st.name,
+      booked_on: mtDay(j.job_created_at || j.scheduled_start), scheduled_on: j.scheduled_start ? mtDay(j.scheduled_start) : null,
+      price, freq, freq_source: st.freq_source, plan_price: scored.plan_price, extra: scored.extra,
+      visits: more + 1, visits_booked: booked.length + 1, backend, committed: round2(price + backend),
+      points: scored.points, serviced: isDone(j),
+    };
+  }).sort((a, b) => a.booked_on < b.booked_on ? 1 : -1);
 }
 
 // Sales to double-check (HCP can't say who created a job, so credit rests on
