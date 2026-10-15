@@ -53,6 +53,10 @@
   # Hourly HCP jobs + customer contact sync for the Sales/Marketing revenue.
   schedule = "7 * * * *"
 
+[functions."reports"]
+  # Marketing/Sales reports: room for one retry when the database is busy.
+  timeout = 26
+
 [functions."hcp-sales-sync-quick-cron"]
   # Every 5 min: HCP jobs scheduled yesterday to 45 days out, for Trevor's
   # live "Booked" board. The hourly run above does everything else.
