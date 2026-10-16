@@ -30,19 +30,19 @@ const TENANTS = {
       ["#eaf3ff", "#e8eff8"], ["#f5f9ff", "#f4f7fb"], ["#2aa8ff", "#5381bc"], ["#0072d1", "#173a63"],
     ],
   },
-  // MVP Cleaning Co (house cleaners). Charcoal like their logo.
+  // MVP Cleaning (house cleaners, American Fork UT). Their site's blue, charcoal logo.
   mvp: {
     title: "MVP Command Center",
     short: "MVP Board",
-    theme: "#26262a",
+    theme: "#338cec",
     outDir: "dist-mvp",
     logo: ["mvp_mark.svg", "mvp_wordmark.svg"], alt: "MVP Cleaning",
     text: MVP_TEXT,
     blocks: MVP_BLOCKS,
     words: true,
     colors: [
-      ["#0092f9", "#26262a"], ["#0077d4", "#18181b"], ["#005fb0", "#111113"],
-      ["#eaf3ff", "#efeff1"], ["#f5f9ff", "#f7f7f8"], ["#2aa8ff", "#5a5a63"], ["#0072d1", "#0b0b0c"],
+      ["#0092f9", "#338cec"], ["#0077d4", "#1f73d1"], ["#005fb0", "#1a5fae"],
+      ["#eaf3ff", "#e9f2fd"], ["#f5f9ff", "#f5f9fe"], ["#2aa8ff", "#5aa6f2"], ["#0072d1", "#16508f"],
     ],
   },
 }

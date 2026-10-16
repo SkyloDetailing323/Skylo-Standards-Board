@@ -73,5 +73,5 @@ export const TEXT = [
   ["RVs & Boats Guide", "Deep & Move-Out Guide"], ["RV & Boat Cert", "Deep Clean Cert"], ["RV & Boat Techs", "Deep Clean Pros"], ["RVs & Boats", "Deep & Move-Out Cleans"],
   ["🚤 Boats", "📦 Move-Outs"], ["🚐 RVs", "🧽 Deep Cleans"],
   ["Pick Interior only or Interior + Exterior", "Pick Standard or Standard + add-ons"], ["\"Interior + Exterior\"", "\"Standard + add-ons\""], ["\"Interior only\"", "\"Standard\""],
-  ["Utah", "your area"], ["\"Interior Finish\"", "\"Kitchen & Baths\""], ["\"Exterior Finish\"", "\"Living Areas\""], ["Detail Tech", "Cleaning Tech"],
+  ["\"Interior Finish\"", "\"Kitchen & Baths\""], ["\"Exterior Finish\"", "\"Living Areas\""], ["Detail Tech", "Cleaning Tech"],
 ];
