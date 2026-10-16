@@ -1,6 +1,7 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { BLOCKS as MVP_BLOCKS, TEXT as MVP_TEXT } from './demo/mvp_overrides.mjs'
+import { BLOCKS as LC_BLOCKS, TEXT as LC_TEXT } from './demo/lc_overrides.mjs'
 
 // Demo builds for other companies: VITE_TENANT=dsd npx vite build
 // The normal build (Skylo's live app) is untouched -- the tenant plugin only
@@ -45,6 +46,22 @@ const TENANTS = {
       ["#eaf3ff", "#efeff1"], ["#f5f9ff", "#f7f7f8"], ["#2aa8ff", "#5a5a63"], ["#0072d1", "#0b0b0c"],
     ],
   },
+  // Lifetime Coatings (floor coatings, American Fork UT + Texas). Black with their teal.
+  lc: {
+    title: "Lifetime Command Center",
+    short: "Lifetime Board",
+    theme: "#111111",
+    outDir: "dist-lc",
+    logo: ["lc_mark.png", "lc_wordmark.png", "lc_wordmark_blue.png"], alt: "Lifetime Coatings",
+    // Login like their Instagram: black, logo in their electric blue.
+    loginBg: "radial-gradient(120% 70% at 50% 0%, #0c2730 0%, #050607 55%, #000 100%)",
+    text: LC_TEXT,
+    blocks: LC_BLOCKS,
+    colors: [
+      ["#0092f9", "#111111"], ["#0077d4", "#0a0a0a"], ["#005fb0", "#000000"],
+      ["#eaf3ff", "#e8f7fb"], ["#f5f9ff", "#f5fbfd"], ["#2aa8ff", "#52c2e2"], ["#0072d1", "#000000"],
+    ],
+  },
 }
 
 // Swap a whole top-level \`const NAME = [ ... ];\` / \`{ ... };\` block.
@@ -68,6 +85,7 @@ function tenantPlugin(key) {
   const logo = `
 import __mark from "./demo/${t.logo[0]}";
 import __wordmark from "./demo/${t.logo[1]}";
+${t.logo[2] ? `import __onDark from "./demo/${t.logo[2]}";` : ""}
 `
   return {
     name: 'tenant-demo',
@@ -90,10 +108,12 @@ import __wordmark from "./demo/${t.logo[1]}";
       // Their logo: the DSD mark in headers, the full wordmark on big spots.
       s = s.replace(/function Logo\(\{ h=40, color=C\.brand \}\) \{\n[^\n]*\n\}/, `function Logo({ h=40, color=C.brand }) {
   const big = h >= 60, white = color === "#fff" || color === "#ffffff";
+  ${t.logo[2] ? 'if (big && white) return <img src={__onDark} alt="' + t.alt + '" style={{ height:h*0.8, width:"auto", maxWidth:"80vw", display:"block", flexShrink:0 }}/>;' : ''}
   return <img src={big ? __wordmark : __mark} alt="${t.alt}" style={{ height:big ? h*0.8 : h*0.62, width:"auto", maxWidth:"80vw", display:"block", flexShrink:0, filter:white ? "brightness(0) invert(1)" : "none" }}/>;
 }`)
       s = s.replace('<div style={{ fontSize:"15px", color:"rgba(255,255,255,0.8)", marginTop:"6px", fontFamily:FONT }}>Enter your PIN</div>',
         '<div style={{ fontSize:"15px", color:"rgba(255,255,255,0.8)", marginTop:"6px", fontFamily:FONT }}>Enter your PIN</div><div style={{ fontSize:"12px", color:"rgba(255,255,255,0.75)", marginTop:"10px", fontFamily:FONT, background:"rgba(0,0,0,0.18)", padding:"6px 12px", borderRadius:"980px" }}>Demo · 1111 owner · 2222 manager · 3333 team lead</div>')
+      if (t.loginBg) s = s.replace('background:`radial-gradient(120% 80% at 50% 0%, #2aa8ff 0%, ${C.brand} 45%, #0072d1 100%)`', `background:"${t.loginBg}"`)
       for (const [a, b] of t.text) s = s.split(a).join(b)
       for (const [a, b] of t.colors) s = s.split(a).join(b).split(a.toUpperCase()).join(b)
       return t.words ? truckWords(s) : s

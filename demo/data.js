@@ -43,7 +43,7 @@ export function buildDemo() {
     if (dow === 0) continue;
     for (const t of detailers) {
       if (rnd() < (dow === 6 ? 0.45 : 0.12)) continue;   // day off
-      const count = rnd() < 0.55 ? 2 : rnd() < 0.7 ? 3 : 1;
+      const count = P.jobCount ? P.jobCount(rnd) : rnd() < 0.55 ? 2 : rnd() < 0.7 ? 3 : 1;
       let hour = 8;
       for (let k = 0; k < count; k++) {
         const hcp = `job_demo_${n++}`;
@@ -54,14 +54,14 @@ export function buildDemo() {
         jobs.push({ id: uuid(), hcp_job_id: hcp, tech_id: t.id, job_date: d, revenue, upsell_amount: upsell, hours: null, week_key: weekKey(d),
           created_at: at(d, hour + 3, 10), tips: 0, customer_name: customer(), split_confirmed: true });
         if (upsell) upsells.push({ id: uuid(), tech_id: t.id, week_key: weekKey(d), amount: upsell, created_at: at(d, hour + 3, 12), hcp_job_id: hcp, note: null });
-        if (rnd() < 0.42) tips.push({ id: uuid(), tech_id: t.id, work_date: d, amount: pick([10, 15, 20, 20, 25, 30, 40, 50]), created_at: at(d, hour + 4, 0), hcp_job_id: hcp });
+        if (rnd() < (P.tipRate ?? 0.42)) tips.push({ id: uuid(), tech_id: t.id, work_date: d, amount: pick([10, 15, 20, 20, 25, 30, 40, 50]), created_at: at(d, hour + 4, 0), hcp_job_id: hcp });
         hour += 3;
       }
       const inH = 7 + Math.floor(rnd() * 2), inM = Math.floor(rnd() * 50);
       const outMin = (hour + 1) * 60 + Math.floor(rnd() * 60);
       time.push({ id: uuid(), tech_id: t.id, work_date: d, clock_in: at(d, inH, inM),
         clock_out: d === today ? null : at(d, Math.floor(outMin / 60), outMin % 60), auto_closed: false, created_at: at(d, inH, inM) });
-      if (rnd() < 0.035 * skill[t.id]) switchovers.push({ id: uuid(), tech_id: t.id, week_key: weekKey(d), plan_id: pick(P.plans), created_at: at(d, 15, 0), with_exterior: rnd() < P.exterior, sold_date: d });
+      if (rnd() < (P.switchRate ?? 0.035) * skill[t.id]) switchovers.push({ id: uuid(), tech_id: t.id, week_key: weekKey(d), plan_id: pick(P.plans), created_at: at(d, 15, 0), with_exterior: rnd() < P.exterior, sold_date: d });
       if (rnd() < 0.006) callbacks.push({ id: uuid(), tech_id: t.id, reason: pick(P.callbacks), created_at: at(d, 18, 0), weight: 1, hcp_job_id: null, job_date: d, customer_name: customer(), job_number: String(8000000 + n), missed_items: [], severity: pick([1, 1, 2]), group_id: null });
     }
   }
@@ -82,7 +82,7 @@ export function buildDemo() {
 
 // ─── Marketing / ads / sales reports (same shapes as reports.js) ─────────────
 const CH = (leads, spend, extra = {}) => {
-  const booked = Math.round(leads * between(0.32, 0.45)), up = booked * between(240, 320);
+  const booked = Math.round(leads * between(0.32, 0.45)), up = booked * between(240, 320) * (P.ticket || 1);
   return { leads, spend: Math.round(spend), booked, clicks: Math.round(spend * between(1.4, 2.2)), customers: booked, plans_sold: Math.round(booked * 0.28),
     impressions: Math.round(spend * between(55, 80)), revenue_upfront: Math.round(up), revenue_sold: Math.round(up * between(1.6, 2.1)),
     revenue_serviced: Math.round(up * between(1.1, 1.4)), revenue_beyond: Math.round(up * 0.3), platform_leads: Math.round(leads * 1.15), last_spend_day: spend ? mtToday() : null, ...extra };
@@ -91,7 +91,7 @@ export function marketingReport(from, to) {
   seed = 777 + from.length;
   const days = Math.max(1, Math.round((new Date(to) - new Date(from)) / DAY) + 1), f = days / 30;
   const daily = [];
-  for (let d = from; d <= to; d = addDays(d, 1)) daily.push({ d, leads: { meta: Math.round(between(1, 5)), google: Math.round(between(0, 3)), lsa: Math.round(between(0, 2)), website: Math.round(between(0, 2)) }, spend: { meta: Math.round(between(45, 85)), google: Math.round(between(30, 60)), lsa: Math.round(between(10, 30)) } });
+  for (let d = from; d <= to; d = addDays(d, 1)) daily.push({ d, leads: { meta: Math.round(between(1, 5)), google: Math.round(between(0, 3)), lsa: Math.round(between(0, 2)), website: Math.round(between(0, 2)) }, spend: { meta: Math.round(between(45, 85) * (P.spend || 1)), google: Math.round(between(30, 60) * (P.spend || 1)), lsa: Math.round(between(10, 30) * (P.spend || 1)) } });
   const sum = (k, ch) => daily.reduce((s, x) => s + (x[k][ch] || 0), 0);
   const meta = CH(sum("leads", "meta"), sum("spend", "meta")), google = CH(sum("leads", "google"), sum("spend", "google")), lsa = CH(sum("leads", "lsa"), sum("spend", "lsa"));
   lsa.lsa_detail = { jobs: lsa.booked, leads: lsa.leads, booked: lsa.booked, people: lsa.leads, by_type: { PHONE_CALL: Math.round(lsa.leads * 0.7), MESSAGE: Math.round(lsa.leads * 0.3) }, charged: lsa.leads, customers: lsa.customers, plans_sold: lsa.plans_sold, last_lead_at: new Date().toISOString(), revenue_sold: lsa.revenue_sold, with_contact: lsa.leads, revenue_beyond: lsa.revenue_beyond, revenue_upfront: lsa.revenue_upfront, revenue_serviced: lsa.revenue_serviced };
@@ -128,7 +128,7 @@ export function adTrends() {
     for (let w = 18; w >= 0; w--) {
       const wk = addDays(monday, -7 * w), age = 18 - w, fade = Math.max(0.45, 1 + drift * Math.max(0, age - 9));
       const spend = Math.round(140 * size * between(0.85, 1.15)), pl = Math.max(0, Math.round(spend / (19 / fade) * between(0.8, 1.2))), leads = Math.round(pl * 0.9), booked = Math.round(leads * between(0.3, 0.45));
-      rows.push({ ad_id: id, ad_name: name, campaign_id: "c_" + camp, campaign_name: camp, wk, spend, impressions: Math.round(spend * 70), link_clicks: Math.round(spend * 1.8), platform_leads: pl, leads, booked, upfront: Math.round(booked * 285), sold: Math.round(booked * 540) });
+      rows.push({ ad_id: id, ad_name: name, campaign_id: "c_" + camp, campaign_name: camp, wk, spend, impressions: Math.round(spend * 70), link_clicks: Math.round(spend * 1.8), platform_leads: pl, leads, booked, upfront: Math.round(booked * 285 * (P.ticket || 1)), sold: Math.round(booked * 540 * (P.ticket || 1)) });
     }
   });
   return { rows, ads: meta, adsets };
@@ -144,7 +144,7 @@ export function salesReport(from, to) {
     calls: { total: calls, per_day: Math.round(calls / Math.max(1, daily.filter(x => x.calls).length)), connected: s("connected"), days_calling: daily.filter(x => x.calls).length, talk_minutes: Math.round(s("connected") * 4.2) },
     daily, plans: { sold: Math.round(sold * 0.6), by_plan: P.byPlan(sold), cancelled: 1 },
     by_kind: { all: kind(Math.round(booked * 2.6), booked), warm: kind(Math.round(booked * 2.1), Math.round(booked * 0.85)), cold: kind(Math.round(booked * 0.5), Math.round(booked * 0.15)) },
-    revenue: { sold: booked * 610, upfront: booked * 265, serviced: booked * 420, sold_jobs: booked, serviced_jobs: Math.round(booked * 0.8), plan_committed: Math.round(sold * 0.6) * 1500, matched_customers: booked, match_types: { name: Math.round(booked * 0.3), phone: Math.round(booked * 0.7) },
+    revenue: { sold: Math.round(booked * 610 * (P.ticket || 1)), upfront: Math.round(booked * 265 * (P.ticket || 1)), serviced: Math.round(booked * 420 * (P.ticket || 1)), sold_jobs: booked, serviced_jobs: Math.round(booked * 0.8), plan_committed: Math.round(sold * 0.6) * 1500, matched_customers: booked, match_types: { name: Math.round(booked * 0.3), phone: Math.round(booked * 0.7) },
       by_kind: { all: { sold: booked * 610, serviced: booked * 420 }, warm: { sold: booked * 520, serviced: booked * 360 }, cold: { sold: booked * 90, serviced: booked * 60 } } },
     pipelines: ["Residential Leads"] };
 }
