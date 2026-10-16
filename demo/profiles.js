@@ -23,7 +23,7 @@ const dsd = {
 // MVP Cleaning, American Fork UT (Utah, Salt Lake, Davis counties). House cleaners: crews paid ~40% of the job, recurring weekly / biweekly / monthly
 // cleans, add-ons like inside the oven or fridge.
 const mvp = {
-  owner: "MVP Owner", plate: "MVP", commission: 40, title: "detail_pro", leadTitle: "lead_detail_pro", seniorTitle: "senior_detail_pro",
+  owner: "Jaylon Vickers", plate: "MVP", commission: 40, title: "detail_pro", leadTitle: "lead_detail_pro", seniorTitle: "senior_detail_pro",
   leads: [["Ashley Moreno", "All-Stars", "2024-03-18"], ["Brianna Cruz", "Starting Five", "2024-05-06"]],
   crew: [["Jasmine Reyes", 0, "2025-01-13"], ["Kayla Brooks", 0, "2025-02-24"], ["Sofia Ramirez", 0, "2025-05-12"], ["Megan Foster", 1, "2024-10-21"], ["Destiny Hall", 1, "2025-03-31"], ["Lauren Price", 1, "2025-06-30", true]],
   rep: "Ryan Hale", field: "Taylor Shaw",
