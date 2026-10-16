@@ -10181,7 +10181,8 @@ function AdminPanel({ techBookings=[], damageReports=[], techs, upsells, switcho
   // gamified rankings.
   const activeTechs = techs.filter(t => t.is_active !== false && t.title !== "owner");
   const pendingBookings = techBookings.filter(b => b.status === "pending").length;
-  const [tab, setTab] = useState("upsells");
+  // Casey opens straight to Sales (owner, Oct 2026); everyone else to Upsells.
+  const [tab, setTab] = useState(() => !isManager && GROWTH_TABS_ON && /^casey\b/i.test(String(currentUser?.name || "").trim()) ? "sales" : "upsells");
   const [menuOpen, setMenuOpen] = useState(false);
   const [awardForm, setAwardForm] = useState({techId:"",badgeId:""});
   const [addForm, setAddForm] = useState({name:"",pin:"",avatar:"",start_date:"",commission_rate:27});
