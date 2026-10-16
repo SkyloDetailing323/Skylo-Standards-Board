@@ -6,6 +6,8 @@ import { buildCommission, monthCommission, withoutCommercial, RATES, COMMITTED, 
 import { computeOpsMonth, monthRange, mountainDate, CALLBACK_TIERS, QUOTA_TIERS, RETENTION_TIERS, NON_ROUTE_VEHICLES, OPS_EXCLUDED_TITLES } from "./opsBonus.js";
 import { techDriverDays, weeklyDriverScore, findUnassignedDriving, DRIVER_CONFIG } from "./driverScoring.js";
 import { buildFordImport } from "./fordReports.js";
+import { TRUCK_DRIVER_TITLES, DEFAULT_HOLIDAYS } from "./staffRules.js";
+import { isGarbageEligible, GARBAGE_LOCK_HOUR } from "./garbageRotation.js";
 import { techWeekCard, techScoreCard, teamSummary, scoreWindow, truckScore, isTruckExempt, TECH_SCORE_CONFIG } from "./techScores.js";
 import { AD_HEALTH, groupAds, trend, grade, metrics, sumWeeks, rolling, adAdvice, marketShift, toAdSets } from "./adTrends.js";
 import { LABOR_TARGET_PCT, payrollTaxRate, tipsPaidByMonth, qbLaborMonth } from "./laborCost.js";
@@ -2274,7 +2276,7 @@ function JourneyCard({ tech, rank, total, onClick, expanded, upsells, quota, job
 // Will's staffing KPI: every Mon-Sat workday that isn't a company holiday needs
 // one scheduled tech per working truck; a full roster is trucks / 2 * 3.
 const DEFAULT_TRUCK_COUNT = 12;
-const DEFAULT_HOLIDAYS = ["2026-11-26","2026-11-27","2026-11-28","2026-12-24","2026-12-25","2026-12-26","2027-01-01"];
+// DEFAULT_HOLIDAYS: imported from staffRules.js (the garbage rotation uses it too).
 async function saveSetting(key, value) {
   const existing = await sb(`settings?key=eq.${key}&select=id`).catch(()=>[]);
   if (existing && existing.length > 0) await sb(`settings?id=eq.${existing[0].id}`,{method:"PATCH",body:JSON.stringify({value:JSON.stringify(value)}),prefer:"return=minimal"});
@@ -3199,15 +3201,72 @@ async function saveTruckPick({ tech, vehicle, workDate, action }) {
   return true;
 }
 
-// Titles that drive a company truck: they must pick one to clock in.
-const TRUCK_DRIVER_TITLES = ["detail_pro","senior_detail_pro","lead_detail_pro","commercial_detail","equipment_coordinator"];
+// Titles that drive a company truck (they must pick one to clock in):
+// TRUCK_DRIVER_TITLES, imported from staffRules.js.
 
-function TimeSheetTab({ tech, techs=[], timeEntries, vehicles=[], truckAssignments=[], refreshAll, showToast, nowTick }) {
+// ─── GARBAGE ROTATION ─────────────────────────────────────────────────────────
+// Nightly garbage (garbageRotation.js + netlify/functions/garbage-duty.mjs).
+// Ops only. It never creates, edits or re-times a time entry: the one link to
+// the Time Sheet is that the assigned tech's Clock Out button waits for the
+// bins photo (or an owner / Field Supervisor's Mark done / Excuse / Reassign).
+async function garbageApi(token, body) {
+  const r = await fetch("/.netlify/functions/garbage-duty", body ? { method:"POST", headers:{ "Content-Type":"application/json", Authorization:`Bearer ${token||""}` }, body:JSON.stringify(body) } : { headers:{ Authorization:`Bearer ${token||""}` } });
+  const j = await r.json().catch(()=>({}));
+  if (!r.ok) { const e = new Error(j.error || `HTTP ${r.status}`); e.missingTable = !!j.missing_table; throw e; }
+  return j;
+}
+// Garbage status, refreshed every 2 minutes and when the app comes back into view.
+function useGarbage(token) {
+  const [state, setState] = useState({ data:null, error:null });
+  const load = useCallback(() => garbageApi(token).then(data => setState({ data, error:null })).catch(e => setState(s => ({ data:s.data, error:e }))), [token]);
+  useEffect(() => {
+    load();
+    const iv = setInterval(load, 120000);
+    const onVis = () => { if (document.visibilityState === "visible") load(); };
+    document.addEventListener("visibilitychange", onVis);
+    return () => { clearInterval(iv); document.removeEventListener("visibilitychange", onVis); };
+  }, [load]);
+  return [state, load, setState];
+}
+// Phone photo -> small JPEG data URL (≤1600px) so the upload stays light.
+async function binsPhotoDataUrl(file) {
+  const url = URL.createObjectURL(file);
+  try {
+    const img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = () => rej(new Error("Couldn't read that photo")); i.src = url; });
+    const scale = Math.min(1, 1600 / Math.max(img.naturalWidth, img.naturalHeight));
+    const c = document.createElement("canvas");
+    c.width = Math.round(img.naturalWidth*scale); c.height = Math.round(img.naturalHeight*scale);
+    c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+    return c.toDataURL("image/jpeg", 0.8);
+  } finally { URL.revokeObjectURL(url); }
+}
+const fmtGarbageDay = d => new Date(d+"T12:00:00").toLocaleDateString("en-US",{ weekday:"short", month:"short", day:"numeric" });
+
+function TimeSheetTab({ tech, techs=[], timeEntries, vehicles=[], truckAssignments=[], refreshAll, showToast, nowTick, token=null }) {
   const myEntries = timeEntries.filter(e => e.tech_id === tech.id);
   const today = mtDateStr(nowTick);
   const openEntry = myEntries.find(e => !e.clock_out);
   const isClockedInToday = !!openEntry && openEntry.work_date === today;
   const [saving, setSaving] = useState(false);
+  // Garbage rotation. Blocks Clock Out only when the server says tonight is
+  // this tech's and still 'assigned' -- if it can't be loaded, nothing is blocked.
+  const [garbage, reloadGarbage] = useGarbage(token);
+  const [garbageBusy, setGarbageBusy] = useState(false);
+  const gd = garbage.data;
+  const garbageMine = !!gd?.tonight && gd.tonight.tech_id === tech.id;
+  const garbageBlocksClockOut = garbageMine && gd.tonight.status === "assigned";
+  const garbageNext = gd?.week?.find(d => d.tech_id === tech.id && !(d.work_date === gd.today && garbageMine));
+  async function sendBinsPhoto(file) {
+    if (!file) return;
+    setGarbageBusy(true);
+    try {
+      const photo = await binsPhotoDataUrl(file);
+      await garbageApi(token, { action:"done", photo });
+      await reloadGarbage();
+      showToast("✅ Garbage done — you can clock out");
+    } catch(e) { showToast("Photo didn't save: "+e.message, false); }
+    setGarbageBusy(false);
+  }
   const [editDate, setEditDate] = useState(today);
   const [editingId, setEditingId] = useState(null);
   const [editForm, setEditForm] = useState({ in:"", out:"" });
@@ -3294,7 +3353,7 @@ function TimeSheetTab({ tech, techs=[], timeEntries, vehicles=[], truckAssignmen
     setSaving(false);
   }
   async function clockOut() {
-    if (!openEntry) return;
+    if (!openEntry || garbageBlocksClockOut) return;
     setSaving(true);
     try {
       await sb(`time_entries?id=eq.${openEntry.id}`, { method:"PATCH", body:JSON.stringify({ clock_out:new Date().toISOString() }), prefer:"return=minimal" });
@@ -3365,6 +3424,27 @@ function TimeSheetTab({ tech, techs=[], timeEntries, vehicles=[], truckAssignmen
         </div>
       )}
 
+      {isGarbageEligible(tech) && gd && (
+        garbageMine ? (
+          <div style={{ background:gd.tonight.status==="assigned" ? `${C.gold}18` : `${C.green}14`, border:`1px solid ${gd.tonight.status==="assigned" ? C.gold : C.green}`, borderRadius:"16px", padding:"14px 18px", display:"flex", flexDirection:"column", gap:"10px" }}>
+            <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"16px", color:C.black }}>🗑 You're on garbage tonight</div>
+            {gd.tonight.status==="assigned" ? (<>
+              <div style={{ fontSize:"12px", color:C.black }}>Take the bins out, then take a photo of them. Clock Out unlocks once the photo is in.</div>
+              <label style={{ display:"block", background:garbageBusy?C.border:C.blue, color:C.white, textAlign:"center", padding:"14px", borderRadius:"14px", cursor:garbageBusy?"not-allowed":"pointer", fontFamily:FONT, fontWeight:"700", fontSize:"14px" }}>
+                {garbageBusy ? "Saving photo…" : "📷 Take bins photo"}
+                <input type="file" accept="image/*" capture="environment" disabled={garbageBusy} onChange={e => { const f = e.target.files?.[0]; e.target.value = ""; sendBinsPhoto(f); }} style={{ display:"none" }}/>
+              </label>
+            </>) : (
+              <div style={{ fontSize:"12px", color:C.black }}>{gd.tonight.status==="done" ? "✅ Done — thanks! You can clock out." : "Excused tonight — you can clock out."}</div>
+            )}
+          </div>
+        ) : (
+          <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"12px", padding:"10px 16px", fontSize:"12px", color:C.black }}>
+            🗑 {garbageNext ? <>Your next garbage night: <strong>{garbageNext.work_date===gd.today ? "tonight" : fmtGarbageDay(garbageNext.work_date)}</strong>{!garbageNext.locked && <span style={{ color:C.muted }}> (set at {GARBAGE_LOCK_HOUR}:00 AM that day — can change with the schedule)</span>}</> : <span style={{ color:C.muted }}>You're not on garbage in the next 7 days.</span>}
+          </div>
+        )
+      )}
+
       <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"20px", display:"flex", flexDirection:"column", gap:"14px" }}>
         {truckOffered && (
           <div>
@@ -3387,8 +3467,9 @@ function TimeSheetTab({ tech, techs=[], timeEntries, vehicles=[], truckAssignmen
         )}
         <div style={{ display:"flex", gap:"12px" }}>
           <button onClick={clockIn} disabled={saving||isClockedInToday} style={{ flex:1, background:isClockedInToday?C.border:C.green, border:"none", color:C.white, padding:"16px", borderRadius:"16px", cursor:(saving||isClockedInToday)?"not-allowed":"pointer", fontSize:"14px", fontWeight:"700", letterSpacing:"-0.01em", fontFamily:FONT, textTransform:"none" }}>Clock In</button>
-          <button onClick={clockOut} disabled={saving||!isClockedInToday} style={{ flex:1, background:!isClockedInToday?C.border:"#ff3b30", border:"none", color:C.white, padding:"16px", borderRadius:"16px", cursor:(saving||!isClockedInToday)?"not-allowed":"pointer", fontSize:"14px", fontWeight:"700", letterSpacing:"-0.01em", fontFamily:FONT, textTransform:"none" }}>Clock Out</button>
+          <button onClick={clockOut} disabled={saving||!isClockedInToday||garbageBlocksClockOut} style={{ flex:1, background:(!isClockedInToday||garbageBlocksClockOut)?C.border:"#ff3b30", border:"none", color:C.white, padding:"16px", borderRadius:"16px", cursor:(saving||!isClockedInToday||garbageBlocksClockOut)?"not-allowed":"pointer", fontSize:"14px", fontWeight:"700", letterSpacing:"-0.01em", fontFamily:FONT, textTransform:"none" }}>Clock Out</button>
         </div>
+        {isClockedInToday && garbageBlocksClockOut && <div style={{ fontSize:"12px", color:C.muted, textAlign:"center", marginTop:"-6px" }}>🗑 Clock Out unlocks after your bins photo (or ask Will / an owner).</div>}
         <div style={{ textAlign:"center" }}>
           <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"32px", color:C.blue }}>{todayTotal.toFixed(2)}h</div>
           <div style={{ fontSize:"11px", color:C.muted, letterSpacing:"-0.01em" }}>{isClockedInToday ? "Clocked in — live total for today" : "Total for today"}</div>
@@ -3774,7 +3855,7 @@ function TechDashboard({ techBookings=[], damageReports=[], tech, techs, upsells
             )}
           </div>
         )}
-        {tab==="timesheet"&&<TimeSheetTab tech={tech} techs={techs} timeEntries={timeEntries} vehicles={vehicles} truckAssignments={truckAssignments} refreshAll={refreshAll} showToast={showToast} nowTick={nowTick}/>}
+        {tab==="timesheet"&&<TimeSheetTab tech={tech} techs={techs} timeEntries={timeEntries} vehicles={vehicles} truckAssignments={truckAssignments} refreshAll={refreshAll} showToast={showToast} nowTick={nowTick} token={token}/>}
         {tab==="reports"&&<ReportsTab techs={techs} jobs={jobs||[]} upsells={upsells||[]} switchovers={switchovers||[]} timeEntries={timeEntries} tipEntries={tipEntries} techId={tech.id} showLabor={LABOR_VIEWER_TECH_IDS.includes(tech.id)}/>}
         {tab==="leaderboard"&&<Leaderboard techs={techs} jobs={jobs||[]} upsells={upsells} reviews={reviews} callbacks={callbacks||[]} switchovers={switchovers} timeEntries={timeEntries}/>}
         {tab==="badges"&&<BadgeGrid earned={tech.badges}/>}
@@ -10167,6 +10248,102 @@ function CallbackLogPanel({ techs, jobs, callbacks, refreshAll, showToast }) {
 }
 
 // ─── ADMIN PANEL ──────────────────────────────────────────────────────────────
+// Admin "Garbage" tab (Payroll & Time): tonight, week preview, 30-day history
+// and per-tech counts. Mark done / Excuse / Reassign each unlock the assigned
+// tech's Clock Out right away. Status only -- never touches time entries.
+const GARBAGE_STATUS = { assigned:["Not done yet", C.gold], done:["Done", C.green], excused:["Excused", C.muted], missed:["Missed", C.red], preview:["Preview", C.muted], none:["No one scheduled", C.muted] };
+function GarbageAdminTab({ techs, token, showToast }) {
+  const [g, reload, setG] = useGarbage(token);
+  const [busy, setBusy] = useState(false);
+  const [to, setTo] = useState("");
+  const name = id => techs.find(t=>t.id===id)?.name || "Unknown tech";
+  const card = { background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"14px 16px" };
+  const btn = color => ({ background:busy?C.border:color, border:"none", color:C.white, padding:"8px 14px", borderRadius:"10px", cursor:busy?"not-allowed":"pointer", fontSize:"12px", fontWeight:"700", fontFamily:FONT });
+  const pill = st => { const [label, color] = GARBAGE_STATUS[st] || [st, C.muted]; return <span style={{ fontSize:"11px", fontWeight:"700", color, border:`1px solid ${color}`, borderRadius:"10px", padding:"1px 8px", whiteSpace:"nowrap" }}>{label}</span>; };
+  async function act(body, msg) {
+    setBusy(true);
+    try { const data = await garbageApi(token, body); setG({ data, error:null }); setTo(""); showToast(msg); }
+    catch(e) { showToast("Error: "+e.message, false); }
+    setBusy(false);
+  }
+  if (g.error?.missingTable) return <div style={{ ...card, fontSize:"13px", color:C.black }}>The garbage rotation isn't set up yet — an owner needs to apply <code>supabase/migrations/20261017_garbage_duty.sql</code>.</div>;
+  if (g.error && !g.data) return <div style={{ ...card, fontSize:"13px", color:C.red }}>Couldn't load the garbage rotation: {g.error.message} <button onClick={reload} style={btn(C.blue)}>Retry</button></div>;
+  const d = g.data;
+  if (!d) return <div style={{ fontSize:"13px", color:C.muted, padding:"20px" }}>Loading…</div>;
+  const t = d.tonight, preview = d.week?.[0];
+  const eligible = techs.filter(isGarbageEligible).sort(byFirstName);
+  const counts = Object.entries(d.counts || {}).map(([id, c]) => ({ id, ...c, total:c.done+c.missed+c.excused+c.assigned }));
+  eligible.forEach(e => { if (!counts.some(c => c.id===e.id)) counts.push({ id:e.id, done:0, missed:0, excused:0, assigned:0, total:0 }); });
+  counts.sort((a,b) => b.done-a.done || name(a.id).localeCompare(name(b.id)));
+  return (
+    <div style={{ display:"flex", flexDirection:"column", gap:"14px" }}>
+      <div style={card}>
+        <Label color={C.blue}>🗑 Garbage tonight · {fmtGarbageDay(d.today)}</Label>
+        {t ? (<>
+          <div style={{ display:"flex", alignItems:"center", gap:"10px", flexWrap:"wrap", margin:"8px 0" }}>
+            <span style={{ fontFamily:FONT, fontWeight:"700", fontSize:"18px", color:C.black }}>{name(t.tech_id)}</span>{pill(t.status)}
+            {t.done_at && <span style={{ fontSize:"12px", color:C.muted }}>at {new Date(t.done_at).toLocaleTimeString("en-US",{ hour:"numeric", minute:"2-digit", timeZone:"America/Denver" })}</span>}
+          </div>
+          {t.reason && <div style={{ fontSize:"12px", color:C.muted, marginBottom:"8px" }}>{t.reassigned_from ? `Was ${name(t.reassigned_from)}'s turn. ` : ""}{t.reason}</div>}
+          {t.photo_url && <a href={t.photo_url} target="_blank" rel="noreferrer"><img src={t.photo_url} alt="Bins photo" style={{ maxWidth:"100%", maxHeight:"260px", borderRadius:"10px", border:`1px solid ${C.border}`, display:"block", marginBottom:"8px" }}/></a>}
+        </>) : (
+          <div style={{ fontSize:"13px", color:C.black, margin:"8px 0" }}>
+            {preview?.tech_id ? <>Up next: <strong>{name(preview.tech_id)}</strong> <span style={{ color:C.muted }}>— locks at {d.lock_hour}:00 AM (moves to a backup if they haven't clocked in). Any button below locks it now.</span></> : <span style={{ color:C.muted }}>Nobody eligible is on the schedule today — no garbage night.</span>}
+          </div>
+        )}
+        {(t || preview?.tech_id) && (
+          <div style={{ display:"flex", gap:"8px", flexWrap:"wrap", alignItems:"center" }}>
+            {t?.status!=="done" && <button disabled={busy} onClick={()=>act({ action:"done" }, "✅ Marked done")} style={btn(C.green)}>Mark done</button>}
+            {t?.status!=="excused" && <button disabled={busy} onClick={()=>{ const reason = window.prompt("Excuse tonight — reason (optional):", ""); if (reason!==null) act({ action:"excuse", reason }, "Excused — Clock Out unlocked"); }} style={btn(C.muted)}>Excuse</button>}
+            <select value={to} disabled={busy} onChange={e=>setTo(e.target.value)} style={{ background:C.white, border:`1px solid ${C.border}`, color:to?C.black:C.muted, padding:"7px 9px", borderRadius:"10px", fontSize:"12px" }}>
+              <option value="">Reassign to…</option>
+              {eligible.filter(e => e.id!==(t?.tech_id || preview?.tech_id)).map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
+            </select>
+            <button disabled={busy||!to} onClick={()=>{ const reason = window.prompt(`Reassign to ${name(to)} — reason (optional):`, ""); if (reason!==null) act({ action:"reassign", tech_id:to, reason }, `🔁 Now ${name(to)}`); }} style={btn(C.blue)}>Reassign</button>
+          </div>
+        )}
+        <div style={{ fontSize:"11px", color:C.muted, marginTop:"8px" }}>Each button unlocks the assigned tech's Clock Out right away. Garbage never changes anyone's hours.</div>
+      </div>
+
+      <div style={card}>
+        <Label color={C.blue}>📅 Next 7 nights</Label>
+        <div style={{ fontSize:"12px", color:C.muted, margin:"4px 0 8px" }}>From the Work Schedule and time off. Each day locks at {d.lock_hour}:00 AM; later days can still change.</div>
+        {(d.week||[]).map(w => (
+          <div key={w.work_date} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:"8px", padding:"6px 0", borderBottom:`1px solid ${C.border}`, fontSize:"13px", color:C.black }}>
+            <span style={{ minWidth:"110px" }}>{fmtGarbageDay(w.work_date)}{w.work_date===d.today?" (tonight)":""}</span>
+            <span style={{ flex:1, fontWeight:"700" }}>{w.tech_id ? name(w.tech_id) : "—"}</span>
+            {pill(w.status)}
+          </div>
+        ))}
+      </div>
+
+      <div style={card}>
+        <Label color={C.green}>⚖️ Last 30 days per tech</Label>
+        <div style={{ fontSize:"12px", color:C.muted, margin:"4px 0 8px" }}>Whoever finished garbage longest ago goes next, so these even out over time.</div>
+        <div style={{ display:"grid", gridTemplateColumns:"1fr repeat(3, 56px)", gap:"4px 8px", fontSize:"12px", color:C.black }}>
+          <span style={{ color:C.muted, fontWeight:"700" }}>Tech</span><span style={{ color:C.muted, fontWeight:"700", textAlign:"right" }}>Done</span><span style={{ color:C.muted, fontWeight:"700", textAlign:"right" }}>Missed</span><span style={{ color:C.muted, fontWeight:"700", textAlign:"right" }}>Excused</span>
+          {counts.map(c => <Fragment key={c.id}><span>{name(c.id)}</span><span style={{ textAlign:"right", fontWeight:"700" }}>{c.done}</span><span style={{ textAlign:"right", color:c.missed?C.red:C.muted }}>{c.missed}</span><span style={{ textAlign:"right", color:C.muted }}>{c.excused}</span></Fragment>)}
+        </div>
+      </div>
+
+      <div style={card}>
+        <Label color={C.blue}>🗂 History (last 30 days)</Label>
+        {!(d.history||[]).length && <div style={{ fontSize:"12px", color:C.muted, marginTop:"6px" }}>No garbage nights yet.</div>}
+        {(d.history||[]).map(h => (
+          <div key={h.id} style={{ display:"flex", alignItems:"center", gap:"10px", padding:"8px 0", borderBottom:`1px solid ${C.border}`, fontSize:"12px", color:C.black }}>
+            {h.photo_url ? <a href={h.photo_url} target="_blank" rel="noreferrer"><img src={h.photo_url} alt="" style={{ width:"44px", height:"44px", objectFit:"cover", borderRadius:"8px", border:`1px solid ${C.border}` }}/></a> : <span style={{ width:"44px", height:"44px", borderRadius:"8px", background:C.cardLt, display:"inline-flex", alignItems:"center", justifyContent:"center", color:C.muted }}>—</span>}
+            <div style={{ flex:1 }}>
+              <div><strong>{fmtGarbageDay(h.work_date)}</strong> · {name(h.tech_id)}</div>
+              {h.reason && <div style={{ color:C.muted }}>{h.reassigned_from ? `Was ${name(h.reassigned_from)}'s turn. ` : ""}{h.reason}</div>}
+            </div>
+            {pill(h.status)}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // isManager: logged in as the Field Supervisor. Same panel as the owners, but
 // read-only on anything that decides his own bonus (quota targets, trucks and
 // holidays, firing approvals, calibration) so he can't move his own numbers.
@@ -10385,6 +10562,7 @@ function AdminPanel({ techBookings=[], damageReports=[], techs, upsells, switcho
       ["tips","💵","Log Tips"],
       ["schedule","🗓","Work Schedule"],
       ["trucks","🚚","Trucks"],
+      ["garbage","🗑","Garbage"],
     ]},
     { label:"Team Activity", items:[
       ["upsells","💰","Upsells"],
@@ -10489,6 +10667,7 @@ function AdminPanel({ techBookings=[], damageReports=[], techs, upsells, switcho
           <SplitJobsAdmin techs={techs} pendingSplits={pendingSplits} refreshAll={refreshAll} showToast={showToast}/>
         )}
 
+        {tab==="garbage"&&<GarbageAdminTab techs={techs} token={currentUser?.token} showToast={showToast}/>}
         {tab==="trucks"&&(
           <TrucksAdminTab techs={techs} vehicles={vehicles} timeEntries={timeEntries} token={currentUser?.token} refreshAll={refreshAll} showToast={showToast}/>
         )}

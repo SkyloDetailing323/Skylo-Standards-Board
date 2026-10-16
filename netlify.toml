@@ -112,3 +112,13 @@
   # Hourly at :37: which of Ethan's commercial visits have been paid in HCP
   # (his commission is paid per visit once the client pays).
   schedule = "37 * * * *"
+
+[functions."garbage-duty"]
+  # Garbage rotation reads/writes + bins photo upload (closed table/bucket).
+  timeout = 26
+
+[functions."garbage-duty-cron"]
+  # Hourly: marks past garbage nights with no photo 'missed' (the 00:xx run)
+  # and locks today's assignment at 10 AM Mountain. Never touches hours.
+  schedule = "4 * * * *"
+  timeout = 26
