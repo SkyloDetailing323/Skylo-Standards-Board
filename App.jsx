@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback, useMemo, useRef, Fragment } from "react";
 import { TEST_QUESTIONS, TESTS, TEST_KEYS, questionsFor, shuffle } from "./trainingTest.js";
 import { scorecard, fixList, pageKind, pageLabel, offered, SEO_GOALS } from "./seoScore.js";
-import { tierFor, pointsFor, BONUS_TIERS, FREQ_LABEL, CHARGEBACK_SERVICES, CHARGEBACK_GRACE_DAYS, FREQ_WEEKS, buildSales, buildBookings, monthPoints, reviewList } from "./salesPoints.js";
+import { tierFor, scaledTiers, pointsFor, BONUS_TIERS, FREQ_LABEL, CHARGEBACK_SERVICES, CHARGEBACK_GRACE_DAYS, FREQ_WEEKS, buildSales, buildBookings, monthPoints, reviewList } from "./salesPoints.js";
+import { buildCommission, monthCommission, withoutCommercial, RATES, COMMITTED, BASE_SALARY, SOURCE_LABEL } from "./commercialCommission.js";
 import { computeOpsMonth, monthRange, mountainDate, CALLBACK_TIERS, QUOTA_TIERS, RETENTION_TIERS, NON_ROUTE_VEHICLES, OPS_EXCLUDED_TITLES } from "./opsBonus.js";
 import { techDriverDays, weeklyDriverScore, findUnassignedDriving, DRIVER_CONFIG } from "./driverScoring.js";
 import { buildFordImport } from "./fordReports.js";
@@ -6771,7 +6772,10 @@ function FunnelBlock({ k, label, revenue }) {
 
 // Reps who can see their own Sales report from their tech login (tech id ->
 // rep key). reports.js enforces the same list (REPS[...].selfTechId).
-const SALES_SELF_VIEW = { "4641f4da-a16f-411b-8688-8b81ac06eda7": "trevor" };
+// Ethan's residential bonus: Trevor's points table, tiers at 1/5 (points and
+// pay) since he sells residential one day a week.
+const ETHAN_TIERS = scaledTiers(0.2);
+const SALES_SELF_VIEW = { "4641f4da-a16f-411b-8688-8b81ac06eda7": "trevor", "9c7c67f1-c295-462c-96a7-2ed16c9eaa81": "ethan" };
 
 // Trevor's monthly points bonus (math in salesPoints.js). A sale is a
 // completed HCP job tagged "sold by trevor", counted in the month it was
@@ -6781,10 +6785,10 @@ const SALES_SELF_VIEW = { "4641f4da-a16f-411b-8688-8b81ac06eda7": "trevor" };
 // Trevor's month at a glance: net points, bonus, and a 5-step track -- one
 // equal-width step per tier, each filling with the points between the tier
 // before it and that tier, so he can see how close he is to every one.
-function TierTrack({ m, t, isNow, today, monthName, pending = 0 }) {
+function TierTrack({ m, t, isNow, today, monthName, pending = 0, tiers = BONUS_TIERS }) {
   const net = Math.max(0, m.net);
-  const steps = BONUS_TIERS.map((b, i) => {
-    const from = i ? BONUS_TIERS[i - 1].points : 0;
+  const steps = tiers.map((b, i) => {
+    const from = i ? tiers[i - 1].points : 0;
     return { ...b, from, fill:Math.min(1, Math.max(0, (net - from) / (b.points - from))) };
   });
   const cur = steps.findIndex(x => x.fill < 1);
@@ -6793,7 +6797,7 @@ function TierTrack({ m, t, isNow, today, monthName, pending = 0 }) {
   const [y, mo, d] = today.split("-").map(Number);
   const dim = new Date(Date.UTC(y, mo, 0)).getUTCDate();
   const pace = isNow && d >= 3 && net > 0 ? Math.round(net / d * dim) : null;
-  const paceTier = pace != null ? tierFor(pace) : null;
+  const paceTier = pace != null ? tierFor(pace, tiers) : null;
   // The month's sales: how many, how many recurring (by plan), revenue.
   const plans = m.earned.filter(x => x.freq !== "one_time");
   const byPlan = {};
@@ -6842,7 +6846,7 @@ function TierTrack({ m, t, isNow, today, monthName, pending = 0 }) {
         </div>
         {pace != null && <div style={{ fontSize:"12px", color:C.muted }}>On pace for ~<b style={{ color:C.black }}>{pace.toLocaleString()} pts</b>{paceTier.tier ? ` · Tier ${paceTier.tier} (${usd(paceTier.pay)})` : " · short of Tier 1"}</div>}
       </div>
-      {pending > 0 && <div style={{ fontSize:"12px", color:C.muted, marginTop:"4px", fontFamily:FONT }}><b style={{ color:C.blue }}>+{pending.toLocaleString()} pts</b> booked and waiting on service{tierFor(net + pending).tier > (t.tier || 0) ? ` · that's Tier ${tierFor(net + pending).tier} (${usd(tierFor(net + pending).pay)}) once they're done` : ""}</div>}
+      {pending > 0 && <div style={{ fontSize:"12px", color:C.muted, marginTop:"4px", fontFamily:FONT }}><b style={{ color:C.blue }}>+{pending.toLocaleString()} pts</b> booked and waiting on service{tierFor(net + pending, tiers).tier > (t.tier || 0) ? ` · that's Tier ${tierFor(net + pending, tiers).tier} (${usd(tierFor(net + pending, tiers).pay)}) once they're done` : ""}</div>}
 
       <div style={{ position:"relative", marginTop:"32px" }}>
         <div style={{ position:"absolute", left:`${pos}%`, top:"-26px", transform:`translateX(${pos > 92 ? "-100%" : pos < 8 ? "0" : "-50%"})`, transition:"left .6s ease", background:C.black, color:"#fff", borderRadius:"6px", padding:"2px 8px", fontSize:"11px", fontWeight:"700", fontFamily:FONT, whiteSpace:"nowrap" }}>{m.net.toLocaleString()} pts</div>
@@ -6899,7 +6903,7 @@ function PointsCalc() {
 // the plan's booked visits (HCP prices, up to the plan minimum), recurring
 // plans, and the points they'll earn once the first visit is serviced.
 // Booking alone doesn't earn points. HCP syncs every 5 minutes.
-function BookedBoard({ bookings, today }) {
+function BookedBoard({ bookings, today, tag = "sold by trevor" }) {
   const [day, setDay] = useState(today);
   const [open, setOpen] = useState(false);
   const rows = bookings.filter(b => b.booked_on === day).sort((a, b) => b.committed - a.committed);
@@ -6970,7 +6974,7 @@ function BookedBoard({ bookings, today }) {
           </div>
         ))}
       </>)}
-      <div style={{ fontSize:"12px", color:C.muted }}>A booking is a job created in HCP that day with the "sold by trevor" tag. Back end = the plan's visits booked in HCP at their prices, up to the plan minimum; any not booked yet count at the plan price. Points come in when the first visit is serviced. Updates from HCP every 5 minutes.</div>
+      <div style={{ fontSize:"12px", color:C.muted }}>A booking is a job created in HCP that day with the "{tag}" tag. Back end = the plan's visits booked in HCP at their prices, up to the plan minimum; any not booked yet count at the plan price. Points come in when the first visit is serviced. Updates from HCP every 5 minutes.</div>
     </div>
   );
 }
@@ -6985,7 +6989,11 @@ function SalesDrop({ open, toggle, title, right }) {
   );
 }
 
-function SalesPointsBonus({ token, canReview=false }) {
+// rep: whose bonus ("trevor" or "ethan"). tiers: their tier table (Ethan's is
+// Trevor's at 1/5). residentialOnly: leave out commercial customers (Ethan's
+// commercial sales are paid by commission instead).
+function SalesPointsBonus({ token, canReview=false, rep="trevor", tiers=BONUS_TIERS, residentialOnly=false }) {
+  const repName = rep[0].toUpperCase() + rep.slice(1);
   const thisMonth = mountainDate(new Date().toISOString()).slice(0, 7);
   const [month, setMonth] = useState(thisMonth);
   const today = mountainDate(new Date().toISOString());
@@ -6997,15 +7005,16 @@ function SalesPointsBonus({ token, canReview=false }) {
   const [salesSort, setSalesSort] = useState("recent");
   const [showHow, setShowHow] = useState(false);
   const [showReview, setShowReview] = useState(false);
-  const s = useGrowthReport({ type:"sales_deals", rep:"trevor", from:"2026-06-01", to:today, v:bump }, token);
+  const s = useGrowthReport({ type:"sales_deals", rep, from:"2026-06-01", to:today, v:bump }, token);
+  const dealJobs = useMemo(() => s.data ? (residentialOnly ? withoutCommercial(s.data.jobs || []) : (s.data.jobs || [])) : [], [s.data, residentialOnly]);
   const overrides = useMemo(() => Object.fromEntries((s.data?.overrides || []).map(o => [o.hcp_job_id, o.rep])), [s.data]);
-  const sales = useMemo(() => s.data ? buildSales(s.data.jobs || [], { tag:s.data.tag, revenueByJob:s.data.revenue || {}, overrides, repKey:"trevor", snapshots:s.data.snapshots || {} }) : [], [s.data, overrides]);
-  const bookings = useMemo(() => s.data ? buildBookings(s.data.jobs || [], { tag:s.data.tag, revenueByJob:s.data.revenue || {}, overrides, repKey:"trevor", minimums:s.data.plan_minimums || {} }) : [], [s.data, overrides]);
+  const sales = useMemo(() => s.data ? buildSales(dealJobs, { tag:s.data.tag, revenueByJob:s.data.revenue || {}, overrides, repKey:rep, snapshots:s.data.snapshots || {} }) : [], [s.data, dealJobs, overrides, rep]);
+  const bookings = useMemo(() => s.data ? buildBookings(dealJobs, { tag:s.data.tag, revenueByJob:s.data.revenue || {}, overrides, repKey:rep, minimums:s.data.plan_minimums || {} }) : [], [s.data, dealJobs, overrides, rep]);
   // Booked in the last 60 days and not serviced yet (an old job nobody closed
   // out shouldn't count).
   const recentFrom = new Date(Date.now() - 60 * 864e5).toISOString().slice(0, 10);
   const pendingPts = bookings.filter(b => !b.serviced && b.booked_on >= recentFrom).reduce((a, b) => a + b.points, 0);
-  const review = useMemo(() => canReview && s.data?.evidence ? reviewList(s.data.evidence, overrides, "trevor") : null, [s.data, overrides, canReview]);
+  const review = useMemo(() => canReview && s.data?.evidence ? reviewList(s.data.evidence, overrides, rep) : null, [s.data, overrides, canReview, rep]);
   async function credit(jobId, rep) {
     setSaving(jobId);
     try {
@@ -7037,7 +7046,7 @@ function SalesPointsBonus({ token, canReview=false }) {
   const m = monthPoints(sales, month);
   const atRisk = month === thisMonth ? sales.filter(d => d.status === "at_risk") : [];
   const riskPts = atRisk.reduce((a, d) => a + d.points, 0);
-  const t = tierFor(Math.max(0, m.net));
+  const t = tierFor(Math.max(0, m.net), tiers);
   const shift = n => { const [y, mo] = month.split("-").map(Number); const d = new Date(Date.UTC(y, mo - 1 + n, 1)); setMonth(d.toISOString().slice(0, 7)); };
   const label = new Date(month + "-15T12:00:00Z").toLocaleDateString("en-US", { month:"long", year:"numeric", timeZone:"UTC" });
   const arrow = { background:C.white, border:`1px solid ${C.border}`, borderRadius:"50%", width:"34px", height:"34px", display:"flex", alignItems:"center", justifyContent:"center", fontSize:"13px", cursor:"pointer", fontFamily:FONT, color:C.blue };
@@ -7049,7 +7058,7 @@ function SalesPointsBonus({ token, canReview=false }) {
   const freqText = d => `${FREQ_LABEL[d.freq] || d.freq}${d.freq_source === "visits" ? " (from schedule)" : ""}`;
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:"10px" }}>
-      {s.data && <BookedBoard bookings={bookings} today={today}/>}
+      {s.data && <BookedBoard bookings={bookings} today={today} tag={s.data.tag}/>}
       <SectionTitle>Bonus points</SectionTitle>
       <div style={{ display:"flex", gap:"10px", alignItems:"center" }}>
         <button onClick={() => shift(-1)} style={arrow}>◀</button>
@@ -7058,7 +7067,7 @@ function SalesPointsBonus({ token, canReview=false }) {
       </div>
       <ReportState s={s}/>
       {s.data && (<>
-        <TierTrack m={m} t={t} isNow={month === thisMonth} today={today} monthName={label.split(" ")[0]} pending={month === thisMonth ? pendingPts : 0}/>
+        <TierTrack m={m} t={t} tiers={tiers} isNow={month === thisMonth} today={today} monthName={label.split(" ")[0]} pending={month === thisMonth ? pendingPts : 0}/>
         {(m.chargebacks.length > 0 || m.downsizes.length > 0 || atRisk.length > 0) && (
           <div style={{ background:C.card, border:`1px solid ${m.back ? `${C.red}30` : C.border}`, borderRadius:"16px", overflow:"hidden" }}>
             <button onClick={() => setShowClawbacks(v => !v)} style={{ width:"100%", display:"flex", justifyContent:"space-between", alignItems:"center", gap:"8px", background:m.back ? `${C.red}08` : C.card, border:"none", padding:"12px 14px", cursor:"pointer", fontFamily:FONT, textAlign:"left" }}>
@@ -7107,8 +7116,8 @@ function SalesPointsBonus({ token, canReview=false }) {
           <SalesDrop open={showReview} toggle={() => setShowReview(v => !v)} title={`Needs a look · ${review.mismatch.length + review.missed.length} to check${review.untagged.length ? ` · ${review.untagged.length} untagged` : ""}`} right="last 100 days"/>
           {showReview && (<>
           <div style={{ fontSize:"12px", color:C.muted }}>HCP can't tell us who booked a job, so credit comes from the "sold by" tag. These don't line up with who was on the calls and texts with the customer in GHL, or have no tag. Pick who sold it; your pick wins over the tag.</div>
-          {review.mismatch.map(e => reviewRow(e, <span style={{ color:C.red }}>Tagged Trevor, but {e.ghl_rep} was talking to them</span>))}
-          {review.missed.map(e => reviewRow(e, <span style={{ color:C.red }}>No "sold by" tag, but Trevor was talking to them</span>))}
+          {review.mismatch.map(e => reviewRow(e, <span style={{ color:C.red }}>Tagged {repName}, but {e.ghl_rep} was talking to them</span>))}
+          {review.missed.map(e => reviewRow(e, <span style={{ color:C.red }}>No "sold by" tag, but {repName} was talking to them</span>))}
           {review.untagged.length > 0 && (
             <button onClick={() => setShowUntagged(v => !v)} style={{ alignSelf:"flex-start", background:C.white, color:C.blue, border:`1px solid ${C.border}`, borderRadius:"980px", padding:"8px 14px", fontSize:"14px", fontWeight:"600", fontFamily:FONT, cursor:"pointer" }}>
               {showUntagged ? "Hide" : "Show"} {review.untagged.length} new customer{review.untagged.length === 1 ? "" : "s"} with no "sold by" tag
@@ -7128,7 +7137,172 @@ function SalesPointsBonus({ token, canReview=false }) {
         {showSales && <RankRows rows={(salesSort === "points" ? [...m.earned].sort((a, b) => b.points - a.points) : m.earned).map(d => ({ id:d.hcp_job_id, name:d.name, value:`${d.points.toLocaleString()} pts`,
           sub:<>{fmtShortDate(d.done_on)} · {money2(d.price)} · {freqText(d)}{d.extra ? ` (${money2(d.plan_price)} plan + ${money2(d.extra)} one-time)` : ""}{d.returning ? " · returning" : ""} · {statusText(d)}{overrides[d.hcp_job_id] ? " · credited by an owner" : ""}</> }))} empty={`No sales completed in ${label} yet.`}/>}
         <button onClick={() => setShowHow(v => !v)} style={{ alignSelf:"flex-start", background:"none", border:"none", padding:"2px 4px", color:C.blue, fontSize:"13px", fontWeight:"600", fontFamily:FONT, cursor:"pointer" }}>How points work {showHow ? "▲" : "▼"}</button>
-        {showHow && <div style={{ fontSize:"12px", color:C.muted, padding:"0 4px" }}>A sale is a completed HCP job tagged "sold by trevor", counted in the month it was completed. Points = first-visit price (no tips) × frequency from the points table; frequency comes from the job's plan tag, or else the client's scheduled visits over the next 6 months. A plan has to finish its first {Object.entries(CHARGEBACK_SERVICES).filter(([f,n])=>n>1).map(([f,n])=>`${n} ${FREQ_LABEL[f].toLowerCase()}`).join(", ")} services; if it stops sooner, it's at risk for {CHARGEBACK_GRACE_DAYS} days after the missed visit, then the points come off in the month those days end. A first visit more than $50 over the plan's visits (like 2 cars the first time, 1 car after) counts as a one-time for the difference plus the plan at the lower price. If a visit inside that window comes in more than $50 under the plan price, it's a downsize: the sale is re-scored at the lower price and the difference comes off in the month that visit was done. $50 or less (like interior or exterior only because of rain) doesn't count.</div>}
+        {showHow && <div style={{ fontSize:"12px", color:C.muted, padding:"0 4px" }}>A sale is a completed HCP job tagged "{s.data.tag}"{residentialOnly ? " (not Commercial)" : ""}, counted in the month it was completed. Points = first-visit price (no tips) × frequency from the points table; frequency comes from the job's plan tag, or else the client's scheduled visits over the next 6 months. A plan has to finish its first {Object.entries(CHARGEBACK_SERVICES).filter(([f,n])=>n>1).map(([f,n])=>`${n} ${FREQ_LABEL[f].toLowerCase()}`).join(", ")} services; if it stops sooner, it's at risk for {CHARGEBACK_GRACE_DAYS} days after the missed visit, then the points come off in the month those days end. A first visit more than $50 over the plan's visits (like 2 cars the first time, 1 car after) counts as a one-time for the difference plus the plan at the lower price. If a visit inside that window comes in more than $50 under the plan price, it's a downsize: the sale is re-scored at the lower price and the difference comes off in the month that visit was done. $50 or less (like interior or exterior only because of rain) doesn't count.</div>}
+        {s.loading && <div style={{ fontSize:"11px", color:C.muted }}>Refreshing...</div>}
+      </>)}
+    </div>
+  );
+}
+
+// Ethan's commercial commission (math in commercialCommission.js): a % of
+// each visit of his commercial accounts once the client pays -- outbound
+// 25% recurring / 20% one-time, inbound 12% / 10%, recurring on the committed
+// cleanings only. Payment dates come from HCP invoices (hourly sync). Owners
+// can set an account's lead source / plan or credit an untagged customer.
+function CommercialCommission({ token, canEdit=false }) {
+  const thisMonth = mountainDate(new Date().toISOString()).slice(0, 7);
+  const [month, setMonth] = useState(thisMonth);
+  const [bump, setBump] = useState(0);
+  const [saving, setSaving] = useState(null);
+  const [showAccounts, setShowAccounts] = useState(false);
+  const [showUncredited, setShowUncredited] = useState(false);
+  const [showHow, setShowHow] = useState(false);
+  const s = useGrowthReport({ type:"commission", v:bump }, token);
+  const settings = useMemo(() => Object.fromEntries((s.data?.accounts || []).map(a => [a.hcp_customer_id, a])), [s.data]);
+  const accounts = useMemo(() => s.data ? buildCommission(s.data.jobs || [], { revenueByJob:s.data.revenue || {}, payments:s.data.payments || {}, accounts:settings }) : [], [s.data, settings]);
+  const mc = monthCommission(accounts, month);
+  const toCome = accounts.reduce((a, x) => a + x.to_come, 0);
+  const needsSource = accounts.filter(a => a.needs_source);
+  async function save(customerId, body) {
+    setSaving(customerId);
+    try {
+      const r = await fetch("/.netlify/functions/reports?type=commission_account", { method:"POST", headers:{ Authorization:`Bearer ${token || ""}`, "Content-Type":"application/json" }, body:JSON.stringify({ hcp_customer_id:customerId, ...body }) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+      setBump(b => b + 1);
+    } catch(e) { window.alert("Couldn't save: " + e.message); }
+    setSaving(null);
+  }
+  const shift = n => { const [y, mo] = month.split("-").map(Number); const d = new Date(Date.UTC(y, mo - 1 + n, 1)); setMonth(d.toISOString().slice(0, 7)); };
+  const label = new Date(month + "-15T12:00:00Z").toLocaleDateString("en-US", { month:"long", year:"numeric", timeZone:"UTC" });
+  const monthName = label.split(" ")[0];
+  const isNow = month === thisMonth;
+  const arrow = { background:C.white, border:`1px solid ${C.border}`, borderRadius:"50%", width:"34px", height:"34px", display:"flex", alignItems:"center", justifyContent:"center", fontSize:"13px", cursor:"pointer", fontFamily:FONT, color:C.blue };
+  const small = { fontSize:"12px", color:C.muted, fontWeight:"600", fontFamily:FONT };
+  const pct = r => `${Math.round(r * 100)}%`;
+  const pill = (on, onClick, text, key) => (
+    <button key={key} disabled={!!saving} onClick={onClick} style={{ background:on ? C.blue : C.white, color:on ? "#fff" : C.blue, border:`1px solid ${on ? C.blue : C.border}`, borderRadius:"980px", padding:"5px 12px", fontSize:"13px", fontWeight:"600", fontFamily:FONT, cursor:"pointer" }}>{text}</button>
+  );
+  const planText = a => a.freq === "one_time" ? "One-time" : `${FREQ_LABEL[a.freq] || a.freq} · ${a.committed} cleanings`;
+  const stat = (name, value, sub) => (
+    <div style={{ minWidth:0 }}>
+      <div style={small}>{name}</div>
+      <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"22px", color:C.black, lineHeight:1.15, marginTop:"2px" }}>{value}</div>
+      <div style={{ fontSize:"12px", color:C.muted, marginTop:"2px" }}>{sub}</div>
+    </div>
+  );
+  return (
+    <div style={{ display:"flex", flexDirection:"column", gap:"10px" }}>
+      <SectionTitle>Commercial commission</SectionTitle>
+      <div style={{ display:"flex", gap:"10px", alignItems:"center" }}>
+        <button onClick={() => shift(-1)} style={arrow}>◀</button>
+        <div style={{ fontFamily:FONT, fontWeight:"600", fontSize:"16px", color:C.black, minWidth:"130px", textAlign:"center" }}>{label}</div>
+        <button onClick={() => shift(1)} disabled={isNow} style={{ ...arrow, opacity:isNow ? 0.4 : 1, cursor:isNow ? "default" : "pointer" }}>▶</button>
+      </div>
+      <ReportState s={s}/>
+      {s.data && (<>
+        <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"20px", padding:"18px 18px 16px", boxShadow:"0 1px 3px rgba(0,0,0,0.05)" }}>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-end", gap:"12px", flexWrap:"wrap" }}>
+            <div>
+              <div style={small}>{monthName} commission</div>
+              <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"48px", color:C.black, lineHeight:1, letterSpacing:"-0.03em", marginTop:"4px" }}>{money2(mc.total)}</div>
+              <div style={{ fontSize:"12px", color:C.muted, marginTop:"4px" }}>{mc.rows.length} paid visit{mc.rows.length === 1 ? "" : "s"} · {money2(mc.collected)} collected from clients</div>
+            </div>
+            <div style={{ textAlign:"right" }}>
+              <div style={small}>With {usd(BASE_SALARY)} base</div>
+              <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"32px", color:C.green, marginTop:"6px", lineHeight:1 }}>{money2(BASE_SALARY + mc.total)}</div>
+              <div style={{ fontSize:"12px", color:C.muted, marginTop:"4px" }}>{isNow ? "so far this month" : "for the month"} · residential bonus is separate</div>
+            </div>
+          </div>
+          <div style={{ borderTop:`1px solid ${C.border}`, margin:"16px 0" }}/>
+          <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(130px, 1fr))", gap:"14px" }}>
+            {stat("Outbound recurring", money2(mc.by.outbound_recurring), `${pct(RATES.outbound.recurring)} of each paid visit`)}
+            {stat("Outbound one-time", money2(mc.by.outbound_one_time), `${pct(RATES.outbound.one_time)} of the job`)}
+            {stat("Inbound recurring", money2(mc.by.inbound_recurring), `${pct(RATES.inbound.recurring)} of each paid visit`)}
+            {stat("Inbound one-time", money2(mc.by.inbound_one_time), `${pct(RATES.inbound.one_time)} of the job`)}
+          </div>
+          <div style={{ borderTop:`1px solid ${C.border}`, margin:"16px 0 12px" }}/>
+          <div style={{ fontSize:"15px", color:C.black, fontFamily:FONT }}>
+            <b style={{ color:C.blue }}>{money2(toCome)}</b> still to come from {accounts.filter(a => a.to_come > 0).length} account{accounts.filter(a => a.to_come > 0).length === 1 ? "" : "s"} <span style={{ color:C.muted, fontSize:"12px" }}>as their committed visits get done and paid</span>
+          </div>
+        </div>
+
+        {needsSource.length > 0 && (
+          <div style={{ background:`${C.red}08`, border:`1px solid ${C.red}30`, borderRadius:"16px", padding:"12px 14px", fontSize:"13px", color:C.black, fontFamily:FONT }}>
+            <b>{needsSource.length} account{needsSource.length === 1 ? " needs" : "s need"} a lead source</b> ({needsSource.map(a => a.name).join(", ")}). Add an "outbound" or "inbound" tag to the first job in HCP{canEdit ? ", or set it below" : ""}. Commission starts counting once it's set.
+          </div>
+        )}
+
+        <ListTitle right={money2(mc.total)}>Paid in {monthName}</ListTitle>
+        {mc.rows.length ? (
+          <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:"16px", padding:"6px 14px" }}>
+            {mc.rows.map(r => (
+              <div key={r.hcp_job_id} style={{ display:"flex", justifyContent:"space-between", gap:"8px", padding:"10px 0", borderBottom:`1px solid ${C.border}40` }}>
+                <div style={{ minWidth:0 }}>
+                  <div style={{ fontFamily:FONT, fontWeight:"600", fontSize:"14px", color:C.black }}>{r.name}</div>
+                  <div style={{ fontSize:"12px", color:C.muted, marginTop:"2px" }}>Paid {fmtShortDate(r.paid_on)} · {r.freq === "one_time" ? "one-time" : `visit ${r.n} of ${r.of}`} · {money2(r.amount)} × {pct(r.rate)} · {SOURCE_LABEL[r.source]}</div>
+                </div>
+                <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"14px", color:C.green, whiteSpace:"nowrap" }}>+{money2(r.commission)}</div>
+              </div>
+            ))}
+          </div>
+        ) : <div style={{ background:C.card, borderRadius:"16px", padding:"20px", textAlign:"center", color:C.muted, fontSize:"14px" }}>No commercial payments in {label} yet.</div>}
+
+        <SalesDrop open={showAccounts} toggle={() => setShowAccounts(v => !v)} title={`Accounts · ${accounts.length}`} right={`${money2(accounts.reduce((a, x) => a + x.earned, 0))} earned`}/>
+        {showAccounts && (accounts.length ? accounts.map(a => (
+          <div key={a.customer_id} style={{ background:C.card, border:`1px solid ${a.needs_source ? `${C.red}40` : "rgba(0,0,0,0.04)"}`, borderRadius:"16px", padding:"12px 14px", boxShadow:"0 1px 3px rgba(0,0,0,0.05)" }}>
+            <div style={{ display:"flex", justifyContent:"space-between", gap:"8px" }}>
+              <div style={{ fontFamily:FONT, fontWeight:"600", fontSize:"15px", color:C.black, minWidth:0 }}>{a.name}</div>
+              <div style={{ fontFamily:FONT, fontWeight:"700", fontSize:"14px", color:C.black, whiteSpace:"nowrap" }}>{money2(a.earned)} <span style={{ color:C.muted, fontWeight:"500" }}>of {money2(a.total)}</span></div>
+            </div>
+            <div style={{ fontSize:"12px", color:C.muted, marginTop:"2px" }}>
+              {a.source ? `${SOURCE_LABEL[a.source]} · ${pct(a.rate)}` : <span style={{ color:C.red }}>No lead source</span>} · {planText(a)} · sold {fmtShortDate(a.sold_on)} · {a.paid} of {a.committed} paid{a.set_by_owner ? " · set by an owner" : ""}
+            </div>
+            <div style={{ display:"flex", gap:"4px", flexWrap:"wrap", marginTop:"8px" }}>
+              {a.visits.map(v => (
+                <span key={v.hcp_job_id} title={`${fmtShortDate(v.date)} · ${money2(v.amount)}`} style={{ fontSize:"11px", fontWeight:"600", fontFamily:FONT, borderRadius:"980px", padding:"3px 8px",
+                  background:v.status === "paid" ? `${C.green}1a` : v.status === "awaiting_payment" ? C.blueLt : C.cardLt, color:v.status === "paid" ? "#248a3d" : v.status === "awaiting_payment" ? C.blue : C.muted }}>
+                  {a.freq === "one_time" ? "" : `#${v.n} `}{v.status === "paid" ? `✓ ${money2(v.commission)}` : v.status === "awaiting_payment" ? "done · not paid" : `${fmtShortDate(v.date)}`}
+                </span>
+              ))}
+              {a.unbooked > 0 && <span style={{ fontSize:"11px", fontWeight:"600", fontFamily:FONT, borderRadius:"980px", padding:"3px 8px", background:C.cardLt, color:C.muted }}>{a.unbooked} not booked yet</span>}
+            </div>
+            {canEdit && (
+              <div style={{ display:"flex", gap:"6px", flexWrap:"wrap", alignItems:"center", marginTop:"8px" }}>
+                {[["outbound","Outbound"],["inbound","Inbound"],["none","Not Ethan's"]].map(([k, l]) => pill(settings[a.customer_id]?.source === k, () => save(a.customer_id, { source:k, freq:settings[a.customer_id]?.freq ?? null }), l, k))}
+                <select disabled={!!saving} value={settings[a.customer_id]?.freq || ""} onChange={e => save(a.customer_id, { source:settings[a.customer_id]?.source ?? null, freq:e.target.value || null })} style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:"10px", padding:"5px 8px", fontSize:"13px", color:C.black, fontFamily:FONT }}>
+                  <option value="">Plan: from HCP</option>
+                  {[...Object.keys(COMMITTED).filter(f => f !== "biannual"), "one_time"].map(f => <option key={f} value={f}>{FREQ_LABEL[f]}</option>)}
+                </select>
+                {settings[a.customer_id] && <button disabled={!!saving} onClick={() => save(a.customer_id, { source:null, freq:null })} style={{ background:"none", border:"none", color:C.muted, fontSize:"12px", cursor:"pointer", fontFamily:FONT }}>Undo (use the tags)</button>}
+              </div>
+            )}
+          </div>
+        )) : <div style={{ background:C.card, borderRadius:"16px", padding:"20px", textAlign:"center", color:C.muted, fontSize:"14px" }}>No commercial accounts yet. Tag the first job "sold by ethan", "Commercial" and "outbound" or "inbound" in HCP.</div>)}
+
+        {canEdit && (s.data.uncredited || []).length > 0 && (<>
+          <SalesDrop open={showUncredited} toggle={() => setShowUncredited(v => !v)} title={`Commercial customers not credited · ${s.data.uncredited.length}`} right="last 120 days"/>
+          {showUncredited && (<>
+            <div style={{ fontSize:"12px", color:C.muted }}>Commercial jobs with no "sold by ethan" tag. If Ethan sold one, credit it here; your pick wins over the tags.</div>
+            {s.data.uncredited.map(j => (
+              <div key={j.hcp_customer_id} style={{ background:C.card, border:"1px solid rgba(0,0,0,0.04)", borderRadius:"16px", padding:"12px 14px" }}>
+                <div style={{ display:"flex", justifyContent:"space-between", gap:"8px" }}>
+                  <div style={{ fontFamily:FONT, fontWeight:"600", fontSize:"15px", color:C.black }}>{`${j.first_name || ""} ${j.last_name || ""}`.trim() || "Unknown client"}</div>
+                  <div style={{ fontFamily:FONT, fontWeight:"600", fontSize:"14px", color:C.black }}>{money2(Math.max(0, (j.total_cents || 0) - (j.tip_cents || 0)) / 100)}</div>
+                </div>
+                <div style={{ fontSize:"12px", color:C.muted, marginTop:"2px" }}>Completed {fmtShortDate(mountainDate(j.completed_at))} · {(j.tags || []).join(", ") || "no tags"}</div>
+                <div style={{ display:"flex", gap:"6px", flexWrap:"wrap", marginTop:"6px" }}>
+                  {pill(false, () => save(j.hcp_customer_id, { source:"outbound", freq:null }), "Ethan · Outbound", "o")}
+                  {pill(false, () => save(j.hcp_customer_id, { source:"inbound", freq:null }), "Ethan · Inbound", "i")}
+                  {pill(false, () => save(j.hcp_customer_id, { source:"none", freq:null }), "Not Ethan's", "n")}
+                </div>
+              </div>
+            ))}
+          </>)}
+        </>)}
+
+        <button onClick={() => setShowHow(v => !v)} style={{ alignSelf:"flex-start", background:"none", border:"none", padding:"2px 4px", color:C.blue, fontSize:"13px", fontWeight:"600", fontFamily:FONT, cursor:"pointer" }}>How commission works {showHow ? "▲" : "▼"}</button>
+        {showHow && <div style={{ fontSize:"12px", color:C.muted, padding:"0 4px" }}>A commercial account is a customer whose first job is tagged "sold by ethan" and "Commercial" in HCP; an "outbound" or "inbound" tag sets the lead source. Ethan earns {pct(RATES.outbound.recurring)} of each visit on outbound recurring plans, {pct(RATES.outbound.one_time)} on outbound one-time jobs, {pct(RATES.inbound.recurring)} on inbound recurring and {pct(RATES.inbound.one_time)} on inbound one-time (price without tips). It's paid per visit, only after the client pays, in the month the payment came in, so nothing is paid upfront and nothing gets clawed back. Recurring plans pay on the committed cleanings: {Object.entries(COMMITTED).filter(([f]) => f !== "biannual").map(([f, n]) => `${FREQ_LABEL[f].toLowerCase()} ${n}`).join(", ")}. Payments are checked in HCP every hour{s.data.payments_checked_at ? ` (last ${new Date(s.data.payments_checked_at).toLocaleString("en-US", { timeZone:"America/Denver", month:"short", day:"numeric", hour:"numeric", minute:"2-digit" })})` : ""}.</div>}
         {s.loading && <div style={{ fontSize:"11px", color:C.muted }}>Refreshing...</div>}
       </>)}
     </div>
@@ -7144,7 +7318,9 @@ function SalesTab({ token, onlyRep=null }) {
     <div style={{ display:"flex", flexDirection:"column", gap:"12px" }}>
       {!onlyRep && <SubTabs tabs={[["trevor","Trevor · Inbound"],["ethan","Ethan · Commercial"]]} active={rep} setActive={setRep}/>}
       {rep === "trevor" && <SalesPointsBonus token={token} canReview={!onlyRep}/>}
-      {rep === "trevor" && <SectionTitle>Sales activity</SectionTitle>}
+      {rep === "ethan" && <CommercialCommission token={token} canEdit={!onlyRep}/>}
+      {rep === "ethan" && <SalesPointsBonus token={token} canReview={!onlyRep} rep="ethan" tiers={ETHAN_TIERS} residentialOnly/>}
+      <SectionTitle>Sales activity</SectionTitle>
       <GrowthRange range={range} setRange={setRange}/>
       <ReportState s={s}/>
       {d && d.rep?.toLowerCase() === rep && (<>

@@ -107,3 +107,8 @@
   # anything by itself.
   schedule = "37 * * * *"
   timeout = 26
+
+[functions."hcp-commission-payments-cron"]
+  # Hourly at :37: which of Ethan's commercial visits have been paid in HCP
+  # (his commission is paid per visit once the client pays).
+  schedule = "37 * * * *"

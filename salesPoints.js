@@ -74,13 +74,19 @@ export function pointsFor(price, freq) {
   return i < 0 ? 0 : rowFor(price).points[i];
 }
 
+// A rep's tiers at a fraction of Trevor's -- both the point goals and the pay
+// (Ethan sells residential one day a week: scale 1/5, owner Oct 2026).
+export function scaledTiers(scale) {
+  return BONUS_TIERS.map(t => ({ tier:t.tier, points:Math.round(t.points * scale), pay:Math.round(t.pay * scale) }));
+}
+
 // Month total -> { tier, pay, next, toNext }. tier is null below Tier 1;
 // next is null at the top tier.
-export function tierFor(points) {
+export function tierFor(points, tiers = BONUS_TIERS) {
   const n = Number(points) || 0;
   let reached = null;
-  for (const t of BONUS_TIERS) if (n >= t.points) reached = t;
-  const next = BONUS_TIERS.find(t => n < t.points) || null;
+  for (const t of tiers) if (n >= t.points) reached = t;
+  const next = tiers.find(t => n < t.points) || null;
   return { tier:reached?.tier ?? null, pay:reached?.pay ?? 0, next, toNext:next ? next.points - n : 0 };
 }
 
