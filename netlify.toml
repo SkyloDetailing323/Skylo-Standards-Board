@@ -107,3 +107,14 @@
   # anything by itself.
   schedule = "37 * * * *"
   timeout = 26
+
+[functions."ford-email-import"]
+  # Ford Pro report emails -> driver scorecard. Downloads ~5 CSVs per day;
+  # stops at ~18s and reports more: true so "Import now" can continue.
+  timeout = 26
+
+[functions."ford-email-import-cron"]
+  # Daily 7:30 AM Mountain. Fires at 13:30 and 14:30 UTC and only runs on
+  # the one that is 7:30 in Denver, so it stays 7:30 through DST changes.
+  schedule = "30 13,14 * * *"
+  timeout = 26
