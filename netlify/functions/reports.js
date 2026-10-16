@@ -352,6 +352,17 @@ exports.handler = async (event) => {
     }
   }
 
+  // GET ?type=commission -- Ethan's commercial commission (no date range;
+  // commercialCommission.js picks the month in the browser).
+  if (q.type === "commission") {
+    try {
+      return json(200, await commissionData(who.role === "owner"));
+    } catch (e) {
+      console.error("reports commission:", e.message);
+      return json(500, { error: e.message });
+    }
+  }
+
   if (!isDate(q.from) || !isDate(q.to)) return json(400, { error: "from and to dates are required" });
 
   try {
@@ -385,9 +396,6 @@ exports.handler = async (event) => {
       if (!rep) return json(400, { error: "Unknown rep" });
       const report = await rpc("sales_report", { p_rep: rep.name, p_pipelines: rep.pipelines, p_from: q.from, p_to: q.to });
       return json(200, { ...report, pipelines: rep.pipelines });
-    }
-    if (q.type === "commission") {
-      return json(200, await commissionData(who.role === "owner"));
     }
     if (q.type === "sales_deals") {
       if (!REPS[q.rep]?.salesTag) return json(400, { error: "No points bonus for this rep" });
