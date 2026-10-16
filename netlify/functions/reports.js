@@ -14,6 +14,12 @@
 //   review evidence (sales_credit_review_rows), saved plan prices
 //   (sales_plan_snapshots) and plan minimums. salesPoints.js does the rest.
 // POST ?type=sales_credit  owners: who sold a job, overriding the tag.
+// GET ?type=commission  Ethan's commercial commission: every HCP job of his
+//   commercial accounts, each visit's price without tips, which visits the
+//   client has paid (hcp_job_payments) and owners' account settings
+//   (commercial_accounts). commercialCommission.js does the math. Owners also
+//   get recent commercial customers nobody's credited yet.
+// POST ?type=commission_account  owners: { hcp_customer_id, source, freq }.
 // GET ?type=ad_trends  owners: Meta ads week by week (adTrends.js).
 //   A rep with selfTechId can also open their own sales report from their
 //   tech login (rep is forced to theirs; nothing else is allowed).
@@ -24,7 +30,7 @@ const { verifyToken, tokenFrom } = require("./lib/authToken");
 // Which GHL pipelines belong to each rep's report.
 const REPS = {
   trevor: { name: "Trevor", pipelines: ["Residential Leads", "Residential Estimates"], selfTechId: "4641f4da-a16f-411b-8688-8b81ac06eda7", salesTag: "sold by trevor" },
-  ethan:  { name: "Ethan",  pipelines: ["Commercial Sales"] },
+  ethan:  { name: "Ethan",  pipelines: ["Commercial Sales"], selfTechId: "9c7c67f1-c295-462c-96a7-2ed16c9eaa81", salesTag: "sold by ethan" },
 };
 
 function json(statusCode, body) {
@@ -216,6 +222,43 @@ async function salesJobs(repKey, rep) {
   return { jobs, revenue, overrides, snapshots, plan_minimums: settings[0]?.value?.plan_minimums || {}, evidence: evidence || [], evidence_failed: evidence == null };
 }
 
+// Ethan's commercial accounts: customers with a job tagged "sold by ethan" and
+// "Commercial", plus any an owner credited to him (commercial_accounts).
+async function commissionData(isOwner) {
+  const cols = "hcp_job_id,hcp_customer_id,first_name,last_name,work_status,scheduled_start,completed_at,job_created_at,total_cents,tip_cents,raw";
+  const [tagged, accounts] = await Promise.all([
+    rest(`hcp_sales_jobs?select=hcp_customer_id&raw->>tags=ilike.*sold%20by%20ethan*&raw->>tags=ilike.*commercial*`),
+    rest("commercial_accounts?select=hcp_customer_id,source,freq,set_by,set_at"),
+  ]);
+  const customers = [...new Set([...tagged.map(j => j.hcp_customer_id), ...accounts.filter(a => a.source && a.source !== "none").map(a => a.hcp_customer_id)].filter(Boolean))];
+  const rows = customers.length ? await restIn(`hcp_sales_jobs?select=${cols}`, "hcp_customer_id", customers) : [];
+  const jobs = rows.map(({ raw, ...j }) => ({ ...j, tags: raw?.tags || [] }));
+  const ids = jobs.map(j => j.hcp_job_id);
+  const [revRows, payRows] = ids.length ? await Promise.all([
+    restIn("jobs?select=hcp_job_id,revenue", "hcp_job_id", ids),
+    restIn("hcp_job_payments?select=hcp_job_id,paid_at,status,checked_at", "hcp_job_id", ids),
+  ]) : [[], []];
+  const revenue = {}, payments = {};
+  for (const r of revRows) revenue[r.hcp_job_id] = (revenue[r.hcp_job_id] || 0) + (Number(r.revenue) || 0);
+  let lastCheck = null;
+  for (const p of payRows) {
+    payments[p.hcp_job_id] = { paid_at: p.paid_at, status: p.status };
+    if (!lastCheck || p.checked_at > lastCheck) lastCheck = p.checked_at;
+  }
+  const out = { jobs, revenue, payments, accounts, payments_checked_at: lastCheck };
+  if (isOwner) {
+    // Commercial first visits in the last 120 days with no "sold by ethan"
+    // tag and no owner call yet -- so an owner can credit one to Ethan.
+    const since = new Date(Date.now() - 120 * 864e5).toISOString();
+    const decided = new Set([...customers, ...accounts.map(a => a.hcp_customer_id)]);
+    const recent = await rest(`hcp_sales_jobs?select=${cols}&raw->>tags=ilike.*commercial*&completed_at=gte.${since}&order=completed_at.desc`);
+    const seen = new Set();
+    out.uncredited = recent.filter(j => j.hcp_customer_id && !decided.has(j.hcp_customer_id) && !/cancel/i.test(j.work_status || "") && !seen.has(j.hcp_customer_id) && seen.add(j.hcp_customer_id))
+      .slice(0, 60).map(({ raw, ...j }) => ({ ...j, tags: raw?.tags || [] }));
+  }
+  return out;
+}
+
 const isDate = s => /^\d{4}-\d{2}-\d{2}$/.test(s || "");
 
 exports.handler = async (event) => {
@@ -224,7 +267,7 @@ exports.handler = async (event) => {
   const q = event.queryStringParameters || {};
   if (who.role !== "owner") {
     const own = who.techId && Object.keys(REPS).find(k => REPS[k].selfTechId === who.techId);
-    if (!own || event.httpMethod === "POST" || (q.type !== "sales" && q.type !== "sales_deals")) return json(403, { error: "Owners only" });
+    if (!own || event.httpMethod === "POST" || !["sales", "sales_deals", "commission"].includes(q.type)) return json(403, { error: "Owners only" });
     q.rep = own;
   }
 
@@ -266,6 +309,27 @@ exports.handler = async (event) => {
             body: JSON.stringify({ hcp_job_id: id, rep: b.rep, set_by: who.name || who.role, set_at: new Date().toISOString() }) })
         : null;
     if (!res) return json(400, { error: "rep must be trevor, ethan, none or null" });
+    if (!res.ok) return json(500, { error: `Couldn't save (HTTP ${res.status})` });
+    return json(200, { ok: true });
+  }
+
+  // POST ?type=commission_account  body: { hcp_customer_id, source, freq }
+  // An owner's call on one of Ethan's commercial accounts. source: "outbound"
+  // | "inbound" | "none" (not Ethan's) | null; freq: a plan frequency,
+  // "one_time" or null (use the tags). Both null clears it.
+  if (event.httpMethod === "POST" && q.type === "commission_account") {
+    let b; try { b = JSON.parse(event.body || "{}"); } catch { return json(400, { error: "Bad JSON" }); }
+    const id = String(b.hcp_customer_id || "");
+    if (!/^cus_[A-Za-z0-9]+$/.test(id)) return json(400, { error: "Bad customer id" });
+    const source = b.source ?? null, freq = b.freq ?? null;
+    if (source !== null && !["outbound", "inbound", "none"].includes(source)) return json(400, { error: "source must be outbound, inbound, none or null" });
+    if (freq !== null && !["weekly", "biweekly", "monthly", "bimonthly", "quarterly", "one_time"].includes(freq)) return json(400, { error: "Bad frequency" });
+    const H = { "Content-Type": "application/json", apikey: process.env.SUPABASE_KEY, Authorization: `Bearer ${process.env.SUPABASE_KEY}` };
+    const url = `${process.env.SUPABASE_URL}/rest/v1/commercial_accounts`;
+    const res = source === null && freq === null
+      ? await fetch(`${url}?hcp_customer_id=eq.${id}`, { method: "DELETE", headers: { ...H, Prefer: "return=minimal" } })
+      : await fetch(`${url}?on_conflict=hcp_customer_id`, { method: "POST", headers: { ...H, Prefer: "resolution=merge-duplicates,return=minimal" },
+          body: JSON.stringify({ hcp_customer_id: id, source, freq, set_by: who.name || who.role, set_at: new Date().toISOString() }) });
     if (!res.ok) return json(500, { error: `Couldn't save (HTTP ${res.status})` });
     return json(200, { ok: true });
   }
@@ -321,6 +385,9 @@ exports.handler = async (event) => {
       if (!rep) return json(400, { error: "Unknown rep" });
       const report = await rpc("sales_report", { p_rep: rep.name, p_pipelines: rep.pipelines, p_from: q.from, p_to: q.to });
       return json(200, { ...report, pipelines: rep.pipelines });
+    }
+    if (q.type === "commission") {
+      return json(200, await commissionData(who.role === "owner"));
     }
     if (q.type === "sales_deals") {
       if (!REPS[q.rep]?.salesTag) return json(400, { error: "No points bonus for this rep" });
