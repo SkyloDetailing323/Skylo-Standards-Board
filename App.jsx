@@ -7278,12 +7278,12 @@ function CommercialCommission({ token, canEdit=false }) {
               </div>
             )}
           </div>
-        )) : <div style={{ background:C.card, borderRadius:"16px", padding:"20px", textAlign:"center", color:C.muted, fontSize:"14px" }}>No commercial accounts yet. Tag the first job "sold by ethan", "Commercial" and "outbound" or "inbound" in HCP.</div>)}
+        )) : <div style={{ background:C.card, borderRadius:"16px", padding:"20px", textAlign:"center", color:C.muted, fontSize:"14px" }}>No commercial accounts yet. Tag the first job "sold by ethan h", "Commercial" and "outbound" or "inbound" in HCP.</div>)}
 
         {canEdit && (s.data.uncredited || []).length > 0 && (<>
           <SalesDrop open={showUncredited} toggle={() => setShowUncredited(v => !v)} title={`Commercial customers not credited · ${s.data.uncredited.length}`} right="last 120 days"/>
           {showUncredited && (<>
-            <div style={{ fontSize:"12px", color:C.muted }}>Commercial jobs with no "sold by ethan" tag. If Ethan sold one, credit it here; your pick wins over the tags.</div>
+            <div style={{ fontSize:"12px", color:C.muted }}>Commercial jobs with no "sold by ethan h" tag. If Ethan sold one, credit it here; your pick wins over the tags.</div>
             {s.data.uncredited.map(j => (
               <div key={j.hcp_customer_id} style={{ background:C.card, border:"1px solid rgba(0,0,0,0.04)", borderRadius:"16px", padding:"12px 14px" }}>
                 <div style={{ display:"flex", justifyContent:"space-between", gap:"8px" }}>
@@ -7302,7 +7302,7 @@ function CommercialCommission({ token, canEdit=false }) {
         </>)}
 
         <button onClick={() => setShowHow(v => !v)} style={{ alignSelf:"flex-start", background:"none", border:"none", padding:"2px 4px", color:C.blue, fontSize:"13px", fontWeight:"600", fontFamily:FONT, cursor:"pointer" }}>How commission works {showHow ? "▲" : "▼"}</button>
-        {showHow && <div style={{ fontSize:"12px", color:C.muted, padding:"0 4px" }}>A commercial account is a customer whose first job is tagged "sold by ethan" and "Commercial" in HCP; an "outbound" or "inbound" tag sets the lead source. Ethan earns {pct(RATES.outbound.recurring)} of each visit on outbound recurring plans, {pct(RATES.outbound.one_time)} on outbound one-time jobs, {pct(RATES.inbound.recurring)} on inbound recurring and {pct(RATES.inbound.one_time)} on inbound one-time (price without tips). It's paid per visit, only after the client pays, in the month the payment came in, so nothing is paid upfront and nothing gets clawed back. Recurring plans pay on the committed cleanings: {Object.entries(COMMITTED).filter(([f]) => f !== "biannual").map(([f, n]) => `${FREQ_LABEL[f].toLowerCase()} ${n}`).join(", ")}. Payments are checked in HCP every hour{s.data.payments_checked_at ? ` (last ${new Date(s.data.payments_checked_at).toLocaleString("en-US", { timeZone:"America/Denver", month:"short", day:"numeric", hour:"numeric", minute:"2-digit" })})` : ""}.</div>}
+        {showHow && <div style={{ fontSize:"12px", color:C.muted, padding:"0 4px" }}>A commercial account is a customer whose first job is tagged "sold by ethan h" and "Commercial" in HCP; an "outbound" or "inbound" tag sets the lead source. Ethan earns {pct(RATES.outbound.recurring)} of each visit on outbound recurring plans, {pct(RATES.outbound.one_time)} on outbound one-time jobs, {pct(RATES.inbound.recurring)} on inbound recurring and {pct(RATES.inbound.one_time)} on inbound one-time (price without tips). It's paid per visit, only after the client pays, in the month the payment came in, so nothing is paid upfront and nothing gets clawed back. Recurring plans pay on the committed cleanings: {Object.entries(COMMITTED).filter(([f]) => f !== "biannual").map(([f, n]) => `${FREQ_LABEL[f].toLowerCase()} ${n}`).join(", ")}. Payments are checked in HCP every hour{s.data.payments_checked_at ? ` (last ${new Date(s.data.payments_checked_at).toLocaleString("en-US", { timeZone:"America/Denver", month:"short", day:"numeric", hour:"numeric", minute:"2-digit" })})` : ""}.</div>}
         {s.loading && <div style={{ fontSize:"11px", color:C.muted }}>Refreshing...</div>}
       </>)}
     </div>
@@ -7316,7 +7316,7 @@ function SalesTab({ token, onlyRep=null }) {
   const d = s.data;
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:"12px" }}>
-      {!onlyRep && <SubTabs tabs={[["trevor","Trevor · Inbound"],["ethan","Ethan · Commercial"]]} active={rep} setActive={setRep}/>}
+      {!onlyRep && <SubTabs tabs={[["trevor","Trevor"],["ethan","Ethan"]]} active={rep} setActive={setRep}/>}
       {rep === "trevor" && <SalesPointsBonus token={token} canReview={!onlyRep}/>}
       {rep === "ethan" && <CommercialCommission token={token} canEdit={!onlyRep}/>}
       {rep === "ethan" && <SalesPointsBonus token={token} canReview={!onlyRep} rep="ethan" tiers={ETHAN_TIERS} residentialOnly/>}

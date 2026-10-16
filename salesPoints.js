@@ -320,7 +320,8 @@ export function reviewList(evidence, overrides, repKey) {
     if (overrides[e.hcp_job_id]) continue;
     const ghl = e.ghl_rep ? first(e.ghl_rep) : null;
     const row = { ...e, done_on: mtDay(e.completed_at), month: mtDay(e.completed_at).slice(0, 7) };
-    if (e.sold_by === repKey) { if (ghl && ghl !== repKey) out.mismatch.push(row); }
+    // "sold by ethan h" -> "ethan h": match on the first name (the rep key).
+    if (first(e.sold_by) === repKey) { if (ghl && ghl !== repKey) out.mismatch.push(row); }
     else if (!e.sold_by && ghl === repKey) out.missed.push(row);
     else if (!e.sold_by && e.is_new && (e.is_lead || ghl)) out.untagged.push(row);
   }

@@ -4,7 +4,7 @@
 // and records when it was paid in hcp_job_payments (commercialCommission.js
 // does the math; reports.js?type=commission serves it).
 //
-// Accounts: customers with a job tagged both "sold by ethan" and "Commercial",
+// Accounts: customers with a job tagged both "sold by ethan h" and "Commercial",
 // plus any an owner credited to him in the app (commercial_accounts).
 // A job already recorded as paid isn't checked again.
 //
@@ -73,7 +73,7 @@ exports.handler = async () => {
   const stats = { accounts: 0, to_check: 0, checked: 0, paid: 0, errors: 0 };
   try {
     const credited = await rest("commercial_accounts?select=hcp_customer_id,source&source=in.(outbound,inbound)");
-    const taggedCommercial = await rest("hcp_sales_jobs?select=hcp_customer_id&raw->>tags=ilike.*sold%20by%20ethan*&raw->>tags=ilike.*commercial*");
+    const taggedCommercial = await rest("hcp_sales_jobs?select=hcp_customer_id&raw->>tags=ilike.*sold%20by%20ethan%20h*&raw->>tags=ilike.*commercial*");
     const customers = [...new Set([...taggedCommercial.map(j => j.hcp_customer_id), ...credited.map(a => a.hcp_customer_id)].filter(Boolean))];
     stats.accounts = customers.length;
     if (!customers.length) { console.log("hcp-commission-payments: no commercial accounts yet", stats); return { statusCode: 200 }; }
