@@ -1,6 +1,7 @@
 // demo/data.js -- made-up data for sales demos (VITE_TENANT builds only).
 // Seeded, so every visit shows the same numbers, and dated relative to today
 // so the demo always looks current. Nothing here is real.
+import { P } from "./profiles.js";
 
 let seed = 20261015;
 const rnd = () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
@@ -15,30 +16,23 @@ const weekKey = d => { const t = new Date(d + "T12:00:00Z"); return addDays(d, -
 const at = (d, hh, mm) => new Date(`${d}T${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}:00-06:00`).toISOString();
 
 const T = (name, extra = {}) => ({ id: uuid(), name, avatar: "", badges: [], start_date: "2025-03-01", is_lead: false, team_lead_id: null, team_name: null,
-  hourly_rate: 0, commission_rate: 27, is_active: true, title: "detail_pro", onboarding_stage: "complete", onboarding_complete: true,
+  hourly_rate: 0, commission_rate: P.commission, is_active: true, title: P.title, onboarding_stage: "complete", onboarding_complete: true,
   cert_status: "certified", cert_attempts: 1, classroom_complete: true, perfect_day_rubric_complete: true, misc_rubric_complete: true, on_leave: false, ...extra });
 
 export function buildDemo() {
   const today = mtToday();
-  const jake = T("Jake Turner", { is_lead: true, team_name: "Diamond Crew", title: "lead_detail_pro", start_date: "2024-04-15" });
-  const mason = T("Mason Reed", { is_lead: true, team_name: "Ozark Elite", title: "lead_detail_pro", start_date: "2024-06-01" });
-  const crew = [
-    T("Tyler Brooks", { team_lead_id: jake.id, start_date: "2025-01-10" }),
-    T("Luke Harmon", { team_lead_id: jake.id, start_date: "2025-02-20" }),
-    T("Caleb Fisher", { team_lead_id: jake.id, start_date: "2025-05-05" }),
-    T("Noah Pierce", { team_lead_id: mason.id, start_date: "2024-11-11" }),
-    T("Wyatt Cole", { team_lead_id: mason.id, start_date: "2025-04-01" }),
-    T("Brady Lane", { team_lead_id: mason.id, start_date: "2025-07-14", title: "senior_detail_pro" }),
-  ];
-  const ryan = T("Ryan Hale", { title: "sales", start_date: "2025-03-01" });
-  const field = T("Hunter Shaw", { title: "field_supervisor", start_date: "2024-02-01" });
+  const leads = P.leads.map(([name, team_name, start_date]) => T(name, { is_lead: true, team_name, title: P.leadTitle, start_date }));
+  const [jake, mason] = leads;
+  const crew = P.crew.map(([name, lead, start_date, senior]) => T(name, { team_lead_id: leads[lead].id, start_date, ...(senior ? { title: P.seniorTitle } : {}) }));
+  const ryan = T(P.rep, { title: "sales", start_date: "2025-03-01" });
+  const field = T(P.field, { title: "field_supervisor", start_date: "2024-02-01" });
   const detailers = [jake, mason, ...crew];
   const techs = [...detailers, ryan, field].sort((a, b) => a.name.localeCompare(b.name));
   const skill = Object.fromEntries(detailers.map(t => [t.id, between(0.85, 1.2)]));
 
   const FIRST = ["Austin", "Bailey", "Carter", "Dana", "Emily", "Grant", "Hailey", "Isaac", "Jordan", "Kendall", "Logan", "Morgan", "Nathan", "Olivia", "Parker", "Quinn", "Reese", "Sierra", "Trent", "Vanessa", "Whitney", "Zane"];
   const LAST = ["Adams", "Baker", "Campbell", "Dawson", "Ellis", "Foster", "Garrett", "Hayes", "Irwin", "Jensen", "Keller", "Lawson", "Mitchell", "Norris", "Owens", "Porter", "Reynolds", "Sutton", "Tucker", "Walsh"];
-  const PRICES = [150, 175, 195, 225, 250, 275, 295, 325, 350, 395, 450, 550];
+  const PRICES = P.prices;
   const customer = () => `${pick(FIRST)} ${pick(LAST)}`;
 
   const jobs = [], upsells = [], tips = [], time = [], switchovers = [], callbacks = [];
@@ -54,7 +48,7 @@ export function buildDemo() {
       for (let k = 0; k < count; k++) {
         const hcp = `job_demo_${n++}`;
         const revenue = Math.round(pick(PRICES) * skill[t.id]);
-        const upsell = rnd() < 0.22 * skill[t.id] ? Math.round(pick([25, 35, 45, 60, 75, 95, 120])) : 0;
+        const upsell = rnd() < 0.22 * skill[t.id] ? Math.round(pick(P.upsells)) : 0;
         const done = d < today || k === 0;
         if (!done) continue;
         jobs.push({ id: uuid(), hcp_job_id: hcp, tech_id: t.id, job_date: d, revenue, upsell_amount: upsell, hours: null, week_key: weekKey(d),
@@ -67,8 +61,8 @@ export function buildDemo() {
       const outMin = (hour + 1) * 60 + Math.floor(rnd() * 60);
       time.push({ id: uuid(), tech_id: t.id, work_date: d, clock_in: at(d, inH, inM),
         clock_out: d === today ? null : at(d, Math.floor(outMin / 60), outMin % 60), auto_closed: false, created_at: at(d, inH, inM) });
-      if (rnd() < 0.035 * skill[t.id]) switchovers.push({ id: uuid(), tech_id: t.id, week_key: weekKey(d), plan_id: pick(["monthly", "monthly", "bimonthly", "quarterly", "biweekly"]), created_at: at(d, 15, 0), with_exterior: rnd() < 0.4, sold_date: d });
-      if (rnd() < 0.006) callbacks.push({ id: uuid(), tech_id: t.id, reason: pick(["Streaks on windshield", "Missed cupholders", "Pet hair left in trunk"]), created_at: at(d, 18, 0), weight: 1, hcp_job_id: null, job_date: d, customer_name: customer(), job_number: String(8000000 + n), missed_items: [], severity: pick([1, 1, 2]), group_id: null });
+      if (rnd() < 0.035 * skill[t.id]) switchovers.push({ id: uuid(), tech_id: t.id, week_key: weekKey(d), plan_id: pick(P.plans), created_at: at(d, 15, 0), with_exterior: rnd() < P.exterior, sold_date: d });
+      if (rnd() < 0.006) callbacks.push({ id: uuid(), tech_id: t.id, reason: pick(P.callbacks), created_at: at(d, 18, 0), weight: 1, hcp_job_id: null, job_date: d, customer_name: customer(), job_number: String(8000000 + n), missed_items: [], severity: pick([1, 1, 2]), group_id: null });
     }
   }
   const reviews = [];
@@ -76,13 +70,13 @@ export function buildDemo() {
     const mk = addDays(today, -30 * m).slice(0, 7);
     for (const t of detailers) reviews.push({ id: uuid(), tech_id: t.id, month_key: mk, count: Math.max(0, Math.round(between(2, 9) * skill[t.id]) - (m === 0 ? 2 : 0)), created_at: at(today, 9, 0) });
   }
-  const vehicles = Array.from({ length: 8 }, (_, i) => ({ id: uuid(), name: `Unit ${i + 1}`, model: i < 6 ? "Ford Transit" : "F-150", plate: `DSD-${100 + i}`, vin: `DEMOVIN${1000 + i}`, active: true, created_at: at(today, 8, 0) }));
+  const vehicles = Array.from({ length: 8 }, (_, i) => ({ id: uuid(), name: `Unit ${i + 1}`, model: i < 6 ? P.cars[0] : P.cars[1], plate: `${P.plate}-${100 + i}`, vin: `DEMOVIN${1000 + i}`, active: true, created_at: at(today, 8, 0) }));
   const truck_assignments = [];
   for (const e of time.filter(e => e.work_date >= addDays(today, -60))) {
     const i = detailers.findIndex(t => t.id === e.tech_id);
     truck_assignments.push({ id: uuid(), tech_id: e.tech_id, vehicle_id: vehicles[i % vehicles.length].id, work_date: e.work_date, shared: false, picked_at: e.clock_in });
   }
-  return { today, techs, detailers, owner: { name: "Cael Bray" }, rep: ryan, field, lead: jake,
+  return { today, techs, detailers, owner: { name: P.owner }, rep: ryan, field, lead: jake,
     tables: { techs, jobs, upsells, tip_entries: tips, time_entries: time, switchovers, reviews, callbacks, vehicles, truck_assignments } };
 }
 
@@ -109,17 +103,13 @@ export function marketingReport(from, to) {
     channels: { meta, google, lsa, website: CH(Math.round(9 * f), 0), social: CH(Math.round(4 * f), 0), manual: CH(Math.round(6 * f), 0), other: CH(Math.round(3 * f), 0) },
     daily,
     attribution: { gross_margin: 0.52, target_margin: 0.3, plan_minimums: { weekly: 8, biweekly: 7, monthly: 6, bimonthly: 5, quarterly: 4 } },
-    meta_campaigns: [
-      camp("NWA Interior Detail – Fall", { share: 0.45, adset: "Bentonville / Rogers", list: ["Before & After Reel", "Pet Hair Carousel"] }),
-      camp("Membership Plans", { share: 0.35, adset: "Fayetteville 25mi", list: ["Monthly Plan Video", "Keep It Clean Offer"] }),
-      camp("Boat & RV Season", { share: 0.2, adset: "Beaver Lake area", list: ["Boat Detail Reel", "RV Wash Photo"] }),
-    ],
-    website_pages: [{ page: "/", leads: Math.round(5 * f) }, { page: "/memberships", leads: Math.round(3 * f) }, { page: "/boat-rv-detailing", leads: Math.round(2 * f) }],
+    meta_campaigns: P.campaigns.map(([name, share, adset, list]) => camp(name, { share, adset, list })),
+    website_pages: [{ page: "/", leads: Math.round(5 * f) }, { page: P.pages[0], leads: Math.round(3 * f) }, { page: P.pages[1], leads: Math.round(2 * f) }],
     website_sources: [{ source: "Google organic", leads: Math.round(6 * f), booked: Math.round(3 * f), revenue_sold: Math.round(2100 * f) }, { source: "Instagram bio", leads: Math.round(3 * f), booked: Math.round(1 * f), revenue_sold: Math.round(700 * f) }],
     ga4: { has_data: true, users: Math.round(1450 * f), sessions: Math.round(1900 * f), engaged: Math.round(1100 * f), key_events: Math.round(64 * f), daily: Object.fromEntries(daily.map(x => [x.d, Math.round(between(40, 80))])),
-      pages: [{ page: "/", sessions: Math.round(900 * f), key_events: Math.round(30 * f) }, { page: "/memberships", sessions: Math.round(320 * f), key_events: Math.round(14 * f) }, { page: "/services-pricing", sessions: Math.round(280 * f), key_events: Math.round(9 * f) }],
+      pages: [{ page: "/", sessions: Math.round(900 * f), key_events: Math.round(30 * f) }, { page: P.pages[0], sessions: Math.round(320 * f), key_events: Math.round(14 * f) }, { page: P.pages[2], sessions: Math.round(280 * f), key_events: Math.round(9 * f) }],
       by_channel: [{ channel: "Organic Search", users: Math.round(620 * f), sessions: Math.round(800 * f), key_events: Math.round(28 * f) }, { channel: "Paid Social", users: Math.round(410 * f), sessions: Math.round(520 * f), key_events: Math.round(18 * f) }, { channel: "Direct", users: Math.round(250 * f), sessions: Math.round(330 * f), key_events: Math.round(11 * f) }] },
-    ad_campaigns: { google: [{ id: "g1", name: "Search – Mobile Detailing NWA", spend: google.spend * 0.7, clicks: Math.round(google.clicks * 0.7), conversions: Math.round(google.leads * 0.7), impressions: Math.round(google.impressions * 0.7) }, { id: "g2", name: "Search – Boat & RV", spend: google.spend * 0.3, clicks: Math.round(google.clicks * 0.3), conversions: Math.round(google.leads * 0.3), impressions: Math.round(google.impressions * 0.3) }],
+    ad_campaigns: { google: [{ id: "g1", name: P.google[0], spend: google.spend * 0.7, clicks: Math.round(google.clicks * 0.7), conversions: Math.round(google.leads * 0.7), impressions: Math.round(google.impressions * 0.7) }, { id: "g2", name: P.google[1], spend: google.spend * 0.3, clicks: Math.round(google.clicks * 0.3), conversions: Math.round(google.leads * 0.3), impressions: Math.round(google.impressions * 0.3) }],
       lsa: [{ id: "l1", name: "LocalServicesCampaign", spend: lsa.spend, clicks: lsa.clicks, conversions: lsa.leads, impressions: lsa.impressions }] },
     connections: { ghl: { connected: true, last_sync: new Date().toISOString() }, meta: { connected: true, last_sync: new Date().toISOString() }, google: { connected: true, last_sync: new Date().toISOString() }, lsa: { connected: true, last_sync: new Date().toISOString() }, ga4: { connected: true, google_connected: true, last_sync: new Date().toISOString() } },
   };
@@ -127,14 +117,8 @@ export function marketingReport(from, to) {
 
 export function adTrends() {
   seed = 4242;
-  const ads = [
-    ["Before & After Reel", "NWA Interior Detail – Fall", "Bentonville / Rogers", 1.0, -0.075],
-    ["Pet Hair Carousel", "NWA Interior Detail – Fall", "Bentonville / Rogers", 0.8, -0.06],
-    ["Monthly Plan Video", "Membership Plans", "Fayetteville 25mi", 0.9, 0.0],
-    ["Keep It Clean Offer", "Membership Plans", "Fayetteville 25mi", 0.6, 0.06],
-    ["Boat Detail Reel", "Boat & RV Season", "Beaver Lake area", 0.7, -0.03],
-    ["RV Wash Photo", "Boat & RV Season", "Beaver Lake area", 0.4, 0.04],
-  ];
+  const SHAPE = [[1.0, -0.075], [0.8, -0.06], [0.9, 0.0], [0.6, 0.06], [0.7, -0.03], [0.4, 0.04]];
+  const ads = P.campaigns.flatMap(([camp, , adset, list]) => list.map(name => [name, camp, adset])).map((a, i) => [...a, ...SHAPE[i]]);
   const rows = [], meta = [], adsets = [];
   const today = mtToday(), monday = addDays(today, -((new Date(today + "T12:00:00Z").getUTCDay() + 6) % 7));
   ads.forEach(([name, camp, adset, size, drift], i) => {
@@ -156,9 +140,9 @@ export function salesReport(from, to) {
   for (let d = from; d <= to; d = addDays(d, 1)) { const wd = new Date(d + "T12:00:00Z").getUTCDay() % 6 !== 0; daily.push({ d, calls: wd ? Math.round(between(35, 70)) : 0, connected: wd ? Math.round(between(12, 25)) : 0, booked: wd ? Math.round(between(1, 5)) : 0, sold: wd ? Math.round(between(0, 3)) : 0 }); }
   const s = k => daily.reduce((a, x) => a + x[k], 0), calls = s("calls"), booked = s("booked"), sold = s("sold");
   const kind = (leads, b) => ({ demos: 0, leads, contacted: Math.round(leads * 0.93), within_5m: Math.round(leads * 0.74), within_60s: Math.round(leads * 0.41), in_hours_leads: Math.round(leads * 0.8), after_hours_leads: Math.round(leads * 0.2), after_hours_auto_replied: Math.round(leads * 0.2), booked_in_period: b, booked_from_leads: b, median_seconds_to_contact: 94 });
-  return { from, to, rep: "Ryan", ghl_user_found: true, texts: Math.round(calls * 1.3),
+  return { from, to, rep: P.rep.split(" ")[0], ghl_user_found: true, texts: Math.round(calls * 1.3),
     calls: { total: calls, per_day: Math.round(calls / Math.max(1, daily.filter(x => x.calls).length)), connected: s("connected"), days_calling: daily.filter(x => x.calls).length, talk_minutes: Math.round(s("connected") * 4.2) },
-    daily, plans: { sold: Math.round(sold * 0.6), by_plan: { Monthly: Math.round(sold * 0.35), Bimonthly: Math.round(sold * 0.15), Quarterly: Math.round(sold * 0.1) }, cancelled: 1 },
+    daily, plans: { sold: Math.round(sold * 0.6), by_plan: P.byPlan(sold), cancelled: 1 },
     by_kind: { all: kind(Math.round(booked * 2.6), booked), warm: kind(Math.round(booked * 2.1), Math.round(booked * 0.85)), cold: kind(Math.round(booked * 0.5), Math.round(booked * 0.15)) },
     revenue: { sold: booked * 610, upfront: booked * 265, serviced: booked * 420, sold_jobs: booked, serviced_jobs: Math.round(booked * 0.8), plan_committed: Math.round(sold * 0.6) * 1500, matched_customers: booked, match_types: { name: Math.round(booked * 0.3), phone: Math.round(booked * 0.7) },
       by_kind: { all: { sold: booked * 610, serviced: booked * 420 }, warm: { sold: booked * 520, serviced: booked * 360 }, cold: { sold: booked * 90, serviced: booked * 60 } } },
@@ -169,9 +153,9 @@ export function salesReport(from, to) {
 export function salesDeals(tag) {
   seed = 31337;
   const jobs = [], revenue = {}, today = mtToday();
-  const FREQ = [["Monthly", 28], ["Bimonthly", 56], ["Quarterly", 84], ["Biweekly", 14], [null, 0], [null, 0]];
+  const FREQ = P.salePlans;
   for (let i = 0; i < 70; i++) {
-    const startDay = addDays(today, -Math.floor(rnd() * 120)), price = pick([175, 225, 250, 295, 325, 395]);
+    const startDay = addDays(today, -Math.floor(rnd() * 120)), price = pick(P.salePrices);
     const [plan, every] = pick(FREQ), cust = "cus_demo_" + i, name = ["Grant", "Hailey", "Isaac", "Jordan", "Kendall", "Morgan", "Parker", "Reese"][i % 8];
     const visits = plan ? Math.min(6, 1 + Math.floor(150 / every)) : 1;
     for (let v = 0; v < visits; v++) {
@@ -187,5 +171,5 @@ export function salesDeals(tag) {
 
 export function laborActuals(today) {
   const m = k => addDays(today.slice(0, 7) + "-01", -28 * k).slice(0, 7);
-  return { months: [3, 2, 1].map(k => ({ month: m(k), income: 61000 + k * 2500, wages_cogs: 15400 + k * 600, payroll_taxes_cogs: 1850 + k * 70, training_pay: 300, tips: 2200 })) };
+  return { months: [3, 2, 1].map(k => ({ month: m(k), income: P.income + k * 2500, wages_cogs: P.wages + k * 600, payroll_taxes_cogs: 1850 + k * 70, training_pay: 300, tips: 2200 })) };
 }
