@@ -147,3 +147,57 @@ export function buildFordImport(files, vehicles = []) {
   if (Object.keys(dates).length > 1) warnings.push(`Events span more than one day (${Object.keys(dates).sort().join(", ")}); each event keeps its own date.`);
   return { workDate, daily, events, used, skipped, warnings };
 }
+
+// ---- Ford's daily report email (automatic import) ----
+// The email has no attachments: each report is a signed storage.googleapis.com
+// link (good for 7 days) whose file name is in response-content-disposition,
+// e.g. Fleet_Activity_Summary_<FLEET>_Unassigned_Oct-15-2026_Oct-15-2026.csv.
+// Only these files are downloaded -- the ones buildFordImport reads. Ford
+// also sends look-alikes that must NOT be used: "Vehicle_Speeding_Events_..."
+// etc. are per-truck totals with no event rows, and the "..._by_Driver"
+// files repeat the same events (importing them would count each twice).
+export const FORD_EMAIL_FILES = [
+  { prefix: "Fleet_Activity_Summary_", kind: "fleet_activity" },
+  { prefix: "Speeding_Events_by_Vehicle_", kind: "speeding" },
+  { prefix: "Harsh_Events_by_Vehicle_", kind: "harsh" },
+  { prefix: "Seat_Belt_Events_By_Vehicle_", kind: "seatbelt" },
+  { prefix: "Excessive_Idling_Events_By_Vehicle_", kind: "idling" },
+];
+const MONTHS = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12 };
+const fileDate = (mon, d, y) => MONTHS[mon.toLowerCase()] ? `${y}-${String(MONTHS[mon.toLowerCase()]).padStart(2, "0")}-${d.padStart(2, "0")}` : null;
+
+// File name -> { kind, work_date } when it's one of FORD_EMAIL_FILES covering
+// a single day; null otherwise (other reports, or a multi-day range).
+export function fordFileInfo(name) {
+  const f = FORD_EMAIL_FILES.find(x => String(name || "").toLowerCase().startsWith(x.prefix.toLowerCase()));
+  const m = String(name || "").match(/_([A-Za-z]{3})-(\d{1,2})-(\d{4})_([A-Za-z]{3})-(\d{1,2})-(\d{4})\.csv$/i);
+  if (!f || !m) return null;
+  const from = fileDate(m[1], m[2], m[3]), to = fileDate(m[4], m[5], m[6]);
+  if (!from || from !== to) return null;
+  return { kind: f.kind, work_date: from };
+}
+
+// Report links in the email's HTML: [{ url, name, kind, work_date, expiresAt }].
+// Only https://storage.googleapis.com links; expiresAt (ms) comes from the
+// signature's X-Goog-Date + X-Goog-Expires (null if it can't be read).
+export function fordReportLinks(html) {
+  const out = [], seenUrls = new Set();
+  const re = /href\s*=\s*["']([^"']+)["']/gi;
+  let m;
+  while ((m = re.exec(String(html || "")))) {
+    const raw = m[1].replace(/&amp;/g, "&").replace(/&#x3D;|&#61;/gi, "=");
+    let u;
+    try { u = new URL(raw); } catch { continue; }
+    if (u.protocol !== "https:" || u.hostname !== "storage.googleapis.com" || seenUrls.has(u.href)) continue;
+    const disp = u.searchParams.get("response-content-disposition") || "";
+    const name = (disp.match(/filename\*?=(?:UTF-8'')?"?([^";]+)"?/i)?.[1] || decodeURIComponent(u.pathname.split("/").pop() || "")).trim();
+    const info = fordFileInfo(name);
+    if (!info) continue;
+    seenUrls.add(u.href);
+    const gd = (u.searchParams.get("X-Goog-Date") || "").match(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z$/);
+    const secs = Number(u.searchParams.get("X-Goog-Expires"));
+    const expiresAt = gd && secs ? Date.UTC(+gd[1], +gd[2] - 1, +gd[3], +gd[4], +gd[5], +gd[6]) + secs * 1000 : null;
+    out.push({ url: u.href, name, ...info, expiresAt });
+  }
+  return out;
+}

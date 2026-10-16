@@ -3,7 +3,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { parseCsv, reportKind, fordDateTime, buildFordImport } from "./fordReports.js";
+import { parseCsv, reportKind, fordDateTime, buildFordImport, fordReportLinks, fordFileInfo } from "./fordReports.js";
 import { DRIVER_CONFIG, scoreDriverDay, techDriverDays } from "./driverScoring.js";
 
 const FLEET = "﻿VIN,Vehicle Name,Distance Driven (mi),Engine Hours (hr),Total Idle Time (hr),Trips,Speeding Over Posted Violations,Speeding Over Threshold Violations,Total Seatbelt Violations,Driver Seatbelt Violations,Passenger Seatbelt Violations,Speeding Over Posted Duration (min),Speeding Over Threshold Duration (min)\n" +
@@ -118,4 +118,28 @@ test("Fleet Activity's truck column may be called \"Vehicle\" (Ford renamed it) 
   assert.equal(imp.events.length, 1);
   assert.equal(imp.events[0].vin, "3FTTW8J34SRA88072");
   assert.ok(!imp.warnings.some(w => /No VIN/.test(w)));
+});
+
+test("Ford email: only the five event/activity files are picked, dated from the file name", () => {
+  const link = (name, date = "20261016T110331Z") => `<a href="https://storage.googleapis.com/prod-ford-fpi-report-storage/x-${name.length}.csv?X-Goog-Algorithm=GOOG4-RSA-SHA256&amp;X-Goog-Date=${date}&amp;X-Goog-Expires=604800&amp;response-content-disposition=attachment%3B%20filename%3D%22${name}%22&amp;X-Goog-Signature=abc">r</a>`;
+  const d = "_SQUEEGEE_BOYS_MOBILE_DETAILING_Unassigned_Oct-15-2026_Oct-15-2026.csv";
+  const html = [
+    "Fleet_Activity_Summary", "Speeding_Events_by_Vehicle", "Harsh_Events_by_Vehicle", "Seat_Belt_Events_By_Vehicle", "Excessive_Idling_Events_By_Vehicle",
+    // look-alikes that must be skipped
+    "Vehicle_Speeding_Events", "Vehicle_Harsh_Events", "Vehicle_Seat_Belt_Violations", "Vehicle_Excessive_Idling_Time",
+    "Harsh_Events_by_Driver", "Speeding_Events_by_Driver", "Excessive_Idling_Events_By_Driver", "Driver_Score", "Fleet_Trip_History",
+  ].map(n => link(n + d)).join("\n") + '<a href="https://u1.ct.sendgrid.net/ls/click?x=1">privacy</a>' +
+    link("Fleet_Activity_Summary_X_Oct-14-2026_Oct-15-2026.csv"); // multi-day range: skipped
+  const links = fordReportLinks(html);
+  assert.deepEqual(links.map(l => l.kind), ["fleet_activity", "speeding", "harsh", "seatbelt", "idling"]);
+  assert.ok(links.every(l => l.work_date === "2026-10-15"));
+  assert.equal(links[0].name, "Fleet_Activity_Summary" + d);
+  assert.equal(links[0].expiresAt, Date.UTC(2026, 9, 23, 11, 3, 31));
+  assert.ok(links[0].url.includes("X-Goog-Signature=abc") && !links[0].url.includes("&amp;"));
+});
+
+test("Ford email: file name dates", () => {
+  assert.deepEqual(fordFileInfo("Harsh_Events_by_Vehicle_A_B_Dec-1-2026_Dec-1-2026.csv"), { kind: "harsh", work_date: "2026-12-01" });
+  assert.equal(fordFileInfo("Harsh_Events_by_Driver_A_Dec-1-2026_Dec-1-2026.csv"), null);
+  assert.equal(fordFileInfo("Fleet_Activity_Summary_A.csv"), null);
 });

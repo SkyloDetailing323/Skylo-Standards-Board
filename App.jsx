@@ -9197,6 +9197,7 @@ function TrucksAdminTab({ techs, vehicles, timeEntries=[], token, refreshAll, sh
   const [imp, setImp] = useState(null);         // parsed Ford report upload, before import
   const [impDate, setImpDate] = useState("");
   const [fileKey, setFileKey] = useState(0);
+  const [auto, setAuto] = useState(null);        // automatic Ford email import status
   const techName = id => techs.find(t=>t.id===id)?.name || "Unknown tech";
   const inp = { background:C.white, border:`1px solid ${C.border}`, color:C.black, padding:"7px 9px", borderRadius:"10px", fontSize:"13px", width:"100%", boxSizing:"border-box" };
   const smallBtn = (color) => ({ background:color, border:"none", color:C.white, padding:"6px 12px", borderRadius:"10px", cursor:busy?"not-allowed":"pointer", fontSize:"12px", fontWeight:"700", whiteSpace:"nowrap" });
@@ -9217,6 +9218,38 @@ function TrucksAdminTab({ techs, vehicles, timeEntries=[], token, refreshAll, sh
       .catch(e => live && setDrive({ loading:false, error:e.message, data:null }));
     return () => { live = false; };
   }, [from, today, token, bump]);
+
+  // Automatic Ford import (ford-email-import, daily 7:30 AM): last run +
+  // whether yesterday is missing.
+  useEffect(() => {
+    let live = true;
+    fetch(`/.netlify/functions/ford-email-import`, { headers:{ Authorization:`Bearer ${token||""}` } })
+      .then(async r => { const j = await r.json().catch(()=>({})); if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`); return j; })
+      .then(j => live && setAuto(j))
+      .catch(e => live && setAuto({ error:e.message }));
+    return () => { live = false; };
+  }, [token, bump]);
+  async function importFordNow() {
+    setBusy(true);
+    try {
+      let done = [], j = null;
+      // The import stops after ~18s and says more: true; keep going (backfill).
+      for (let i = 0; i < 5; i++) {
+        const r = await fetch(`/.netlify/functions/ford-email-import`, { method:"POST", headers:{ Authorization:`Bearer ${token||""}` } });
+        j = await r.json().catch(()=>({}));
+        if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+        done = done.concat(j.results || []);
+        if (!j.more) break;
+      }
+      const ok = done.filter(d => d.status==="imported"), bad = done.filter(d => d.status!=="imported");
+      const why = { no_fleet:"no Fleet Activity Summary", expired:"links expired", failed:"download failed" };
+      const msg = [ok.length && `✅ Imported ${ok.map(d => `${fmtShortDate(d.work_date)} (${d.trucks} trucks)`).join(", ")}`,
+        bad.length && `⚠ ${bad.map(d => `${fmtShortDate(d.work_date)}: ${why[d.status] || d.status}`).join(", ")}`].filter(Boolean).join(" · ");
+      showToast(msg || (j?.emails ? "Nothing new — every day in Ford's emails is already imported" : "No Ford report emails from the last 7 days"), !bad.length);
+      setBump(b=>b+1);
+    } catch(e) { showToast("Ford import failed: "+e.message, false); }
+    setBusy(false);
+  }
 
   async function removePick(a) {
     if (!window.confirm(`Remove ${techName(a.tech_id)}'s pick of ${vehicles.find(v=>v.id===a.vehicle_id)?.name} on ${fmtShortDate(a.work_date)}?`)) return;
@@ -9354,9 +9387,21 @@ function TrucksAdminTab({ techs, vehicles, timeEntries=[], token, refreshAll, sh
       </div>
 
       <div style={card}>
-        <Label color={C.green}>📥 Upload Ford reports</Label>
+        <Label color={C.green}>📥 Ford reports</Label>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:"10px", flexWrap:"wrap", margin:"6px 0 4px" }}>
+          <div style={{ fontSize:"12px", color:C.black }}>
+            {auto?.error ? <span style={{ color:C.red }}>Couldn't load the automatic import: {auto.error}</span>
+              : !auto ? <span style={{ color:C.muted }}>Loading…</span>
+              : auto.last_import ? <>Last automatic Ford import: <strong>{fmtShortDate(auto.last_import.work_date)}</strong>, {auto.last_import.trucks} truck{auto.last_import.trucks!==1?"s":""}</>
+              : <span style={{ color:C.muted }}>No automatic Ford import yet.</span>}
+            <div style={{ color:C.muted }}>Imported automatically every day at 7:30 AM from Ford's email to team@skylod.com.</div>
+          </div>
+          <button disabled={busy} onClick={importFordNow} style={smallBtn(C.blue)}>Import now</button>
+        </div>
+        {auto?.alert && <div style={{ fontSize:"12px", color:C.white, background:C.red, borderRadius:"10px", padding:"8px 10px", margin:"6px 0", fontWeight:"700" }}>🚨 {auto.alert} Use Import now, or upload that day's files below.</div>}
+        <div style={{ fontSize:"12px", color:C.black, fontWeight:"700", marginTop:"10px" }}>Upload by hand</div>
         <div style={{ fontSize:"12px", color:C.muted, margin:"6px 0 10px", lineHeight:1.5 }}>
-          Each morning Ford emails Equipment@skylod.com a "Ford Pro™ Telematics Report Delivered" email (the <strong>Driver score</strong> schedule) covering the day before. Download these from it and drop them here: <strong>Fleet Activity Summary</strong> (required — miles, idle and speeding minutes), <strong>Vehicle Speeding Events Enhanced</strong>, <strong>Vehicle Harsh Events Enhanced</strong>, <strong>Vehicle Seat Belt Violations Enhanced</strong> and <strong>Vehicle Excessive Idling Enhanced</strong>. Other files are skipped. Locations and addresses are never saved. Uploading the same day again replaces it.
+          Only needed if the automatic import missed a day. Each morning Ford emails Equipment@skylod.com a "Ford Pro™ Telematics Report Delivered" email (the <strong>Driver score</strong> schedule) covering the day before. Download these from it and drop them here: <strong>Fleet Activity Summary</strong> (required — miles, idle and speeding minutes), <strong>Vehicle Speeding Events Enhanced</strong>, <strong>Vehicle Harsh Events Enhanced</strong>, <strong>Vehicle Seat Belt Violations Enhanced</strong> and <strong>Vehicle Excessive Idling Enhanced</strong>. Other files are skipped. Locations and addresses are never saved. Uploading the same day again replaces it.
           {drive.data?.last_pull && <div style={{ marginTop:"4px", color:C.black }}>Last import: {fmtShortDate(drive.data.last_pull.work_date)} — {drive.data.last_pull.trucks} trucks, {drive.data.last_pull.events} events{drive.data.last_pull.by ? ` (by ${drive.data.last_pull.by})` : ""}</div>}
         </div>
         <input key={fileKey} type="file" accept=".csv,text/csv" multiple onChange={e => e.target.files?.length && readFordFiles(e.target.files)} style={{ fontSize:"13px", color:C.black }}/>
