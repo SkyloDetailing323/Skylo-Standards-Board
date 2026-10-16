@@ -27,7 +27,7 @@ test("lead source from tags", () => {
 
 test("monthly outbound plan pays 25% of each paid visit, only the first 6", () => {
   const dates = ["2026-10-01", "2026-11-01", "2026-12-01", "2027-01-01", "2027-02-01", "2027-03-01", "2027-04-01"];
-  const jobs = dates.map((d, i) => job(`job_${i}`, "c1", d, i === 0 ? { tags: ["Commercial", "sold by ethan", "Outbound", "Monthly"] } : {}));
+  const jobs = dates.map((d, i) => job(`job_${i}`, "c1", d, i === 0 ? { tags: ["Commercial", "sold by ethan h", "Outbound", "Monthly"] } : {}));
   const payments = { job_0: { paid_at: day("2026-10-03") }, job_1: { paid_at: day("2026-11-20") }, job_6: { paid_at: day("2027-04-02") } };
   const [a] = buildCommission(jobs, { payments, revenueByJob: { job_0: 1400 } });
   assert.equal(a.freq, "monthly");
@@ -45,7 +45,7 @@ test("monthly outbound plan pays 25% of each paid visit, only the first 6", () =
 });
 
 test("big recurring account: each monthly payment at the recurring rate", () => {
-  const jobs = ["2026-10-15", "2026-11-15"].map((d, i) => job(`big_${i}`, "c2", d, { total_cents: 600000, tags: i ? [] : ["Commercial", "sold by ethan", "Outbound", "Monthly"] }));
+  const jobs = ["2026-10-15", "2026-11-15"].map((d, i) => job(`big_${i}`, "c2", d, { total_cents: 600000, tags: i ? [] : ["Commercial", "sold by ethan h", "Outbound", "Monthly"] }));
   const [a] = buildCommission(jobs, { payments: { big_0: { paid_at: day("2026-10-20") }, big_1: { paid_at: day("2026-11-20") } } });
   assert.deepEqual(a.visits.map(v => v.commission), [1500, 1500]);
   assert.equal(a.unbooked, 4);
@@ -53,7 +53,7 @@ test("big recurring account: each monthly payment at the recurring rate", () => 
 });
 
 test("one-time inbound pays 10% once, after payment", () => {
-  const jobs = [job("ot", "c3", "2026-10-10", { total_cents: 140200, tags: ["Commercial", "sold by ethan", "inbound"] })];
+  const jobs = [job("ot", "c3", "2026-10-10", { total_cents: 140200, tags: ["Commercial", "sold by ethan h", "inbound"] })];
   let [a] = buildCommission(jobs);
   assert.equal(a.freq, "one_time");
   assert.equal(a.earned, 0);
@@ -63,7 +63,7 @@ test("one-time inbound pays 10% once, after payment", () => {
 });
 
 test("no source tag: shows the account but pays nothing until an owner sets it", () => {
-  const jobs = [job("x", "c4", "2026-10-10", { tags: ["Commercial", "sold by ethan"] })];
+  const jobs = [job("x", "c4", "2026-10-10", { tags: ["Commercial", "sold by ethan h"] })];
   const pay = { x: { paid_at: day("2026-10-11") } };
   let [a] = buildCommission(jobs, { payments: pay });
   assert.equal(a.needs_source, true);
@@ -76,16 +76,16 @@ test("owner overrides: credit an untagged account, or mark a tagged one not Etha
   const untagged = [job("u", "c5", "2026-10-10", { tags: ["Commercial"] })];
   assert.equal(buildCommission(untagged).length, 0);
   assert.equal(buildCommission(untagged, { accounts: { c5: { source: "inbound", freq: "one_time" } } }).length, 1);
-  const tagged = [job("t", "c6", "2026-10-10", { tags: ["Commercial", "sold by ethan", "outbound"] })];
+  const tagged = [job("t", "c6", "2026-10-10", { tags: ["Commercial", "sold by ethan h", "outbound"] })];
   assert.equal(buildCommission(tagged, { accounts: { c6: { source: "none" } } }).length, 0);
 });
 
 test("canceled visits are skipped and residential customers aren't commercial", () => {
   const jobs = [
-    job("a", "c7", "2026-10-01", { tags: ["Commercial", "sold by ethan", "outbound", "Monthly"] }),
+    job("a", "c7", "2026-10-01", { tags: ["Commercial", "sold by ethan h", "outbound", "Monthly"] }),
     job("b", "c7", "2026-11-01", { work_status: "pro canceled", completed_at: null }),
     job("c", "c7", "2026-12-01"),
-    job("r", "res", "2026-10-01", { tags: ["sold by ethan"] }),
+    job("r", "res", "2026-10-01", { tags: ["sold by ethan h"] }),
   ];
   const acc = buildCommission(jobs);
   assert.equal(acc.length, 1);
@@ -99,4 +99,10 @@ test("Ethan's residential tiers are Trevor's at 1/5 (points and pay)", () => {
   assert.equal(tierFor(279, t).pay, 0);
   assert.equal(tierFor(280, t).tier, 1);
   assert.equal(tierFor(640, t).tier, 5);
+});
+
+test("Ethan's tag is \"sold by ethan h\", any capitalization; plain \"sold by ethan\" doesn't count", () => {
+  const pay = { a: { paid_at: day("2026-10-02") } };
+  assert.equal(buildCommission([job("a", "c8", "2026-10-01", { tags: ["Commercial", "Sold by Ethan H", "Outbound"] })], { payments: pay })[0].earned, 280);
+  assert.equal(buildCommission([job("a", "c8", "2026-10-01", { tags: ["Commercial", "sold by ethan", "Outbound"] })], { payments: pay }).length, 0);
 });

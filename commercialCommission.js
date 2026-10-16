@@ -2,7 +2,7 @@
 // Ethan's commercial commission (owner rules, Oct 2026). Pure functions with
 // no React or network code; reports.js?type=commission supplies the data.
 //
-// - A commercial sale is a customer whose job is tagged both "sold by ethan"
+// - A commercial sale is a customer whose job is tagged both "sold by ethan h"
 //   and "Commercial" in HCP. "outbound" / "inbound" on that job is the lead
 //   source (outbound = he found it, inbound = a lead the company paid for).
 //   An owner can set the source or plan for any account in the app, or mark
@@ -33,7 +33,7 @@ const startOf = j => new Date(j.scheduled_start || j.completed_at || j.job_creat
 const round2 = n => Math.round(n * 100) / 100;
 
 export const isCommercial = j => tagSet(j).has("commercial");
-export const isEthanCommercial = j => { const t = tagSet(j); return t.has("commercial") && t.has("sold by ethan"); };
+export const isEthanCommercial = j => { const t = tagSet(j); return t.has("commercial") && t.has("sold by ethan h"); };
 
 export function sourceFromTags(tags) {
   const t = new Set((tags || []).map(x => String(x).trim().toLowerCase()));

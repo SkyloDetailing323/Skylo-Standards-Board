@@ -30,7 +30,7 @@ const { verifyToken, tokenFrom } = require("./lib/authToken");
 // Which GHL pipelines belong to each rep's report.
 const REPS = {
   trevor: { name: "Trevor", pipelines: ["Residential Leads", "Residential Estimates"], selfTechId: "4641f4da-a16f-411b-8688-8b81ac06eda7", salesTag: "sold by trevor" },
-  ethan:  { name: "Ethan",  pipelines: ["Commercial Sales"], selfTechId: "9c7c67f1-c295-462c-96a7-2ed16c9eaa81", salesTag: "sold by ethan" },
+  ethan:  { name: "Ethan",  pipelines: ["Commercial Sales"], selfTechId: "9c7c67f1-c295-462c-96a7-2ed16c9eaa81", salesTag: "sold by ethan h" },
 };
 
 function json(statusCode, body) {
@@ -222,12 +222,12 @@ async function salesJobs(repKey, rep) {
   return { jobs, revenue, overrides, snapshots, plan_minimums: settings[0]?.value?.plan_minimums || {}, evidence: evidence || [], evidence_failed: evidence == null };
 }
 
-// Ethan's commercial accounts: customers with a job tagged "sold by ethan" and
+// Ethan's commercial accounts: customers with a job tagged "sold by ethan h" and
 // "Commercial", plus any an owner credited to him (commercial_accounts).
 async function commissionData(isOwner) {
   const cols = "hcp_job_id,hcp_customer_id,first_name,last_name,work_status,scheduled_start,completed_at,job_created_at,total_cents,tip_cents,raw";
   const [tagged, accounts] = await Promise.all([
-    rest(`hcp_sales_jobs?select=hcp_customer_id&raw->>tags=ilike.*sold%20by%20ethan*&raw->>tags=ilike.*commercial*`),
+    rest(`hcp_sales_jobs?select=hcp_customer_id&raw->>tags=ilike.*sold%20by%20ethan%20h*&raw->>tags=ilike.*commercial*`),
     rest("commercial_accounts?select=hcp_customer_id,source,freq,set_by,set_at"),
   ]);
   const customers = [...new Set([...tagged.map(j => j.hcp_customer_id), ...accounts.filter(a => a.source && a.source !== "none").map(a => a.hcp_customer_id)].filter(Boolean))];
@@ -247,7 +247,7 @@ async function commissionData(isOwner) {
   }
   const out = { jobs, revenue, payments, accounts, payments_checked_at: lastCheck };
   if (isOwner) {
-    // Commercial first visits in the last 120 days with no "sold by ethan"
+    // Commercial first visits in the last 120 days with no "sold by ethan h"
     // tag and no owner call yet -- so an owner can credit one to Ethan.
     const since = new Date(Date.now() - 120 * 864e5).toISOString();
     const decided = new Set([...customers, ...accounts.map(a => a.hcp_customer_id)]);
