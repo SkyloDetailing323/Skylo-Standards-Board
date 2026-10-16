@@ -1,7 +1,7 @@
 // demo/data.js -- made-up data for sales demos (VITE_TENANT builds only).
 // Seeded, so every visit shows the same numbers, and dated relative to today
 // so the demo always looks current. Nothing here is real.
-import { P } from "./profiles.js";
+import { P } from "virtual:demo-profile";
 
 let seed = 20261015;
 const rnd = () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };

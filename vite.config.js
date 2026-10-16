@@ -90,6 +90,8 @@ ${t.logo[2] ? `import __onDark from "./demo/${t.logo[2]}";` : ""}
   return {
     name: 'tenant-demo',
     enforce: 'pre',
+    // Only this company's made-up profile goes in the bundle -- never another client's.
+    resolveId(id) { return id === 'virtual:demo-profile' ? this.resolve(`./demo/profile_${key}.js`) : null },
     transform(code, id) {
       if (id.endsWith('/main.jsx')) return `import "./demo/install.js";\n${code}`
       if (id.includes('node_modules') || id.includes('/demo/') || !/\.(jsx?|mjs)$/.test(id)) return null
